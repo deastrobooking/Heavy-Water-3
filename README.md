@@ -37,7 +37,7 @@ python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/zig.py build -Doptimize=ReleaseFast
 ```
 
-`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises camera, culling, HUD, and resize changes. It requires a graphical desktop and GPU. Tests do not open a window.
+`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises camera changes, culling (including an empty view), and HUD toggling. Use at least 16 frames to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
 
 ## Pinned foundation
 
@@ -48,5 +48,7 @@ python3 tools/zig.py build -Doptimize=ReleaseFast
 The compiler matches this Mach revision's manifest. The [nomination history](https://machengine.org/docs/nominated-zig/) also lists newer compilers; upgrading the compiler and Mach must be a tested change together.
 
 Local validation targets Apple Silicon / Metal. Linux/Vulkan and Windows/D3D12 are future runtime validation targets, even though Mach exposes those backends. Frame timing in the HUD measures the interval between render callbacks, including presentation pacing; it is not GPU execution time or a performance benchmark.
+
+Known upstream limitation: programmatically changing window dimensions deadlocks in this Mach revision's macOS resize callback. This application does not change dimensions after startup. The renderer recreates its depth buffer when framebuffer dimensions change, but interactive drag-resize has not been validated here. See the [validation notes](docs/validation.md).
 
 Read [architecture and ownership](docs/architecture.md) and the [milestone roadmap](docs/roadmap.md).

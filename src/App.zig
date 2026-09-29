@@ -65,11 +65,11 @@ pub fn update(self: *App, core: *mach.Core) void {
         else => {},
     };
     self.engine.input.sample(core);
-    if (options.smoke_frames > 0) self.exerciseSmoke(core);
+    if (options.smoke_frames > 0) self.exerciseSmoke();
     self.engine.update(self.timer.lap());
 }
 
-fn exerciseSmoke(self: *App, core: *mach.Core) void {
+fn exerciseSmoke(self: *App) void {
     const stage = @min(3, self.rendered_frames_seen * 4 / options.smoke_frames);
     if (stage == self.smoke_stage) return;
     self.smoke_stage = stage;
@@ -79,10 +79,9 @@ fn exerciseSmoke(self: *App, core: *mach.Core) void {
             self.engine.camera.yaw = 0.4;
         },
         2 => {
-            core.windows.lock();
-            defer core.windows.unlock();
-            core.windows.set(self.window, .width, 960);
-            core.windows.set(self.window, .height, 640);
+            // Look away to exercise a frame with zero visible relics.
+            self.engine.camera.yaw = std.math.pi;
+            self.engine.camera.position = mach.math.vec3(0, 27, -90);
         },
         3 => {
             self.show_metrics = false;
