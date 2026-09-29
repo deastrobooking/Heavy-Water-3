@@ -1,0 +1,14 @@
+.{
+    .name = .heavy_water,
+    .fingerprint = 0x2e40c8485c6c35d2, // Package identity; keep stable.
+    .version = "0.1.0",
+    .mach_zig_version = "2026.4.10-mach",
+    .minimum_zig_version = "0.16.0-dev.3142+5ccfeb926",
+    .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "LICENSE", "README.md" },
+    .dependencies = .{
+        .mach = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/mach/7ed0d504a9569fd4ad840ecb10ead16b90a8926e.tar.gz",
+            .hash = "mach-0.5.0-jXwHfVKRNQCZ0QP3Yf3aqxQ7V6vGlgO4C9MT0p-59q_n",
+        },
+    },
+}

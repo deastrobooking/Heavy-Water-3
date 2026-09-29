@@ -1,0 +1,99 @@
+.{
+    .name = .mach,
+    .fingerprint = 0xaca480db7d077c8d, // Changing this has security and trust implications.
+    .version = "0.5.0",
+    .mach_zig_version = "2026.4.10-mach",
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "LICENSE-APACHE",
+        "LICENSE-MIT",
+        "README.md",
+    },
+    .dependencies = .{
+        .freetype = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/freetype/1d0f0f11162275d67d3db2cb4905ed5c659b8a41.tar.gz",
+            .hash = "freetype-0.0.0-Oa073aaddgBS9kbmOT8NQP-kfpHr3YJgIASnj5V9PsZX",
+            .lazy = true,
+        },
+
+        .@"kb-text-shape" = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/kb-text-shape/3e43ed35ea82bcf9a51d20500884f9f265238c51.tar.gz",
+            .hash = "kb_text_shape-0.1.0-ltexQow0GgCWc-DFDVEuHBKjU08CSS5dGOUg91UUVZ75",
+            .lazy = true,
+        },
+        .mach_objc = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/mach-objc/7713665ce8c6797c117c57b85522b892381c0f18.tar.gz",
+            .hash = "mach_objc-0.0.0-pF1e0q9ADQDM7s0Vg40-m_hjLWZC3dju9OsrcWUGQ19G",
+            .lazy = true,
+        },
+        .xcode_frameworks = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/xcode-frameworks/62f660e82e4eddb5007cb4cf06a6d3d31237f05e.tar.gz",
+            .hash = "N-V-__8AAMikhQnOIqoH0uy5aepJKs8Zy0VqznnW3n94VSZN",
+            .lazy = true,
+        },
+        .directx_headers = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/directx-headers/e35c0940474974e1d46a34051881b7151a8a54f3.tar.gz",
+            .hash = "N-V-__8AAF1ZPgA6rybQBbBq80YYqgKnu733wTGRC4K_JC_b",
+            .lazy = true,
+        },
+        .opengl_headers = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/opengl-headers/8b45e5dbbbff0a65c9bcbec4918acdff911dcb2d.tar.gz",
+            .hash = "N-V-__8AAFJgJABLNrdmvVVv7_dxFGpR1QHnHYYudPC31bNS",
+            .lazy = true,
+        },
+        .vulkan_zig = .{
+            .url = "https://pkg.hexops.org/pkg/thirdparty/vulkan-zig/8dd11cfb44b3897b2cd8b026184306e46e7b1e40.tar.gz",
+            .hash = "vulkan-0.0.0-r7Ytx-lrAwDA6o57xnZ2Fs7AGKNBEkyGgsfQKyBlJw-2",
+            .lazy = true,
+        },
+        .vulkan_headers = .{
+            .url = "https://pkg.hexops.org/pkg/thirdparty/vulkan-headers/f6a6f7ab165cedbfa2a7d0c93fe27a2d01ce09c8.tar.gz",
+            .hash = "N-V-__8AAC1ZbAIG2kVq3iPpAWaOlDTQ3MOyOyQQR0o_-9ez",
+            .lazy = true,
+        },
+        .linux_audio_headers = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/linux-audio-headers/5e016e7bf15a52ec720c73f92c6fba58cbe97a05.tar.gz",
+            .hash = "N-V-__8AAHY2IADL1G0UHC3EtMpaBhN9Z-yMzvCGuCKQSpNN",
+            .lazy = true,
+        },
+        .wayland_headers = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/wayland-headers/bf463e018b9e36974898ce31b92f8a031eea45a2.tar.gz",
+            .hash = "N-V-__8AAGn4CgBM_vzz1o5HRh08JarL3_6N6-VV9XJBgigL",
+            .lazy = true,
+        },
+        .x11_headers = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/x11-headers/ea933d71f13816b25bf8533e44e105aed8fe4ba7.tar.gz",
+            .hash = "N-V-__8AAIxIRwBTt3m8YLYIjDLGc2J6d1X6v2kdQRUZJQSk",
+            .lazy = true,
+        },
+
+        // Dependencies used by examples only
+        .zigimg = .{
+            // TODO: switch back to upstream zigimg once it supports Zig 0.16
+            // and once https://codeberg.org/ziglang/zig/issues/31617 is resolved
+            // .url = "https://pkg.hexops.org/pkg/thirdparty/zigimg/7b98e82621fe302a9edc147df1191f4d1b7ff7a5.tar.gz",
+            // .hash = "zigimg-0.1.0-8_eo2qWHFwA-S24SH7x7NplPii0EbIQiUfDrimgA6rzN",
+            .url = "https://github.com/emidoots/zigimg/archive/204076da6e0cce50ca19c46570793deda6c2b8cb.tar.gz",
+            .hash = "zigimg-0.1.0-8_eo2naZFwDyZ1zDEeRFB2EDzeZ37qxhxXVWsdUAWkE8",
+            .lazy = true,
+        },
+        .opusfile = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/opusfile/e4276233c6d3982173d9331f7d070c124473880f.tar.gz",
+            .hash = "opusfile-0.0.0-cWXcaTDPBgCpMe85dQMu5IzC7-liZMHR4m6DKy9EmQg_",
+            .lazy = true,
+        },
+        .opusenc = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/opusenc/2e88eeb99a1cdb84df584031c47bb9c3fcb01226.tar.gz",
+            .hash = "opusenc-0.0.0-X0lZja_9AgDl5pppfFckmWMvqXQ70pdE1PMuedPaI3su",
+            .lazy = true,
+        },
+        .mach_example_assets = .{
+            .url = "https://pkg.hexops.org/pkg/hexops/mach-example-assets/855d76851177d0336b9a340572a411b933663313.tar.gz",
+            .hash = "mach_example_assets-0.0.0-qpnm5puqpQDpDLqz1EEI2GVg3FZv8XlNaMtKbLqRHiEw",
+            .lazy = true,
+        },
+    },
+}

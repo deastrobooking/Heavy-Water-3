@@ -1,0 +1,31 @@
+pub const util = @import("util.zig"); // TODO: banish 2-level deep namespaces
+pub const Atlas = @import("atlas/Atlas.zig");
+
+// Mach modules
+pub const Sprite = @import("Sprite.zig");
+pub const Text = @import("Text.zig");
+
+/// All graphics modules
+pub const modules = .{ Sprite, Text };
+
+// Fonts
+pub const Font = @import("font/main.zig").Font;
+pub const default_font = @import("font/main.zig").default_font;
+pub const TextRun = @import("font/main.zig").TextRun;
+pub const Glyph = @import("font/main.zig").Glyph;
+pub const px_per_pt = @import("font/main.zig").px_per_pt;
+pub const font_weight_normal = 400;
+pub const font_weight_bold = 700;
+
+test {
+    const std = @import("std");
+    // TODO: refactor code so we can use this here:
+    // std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(util);
+    std.testing.refAllDecls(Sprite);
+    std.testing.refAllDecls(Atlas);
+    std.testing.refAllDecls(Text);
+    std.testing.refAllDecls(Font);
+    std.testing.refAllDecls(TextRun);
+    std.testing.refAllDecls(Glyph);
+}
