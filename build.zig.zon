@@ -4,7 +4,7 @@
     .version = "0.1.0",
     .mach_zig_version = "2026.4.10-mach",
     .minimum_zig_version = "0.16.0-dev.3142+5ccfeb926",
-    .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "LICENSE", "README.md" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "tools", "docs", "LICENSE", "README.md" },
     .dependencies = .{
         .mach = .{
             .url = "https://pkg.hexops.org/pkg/hexops/mach/7ed0d504a9569fd4ad840ecb10ead16b90a8926e.tar.gz",
