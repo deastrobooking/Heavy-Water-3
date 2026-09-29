@@ -14,6 +14,16 @@ struct VertexOut {
     @location(3) world: vec3<f32>,
 };
 
+// Mach's WGSL compiler does not implement the `cross` builtin yet.
+fn cross3(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+}
+
+fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross3(q.xyz, v);
+    return v + q.w * t + cross3(q.xyz, t);
+}
+
 @vertex fn vertex_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -22,12 +32,13 @@ struct VertexOut {
     @location(4) tint: vec4<f32>,
     @location(5) color: vec3<f32>,
     @location(6) stretch: vec4<f32>,
+    @location(7) rotation: vec4<f32>,
 ) -> VertexOut {
     var out: VertexOut;
-    let world = position * stretch.xyz * translation_scale.w + translation_scale.xyz;
+    let world = rotate(rotation, position * stretch.xyz) * translation_scale.w + translation_scale.xyz;
     out.clip = frame.view_projection * vec4<f32>(world, 1.0);
     // Inverse-transpose of a diagonal scale: divide, then renormalize in the fragment stage.
-    out.normal = normal / stretch.xyz;
+    out.normal = rotate(rotation, normal / stretch.xyz);
     out.uv = uv;
     out.tint = tint * vec4<f32>(color, 1.0);
     out.world = world;

@@ -10,6 +10,7 @@ Supported input: `.gltf` with base64 data-URI or relative external buffers, and 
 
 - `source/blueprints/powered_door.json`: a wall with a doorway, a 200 W generator, a button (on the −z face) that toggles a latch, a proximity sensor on the +z side, a logic OR, and a sliding door actuator.
 - `source/blueprints/elevator.json`: a base, a 4.2 m landing tower, a 250 W generator, call buttons at the bottom and top, a logic OR into a latch, and a platform actuator with 3.9 m of travel.
+- `source/blueprints/rover.json`: a 400 kg, four-wheel-drive rover with front steering, a 6 kW cell powering a 5 kW motor, a driver seat, and a steering device.
 - `source/crate.gltf`: the supply crate (1.06 × 0.8 × 1.06 m), two materials (`hull`, `band`), one planar and one interleaved buffer view.
 
 Changing the runtime layout means bumping `Model.format_version`. Changing what shipped content means (IDs, dimensions) means bumping `Catalog.content_version`, which invalidates saves.

@@ -37,6 +37,50 @@ pub fn block(allocator: std.mem.Allocator) !Mesh {
     return mesh;
 }
 
+/// Unit-diameter, unit-width cylinder along X (a wheel). UVs stripe around the rim so spin
+/// is visible under the checker texture.
+pub fn wheel(allocator: std.mem.Allocator) !Mesh {
+    const segments = 16;
+    const vertices = try allocator.alloc(Vertex, segments * 4 + 4);
+    errdefer allocator.free(vertices);
+    const indices = try allocator.alloc(u32, segments * 12);
+    for (0..segments + 1) |i| {
+        const a = @as(f32, @floatFromInt(i)) / segments * 2 * std.math.pi;
+        const y = @cos(a) * 0.5;
+        const z = @sin(a) * 0.5;
+        const v = @as(f32, @floatFromInt(i)) / segments * 8;
+        vertices[i * 2] = .{ .position = .{ -0.5, y, z }, .normal = .{ 0, y * 2, z * 2 }, .uv = .{ 0, v } };
+        vertices[i * 2 + 1] = .{ .position = .{ 0.5, y, z }, .normal = .{ 0, y * 2, z * 2 }, .uv = .{ 0.5, v } };
+    }
+    // Caps: one center vertex per side plus a ring.
+    const cap = (segments + 1) * 2;
+    for ([_]f32{ -0.5, 0.5 }, 0..) |x, side| {
+        vertices[cap + side] = .{ .position = .{ x, 0, 0 }, .normal = .{ x * 2, 0, 0 }, .uv = .{ 0.25, 0.25 } };
+    }
+    const ring = cap + 2;
+    for (0..segments) |i| {
+        const a = @as(f32, @floatFromInt(i)) / segments * 2 * std.math.pi;
+        for ([_]f32{ -0.5, 0.5 }, 0..) |x, side| {
+            vertices[ring + i * 2 + side] = .{ .position = .{ x, @cos(a) * 0.5, @sin(a) * 0.5 }, .normal = .{ x * 2, 0, 0 }, .uv = .{ 0.25 + @cos(a) * 0.2, 0.25 + @sin(a) * 0.2 } };
+        }
+    }
+    var n: usize = 0;
+    for (0..segments) |i| {
+        const a: u32 = @intCast(i * 2);
+        for ([_]u32{ a, a + 2, a + 1, a + 1, a + 2, a + 3 }) |index| {
+            indices[n] = index;
+            n += 1;
+        }
+        const r0: u32 = @intCast(ring + i * 2);
+        const r1: u32 = @intCast(ring + ((i + 1) % segments) * 2);
+        for ([_]u32{ @intCast(cap), r1, r0, @intCast(cap + 1), r0 + 1, r1 + 1 }) |index| {
+            indices[n] = index;
+            n += 1;
+        }
+    }
+    return .{ .vertices = vertices, .indices = indices };
+}
+
 /// A faceted, six-sided alien shrub. Shared by all vegetation instances.
 pub fn vegetation(allocator: std.mem.Allocator) !Mesh {
     const vertices = try allocator.alloc(Vertex, 18);

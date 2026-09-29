@@ -23,4 +23,6 @@ test {
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");
     _ = @import("machine/Machine.zig");
+    _ = @import("physics/Rotation.zig");
+    _ = @import("physics/Vehicle.zig");
 }

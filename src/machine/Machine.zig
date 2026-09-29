@@ -2,12 +2,14 @@ const std = @import("std");
 const Blueprint = @import("Blueprint.zig");
 const Device = @import("Device.zig");
 const Graph = @import("Graph.zig");
+const R = @import("../physics/Rotation.zig");
 const Machine = @This();
 
 /// One placed blueprint instance. Simulation is fixed-step, allocation-free, and deterministic:
 /// every signal input reads the previous step's outputs (one step of latency per hop, so wiring
 /// cycles are allowed), then each power network shares its supply among consumers.
-/// The machine knows nothing about physics; callers move actuator bodies to `devicePosition`.
+/// The machine knows nothing about physics; callers move actuator bodies to `devicePosition`
+/// and, for vehicles, keep `origin`/`rotation` on the chassis and read the motor and steering.
 pub const max_devices = Blueprint.max_devices;
 const none: u8 = 0xFF;
 
@@ -16,11 +18,16 @@ pub const Environment = struct {
     player_feet: [3]f32 = .{ 0, -1e9, 0 },
     /// Device index of a button pressed this step.
     pressed: ?u8 = null,
+    /// Driver input for this machine's seat, when occupied.
+    controls: ?Controls = null,
 };
+pub const Controls = struct { throttle: f32 = 0, steer: f32 = 0, brake: f32 = 0 };
 pub const Network = struct { supply: f32 = 0, demand: f32 = 0, satisfaction: f32 = 1 };
 
 blueprint: *const Blueprint,
 origin: [3]f32,
+/// Frame orientation; identity for placed structures, the chassis pose for vehicles.
+rotation: R.Quat = R.identity,
 outputs: [max_devices][Device.max_ports]f32 = @splat(@splat(0)),
 previous: [max_devices][Device.max_ports]f32 = @splat(@splat(0)),
 /// Persistent per-device state: latch value, actuator position (0..1 along travel).
@@ -84,11 +91,17 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
             },
             .button => self.outputs[d][0] = if (env.pressed == @as(u8, @intCast(d))) 1 else 0,
             .proximity => {
-                const center = self.worldOffset(def.offset);
+                const local = R.inverseRotate(self.rotation, R.sub(env.player_feet, self.worldOffset(def.offset)));
                 var inside = true;
-                for (0..3) |k| inside = inside and @abs(env.player_feet[k] - center[k]) <= def.size[k] / 2;
+                for (0..3) |k| inside = inside and @abs(local[k]) <= def.size[k] / 2;
                 self.outputs[d][0] = if (inside) 1 else 0;
             },
+            .seat => {
+                const c = env.controls orelse Controls{};
+                self.outputs[d] = .{ @floatFromInt(@intFromBool(env.controls != null)), std.math.clamp(c.throttle, -1, 1), std.math.clamp(c.steer, -1, 1), std.math.clamp(c.brake, 0, 1), 0 };
+            },
+            .motor => self.networks[self.network_of[d]].demand += def.watts * @abs(std.math.clamp(self.input(d, 1), -1, 1)),
+            .steering => self.outputs[d][1] = std.math.clamp(self.input(d, 0), -1, 1),
             .latch => {
                 const toggle = self.input(d, 0);
                 if (toggle > 0.5 and self.last_input[d] <= 0.5) self.state[d] = 1 - self.state[d];
@@ -113,8 +126,9 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
         // No supply means nothing on the network runs, whatever its rating.
         n.satisfaction = if (n.supply <= 0) 0 else if (n.demand <= 0) 1 else @min(1, n.supply / n.demand);
     }
-    // Actuators move at rated speed scaled by their network's satisfaction (brownout).
+    // Actuators move and motors drive at rated output scaled by satisfaction (brownout).
     for (bp.devices[0..bp.device_count], 0..) |def, d| {
+        if (def.kind == .motor) self.outputs[d][2] = std.math.clamp(self.input(d, 1), -1, 1) * self.satisfaction(d);
         if (def.kind != .actuator) continue;
         const target = std.math.clamp(self.input(d, 1), 0, 1);
         const max_step = def.speed / Blueprint.length(def.travel) * dt * self.satisfaction(d);
@@ -134,18 +148,19 @@ pub fn network(self: *const Machine, device: usize) ?Network {
     return if (n == none) null else self.networks[n];
 }
 
-fn worldOffset(self: *const Machine, offset: [3]f32) [3]f32 {
-    return .{ self.origin[0] + offset[0], self.origin[1] + offset[1], self.origin[2] + offset[2] };
+/// Frame-relative offset to world space.
+pub fn worldOffset(self: *const Machine, offset: [3]f32) [3]f32 {
+    return R.add(self.origin, R.rotate(self.rotation, offset));
 }
 
 /// World-space center of a device's body, including actuator travel.
 pub fn devicePosition(self: *const Machine, device: usize) [3]f32 {
     const def = self.blueprint.devices[device];
-    var p = self.worldOffset(def.offset);
+    var offset = def.offset;
     if (def.kind == .actuator) for (0..3) |k| {
-        p[k] += def.travel[k] * self.state[device];
+        offset[k] += def.travel[k] * self.state[device];
     };
-    return p;
+    return self.worldOffset(offset);
 }
 
 /// Restores persistent state (from a save) and re-derives outputs that depend on it.
@@ -254,4 +269,32 @@ test "machine state restores and rejects invalid values" {
     try std.testing.expectEqual(@as(f32, 0.25), m.state[1]);
     try std.testing.expectError(error.InvalidMachineState, m.restore(&.{ 0.5, 0 }));
     try std.testing.expectError(error.InvalidMachineState, m.restore(&.{1}));
+}
+
+test "seat controls drive a powered motor and steering; power limits drive output" {
+    const bp = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"cart","devices":[
+        \\ {"id":"cell","kind":"generator","watts":50},
+        \\ {"id":"seat","kind":"seat","offset":[0,1,0]},
+        \\ {"id":"motor","kind":"motor","watts":100},
+        \\ {"id":"wheel","kind":"steering"}],
+        \\ "wires":[["cell.power","motor.power"],["seat.throttle","motor.throttle"],["seat.steer","wheel.command"]],
+        \\ "vehicle":{"size":[2,1,3],"mass":300,"stiffness":8000,"damping":1000,"grip":1,"max_force":3000,"max_brake":2000,"max_steer":0.5,
+        \\  "wheels":[{"offset":[-1,-0.5,1],"radius":0.4,"rest":0.4,"driven":true},{"offset":[1,-0.5,1],"radius":0.4,"rest":0.4},{"offset":[0,-0.5,-1],"radius":0.4,"rest":0.4}]}}
+    );
+    var m = Machine.init(&bp, .{ 0, 0, 0 });
+    run(&m, .{ .controls = .{ .throttle = 1, .steer = -0.5, .brake = 1 } }, 3);
+    try std.testing.expectEqual(@as(f32, 1), m.outputs[1][0]);
+    // 50 W supply for a 100 W motor at full throttle: half drive.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), m.outputs[2][2], 0.0001);
+    try std.testing.expectEqual(@as(f32, -0.5), m.outputs[3][1]);
+    // Half throttle fits within the supply: full requested drive.
+    run(&m, .{ .controls = .{ .throttle = 0.5 } }, 3);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), m.outputs[2][2], 0.0001);
+    run(&m, .{}, 3);
+    try std.testing.expectEqual(@as(f32, 0), m.outputs[1][0]);
+    try std.testing.expectEqual(@as(f32, 0), m.outputs[2][2]);
+    // A rotated frame carries device positions with it.
+    m.rotation = R.axisAngle(.{ 1, 0, 0 }, std.math.pi / 2.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), m.devicePosition(1)[2], 1e-5);
 }

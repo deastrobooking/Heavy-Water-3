@@ -5,7 +5,9 @@ const Graph = @import("Graph.zig");
 const Blueprint = @This();
 
 /// JSON blueprint format. A blueprint is data only: static structure parts, typed devices,
-/// and wires between named ports ("device.port"). Parsing validates everything and produces a
+/// wires between named ports ("device.port"), and for vehicles a chassis and wheels.
+/// The optional `vehicle` section and the seat/motor/steering kinds were added without a
+/// format bump: every earlier blueprint still parses with the same meaning. Parsing validates everything and produces a
 /// fixed-capacity value with resolved indices, so instancing and simulation never allocate.
 pub const format_version: u32 = 1;
 pub const max_devices = 24;
@@ -18,6 +20,24 @@ pub const id_len = 16;
 pub const Part = struct { offset: [3]f32, size: [3]f32, color: [4]f32 };
 pub const PortRef = struct { device: u8, port: u8 };
 pub const Wire = struct { from: PortRef, to: PortRef };
+pub const max_wheels = 6;
+pub const Wheel = struct { offset: [3]f32, radius: f32, rest: f32, driven: bool, steered: bool };
+/// Chassis and suspension of a vehicle blueprint. Parts and devices are then chassis-relative.
+pub const Vehicle = struct {
+    size: [3]f32,
+    mass: f32,
+    stiffness: f32,
+    damping: f32,
+    grip: f32,
+    max_force: f32,
+    max_brake: f32,
+    max_steer: f32,
+    wheels: [max_wheels]Wheel,
+    wheel_count: usize,
+    seat: u8,
+    motor: u8,
+    steering: u8,
+};
 pub const DeviceDef = struct {
     id: [id_len]u8,
     kind: Device.Kind,
@@ -40,7 +60,15 @@ pub const DeviceDef = struct {
     pub fn hasBody(self: DeviceDef) bool {
         return switch (self.kind) {
             .generator, .button, .actuator => true,
-            .proximity, .latch, .logic => false,
+            .proximity, .latch, .logic, .seat, .motor, .steering => false,
+        };
+    }
+
+    /// Rendered as a block at its offset.
+    pub fn visible(self: DeviceDef) bool {
+        return switch (self.kind) {
+            .generator, .button, .actuator, .seat, .motor => true,
+            .proximity, .latch, .logic, .steering => false,
         };
     }
 };
@@ -54,6 +82,7 @@ wires: [max_wires]Wire = undefined,
 wire_count: usize = 0,
 nodes: [max_nodes]Node = undefined,
 node_count: usize = 0,
+vehicle: ?Vehicle = null,
 
 pub fn name(self: *const Blueprint) []const u8 {
     return std.mem.sliceTo(&self.name_buffer, 0);
@@ -84,12 +113,24 @@ const DocDevice = struct {
     travel: [3]f32 = .{ 0, 0, 0 },
     nodes: []const Node = &.{},
 };
+const DocVehicle = struct {
+    size: [3]f32,
+    mass: f32,
+    stiffness: f32,
+    damping: f32,
+    grip: f32,
+    max_force: f32,
+    max_brake: f32,
+    max_steer: f32,
+    wheels: []const struct { offset: [3]f32, radius: f32, rest: f32, driven: bool = false, steered: bool = false },
+};
 const Doc = struct {
     format: u32,
     name: []const u8,
     parts: []const DocPart = &.{},
     devices: []const DocDevice,
     wires: []const [2][]const u8 = &.{},
+    vehicle: ?DocVehicle = null,
 };
 
 pub const Error = error{
@@ -105,6 +146,7 @@ pub const Error = error{
     InvalidSize,
     InvalidDeviceParameters,
     InvalidLogic,
+    InvalidVehicle,
     UnknownPort,
     WrongDirection,
     PortKindMismatch,
@@ -140,7 +182,7 @@ pub fn parse(allocator: std.mem.Allocator, json: []const u8) Error!Blueprint {
         try finite(&(d.offset ++ d.size ++ d.color ++ d.travel ++ [_]f32{ d.watts, d.speed }));
         try positive(d.size);
         switch (d.kind) {
-            .generator => if (!(d.watts > 0)) return error.InvalidDeviceParameters,
+            .generator, .motor => if (!(d.watts > 0) or d.speed != 0 or length(d.travel) != 0) return error.InvalidDeviceParameters,
             .actuator => if (d.watts < 0 or !(d.speed > 0) or length(d.travel) == 0) return error.InvalidDeviceParameters,
             else => if (d.watts != 0 or d.speed != 0 or length(d.travel) != 0) return error.InvalidDeviceParameters,
         }
@@ -181,7 +223,56 @@ pub fn parse(allocator: std.mem.Allocator, json: []const u8) Error!Blueprint {
         result.wires[i] = .{ .from = from, .to = to };
     }
     result.wire_count = doc.wires.len;
+    try result.parseVehicle(doc.vehicle);
     return result;
+}
+
+/// A vehicle needs exactly one seat, motor, and steering device, and stationary kinds that
+/// move bodies in world space (actuators, buttons, proximity) are not allowed on a chassis.
+fn parseVehicle(self: *Blueprint, doc: ?DocVehicle) Error!void {
+    var seat: ?u8 = null;
+    var motor: ?u8 = null;
+    var steering: ?u8 = null;
+    for (self.devices[0..self.device_count], 0..) |d, i| {
+        const slot = switch (d.kind) {
+            .seat => &seat,
+            .motor => &motor,
+            .steering => &steering,
+            .actuator, .button, .proximity => if (doc != null) return error.InvalidVehicle else continue,
+            else => continue,
+        };
+        if (doc == null or slot.* != null) return error.InvalidVehicle;
+        slot.* = @intCast(i);
+    }
+    const v = doc orelse return;
+    try finite(&(v.size ++ [_]f32{ v.mass, v.stiffness, v.damping, v.grip, v.max_force, v.max_brake, v.max_steer }));
+    try positive(v.size);
+    if (!(v.mass > 0) or !(v.stiffness > 0) or v.damping < 0 or !(v.grip > 0) or !(v.max_force > 0) or v.max_brake < 0 or v.max_steer < 0 or v.max_steer > 1.2) return error.InvalidVehicle;
+    if (v.wheels.len < 3 or v.wheels.len > max_wheels) return error.InvalidVehicle;
+    var result: Vehicle = .{
+        .size = v.size,
+        .mass = v.mass,
+        .stiffness = v.stiffness,
+        .damping = v.damping,
+        .grip = v.grip,
+        .max_force = v.max_force,
+        .max_brake = v.max_brake,
+        .max_steer = v.max_steer,
+        .wheels = undefined,
+        .wheel_count = v.wheels.len,
+        .seat = seat orelse return error.InvalidVehicle,
+        .motor = motor orelse return error.InvalidVehicle,
+        .steering = steering orelse return error.InvalidVehicle,
+    };
+    var driven = false;
+    for (v.wheels, 0..) |w, i| {
+        try finite(&(w.offset ++ [_]f32{ w.radius, w.rest }));
+        if (!(w.radius > 0) or !(w.rest > 0)) return error.InvalidVehicle;
+        driven = driven or w.driven;
+        result.wheels[i] = .{ .offset = w.offset, .radius = w.radius, .rest = w.rest, .driven = w.driven, .steered = w.steered };
+    }
+    if (!driven) return error.InvalidVehicle;
+    self.vehicle = result;
 }
 
 fn resolve(self: *const Blueprint, text: []const u8) Error!PortRef {
@@ -239,4 +330,41 @@ test "blueprint parses, resolves wires, and rejects invalid machines" {
     const cyclic = try std.mem.replaceOwned(u8, allocator, door_json, "{\"id\":\"toggle\",\"kind\":\"latch\"}", "{\"id\":\"toggle\",\"kind\":\"logic\",\"nodes\":[{\"add\":{\"a\":0,\"b\":0}}]}");
     defer allocator.free(cyclic);
     try std.testing.expectError(error.InvalidLogic, parse(allocator, cyclic));
+}
+
+const cart_json =
+    \\{"format":1,"name":"cart","devices":[
+    \\ {"id":"cell","kind":"generator","watts":100},
+    \\ {"id":"seat","kind":"seat"},
+    \\ {"id":"motor","kind":"motor","watts":80},
+    \\ {"id":"wheel","kind":"steering"}],
+    \\ "wires":[["cell.power","motor.power"],["seat.throttle","motor.throttle"],["seat.steer","wheel.command"]],
+    \\ "vehicle":{"size":[2,1,3],"mass":300,"stiffness":8000,"damping":1000,"grip":1,"max_force":3000,"max_brake":2000,"max_steer":0.5,
+    \\  "wheels":[{"offset":[-1,-0.5,1],"radius":0.4,"rest":0.4,"driven":true,"steered":true},{"offset":[1,-0.5,1],"radius":0.4,"rest":0.4,"steered":true},{"offset":[0,-0.5,-1],"radius":0.4,"rest":0.4,"driven":true}]}}
+;
+
+test "vehicle blueprints resolve their seat, motor, and steering and reject invalid chassis" {
+    const allocator = std.testing.allocator;
+    const cart = try parse(allocator, cart_json);
+    const v = cart.vehicle.?;
+    try std.testing.expectEqual(@as(u8, 1), v.seat);
+    try std.testing.expectEqual(@as(u8, 3), v.steering);
+    try std.testing.expectEqual(@as(usize, 3), v.wheel_count);
+    try std.testing.expect(v.wheels[0].driven and !v.wheels[1].driven);
+
+    const cases = [_]struct { from: []const u8, to: []const u8 }{
+        .{ .from = "{\"id\":\"wheel\",\"kind\":\"steering\"}", .to = "{\"id\":\"wheel\",\"kind\":\"steering\"},{\"id\":\"b\",\"kind\":\"button\"}" },
+        .{ .from = "\"driven\":true", .to = "\"driven\":false" },
+        .{ .from = "\"max_steer\":0.5", .to = "\"max_steer\":2" },
+        .{ .from = "\"mass\":300", .to = "\"mass\":0" },
+    };
+    for (cases) |case| {
+        const broken = try std.mem.replaceOwned(u8, allocator, cart_json, case.from, case.to);
+        defer allocator.free(broken);
+        try std.testing.expectError(error.InvalidVehicle, parse(allocator, broken));
+    }
+    // Driving components without a vehicle section are rejected.
+    const seat_only = try std.mem.replaceOwned(u8, allocator, door_json, "{\"id\":\"toggle\",\"kind\":\"latch\"}", "{\"id\":\"toggle\",\"kind\":\"latch\"},{\"id\":\"s\",\"kind\":\"seat\"}");
+    defer allocator.free(seat_only);
+    try std.testing.expectError(error.InvalidVehicle, parse(allocator, seat_only));
 }

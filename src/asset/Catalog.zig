@@ -12,7 +12,7 @@ const MaterialTag = struct {};
 pub const MeshHandle = Handle.Handle(MeshTag);
 pub const MaterialHandle = Handle.Handle(MaterialTag);
 /// Bumped whenever shipped content changes meaning (IDs, dimensions); persisted in saves.
-pub const content_version: u32 = 2;
+pub const content_version: u32 = 3;
 pub const max_blueprints = 8;
 
 pub const Entry = struct {
@@ -27,8 +27,11 @@ pub const Content = struct {
     crate: MeshHandle,
     /// Centered unit cube; machine parts and device bodies scale it per axis.
     block: MeshHandle,
+    /// Unit cylinder along X for wheels.
+    wheel: MeshHandle,
     powered_door: *const Blueprint,
     elevator: *const Blueprint,
+    rover: *const Blueprint,
 };
 
 meshes: Handle.Pool(MeshTag, Entry, mesh_capacity) = .{},
@@ -46,9 +49,11 @@ pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
     self.content.plant = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.vegetation(allocator), .named("plant", .{ 1, 1, 1, 1 })));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
+    self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
     // Blueprints were validated at build time; parsing again guards against a stale build.
     self.content.powered_door = try self.addBlueprint(allocator, @embedFile("powered_door.blueprint"));
     self.content.elevator = try self.addBlueprint(allocator, @embedFile("elevator.blueprint"));
+    self.content.rover = try self.addBlueprint(allocator, @embedFile("rover.blueprint"));
 }
 
 fn addBlueprint(self: *Catalog, allocator: std.mem.Allocator, json: []const u8) !*const Blueprint {
@@ -99,6 +104,7 @@ test "catalog loads the compiled crate and resolves typed handles" {
     try std.testing.expectEqualStrings("band", std.mem.sliceTo(&band.name, 0));
     try std.testing.expect(catalog.mesh(.none) == null);
     try std.testing.expectEqualStrings("elevator", catalog.content.elevator.name());
+    try std.testing.expectEqual(@as(usize, 4), catalog.content.rover.vehicle.?.wheel_count);
     try std.testing.expect(catalog.findBlueprint("powered_door") == catalog.content.powered_door);
 }
 

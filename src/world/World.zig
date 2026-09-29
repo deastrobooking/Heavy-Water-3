@@ -7,8 +7,9 @@ pub const mach_systems = .{ .init, .deinit };
 pub const Renderable = struct { transform: Transform, tint: [4]f32 };
 pub const max_props = 64;
 /// A dynamic catalog-backed object, published to the renderer each simulation tick.
-/// `size` scales the mesh per axis on top of the transform's uniform scale.
-pub const Prop = struct { mesh: Catalog.MeshHandle, transform: Transform, tint: [4]f32, size: [3]f32 = .{ 1, 1, 1 } };
+/// `size` scales the mesh per axis (before rotation) on top of the transform's uniform scale;
+/// `rotation` is a unit quaternion (x, y, z, w).
+pub const Prop = struct { mesh: Catalog.MeshHandle, transform: Transform, tint: [4]f32, size: [3]f32 = .{ 1, 1, 1 }, rotation: [4]f32 = .{ 0, 0, 0, 1 } };
 /// Mach owns collection storage and generational IDs; app owns the lifetime of the world.
 objects: mach.Objects(.{}, Renderable),
 seed: u64 = 0,

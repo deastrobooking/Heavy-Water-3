@@ -2,7 +2,8 @@ const std = @import("std");
 
 /// Device kinds shared by every machine. Sensors produce signals, controllers transform them,
 /// actuators consume power and signals, and generators feed power networks.
-pub const Kind = enum { generator, button, proximity, latch, logic, actuator };
+/// `seat`, `motor`, and `steering` exist only in vehicle blueprints.
+pub const Kind = enum { generator, button, proximity, latch, logic, actuator, seat, motor, steering };
 pub const PortKind = enum { power, signal };
 pub const Direction = enum { input, output };
 pub const Port = struct {
@@ -39,6 +40,24 @@ pub fn ports(kind: Kind) []const Port {
             .{ .name = "target", .kind = .signal, .direction = .input },
             .{ .name = "position", .kind = .signal, .direction = .output },
         },
+        // Driver controls while occupied; all zero when empty.
+        .seat => &.{
+            .{ .name = "occupied", .kind = .signal, .direction = .output },
+            .{ .name = "throttle", .kind = .signal, .direction = .output },
+            .{ .name = "steer", .kind = .signal, .direction = .output },
+            .{ .name = "brake", .kind = .signal, .direction = .output },
+        },
+        // Draws watts × |throttle|; `drive` is throttle scaled by power satisfaction.
+        .motor => &.{
+            .{ .name = "power", .kind = .power, .direction = .input },
+            .{ .name = "throttle", .kind = .signal, .direction = .input },
+            .{ .name = "drive", .kind = .signal, .direction = .output },
+        },
+        // Clamps the steering command to −1..1; the vehicle reads `angle`.
+        .steering => &.{
+            .{ .name = "command", .kind = .signal, .direction = .input },
+            .{ .name = "angle", .kind = .signal, .direction = .output },
+        },
     };
 }
 
@@ -63,4 +82,9 @@ test "port tables fit the fixed capacity and have at most one power port" {
     }
     try std.testing.expectEqual(@as(?u8, 1), portIndex(.actuator, "target"));
     try std.testing.expectEqual(@as(?u8, null), portIndex(.button, "power"));
+    // Port names are unique within a kind, so "device.port" is unambiguous.
+    inline for (std.meta.fields(Kind)) |field| {
+        const list = ports(@enumFromInt(field.value));
+        for (list, 0..) |a, i| for (list[0..i]) |b| try std.testing.expect(!std.mem.eql(u8, a.name, b.name));
+    }
 }

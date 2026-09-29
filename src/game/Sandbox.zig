@@ -11,13 +11,15 @@ const Modifications = @import("../world/Modifications.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Machine = @import("../machine/Machine.zig");
+const Vehicle = @import("../physics/Vehicle.zig");
+const R = Physics.Rotation;
 const Player = @import("Player.zig");
 const Save = @import("Save.zig");
 const Sandbox = @This();
 
 /// The interactive test session: a walking player, physical crates, a pickup, one tool
 /// (the salvage cutter, which removes relics), placed machines (a powered door and an
-/// elevator), and versioned saves of every change.
+/// elevator), a drivable rover, and versioned saves of every change.
 pub const max_crates = 16;
 pub const max_machines = 4;
 pub const reach: f32 = 6;
@@ -26,8 +28,13 @@ pub const spawn: Physics.Vec3 = .{ 0, 0, -58 };
 /// Crate layout relative to the spawn point: a row, plus one stacked on the middle crate.
 const crate_offsets = [_]Physics.Vec3{ .{ -2.2, 0, 6 }, .{ 0, 0, 6 }, .{ 2.2, 0, 6 }, .{ 0, 1, 6 }, .{ -1.1, 0, 9 }, .{ 1.1, 0, 9 } };
 /// Machine placements relative to the spawn point.
-const Placement = struct { blueprint: enum { powered_door, elevator }, offset: [2]f32 };
-const placements = [_]Placement{ .{ .blueprint = .powered_door, .offset = .{ 9, 10 } }, .{ .blueprint = .elevator, .offset = .{ -10, 8 } } };
+const Placement = struct { blueprint: enum { powered_door, elevator, rover }, offset: [2]f32 };
+const placements = [_]Placement{
+    .{ .blueprint = .powered_door, .offset = .{ 9, 10 } },
+    .{ .blueprint = .elevator, .offset = .{ -10, 8 } },
+    .{ .blueprint = .rover, .offset = .{ -6, -3 } },
+};
+pub const chase_distance: f32 = 7.5;
 
 pub const DeviceRef = struct { machine: u8, device: u8 };
 pub const Target = union(enum) {
@@ -49,11 +56,14 @@ pub const Placed = struct {
     machine: Machine,
     devices: [Blueprint.max_devices]Physics.Body = @splat(.none),
     parts: [Blueprint.max_parts]Physics.Body = @splat(.none),
+    /// Vehicle blueprints: the chassis rigid body and wheels. Parts and devices ride on it.
+    vehicle: ?Vehicle = null,
 };
 
 // Physics user data: crates are their index; machine bodies set the top bit.
 const machine_flag: u32 = 1 << 31;
 const part_flag: u32 = 1 << 30;
+const chassis_flag: u32 = 1 << 29;
 
 seed: u64,
 catalog: *const Catalog,
@@ -65,6 +75,9 @@ machines: [max_machines]Placed = undefined,
 machine_count: usize = 0,
 /// Button pressed during the last step; the machines see it on the next step.
 press: ?DeviceRef = null,
+/// Vehicle machine the player is driving.
+seated: ?u8 = null,
+driver_input: Machine.Controls = .{},
 held: ?u32 = null,
 target: Target = .none,
 modifications: Modifications = .{},
@@ -88,6 +101,7 @@ pub fn init(self: *Sandbox, seed: u64, catalog: *const Catalog, camera: *Camera)
         const bp = switch (placement.blueprint) {
             .powered_door => catalog.content.powered_door,
             .elevator => catalog.content.elevator,
+            .rover => catalog.content.rover,
         };
         try self.place(bp, spawn[0] + placement.offset[0], spawn[2] + placement.offset[1]);
     }
@@ -112,6 +126,18 @@ pub fn place(self: *Sandbox, bp: *const Blueprint, x: f32, z: f32) !void {
     }
     const m = self.machine_count;
     const placed = &self.machines[m];
+    if (bp.vehicle) |v| {
+        // Vehicles spawn slightly above their ride height and settle on their suspension.
+        const wheel = v.wheels[0];
+        const height = Terrain.surface(self.seed, x, z).height + wheel.radius + wheel.rest - wheel.offset[1] + 0.1;
+        placed.* = .{ .machine = .init(bp, .{ x, height, z }) };
+        const rigid = try self.physics.createRigid(.{ .half_extents = halve(v.size), .position = .{ x, height, z }, .mass = v.mass, .user = machine_flag | chassis_flag | @as(u32, @intCast(m)) << 8 | v.seat });
+        var wheels: [Vehicle.max_wheels]Vehicle.Wheel = undefined;
+        for (v.wheels[0..v.wheel_count], wheels[0..v.wheel_count]) |def, *w| w.* = .{ .mount = def.offset, .radius = def.radius, .rest = def.rest, .driven = def.driven, .steered = def.steered };
+        placed.vehicle = .init(rigid, .{ .stiffness = v.stiffness, .damping = v.damping, .grip = v.grip, .max_force = v.max_force, .max_brake = v.max_brake, .max_steer = v.max_steer }, wheels[0..v.wheel_count]);
+        self.machine_count += 1;
+        return;
+    }
     placed.* = .{ .machine = .init(bp, .{ x, y, z }) };
     errdefer for (placed.devices ++ placed.parts) |body| self.physics.destroyBody(body);
     for (bp.parts[0..bp.part_count], 0..) |part, i| {
@@ -141,6 +167,7 @@ fn groundSample(context: ?*const anyopaque, x: f32, z: f32) Physics.GroundSample
 
 pub fn resetPlayer(self: *Sandbox, camera: *Camera) void {
     self.release();
+    self.seated = null;
     camera.* = .{ .yaw = 0, .pitch = -0.2 };
     self.player = .{ .feet = .{ spawn[0], Terrain.surface(self.seed, spawn[0], spawn[2]).height, spawn[2] }, .mode = self.player.mode };
     if (self.player.mode == .fly) {
@@ -151,8 +178,11 @@ pub fn resetPlayer(self: *Sandbox, camera: *Camera) void {
 
 pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt: f32) !void {
     if (actions.reset) self.resetPlayer(camera);
-    if (actions.toggle_mode) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
-    self.player.step(&self.physics, camera, input, dt);
+    if (actions.toggle_mode and self.seated == null) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
+    if (self.seated != null) {
+        if (actions.interact) self.exitVehicle(camera) else self.driver_input = .{ .throttle = input.forward, .steer = input.right, .brake = @floatFromInt(@intFromBool(input.jump)) };
+    }
+    if (self.seated == null) self.player.step(&self.physics, camera, input, dt);
     self.stepMachines(dt);
     if (self.held) |i| {
         // Spring the held crate toward a point in front of the eye; physics still resolves contacts.
@@ -170,13 +200,20 @@ pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt:
     }
     self.physics.step(dt);
     self.tick += 1;
+    if (self.seated) |m| {
+        self.followVehicle(m, camera);
+        self.target = .none;
+        return;
+    }
     self.refreshNearby(camera.position);
     self.target = self.pick(camera.position, camera.forward());
     if (actions.interact) {
         if (self.held != null) self.release() else switch (self.target) {
             .prop => |i| self.hold(i),
-            .device => |d| if (self.machines[d.machine].machine.blueprint.devices[d.device].kind == .button) {
-                self.press = d;
+            .device => |d| switch (self.machines[d.machine].machine.blueprint.devices[d.device].kind) {
+                .button => self.press = d,
+                .seat => self.enterVehicle(d.machine, camera),
+                else => {},
             },
             else => {},
         }
@@ -187,14 +224,67 @@ pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt:
     };
 }
 
+pub fn enterVehicle(self: *Sandbox, machine: u8, camera: *Camera) void {
+    self.release();
+    self.seated = machine;
+    self.driver_input = .{};
+    const pose = self.physics.rigidPose(self.machines[machine].vehicle.?.rigid).?;
+    camera.yaw = R.yaw(pose.orientation);
+    camera.pitch = -0.25;
+    self.followVehicle(machine, camera);
+}
+
+/// Steps out to the vehicle's left, onto the terrain.
+pub fn exitVehicle(self: *Sandbox, camera: *Camera) void {
+    const m = self.seated orelse return;
+    self.seated = null;
+    const placed = &self.machines[m];
+    const pose = self.physics.rigidPose(placed.vehicle.?.rigid).?;
+    const side = R.add(pose.position, R.rotate(pose.orientation, .{ -(placed.machine.blueprint.vehicle.?.size[0] / 2 + 1.2), 0, 0 }));
+    self.player = .{ .feet = .{ side[0], Terrain.surface(self.seed, side[0], side[2]).height, side[2] }, .mode = .walk };
+    camera.pitch = -0.2;
+    camera.position = self.player.eye();
+}
+
+/// Seats the player and places the chase camera behind and above the chassis.
+fn followVehicle(self: *Sandbox, m: u8, camera: *Camera) void {
+    const placed = &self.machines[m];
+    const v = placed.machine.blueprint.vehicle.?;
+    const seat = placed.machine.devicePosition(v.seat);
+    self.player.feet = .{ seat[0], seat[1] - 0.5, seat[2] };
+    self.player.velocity = .{ 0, 0, 0 };
+    self.player.grounded = false;
+    self.player.support = .none;
+    const pose = self.physics.rigidPose(placed.vehicle.?.rigid).?;
+    const f = camera.forward();
+    var eye = math.vec3(pose.position[0] - f.x() * chase_distance, pose.position[1] + 1.5 - f.y() * chase_distance, pose.position[2] - f.z() * chase_distance);
+    const ground = Terrain.surface(self.seed, eye.x(), eye.z()).height + 0.6;
+    if (eye.y() < ground) eye = math.vec3(eye.x(), ground, eye.z());
+    camera.position = eye;
+}
+
 /// Advances every machine one fixed step, then drives actuator bodies to their new positions
-/// through velocity so physics pushes whatever they touch.
+/// through velocity so physics pushes whatever they touch, and feeds vehicle controls.
 fn stepMachines(self: *Sandbox, dt: f32) void {
     for (self.machines[0..self.machine_count], 0..) |*placed, m| {
         var env: Machine.Environment = .{ .player_feet = self.player.feet };
         if (self.press) |p| if (p.machine == m) {
             env.pressed = p.device;
         };
+        if (placed.vehicle) |*vehicle| {
+            const driving = self.seated == @as(u8, @intCast(m));
+            const pose = self.physics.rigidPose(vehicle.rigid).?;
+            placed.machine.origin = pose.position;
+            placed.machine.rotation = pose.orientation;
+            if (driving) env.controls = self.driver_input;
+            placed.machine.step(env, dt);
+            const v = placed.machine.blueprint.vehicle.?;
+            const out = placed.machine.outputs;
+            // An empty seat sets the parking brake.
+            const brake = if (driving) out[v.seat][3] else 1;
+            vehicle.step(&self.physics, .{ .drive = out[v.motor][2], .steer = out[v.steering][1], .brake = brake }, dt);
+            continue;
+        }
         placed.machine.step(env, dt);
         const bp = placed.machine.blueprint;
         for (bp.devices[0..bp.device_count], 0..) |def, d| {
@@ -239,6 +329,7 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3) Target {
     const ignore: Physics.Body = if (self.held) |i| self.crates[i] else .none;
     if (self.physics.raycast(origin, dir, best_distance, ignore)) |hit| {
         best_distance = hit.distance;
+        // Crates carry their index; machine devices and vehicle chassis (→ seat) carry machine and device.
         best = if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .none else .{ .device = .{ .machine = @intCast((hit.user >> 8) & 0xFF), .device = @intCast(hit.user & 0xFF) } };
     }
     for (self.nearby) |chunk| for (chunk.objects[0..chunk.count]) |object| {
@@ -289,6 +380,10 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     for (self.machines[0..self.machine_count], 0..) |*placed, m| {
         const bp = placed.machine.blueprint;
+        if (placed.vehicle) |vehicle| {
+            n = self.publishVehicle(placed, vehicle, m, out, n);
+            continue;
+        }
         for (bp.parts[0..bp.part_count], 0..) |part, i| {
             if (n == out.len) return n;
             out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = self.physics.position(placed.parts[i]).? }, .tint = part.color, .size = part.size };
@@ -307,12 +402,50 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     return n;
 }
 
+/// Chassis parts and devices follow the rigid pose; wheels follow the suspension and spin.
+fn publishVehicle(self: *const Sandbox, placed: *const Placed, vehicle: Vehicle, m: usize, out: []World.Prop, start: usize) usize {
+    var n = start;
+    const pose = self.physics.rigidPose(vehicle.rigid).?;
+    const frame: Machine = blk: {
+        var copy = placed.machine;
+        copy.origin = pose.position;
+        copy.rotation = pose.orientation;
+        break :blk copy;
+    };
+    const bp = frame.blueprint;
+    const glow: f32 = if (self.target == .device and self.target.device.machine == m) 1.2 else 1;
+    for (bp.parts[0..bp.part_count]) |part| {
+        if (n == out.len) return n;
+        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = frame.worldOffset(part.offset) }, .tint = .{ part.color[0] * glow, part.color[1] * glow, part.color[2] * glow, 1 }, .size = part.size, .rotation = pose.orientation };
+        n += 1;
+    }
+    for (bp.devices[0..bp.device_count], 0..) |def, d| {
+        if (!def.visible()) continue;
+        if (n == out.len) return n;
+        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = frame.devicePosition(d) }, .tint = def.color, .size = def.size, .rotation = pose.orientation };
+        n += 1;
+    }
+    for (0..vehicle.wheel_count) |i| {
+        if (n == out.len) return n;
+        const wheel = vehicle.wheelPose(&self.physics, i);
+        const r = vehicle.wheels[i].radius;
+        out[n] = .{ .mesh = self.catalog.content.wheel, .transform = .{ .position = wheel.position }, .tint = .{ 1, 1, 1, 1 }, .size = .{ 0.32, r * 2, r * 2 }, .rotation = wheel.orientation };
+        n += 1;
+    }
+    return n;
+}
+
 pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) ![]u8 {
     var crates: [max_crates]Save.PropState = undefined;
     for (crates[0..self.crate_count], 0..) |*p, i| p.* = .{ .id = @intCast(i), .position = self.cratePosition(@intCast(i)), .velocity = self.physics.velocity(self.crates[i]).? };
     var machines: [max_machines]Save.MachineState = undefined;
     for (machines[0..self.machine_count], self.machines[0..self.machine_count]) |*state, *placed| {
         state.* = .{ .blueprint = placed.machine.blueprint.name(), .states = placed.machine.states() };
+        if (placed.vehicle) |vehicle| {
+            const pose = self.physics.rigidPose(vehicle.rigid).?;
+            const motion = self.physics.rigidVelocity(vehicle.rigid).?;
+            state.body = .{ .position = pose.position, .orientation = pose.orientation, .linear = motion.linear, .angular = motion.angular };
+        }
     }
     return Save.encode(allocator, .{
         .seed = self.seed,
@@ -334,13 +467,19 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     var restored: [max_machines]Machine = undefined;
     for (doc.machines, self.machines[0..self.machine_count], 0..) |state, placed, m| {
         if (!std.mem.eql(u8, state.blueprint, placed.machine.blueprint.name())) return error.MachineMismatch;
+        if ((state.body != null) != (placed.vehicle != null)) return error.MachineMismatch;
         restored[m] = placed.machine;
         try restored[m].restore(state.states);
     }
     self.release();
     for (doc.props) |p| self.physics.setTransform(self.crates[p.id], p.position, p.velocity);
-    for (self.machines[0..self.machine_count], restored[0..self.machine_count]) |*placed, machine| {
+    self.seated = null;
+    for (self.machines[0..self.machine_count], restored[0..self.machine_count], doc.machines) |*placed, machine, state| {
         placed.machine = machine;
+        if (placed.vehicle) |vehicle| {
+            const body = state.body.?;
+            self.physics.setRigidState(vehicle.rigid, .{ .position = body.position, .orientation = body.orientation }, body.linear, body.angular);
+        }
         const bp = machine.blueprint;
         for (bp.devices[0..bp.device_count], 0..) |def, d| {
             if (def.kind == .actuator) self.physics.setTransform(placed.devices[d], machine.devicePosition(d), .{ 0, 0, 0 });
@@ -560,4 +699,51 @@ test "elevator carries the player to the landing with the same machine APIs" {
     try run(&sandbox, &camera, .{}, .{ .interact = true }, 240);
     try std.testing.expectEqual(@as(f32, 0), sandbox.machines[1].machine.state[platform.device]);
     try std.testing.expectApproxEqAbs(origin[1] + 4.2, sandbox.player.feet[1], 0.05);
+}
+
+test "rover: enter from its side, drive forward on machine power, exit, park, and reload its pose" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    const m: u8 = 2;
+    const rigid = sandbox.machines[m].vehicle.?.rigid;
+    try run(&sandbox, &camera, .{}, .{}, 120);
+    const parked = sandbox.physics.rigidPose(rigid).?;
+    // Settled on four wheels, aligned with the terrain it parked on (the spawn area slopes).
+    const ground_normal = Terrain.surface(sandbox.seed, parked.position[0], parked.position[2]).normal;
+    try std.testing.expect(R.dot(R.rotate(parked.orientation, .{ 0, 1, 0 }), ground_normal) > 0.98);
+    try std.testing.expect(R.length(sandbox.physics.rigidVelocity(rigid).?.linear) < 0.02);
+    for (sandbox.machines[m].vehicle.?.state[0..4]) |w| try std.testing.expect(w.contact);
+
+    // Walk up beside it, aim at the chassis, and get in.
+    try standAt(&sandbox, &camera, .{ parked.position[0] - 3, Terrain.surface(sandbox.seed, parked.position[0] - 3, parked.position[2]).height, parked.position[2] });
+    aimAt(&camera, parked.position);
+    try run(&sandbox, &camera, .{}, .{}, 1);
+    try std.testing.expect(sandbox.target == .device and sandbox.target.device.machine == m);
+    try run(&sandbox, &camera, .{}, .{ .interact = true }, 1);
+    try std.testing.expectEqual(@as(?u8, m), sandbox.seated);
+
+    // Two seconds of throttle moves it forward along its heading.
+    try run(&sandbox, &camera, .{ .forward = 1 }, .{}, 120);
+    const moved = sandbox.physics.rigidPose(rigid).?;
+    const heading = R.rotate(parked.orientation, .{ 0, 0, 1 });
+    try std.testing.expect(R.dot(R.sub(moved.position, parked.position), heading) > 4);
+    try std.testing.expect(sandbox.machines[m].machine.network(sandbox.machines[m].machine.blueprint.vehicle.?.motor).?.demand > 0);
+
+    // Exit: the parking brake stops it and the player stands beside it, outside the chassis.
+    try run(&sandbox, &camera, .{}, .{ .interact = true }, 180);
+    try std.testing.expectEqual(@as(?u8, null), sandbox.seated);
+    try std.testing.expect(R.length(sandbox.physics.rigidVelocity(rigid).?.linear) < 0.1);
+    try std.testing.expect(sandbox.player.grounded);
+    const stopped = sandbox.physics.rigidPose(rigid).?;
+    const offset = R.inverseRotate(stopped.orientation, R.sub(sandbox.player.feet, stopped.position));
+    try std.testing.expect(@abs(offset[0]) > 1.1 + sandbox.player.shape.radius - 0.01);
+
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sandbox.physics.setRigidState(rigid, parked, .{ 0, 0, 0 }, .{ 0, 0, 0 });
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqualDeep(stopped, sandbox.physics.rigidPose(rigid).?);
 }

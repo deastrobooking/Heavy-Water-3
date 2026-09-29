@@ -36,23 +36,27 @@ Acceptance evidence: a headless test walks to a crate, carries and drops it, sav
 
 Known limits: boxes do not rotate, stacking is soft, and there is no continuous collision for fast throws. Physics stays native Zig; rigid-body rotation, a broadphase, and CCD will be built in `physics/` when machines and vehicles need them.
 
-## 4. Machines — implemented except the vehicle
+## 4. Machines — implemented
 
 1. Typed power and signal ports per device kind, with defaults for unconnected inputs.
 2. Power networks (union-find) with supply/demand satisfaction and brownout; double-buffered signals with one step of latency per hop.
 3. Sensors (button, proximity), controllers (latch, logic graph), actuators (linear, kinematic), and generators.
 4. Fixed-step, allocation-free, physics-independent machine simulation; kinematic physics bodies that carry props and the player.
-5. Versioned JSON blueprints, validated at build time by `asset-compiler` and again at load; machine state in save format v2.
+5. Versioned JSON blueprints, validated at build time by `asset-compiler` and again at load; machine state in saves.
+6. Vehicle: oriented rigid bodies (quaternion orientation, box inertia, sample-point contacts with sequential impulses), a raycast-suspension vehicle, and seat/motor/steering devices. The rover blueprint drives through the same power network as the door and elevator.
 
 Acceptance evidence: headless tests walk into the closed door, press its button, wait for it to open, walk through, save, disturb, and reload it open. Another rides the elevator from the ground to the landing by its call button and sends it back from the top. Both machines use the same device kinds and APIs. See [validation](validation.md).
 
-Next in this phase: a simple vehicle. It needs rotating rigid bodies in `physics/` (orientation, angular velocity, oriented-box contacts), plus a machine device that applies drive force. Build those natively before any vehicle content.
+The rover was added only after the door and elevator worked, as planned. A headless test enters it, drives it more than 4 m on motor power, exits, verifies the parking brake, and reloads its pose. Physics tests hold it on a 20° slope in both headings and roll it freely when released.
 
-## 5–8. Creation and scale — later
+## 5. Creation — next
 
-5. Runtime object placement, snapping, prefab editing and machine inspection.
+Runtime object placement, snapping, prefab editing, and machine inspection. The first slice: place blueprint instances and crates from an in-game palette with grid and surface snapping, wire and rewire device ports in-world with the same validation blueprints use, and save placed machines (not only their state) in the save file.
+
+## 6–8. Facilities, mods, and scale — later
+
 6. Procedural facilities with explicit requirements and solver validation.
-7. Versioned mod packages and a constrained public API; evaluate WASM before selecting a scripting runtime.
+7. Versioned mod packages and a constrained public API; evaluate a native Zig WASM runtime before selecting a scripting approach.
 8. Repeatable 10K/100K/1M workloads with GPU culling, LOD, indirect submission, streaming budgets, and CPU/GPU/memory percentile reports.
 
 PBR, shadows, HDR, clustered lights, and postprocessing should develop alongside measurable scenes. Long-term research remains World Genome, civilization archaeology, Machine DNA, procedural graph compilation, and solver-verified dungeons. None is represented as implemented by this bootstrap.

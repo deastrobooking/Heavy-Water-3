@@ -7,14 +7,16 @@ const Player = @import("Player.zig");
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
 /// into a world with the same seed, generator version, and content version; old worlds must not
 /// silently regenerate with different rules.
-/// v2 added machine state. Older saves are rejected rather than migrated.
-pub const format_version: u32 = 2;
+/// v2 added machine state; v3 added vehicle bodies. Older saves are rejected, not migrated.
+pub const format_version: u32 = 3;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
 pub const PropState = struct { id: u32, position: [3]f32, velocity: [3]f32 };
 /// Persistent per-device machine state, in blueprint device order.
-pub const MachineState = struct { blueprint: []const u8, states: []const f32 };
+pub const MachineState = struct { blueprint: []const u8, states: []const f32, body: ?BodyState = null };
+/// A vehicle chassis: pose and velocities.
+pub const BodyState = struct { position: [3]f32, orientation: [4]f32, linear: [3]f32, angular: [3]f32 };
 pub const PlayerState = struct { feet: [3]f32, yaw: f32, pitch: f32, mode: Player.Mode };
 pub const Document = struct {
     format: u32 = format_version,
@@ -46,6 +48,11 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (doc.collected.len > Modifications.capacity or doc.props.len > prop_count) return error.InvalidSave;
     for (doc.player.feet) |v| if (!finite(v)) return error.InvalidSave;
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;
+    for (doc.machines) |m| if (m.body) |b| {
+        for (b.position ++ b.orientation ++ b.linear ++ b.angular) |v| if (!finite(v)) return error.InvalidSave;
+        const q = b.orientation;
+        if (@abs(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3] - 1) > 0.01) return error.InvalidSave;
+    };
     for (doc.props, 0..) |p, i| {
         if (p.id >= prop_count) return error.InvalidSave;
         for (doc.props[0..i]) |q| if (q.id == p.id) return error.InvalidSave;
@@ -93,7 +100,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 2", "\"format\": 1");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 3", "\"format\": 2");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4));
 }

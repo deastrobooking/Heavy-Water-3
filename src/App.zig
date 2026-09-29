@@ -36,6 +36,7 @@ culling: bool = true,
 captured: bool = false,
 rendered_frames_seen: u64 = 0,
 smoke_stage: u64 = 0,
+smoke_rover_start: ?[3]f32 = null,
 status: Overlay.Line = .{},
 status_until: u64 = 0,
 published_revision: ?u64 = null,
@@ -87,7 +88,11 @@ pub fn update(self: *App, core: *mach.Core) void {
         else => {},
     };
     self.engine.input.sample(core);
-    if (options.smoke_frames > 0 and options.benchmark_frames == 0) self.exerciseSmoke();
+    if (options.smoke_frames > 0 and options.benchmark_frames == 0) {
+        self.exerciseSmoke();
+        // The last smoke stage drives the rover at full throttle.
+        if (self.sandbox.seated != null) self.engine.input.forward = 1;
+    }
     const steps = self.engine.advance(self.timer.lap());
     for (0..steps) |_| {
         self.sandbox.step(&self.engine.camera, self.engine.input, self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
@@ -153,8 +158,10 @@ fn exerciseSmoke(self: *App) void {
             defer self.allocator.free(bytes);
             self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE LOAD {s}", .{@errorName(err)});
             std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machine_count, bytes.len });
-            // Press the door button; the rest of the run renders the door opening.
+            if (self.smoke_rover_start == null) self.smoke_rover_start = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
+            // Press the door button, then take the rover for the rest of the run.
             self.sandbox.press = self.sandbox.findDevice(0, "button");
+            self.sandbox.enterVehicle(2, camera);
         },
         else => {},
     }
@@ -181,9 +188,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.crosshair = self.captured or sandbox.player.mode == .walk;
-    renderer.hud_lines[0].set("{s}  SALVAGED {d}  TOOL SALVAGE CUTTER", .{ if (sandbox.player.mode == .walk) "WALK" else "FLY", sandbox.modifications.len });
-    if (sandbox.held) |i| {
+    renderer.crosshair = sandbox.seated == null and (self.captured or sandbox.player.mode == .walk);
+    renderer.hud_lines[0].set("{s}  SALVAGED {d}  TOOL SALVAGE CUTTER", .{ if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", sandbox.modifications.len });
+    if (sandbox.seated) |m| {
+        const placed = &sandbox.machines[m];
+        const motor = placed.machine.blueprint.vehicle.?.motor;
+        renderer.hud_lines[1].set("{d:.1} M/S  POWER {d:.0}%  WASD DRIVE  SPACE BRAKE  CLICK EXIT", .{ placed.vehicle.?.forwardSpeed(&sandbox.physics), placed.machine.satisfaction(motor) * 100 });
+    } else if (sandbox.held) |i| {
         renderer.hud_lines[1].set("HOLDING CRATE {d}  CLICK DROP", .{i});
     } else switch (sandbox.target) {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
@@ -193,6 +204,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             const def = machine.blueprint.device(ref.device);
             switch (def.kind) {
                 .button => renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
+                .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
                 .generator => renderer.hud_lines[1].set("GENERATOR {d:.0} W  LOAD {d:.0} W", .{ machine.outputs[ref.device][0], machine.network(ref.device).?.demand }),
                 .actuator => renderer.hud_lines[1].set("{s} {d:.0}%  POWER {d:.0}%", .{ def.name(), machine.state[ref.device] * 100, machine.satisfaction(ref.device) * 100 }),
                 else => renderer.hud_lines[1].set("{s}", .{def.name()}),
@@ -205,4 +217,11 @@ pub fn publish(self: *App, renderer: *Renderer) void {
 
 pub fn stop(self: *App) void {
     self.thread.join();
+    // The app thread has exited, so the sandbox can be read safely.
+    if (self.smoke_rover_start) |origin| {
+        const now = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
+        const dx = now[0] - origin[0];
+        const dz = now[2] - origin[2];
+        std.log.info("Smoke drive: rover moved {d:.1} m", .{@sqrt(dx * dx + dz * dz)});
+    }
 }

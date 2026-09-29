@@ -6,6 +6,8 @@
 const std = @import("std");
 const Handle = @import("../engine/Handle.zig");
 const Physics = @import("Physics.zig");
+const Rigid = @import("Rigid.zig");
+const R = @import("Rotation.zig");
 const Vec3 = Physics.Vec3;
 const BoxWorld = @This();
 
@@ -26,6 +28,14 @@ pub const BodyState = struct {
 
 ground: Physics.Ground,
 bodies: Handle.Pool(Physics.BodyTag, BodyState, Physics.max_bodies) = .{},
+rigids: Handle.Pool(Physics.RigidTag, Rigid.State, Physics.max_rigids) = .{},
+
+pub fn createRigid(self: *BoxWorld, desc: Physics.RigidDesc) !Physics.Rigid {
+    for (desc.half_extents ++ desc.position ++ desc.orientation ++ desc.linear ++ desc.angular) |v| if (!std.math.isFinite(v)) return error.InvalidBody;
+    for (desc.half_extents) |h| if (h <= 0) return error.InvalidBody;
+    if (!(desc.mass > 0)) return error.InvalidBody;
+    return self.rigids.add(Rigid.init(desc));
+}
 
 pub fn create(self: *BoxWorld, desc: Physics.BodyDesc) !Physics.Body {
     for (desc.half_extents ++ desc.position ++ desc.velocity) |v| if (!std.math.isFinite(v)) return error.InvalidBody;
@@ -59,6 +69,9 @@ pub fn step(self: *BoxWorld, dt: f32) void {
         self.solvePairs();
         self.solveGround();
     }
+    // Rigid bodies see the boxes' resolved positions and push dynamic ones.
+    var rigid = self.rigids.live.iterator(.{});
+    while (rigid.next()) |i| Rigid.step(self, &self.rigids.items[i], dt);
     live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = &self.bodies.items[i];
@@ -141,6 +154,56 @@ pub fn raycast(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
         if (hit.distance > max_distance or (best != null and hit.distance >= best.?.distance)) continue;
         best = .{ .body = id, .distance = hit.distance, .point = hit.point, .normal = hit.normal, .user = b.user };
     }
+    var rigid = self.rigids.live.iterator(.{});
+    while (rigid.next()) |i| {
+        const hit = Rigid.rayCast(self.rigids.items[i], origin, direction) orelse continue;
+        if (hit.distance > max_distance or (best != null and hit.distance >= best.?.distance)) continue;
+        best = .{ .rigid = self.rigids.idAt(i), .distance = hit.distance, .point = hit.point, .normal = hit.normal, .user = self.rigids.items[i].user };
+    }
+    return best;
+}
+
+/// Nearest solid surface along a ray: terrain, any box, or any rigid body except `ignore`.
+/// Reports the surface's velocity at the hit so wheels can drive on moving platforms.
+pub fn castRay(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Physics.Rigid) ?Physics.SurfaceHit {
+    var best: ?Physics.SurfaceHit = null;
+    // Terrain: march in 5 cm steps, then bisect the crossing.
+    const below = struct {
+        fn f(world: *const BoxWorld, p: Vec3) bool {
+            return p[1] < world.ground.sample(world.ground.context, p[0], p[2]).height;
+        }
+    }.f;
+    var t: f32 = 0;
+    if (!below(self, origin)) while (t < max_distance) {
+        const next = @min(max_distance, t + 0.05);
+        if (below(self, R.add(origin, R.scale(direction, next)))) {
+            var lo = t;
+            var hi = next;
+            for (0..8) |_| {
+                const mid = (lo + hi) / 2;
+                if (below(self, R.add(origin, R.scale(direction, mid)))) hi = mid else lo = mid;
+            }
+            const point = R.add(origin, R.scale(direction, hi));
+            best = .{ .distance = hi, .point = point, .normal = self.ground.sample(self.ground.context, point[0], point[2]).normal, .velocity = .{ 0, 0, 0 } };
+            break;
+        }
+        t = next;
+    };
+    var live = self.bodies.live.iterator(.{});
+    while (live.next()) |i| {
+        const b = self.bodies.items[i];
+        const hit = Physics.rayBox(origin, direction, b.position, b.half) orelse continue;
+        if (hit.distance > max_distance or (best != null and hit.distance >= best.?.distance)) continue;
+        best = .{ .distance = hit.distance, .point = hit.point, .normal = hit.normal, .velocity = b.velocity };
+    }
+    var rigid = self.rigids.live.iterator(.{});
+    while (rigid.next()) |i| {
+        if (self.rigids.idAt(i).eql(ignore)) continue;
+        const r = self.rigids.items[i];
+        const hit = Rigid.rayCast(r, origin, direction) orelse continue;
+        if (hit.distance > max_distance or (best != null and hit.distance >= best.?.distance)) continue;
+        best = .{ .distance = hit.distance, .point = hit.point, .normal = hit.normal, .velocity = r.pointVelocity(hit.point) };
+    }
     return best;
 }
 
@@ -177,6 +240,7 @@ pub fn moveCharacter(self: *BoxWorld, shape: Physics.Character, start: Vec3, dis
 
 /// Pushes the character's cylinder horizontally out of boxes it overlaps and nudges dynamic ones.
 fn pushOut(self: *BoxWorld, shape: Physics.Character, feet: *Vec3) void {
+    self.pushOutRigids(shape, feet);
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = &self.bodies.items[i];
@@ -219,6 +283,42 @@ fn pushOut(self: *BoxWorld, shape: Physics.Character, feet: *Vec3) void {
                 b.velocity[2] -= dz * (shape.push - along) * @min(1, b.inv_mass);
             }
         }
+    }
+}
+
+/// Rigid bodies block the character like walls: the closest point on the oriented box to the
+/// character's mid-height axis point pushes it out horizontally. Rigid bodies are not pushed back.
+fn pushOutRigids(self: *BoxWorld, shape: Physics.Character, feet: *Vec3) void {
+    var rigid = self.rigids.live.iterator(.{});
+    while (rigid.next()) |i| {
+        const r = self.rigids.items[i];
+        const mid: Vec3 = .{ feet[0], feet[1] + shape.height / 2, feet[2] };
+        var local = R.inverseRotate(r.orientation, R.sub(mid, r.position));
+        for (0..3) |k| local[k] = std.math.clamp(local[k], -r.half[k], r.half[k]);
+        const closest = r.toWorld(local);
+        if (@abs(closest[1] - mid[1]) >= shape.height / 2 - shape.step / 2) continue;
+        var dx = mid[0] - closest[0];
+        var dz = mid[2] - closest[2];
+        var distance = @sqrt(dx * dx + dz * dz);
+        if (distance >= shape.radius) continue;
+        if (distance < 1e-5) {
+            // Inside: leave away from the body's center.
+            dx = mid[0] - r.position[0];
+            dz = mid[2] - r.position[2];
+            const l = @max(1e-5, @sqrt(dx * dx + dz * dz));
+            dx /= l;
+            dz /= l;
+            distance = 0;
+            // Move to the box's footprint edge along that direction.
+            const reach = r.half[0] + r.half[2];
+            feet[0] = r.position[0] + dx * reach;
+            feet[2] = r.position[2] + dz * reach;
+            continue;
+        }
+        dx /= distance;
+        dz /= distance;
+        feet[0] += dx * (shape.radius - distance);
+        feet[2] += dz * (shape.radius - distance);
     }
 }
 
@@ -334,4 +434,42 @@ test "kinematic platforms carry props, push the character, and ignore gravity" {
     const pushed = physics.moveCharacter(shape, .{ 10.5, 0, 0.05 }, .{ 0, 0, 0 }, true);
     try std.testing.expect(@abs(pushed.feet[2]) >= 0.1 + shape.radius - 0.001);
     _ = door;
+}
+
+test "a tilted rigid box falls, settles flat, and pushes a crate" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    const box = try physics.createRigid(.{ .half_extents = .{ 0.5, 0.25, 1 }, .position = .{ 0, 2, 0 }, .orientation = R.axisAngle(.{ 1, 0, 1 }, 0.5), .mass = 50 });
+    for (0..300) |_| physics.step(1.0 / 60.0);
+    const pose = physics.rigidPose(box).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), pose.position[1], 0.02);
+    // Local up is world up again (it rests on its largest face).
+    try std.testing.expect(R.rotate(pose.orientation, .{ 0, 1, 0 })[1] > 0.999);
+    try std.testing.expect(R.length(physics.rigidVelocity(box).?.linear) < 0.05);
+
+    // Sliding into a crate shoves it along.
+    const crate = try physics.createBody(.{ .half_extents = .{ 0.4, 0.4, 0.4 }, .position = .{ 0, 0.4, 3 }, .mass = 10 });
+    physics.setRigidState(box, pose, .{ 0, 0, 6 }, .{ 0, 0, 0 });
+    for (0..90) |_| physics.step(1.0 / 60.0);
+    try std.testing.expect(physics.position(crate).?[2] > 3.2);
+    try std.testing.expect(physics.rigidPose(box).?.position[2] < physics.position(crate).?[2]);
+}
+
+test "rigid bodies stop at static walls and block the character; surface rays report motion" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    _ = try physics.createBody(.{ .half_extents = .{ 3, 2, 0.2 }, .position = .{ 0, 2, 5 }, .motion = .static });
+    const box = try physics.createRigid(.{ .half_extents = .{ 0.5, 0.5, 0.5 }, .position = .{ 0, 0.5, 0 }, .linear = .{ 0, 0, 12 }, .mass = 20 });
+    for (0..120) |_| physics.step(1.0 / 60.0);
+    try std.testing.expect(physics.rigidPose(box).?.position[2] < 4.8 - 0.49);
+
+    const pose = physics.rigidPose(box).?;
+    const feet = physics.moveCharacter(.{}, .{ pose.position[0] - 2, 0, pose.position[2] }, .{ 3, 0, 0 }, true).feet;
+    try std.testing.expect(feet[0] <= pose.position[0] - 0.5 - 0.3);
+
+    const lift = try physics.createBody(.{ .half_extents = .{ 1, 0.1, 1 }, .position = .{ 20, 1, 0 }, .motion = .kinematic, .velocity = .{ 0, 2, 0 } });
+    _ = lift;
+    const hit = physics.castRay(.{ 20, 3, 0 }, .{ 0, -1, 0 }, 5, .none).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.9), hit.distance, 0.0001);
+    try std.testing.expectEqual(@as(f32, 2), hit.velocity[1]);
+    const ground = physics.castRay(.{ -20, 1, 0 }, .{ 0, -1, 0 }, 5, .none).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1), ground.distance, 0.001);
 }

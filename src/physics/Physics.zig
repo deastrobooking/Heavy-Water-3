@@ -4,12 +4,32 @@
 const std = @import("std");
 const Handle = @import("../engine/Handle.zig");
 const Backend = @import("BoxWorld.zig");
+pub const Rotation = @import("Rotation.zig");
+pub const Quat = Rotation.Quat;
 const Physics = @This();
 
 pub const Vec3 = [3]f32;
 pub const BodyTag = struct {};
 pub const Body = Handle.Handle(BodyTag);
 pub const max_bodies = 128;
+pub const RigidTag = struct {};
+/// Oriented rigid box with rotation (vehicles). Separate from `Body`, which never rotates.
+pub const Rigid = Handle.Handle(RigidTag);
+pub const max_rigids = 8;
+pub const RigidDesc = struct {
+    half_extents: Vec3,
+    position: Vec3,
+    orientation: Quat = Rotation.identity,
+    linear: Vec3 = .{ 0, 0, 0 },
+    angular: Vec3 = .{ 0, 0, 0 },
+    mass: f32,
+    friction: f32 = 0.7,
+    user: u32 = 0,
+};
+pub const Pose = struct { position: Vec3, orientation: Quat };
+pub const Motion6 = struct { linear: Vec3, angular: Vec3 };
+/// A solid surface hit by `castRay`, with the surface's own velocity at that point.
+pub const SurfaceHit = struct { distance: f32, point: Vec3, normal: Vec3, velocity: Vec3 };
 pub const gravity: f32 = -9.81;
 
 /// Kinematic bodies move only by the velocity set on them and are never pushed.
@@ -30,7 +50,8 @@ pub const Ground = struct {
     context: ?*const anyopaque = null,
     sample: *const fn (context: ?*const anyopaque, x: f32, z: f32) GroundSample,
 };
-pub const Hit = struct { body: Body, distance: f32, point: Vec3, normal: Vec3, user: u32 };
+/// Exactly one of `body` or `rigid` is set.
+pub const Hit = struct { body: Body = .none, rigid: Rigid = .none, distance: f32, point: Vec3, normal: Vec3, user: u32 };
 /// Upright cylinder with its origin at the feet.
 pub const Character = struct { radius: f32 = 0.35, height: f32 = 1.8, step: f32 = 0.4, push: f32 = 2.5 };
 /// `support` is the body stood on, or `.none` on terrain or in the air.
@@ -83,6 +104,66 @@ pub fn setVelocity(self: *Physics, body: Body, vel: Vec3) void {
 /// 0 suspends gravity (a held object); 1 restores it.
 pub fn setGravityScale(self: *Physics, body: Body, scale: f32) void {
     if (self.backend.bodies.get(body)) |b| b.gravity_scale = scale;
+}
+
+pub fn createRigid(self: *Physics, desc: RigidDesc) !Rigid {
+    return self.backend.createRigid(desc);
+}
+
+pub fn destroyRigid(self: *Physics, rigid: Rigid) void {
+    _ = self.backend.rigids.remove(rigid);
+}
+
+pub fn rigidPose(self: *const Physics, rigid: Rigid) ?Pose {
+    const r = self.backend.rigids.getConst(rigid) orelse return null;
+    return .{ .position = r.position, .orientation = r.orientation };
+}
+
+pub fn rigidVelocity(self: *const Physics, rigid: Rigid) ?Motion6 {
+    const r = self.backend.rigids.getConst(rigid) orelse return null;
+    return .{ .linear = r.linear, .angular = r.angular };
+}
+
+pub fn rigidPointVelocity(self: *const Physics, rigid: Rigid, point: Vec3) ?Vec3 {
+    const r = self.backend.rigids.getConst(rigid) orelse return null;
+    return r.pointVelocity(point);
+}
+
+pub fn rigidMass(self: *const Physics, rigid: Rigid) ?f32 {
+    const r = self.backend.rigids.getConst(rigid) orelse return null;
+    return 1 / r.inv_mass;
+}
+
+/// Mass a force at `point` along unit `direction` effectively accelerates, including the
+/// rotation it induces: 1 / (1/m + n·((I⁻¹(r×n))×r)).
+pub fn rigidEffectiveMass(self: *const Physics, rigid: Rigid, point: Vec3, direction: Vec3) ?f32 {
+    const r = self.backend.rigids.getConst(rigid) orelse return null;
+    const arm = Rotation.sub(point, r.position);
+    const angular = Rotation.applyInverseInertia(r.orientation, r.inv_inertia, Rotation.cross(arm, direction));
+    return 1 / (r.inv_mass + Rotation.dot(direction, Rotation.cross(angular, arm)));
+}
+
+/// Teleports a rigid body (loading saves, placing vehicles).
+pub fn setRigidState(self: *Physics, rigid: Rigid, pose: Pose, linear: Vec3, angular: Vec3) void {
+    if (self.backend.rigids.get(rigid)) |r| {
+        r.position = pose.position;
+        r.orientation = Rotation.normalizeQuat(pose.orientation);
+        r.linear = linear;
+        r.angular = angular;
+    }
+}
+
+/// Accumulates a world-space force applied at a world-space point until the next step.
+pub fn addForceAt(self: *Physics, rigid: Rigid, force: Vec3, point: Vec3) void {
+    if (self.backend.rigids.get(rigid)) |r| {
+        r.force = Rotation.add(r.force, force);
+        r.torque = Rotation.add(r.torque, Rotation.cross(Rotation.sub(point, r.position), force));
+    }
+}
+
+/// Nearest solid surface (terrain, boxes, rigid bodies except `ignore`) along a normalized ray.
+pub fn castRay(self: *const Physics, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Rigid) ?SurfaceHit {
+    return self.backend.castRay(origin, direction, max_distance, ignore);
 }
 
 pub fn step(self: *Physics, dt: f32) void {
