@@ -20,7 +20,10 @@ pub const Environment = struct {
     pressed: ?u8 = null,
     /// Driver input for this machine's seat, when occupied.
     controls: ?Controls = null,
+    /// World signal bus from the previous step, indexed by channel − 1.
+    bus: ?*const Bus = null,
 };
+pub const Bus = [Device.max_channels]f32;
 pub const Controls = struct { throttle: f32 = 0, steer: f32 = 0, brake: f32 = 0 };
 pub const Network = struct { supply: f32 = 0, demand: f32 = 0, satisfaction: f32 = 1 };
 
@@ -122,6 +125,8 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
             },
             .motor => self.networks[self.network_of[d]].demand += def.watts * @abs(std.math.clamp(self.input(d, 1), -1, 1)),
             .steering => self.outputs[d][1] = std.math.clamp(self.input(d, 0), -1, 1),
+            .transmitter => {},
+            .receiver => self.outputs[d][0] = if (env.bus) |bus| bus[def.channel - 1] else 0,
             .lamp => if (self.input(d, 1) > 0.5) {
                 self.networks[self.network_of[d]].demand += def.watts;
             },
@@ -159,6 +164,15 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
         const delta = target - self.state[d];
         self.state[d] += std.math.clamp(delta, -max_step, max_step);
         self.outputs[d][2] = self.state[d];
+    }
+}
+
+/// Writes each transmitter's current input onto the bus (largest value wins per channel).
+/// Call after `step`; receivers read the result on the next step.
+pub fn transmit(self: *const Machine, bus: *Bus) void {
+    for (self.blueprint.devices[0..self.blueprint.device_count], 0..) |def, d| {
+        if (def.kind != .transmitter) continue;
+        bus[def.channel - 1] = @max(bus[def.channel - 1], self.input(d, 0));
     }
 }
 
@@ -350,4 +364,36 @@ test "edits reconfigure a live machine: a lamp lights only when switched and pow
     run(&m, .{}, 2);
     try std.testing.expectEqual(@as(f32, 1), m.state[1]);
     try std.testing.expectEqual(@as(f32, 1), m.outputs[2][2]);
+}
+
+test "transmitters and receivers carry a signal between machines through the bus" {
+    const sender_bp = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"sender","devices":[
+        \\ {"id":"button","kind":"button"},{"id":"toggle","kind":"latch"},{"id":"tx","kind":"transmitter","channel":7}],
+        \\ "wires":[["button.pressed","toggle.toggle"],["toggle.state","tx.in"]]}
+    );
+    const receiver_bp = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"receiver","devices":[
+        \\ {"id":"gen","kind":"generator","watts":50},{"id":"rx","kind":"receiver","channel":7},{"id":"lamp","kind":"lamp","watts":10}],
+        \\ "wires":[["gen.power","lamp.power"],["rx.out","lamp.on"]]}
+    );
+    var sender = Machine.init(&sender_bp, .{ 0, 0, 0 });
+    var receiver = Machine.init(&receiver_bp, .{ 50, 0, 0 });
+    var bus: Bus = @splat(0);
+    for (0..6) |i| {
+        const previous = bus;
+        bus = @splat(0);
+        sender.step(.{ .pressed = if (i == 0) 0 else null, .bus = &previous }, 1.0 / 60.0);
+        receiver.step(.{ .bus = &previous }, 1.0 / 60.0);
+        sender.transmit(&bus);
+        receiver.transmit(&bus);
+    }
+    try std.testing.expectEqual(@as(f32, 1), bus[6]);
+    try std.testing.expectEqual(@as(f32, 1), receiver.outputs[2][2]);
+    try std.testing.expectError(error.InvalidDeviceParameters, Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"bad","devices":[{"id":"tx","kind":"transmitter","channel":0}]}
+    ));
+    try std.testing.expectError(error.InvalidDeviceParameters, Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"bad","devices":[{"id":"l","kind":"latch","channel":3}]}
+    ));
 }

@@ -59,6 +59,9 @@ pub const Actions = packed struct {
     rotate: bool = false,
     /// Capture the aimed machine as a prefab (build or wire tool).
     capture: bool = false,
+    /// Step the aimed transmitter or receiver's channel down or up (any tool).
+    channel_down: bool = false,
+    channel_up: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire.
     select_tool: u2 = 0,
 };
@@ -92,6 +95,8 @@ machines: [max_machines]Placed = @splat(.{}),
 workshop: ?u8 = null,
 /// Button pressed during the last step; the machines see it on the next step.
 press: ?DeviceRef = null,
+/// World signal bus written by transmitters last step, read by receivers this step.
+bus: Machine.Bus = @splat(0),
 /// Vehicle machine the player is driving.
 seated: ?u8 = null,
 driver_input: Machine.Controls = .{},
@@ -365,6 +370,7 @@ pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt:
     // Build and wire tools reach farther and ignore relics.
     const hands = self.tools.tool == .hands;
     self.target = self.pick(camera.position, camera.forward(), if (hands) reach else Build.build_reach, hands);
+    if (actions.channel_down or actions.channel_up) Build.adjustChannel(self, if (actions.channel_up) 1 else -1);
     switch (self.tools.tool) {
         .hands => {
             if (primary) {
@@ -429,9 +435,12 @@ fn followVehicle(self: *Sandbox, m: u8, camera: *Camera) void {
 /// Advances every machine one fixed step, then drives actuator bodies to their new positions
 /// through velocity so physics pushes whatever they touch, and feeds vehicle controls.
 fn stepMachines(self: *Sandbox, dt: f32) void {
+    const previous = self.bus;
+    self.bus = @splat(0);
+    defer for (&self.machines) |*placed| if (placed.active) placed.machine.transmit(&self.bus);
     for (&self.machines, 0..) |*placed, m| {
         if (!placed.active) continue;
-        var env: Machine.Environment = .{ .player_feet = self.player.feet };
+        var env: Machine.Environment = .{ .player_feet = self.player.feet, .bus = &previous };
         if (self.press) |p| if (p.machine == m) {
             env.pressed = p.device;
         };

@@ -3,7 +3,9 @@ const std = @import("std");
 /// Device kinds shared by every machine. Sensors produce signals, controllers transform them,
 /// actuators consume power and signals, and generators feed power networks.
 /// `seat`, `motor`, and `steering` exist only in vehicle blueprints.
-pub const Kind = enum { generator, button, proximity, latch, logic, actuator, seat, motor, steering, lamp };
+pub const Kind = enum { generator, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver };
+/// Channels of the world signal bus shared by transmitters and receivers on any machine.
+pub const max_channels = 64;
 pub const PortKind = enum { power, signal };
 pub const Direction = enum { input, output };
 pub const Port = struct {
@@ -59,6 +61,9 @@ pub fn ports(kind: Kind) []const Port {
             .{ .name = "on", .kind = .signal, .direction = .input },
             .{ .name = "lit", .kind = .signal, .direction = .output },
         },
+        // Publishes its input on its channel; receivers anywhere read it one step later.
+        .transmitter => &.{.{ .name = "in", .kind = .signal, .direction = .input }},
+        .receiver => &.{.{ .name = "out", .kind = .signal, .direction = .output }},
         // Clamps the steering command to −1..1; the vehicle reads `angle`.
         .steering => &.{
             .{ .name = "command", .kind = .signal, .direction = .input },

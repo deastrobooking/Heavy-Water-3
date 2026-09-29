@@ -49,7 +49,7 @@ Acceptance evidence: headless tests walk into the closed door, press its button,
 
 The rover was added only after the door and elevator worked, as planned. A headless test enters it, drives it more than 4 m on motor power, exits, verifies the parking brake, and reloads its pose. Physics tests hold it on a 20° slope in both headings and roll it freely when released.
 
-## 5. Creation — prefabs and inspection implemented
+## 5. Creation — implemented
 
 1. Build tool: a palette of crates, prefab machines (powered door, elevator, rover), and loose devices (generator, button, latch, logic OR, lamp), with 0.5 m grid snapping, quarter-turn rotation, surface or terrain-footprint snapping, a green or red preview, overlap and player rejection, and removal.
 2. Wire tool: connect any output to a compatible input on the same machine, cycling valid port pairs; disconnect a device's inputs. Every edit goes through `Blueprint.connect` / `addDevice` / `removeDevice`, the same checks the file format uses. Live machines `reconfigure` and keep their state.
@@ -63,11 +63,18 @@ Acceptance evidence: headless tests build a generator, button, latch, and lamp f
 
 Acceptance evidence: a headless test captures a four-device circuit, places a copy that works independently (its lamp lights, the original's does not), inspects the copy's network and outputs, rewires the copy without changing the prefab, and restores the prefab library from a save. A manual run imported one valid prefab file and skipped a broken one with `InvalidDeviceParameters`.
 
-Next in this phase: wires between machines through explicit connector devices (a sender and receiver pair with a channel), and editing a prefab's parts and parameters in place.
+7. Between machines: `transmitter` and `receiver` devices share a world signal bus of 64 channels. Transmitters publish after each machine step (the largest value wins per channel), and receivers on any machine read the previous step's bus. Channels live in blueprints (validated 1–64) and change in-world with `[` / `]`. Power stays per machine.
 
-## 6–8. Facilities, mods, and scale — later
+Acceptance evidence for the bus: a headless test presses a workshop button whose latch feeds a transmitter, and a separately placed machine's receiver lights its own lamp. Retuning the transmitter darkens the lamp, channels wrap from 1 to 64, and the channel survives a save round trip.
 
-6. Procedural facilities with explicit requirements and solver validation.
+Deferred: editing a prefab's parts and numeric parameters in place (today a prefab is edited by placing it, rewiring or retuning it, and capturing it again).
+
+## 6. Procedural facilities — next
+
+Facilities generated from explicit requirements (rooms, access, power, puzzles built from the machine kit) and validated by a solver before they appear. The first slice: a generator that places a small powered facility from blueprint rooms with doors and verifies every room is reachable and every door powered.
+
+## 7–8. Mods and scale — later
+
 7. Versioned mod packages and a constrained public API; evaluate a native Zig WASM runtime before selecting a scripting approach.
 8. Repeatable 10K/100K/1M workloads with GPU culling, LOD, indirect submission, streaming budgets, and CPU/GPU/memory percentile reports.
 

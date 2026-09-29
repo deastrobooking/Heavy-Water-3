@@ -53,6 +53,8 @@ pub const DeviceDef = struct {
     node_count: u16,
     /// Explicit `"body": true` gives any device a pickable static body (workshop kits).
     body: bool = false,
+    /// Bus channel (1..max_channels) for transmitters and receivers; 0 otherwise.
+    channel: u16 = 0,
 
     pub fn name(self: *const DeviceDef) []const u8 {
         return std.mem.sliceTo(&self.id, 0);
@@ -62,7 +64,7 @@ pub const DeviceDef = struct {
     /// controllers only when the blueprint asks.
     pub fn hasBody(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
-            .generator, .button, .actuator, .lamp => true,
+            .generator, .button, .actuator, .lamp, .transmitter, .receiver => true,
             .proximity, .latch, .logic, .seat, .motor, .steering => false,
         };
     }
@@ -70,7 +72,7 @@ pub const DeviceDef = struct {
     /// Rendered as a block at its offset.
     pub fn visible(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
-            .generator, .button, .actuator, .seat, .motor, .lamp => true,
+            .generator, .button, .actuator, .seat, .motor, .lamp, .transmitter, .receiver => true,
             .proximity, .latch, .logic, .steering => false,
         };
     }
@@ -116,6 +118,7 @@ pub const DocDevice = struct {
     travel: [3]f32 = .{ 0, 0, 0 },
     nodes: []const Node = &.{},
     body: bool = false,
+    channel: u16 = 0,
 };
 pub const DocWheel = struct { offset: [3]f32, radius: f32, rest: f32, driven: bool = false, steered: bool = false };
 pub const DocVehicle = struct {
@@ -220,6 +223,8 @@ fn addDeviceChecked(self: *Blueprint, d: DocDevice, vehicle: bool) Error!u8 {
         .actuator, .button, .proximity => if (vehicle) return error.InvalidVehicle,
         else => {},
     }
+    const bus = d.kind == .transmitter or d.kind == .receiver;
+    if (if (bus) d.channel == 0 or d.channel > Device.max_channels else d.channel != 0) return error.InvalidDeviceParameters;
     if ((d.kind == .logic) != (d.nodes.len > 0)) return error.InvalidLogic;
     if (self.node_count + d.nodes.len > max_nodes) return error.TooManyNodes;
     Graph.validate(d.nodes) catch return error.InvalidLogic;
@@ -236,6 +241,7 @@ fn addDeviceChecked(self: *Blueprint, d: DocDevice, vehicle: bool) Error!u8 {
         .first_node = @intCast(self.node_count),
         .node_count = @intCast(d.nodes.len),
         .body = d.body,
+        .channel = d.channel,
     };
     @memcpy(def.id[0..d.id.len], d.id);
     self.devices[self.device_count] = def;
@@ -323,6 +329,7 @@ pub fn toDoc(self: *const Blueprint, arena: std.mem.Allocator) error{OutOfMemory
         .travel = d.travel,
         .nodes = try arena.dupe(Node, self.logicNodes(d.*)),
         .body = d.body,
+        .channel = d.channel,
     };
     const wires = try arena.alloc([2][]const u8, self.wire_count);
     for (wires, self.wires[0..self.wire_count]) |*out, w| out.* = .{ try self.portName(arena, w.from), try self.portName(arena, w.to) };

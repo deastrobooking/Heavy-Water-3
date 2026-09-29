@@ -14,7 +14,7 @@ const Vec3 = Physics.Vec3;
 
 pub const Tool = enum { hands, build, wire };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
-pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp };
+pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver };
 pub const build_reach: f32 = 14;
 pub const grid: f32 = 0.5;
 pub const max_candidates = 16;
@@ -106,6 +106,8 @@ pub fn kitDevice(item: Item, id: []const u8) Blueprint.DocDevice {
         .latch => .{ .id = id, .kind = .latch, .size = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.55, 0.35, 0.75, 1 }, .body = true },
         .logic_or => .{ .id = id, .kind = .logic, .size = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.2, 0.7, 0.65, 1 }, .nodes = &or_nodes, .body = true },
         .lamp => .{ .id = id, .kind = .lamp, .size = .{ 0.35, 1.2, 0.35 }, .color = .{ 1, 0.9, 0.6, 1 }, .watts = 25, .body = true },
+        .transmitter => .{ .id = id, .kind = .transmitter, .size = .{ 0.3, 1.4, 0.3 }, .color = .{ 0.95, 0.45, 0.8, 1 }, .channel = 1, .body = true },
+        .receiver => .{ .id = id, .kind = .receiver, .size = .{ 0.5, 0.3, 0.5 }, .color = .{ 0.45, 0.55, 0.95, 1 }, .channel = 1, .body = true },
         .crate, .powered_door, .elevator, .rover => unreachable,
     };
 }
@@ -225,12 +227,14 @@ pub fn place(sb: *Sandbox, p: Preview) !void {
     switch (item) {
         .crate => _ = sb.spawnCrate(p.center, .{ 0, 0, 0 }) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)}),
         .powered_door, .elevator, .rover => unreachable,
-        .generator, .button, .latch, .logic_or, .lamp => {
+        .generator, .button, .latch, .logic_or, .lamp, .transmitter, .receiver => {
             sb.tools.kit_serial += 1;
             var id_buffer: [Blueprint.id_len]u8 = undefined;
             const tag = switch (item) {
                 .generator => "gen",
                 .logic_or => "or",
+                .transmitter => "tx",
+                .receiver => "rx",
                 else => @tagName(item),
             };
             const id = std.fmt.bufPrint(&id_buffer, "{s}{d}", .{ tag, sb.tools.kit_serial }) catch unreachable;
@@ -319,6 +323,18 @@ fn wireClick(sb: *Sandbox) void {
     sb.say("wired {s}.{s} to {s}.{s}", .{ a.name(), Device.ports(a.kind)[wire.from.port].name, b.name(), Device.ports(b.kind)[wire.to.port].name });
     st.wire_from = null;
     st.wire_choice = 0;
+}
+
+/// Steps the aimed transmitter or receiver through channels 1..max, wrapping. The machine
+/// reads the new channel on its next step.
+pub fn adjustChannel(sb: *Sandbox, delta: i32) void {
+    if (sb.target != .device) return;
+    const d = sb.target.device;
+    const def = &sb.machines[d.machine].blueprint.devices[d.device];
+    if (def.kind != .transmitter and def.kind != .receiver) return sb.say("only transmitters and receivers have channels", .{});
+    const count: i32 = Device.max_channels;
+    def.channel = @intCast(@mod(@as(i32, def.channel) - 1 + delta, count) + 1);
+    sb.say("{s} channel {d}", .{ def.name(), def.channel });
 }
 
 /// Copies the aimed machine's blueprint (with its current wiring) into the prefab library,
@@ -413,6 +429,10 @@ pub fn inspect(sb: *const Sandbox, lines: []PanelLine) usize {
         for (Device.ports(d.kind), 0..) |port, k| {
             if (port.direction != .output) continue;
             const text = std.fmt.bufPrint(values[used..], " {s} {d:.2}", .{ port.name, machine.outputs[i][k] }) catch break;
+            used += text.len;
+        }
+        if (d.channel != 0) {
+            const text = std.fmt.bufPrint(values[used..], " ch {d}", .{d.channel}) catch "";
             used += text.len;
         }
         Writer.line(lines, &n, "{s} {s}:{s}", .{ d.name(), @tagName(d.kind), values[0..used] });
@@ -726,4 +746,62 @@ test "capture a circuit as a prefab, place an independent copy, inspect it, and 
     try std.testing.expectEqual(@as(usize, 1), other.prefab_count);
     try std.testing.expectEqualStrings("circuit_1", other.prefabs[0].name());
     try std.testing.expectEqual(@as(usize, 1), other.machines[copy].blueprint.wire_count);
+}
+
+test "a button on one machine lights a lamp on another over a bus channel, and channels persist" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testWorld(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    // Sender: workshop button → latch → transmitter.
+    const kits = [_]Item{ .button, .latch, .transmitter };
+    var refs: [3]Sandbox.DeviceRef = undefined;
+    for (kits, 0..) |item, i| {
+        const x = Sandbox.spawn[0] + 3 + @as(f32, @floatFromInt(i)) * 1.5;
+        const z = Sandbox.spawn[2] - 3;
+        var id: [8]u8 = undefined;
+        refs[i] = try sb.addWorkshopDevice(kitDevice(item, try std.fmt.bufPrint(&id, "s{d}", .{i})), .{ x, Terrain.surface(sb.seed, x, z).height + 0.8, z });
+    }
+    const w = refs[0].machine;
+    try sb.machines[w].blueprint.connect(.{ .device = 0, .port = 0 }, .{ .device = 1, .port = 0 });
+    try sb.machines[w].blueprint.connect(.{ .device = 1, .port = 1 }, .{ .device = 2, .port = 0 });
+    sb.machines[w].machine.reconfigure();
+    // Receiver: a separate placed machine with its own generator.
+    const lamp_bp = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"beacon","devices":[
+        \\ {"id":"gen","kind":"generator","watts":50,"offset":[0,0.5,0]},{"id":"rx","kind":"receiver","channel":1,"offset":[1,0.2,0]},{"id":"lamp","kind":"lamp","watts":10,"offset":[2,0.6,0]}],
+        \\ "wires":[["gen.power","lamp.power"],["rx.out","lamp.on"]]}
+    );
+    const bx = Sandbox.spawn[0] + 3;
+    const bz = Sandbox.spawn[2] - 7;
+    const beacon = try sb.spawnMachine(null, lamp_bp, sb.groundOrigin(&lamp_bp, bx, bz, 0), 0, false);
+
+    // Stand beside the sender so nothing (such as a relic) sits between eye and button.
+    const bp0 = sb.devicePosition(refs[0]);
+    sb.player.feet = .{ bp0[0] + 1.5, Terrain.surface(sb.seed, bp0[0] + 1.5, bp0[2] + 1.5).height, bp0[2] + 1.5 };
+    camera.position = sb.player.eye();
+    try aimDevice(&sb, &camera, refs[0]);
+    try tick(&sb, &camera, .{ .interact = true });
+    for (0..6) |_| try tick(&sb, &camera, .{});
+    try std.testing.expectEqual(@as(f32, 1), sb.bus[0]);
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[beacon].machine.outputs[2][2]);
+
+    // Retune the transmitter: the beacon hears nothing and goes dark.
+    try aimDevice(&sb, &camera, refs[2]);
+    try tick(&sb, &camera, .{ .channel_up = true });
+    try std.testing.expectEqual(@as(u16, 2), sb.machines[w].blueprint.devices[2].channel);
+    for (0..4) |_| try tick(&sb, &camera, .{});
+    try std.testing.expectEqual(@as(f32, 0), sb.machines[beacon].machine.outputs[2][2]);
+    try tick(&sb, &camera, .{ .channel_down = true });
+    try tick(&sb, &camera, .{ .channel_down = true });
+    try std.testing.expectEqual(@as(u16, Device.max_channels), sb.machines[w].blueprint.devices[2].channel);
+
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    var other_camera: Camera = .{};
+    var other: Sandbox = undefined;
+    try other.init(sb.seed, &catalog, &other_camera);
+    try other.restore(std.testing.allocator, bytes, &other_camera);
+    try std.testing.expectEqual(@as(u16, Device.max_channels), other.machines[other.workshop.?].blueprint.devices[2].channel);
 }

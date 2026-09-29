@@ -2,7 +2,7 @@
 
 A Zig/Mach 3D engine foundation for a procedural science-fiction exploration and engineering game.
 
-The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps) on a snapping grid; with the wire tool you connect their ports in the world. Capture any machine or circuit as a prefab to place copies, and inspect a machine's power networks, device outputs, and wires. Quicksave/quickload stores the whole world, including what you built, rewired, and captured. Every engine system is native Zig; Mach provides the platform and GPU layer.
+The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps, radio transmitters and receivers) on a snapping grid; with the wire tool you connect their ports in the world. Capture any machine or circuit as a prefab to place copies, and inspect a machine's power networks, device outputs, and wires. Quicksave/quickload stores the whole world, including what you built, rewired, and captured. Every engine system is native Zig; Mach provides the platform and GPU layer.
 
 ## Run
 
@@ -31,6 +31,7 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | Wire tool | Left click a source device, then a target (Tab cycles valid port pairs), left click to connect; right click disconnects the aimed device's inputs or cancels |
 | P (build or wire tool) | Capture the aimed machine as a prefab: added to the palette and exported to `saves/prefabs/<name>.json` |
 | I | Toggle the inspection panel for the aimed machine |
+| [ / ] | Change the aimed transmitter's or receiver's channel (1–64) |
 | W / S, A / D (driving) | Throttle and reverse, steer |
 | Space (driving) | Brake (an empty rover holds its parking brake) |
 | F5 / F9 | Quicksave / quickload `saves/quicksave.json` |

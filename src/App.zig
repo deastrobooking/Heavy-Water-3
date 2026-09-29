@@ -112,6 +112,8 @@ pub fn update(self: *App, core: *mach.Core) void {
             .tab => self.actions.next_item = true,
             .t => self.actions.rotate = true,
             .p => self.actions.capture = true,
+            .left_bracket => self.actions.channel_down = true,
+            .right_bracket => self.actions.channel_up = true,
             .i => self.inspecting = !self.inspecting,
             else => {},
         },
@@ -293,6 +295,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             switch (def.kind) {
                 .button => renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
                 .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
+                .transmitter, .receiver => renderer.hud_lines[1].set("{s} {s} CHANNEL {d}  [ ] CHANGE", .{ def.name(), @tagName(def.kind), def.channel }),
                 .lamp => renderer.hud_lines[1].set("{s} LAMP {s}", .{ def.name(), if (machine.outputs[ref.device][2] > 0) "LIT" else "DARK" }),
                 .generator => renderer.hud_lines[1].set("GENERATOR {d:.0} W  LOAD {d:.0} W", .{ machine.outputs[ref.device][0], machine.network(ref.device).?.demand }),
                 .actuator => renderer.hud_lines[1].set("{s} {d:.0}%  POWER {d:.0}%", .{ def.name(), machine.state[ref.device] * 100, machine.satisfaction(ref.device) * 100 }),
