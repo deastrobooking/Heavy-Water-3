@@ -1,6 +1,6 @@
 //! Engine physics API. Game code talks only to this file; backend types and handles never
-//! escape it, so an external engine (for example Jolt) can replace `Backend` without touching
-//! gameplay. The built-in backend is intentionally small: see BoxWorld.zig for its limits.
+//! escape it, so the native Zig backend can grow (rotation, broadphase, CCD) or be replaced
+//! without touching gameplay. The current backend is intentionally small: see BoxWorld.zig.
 const std = @import("std");
 const Handle = @import("../engine/Handle.zig");
 const Backend = @import("BoxWorld.zig");

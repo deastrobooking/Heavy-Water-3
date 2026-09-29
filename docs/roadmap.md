@@ -1,5 +1,7 @@
 # Heavy Water development plan
 
+Engine tooling is native Zig: physics, asset compilation, navigation, and other engine systems are written in Zig rather than bound from C/C++ libraries. Mach (platform, GPU) is the foundation layer.
+
 The two supplied plans define a sci-fi exploration game that grows into a reusable engine and creator platform. Problems should constrain the player without prescribing a single solution. Engine features should arrive through runnable slices.
 
 ## 1. Engine bootstrap — implemented
@@ -25,14 +27,14 @@ Acceptance evidence: seam tests (including negative coordinates), a fixed 49-slo
 
 1. `asset-compiler` runs in the build graph: glTF 2.0 (`.gltf`/`.glb`) → versioned `HWMS` runtime models with submeshes and materials. The app embeds and validates them.
 2. Typed generational mesh, material, and body handles through one `Catalog`; the renderer resolves handles each frame.
-3. `physics/Physics.zig` is the engine API; `BoxWorld.zig` is a small built-in backend (axis-aligned boxes, no rotation). No backend type crosses the API, so Jolt or another engine can replace it.
+3. `physics/Physics.zig` is the engine API; `BoxWorld.zig` is a small built-in backend (axis-aligned boxes, no rotation). No backend type crosses the API, so the solver can grow without touching gameplay.
 4. Walking character with ground and box collision, step-up, jump, and prop pushing; exact triangle-accurate terrain queries.
 5. Picking (crates via physics raycast, relics by stable ID, terrain occlusion), pickup/carry/throw, and one tool: the salvage cutter.
 6. JSON save format v1 with seed, generator, and content versions; atomic writes; reject-before-apply loading.
 
 Acceptance evidence: a headless test walks to a crate, carries and drops it, saves, disturbs the world, and reloads the crate's exact position. Another removes a relic, verifies regeneration still yields the same ID, and restores the removal from a save. The real app grabs a crate and round-trips a save in smoke mode. See [validation](validation.md).
 
-Known limits: boxes do not rotate, stacking is soft, and there is no continuous collision for fast throws. The built-in backend was chosen over binding Jolt now because the pinned Zig 0.16 dev compiler makes a C++ dependency a risk; revisit when vehicles or rotating bodies are needed.
+Known limits: boxes do not rotate, stacking is soft, and there is no continuous collision for fast throws. Physics stays native Zig; rigid-body rotation, a broadphase, and CCD will be built in `physics/` when machines and vehicles need them.
 
 ## 4. Machines — next
 
