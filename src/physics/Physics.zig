@@ -11,7 +11,7 @@ const Physics = @This();
 pub const Vec3 = [3]f32;
 pub const BodyTag = struct {};
 pub const Body = Handle.Handle(BodyTag);
-pub const max_bodies = 128;
+pub const max_bodies = 256;
 pub const RigidTag = struct {};
 /// Oriented rigid box with rotation (vehicles). Separate from `Body`, which never rotates.
 pub const Rigid = Handle.Handle(RigidTag);
@@ -95,6 +95,31 @@ pub fn setTransform(self: *Physics, body: Body, pos: Vec3, vel: Vec3) void {
         b.velocity = vel;
         b.grounded = false;
     }
+}
+
+/// Re-tags a body (game code renumbers devices after edits).
+pub fn setUser(self: *Physics, body: Body, user: u32) void {
+    if (self.backend.bodies.get(body)) |b| b.user = user;
+}
+
+/// True if an axis-aligned box overlaps any body or rigid body (rigid bodies by bounding
+/// sphere). Used to reject placements; terrain is not considered.
+pub fn overlapsBox(self: *const Physics, center: Vec3, half: Vec3) bool {
+    var live = self.backend.bodies.live.iterator(.{});
+    while (live.next()) |i| {
+        const b = self.backend.bodies.items[i];
+        var hit = true;
+        for (0..3) |k| hit = hit and @abs(b.position[k] - center[k]) < b.half[k] + half[k];
+        if (hit) return true;
+    }
+    var rigid = self.backend.rigids.live.iterator(.{});
+    while (rigid.next()) |i| {
+        const r = self.backend.rigids.items[i];
+        var hit = true;
+        for (0..3) |k| hit = hit and @abs(r.position[k] - center[k]) < r.radius() + half[k];
+        if (hit) return true;
+    }
+    return false;
 }
 
 pub fn setVelocity(self: *Physics, body: Body, vel: Vec3) void {

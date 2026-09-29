@@ -49,9 +49,16 @@ Acceptance evidence: headless tests walk into the closed door, press its button,
 
 The rover was added only after the door and elevator worked, as planned. A headless test enters it, drives it more than 4 m on motor power, exits, verifies the parking brake, and reloads its pose. Physics tests hold it on a 20° slope in both headings and roll it freely when released.
 
-## 5. Creation — next
+## 5. Creation — first slice implemented
 
-Runtime object placement, snapping, prefab editing, and machine inspection. The first slice: place blueprint instances and crates from an in-game palette with grid and surface snapping, wire and rewire device ports in-world with the same validation blueprints use, and save placed machines (not only their state) in the save file.
+1. Build tool: a palette of crates, prefab machines (powered door, elevator, rover), and loose devices (generator, button, latch, logic OR, lamp), with 0.5 m grid snapping, quarter-turn rotation, surface or terrain-footprint snapping, a green or red preview, overlap and player rejection, and removal.
+2. Wire tool: connect any output to a compatible input on the same machine, cycling valid port pairs; disconnect a device's inputs. Every edit goes through `Blueprint.connect` / `addDevice` / `removeDevice`, the same checks the file format uses. Live machines `reconfigure` and keep their state.
+3. Loose devices form one editable workshop machine, so they can be wired together.
+4. Save format v4 stores the whole world: each machine's full (possibly edited) blueprint document, origin, yaw, and state, plus every crate. Loading validates everything, including body capacity, with a dry run before rebuilding.
+
+Acceptance evidence: headless tests build a generator, button, latch, and lamp from the palette, wire them in the world, light the lamp with the button, reload the circuit into a fresh session with the lamp lit, and remove a device (dropping its wires). They also place a rotated door on the grid, refuse an overlapping second one, and remove it.
+
+Next in this phase: prefab editing (save a workshop circuit or an edited machine as a reusable blueprint and place copies), a machine inspection panel (ports, wires, network supply and demand), and wires between machines through explicit connector devices.
 
 ## 6–8. Facilities, mods, and scale — later
 

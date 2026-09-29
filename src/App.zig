@@ -9,6 +9,7 @@ const Overlay = @import("render/Overlay.zig");
 const TestWorld = @import("game/TestWorld.zig");
 const Sandbox = @import("game/Sandbox.zig");
 const Save = @import("game/Save.zig");
+const Build = @import("game/Build.zig");
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -65,6 +66,11 @@ pub fn update(self: *App, core: *mach.Core) void {
             .c => self.culling = !self.culling,
             .f5 => self.quicksave(),
             .f9 => self.quickload(),
+            .one => self.actions.select_tool = 1,
+            .two => self.actions.select_tool = 2,
+            .three => self.actions.select_tool = 3,
+            .tab => self.actions.next_item = true,
+            .t => self.actions.rotate = true,
             else => {},
         },
         .mouse_press => |mouse| switch (mouse.button) {
@@ -72,7 +78,7 @@ pub fn update(self: *App, core: *mach.Core) void {
                 self.actions.interact = true;
             } else self.capture(core, true),
             .right => if (self.captured) {
-                self.actions.salvage = true;
+                self.actions.secondary = true;
             },
             else => {},
         },
@@ -157,7 +163,9 @@ fn exerciseSmoke(self: *App) void {
             const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE SAVE {s}", .{@errorName(err)});
             defer self.allocator.free(bytes);
             self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE LOAD {s}", .{@errorName(err)});
-            std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machine_count, bytes.len });
+            std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machineCount(), bytes.len });
+            // Build a powered lamp circuit directly through the tool APIs, then drive.
+            self.smokeBuild();
             if (self.smoke_rover_start == null) self.smoke_rover_start = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
             // Press the door button, then take the rover for the rest of the run.
             self.sandbox.press = self.sandbox.findDevice(0, "button");
@@ -166,6 +174,30 @@ fn exerciseSmoke(self: *App) void {
         else => {},
     }
     std.log.info("Smoke stage {d}: culling={any}, hud={any}, mode={s}", .{ stage, self.culling, self.show_metrics, @tagName(self.sandbox.player.mode) });
+}
+
+fn smokeBuild(self: *App) void {
+    const sb = &self.sandbox;
+    const base = self.engine.camera.position;
+    const kits = [_]Build.Item{ .generator, .button, .latch, .lamp };
+    var refs: [kits.len]Sandbox.DeviceRef = undefined;
+    for (kits, 0..) |item, i| {
+        const x = base.x() + 3 + @as(f32, @floatFromInt(i)) * 1.5;
+        const z = base.z() - 3;
+        const point = .{ x, @import("procedural/Terrain.zig").surface(sb.seed, x, z).height + 0.7, z };
+        refs[i] = sb.addWorkshopDevice(Build.kitDevice(item, @tagName(item)), point) catch |err| return self.report("SMOKE BUILD {s}", .{@errorName(err)});
+    }
+    const w = refs[0].machine;
+    const bp = &sb.machines[w].blueprint;
+    for ([_][2]usize{ .{ 0, 3 }, .{ 1, 2 }, .{ 2, 3 } }) |pair| {
+        var buffer: [Build.max_candidates]@import("machine/Blueprint.zig").Wire = undefined;
+        const n = Build.candidates(sb, refs[pair[0]], refs[pair[1]], &buffer);
+        if (n == 0) return self.report("SMOKE WIRE NONE", .{});
+        bp.connect(buffer[0].from, buffer[0].to) catch |err| return self.report("SMOKE WIRE {s}", .{@errorName(err)});
+    }
+    sb.machines[w].machine.reconfigure();
+    sb.press = refs[1];
+    std.log.info("Smoke build: workshop devices={d} wires={d}", .{ bp.device_count, bp.wire_count });
 }
 
 fn capture(self: *App, core: *mach.Core, enabled: bool) void {
@@ -189,7 +221,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     }
     const sandbox = &self.sandbox;
     renderer.crosshair = sandbox.seated == null and (self.captured or sandbox.player.mode == .walk);
-    renderer.hud_lines[0].set("{s}  SALVAGED {d}  TOOL SALVAGE CUTTER", .{ if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", sandbox.modifications.len });
+    renderer.hud_lines[0].set("{s}  TOOL {s}  SALVAGED {d}  1 HANDS 2 BUILD 3 WIRE", .{ if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", @tagName(sandbox.tools.tool), sandbox.modifications.len });
     if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;
@@ -199,12 +231,14 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     } else switch (sandbox.target) {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
         .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  RMB SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
+        .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;
             const def = machine.blueprint.device(ref.device);
             switch (def.kind) {
                 .button => renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
                 .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
+                .lamp => renderer.hud_lines[1].set("{s} LAMP {s}", .{ def.name(), if (machine.outputs[ref.device][2] > 0) "LIT" else "DARK" }),
                 .generator => renderer.hud_lines[1].set("GENERATOR {d:.0} W  LOAD {d:.0} W", .{ machine.outputs[ref.device][0], machine.network(ref.device).?.demand }),
                 .actuator => renderer.hud_lines[1].set("{s} {d:.0}%  POWER {d:.0}%", .{ def.name(), machine.state[ref.device] * 100, machine.satisfaction(ref.device) * 100 }),
                 else => renderer.hud_lines[1].set("{s}", .{def.name()}),
@@ -212,7 +246,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         },
         .none => renderer.hud_lines[1] = .{},
     }
+    var hint_buffer: [96]u8 = undefined;
+    const hint = Build.hint(sandbox, &hint_buffer);
+    if (sandbox.seated == null and hint.len > 0 and sandbox.target != .device) renderer.hud_lines[1].set("{s}", .{hint});
+    if (sandbox.tools.tool == .wire and Build.pendingWire(sandbox) != null) renderer.hud_lines[1].set("{s}", .{hint});
     renderer.hud_lines[2] = if (self.engine.time.tick < self.status_until) self.status else .{};
+    if (renderer.hud_lines[2].len == 0 and sandbox.noticeText().len > 0) renderer.hud_lines[2].set("{s}", .{sandbox.noticeText()});
 }
 
 pub fn stop(self: *App) void {

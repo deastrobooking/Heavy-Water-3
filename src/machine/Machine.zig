@@ -42,6 +42,17 @@ network_count: usize = 0,
 
 pub fn init(blueprint: *const Blueprint, origin: [3]f32) Machine {
     var self: Machine = .{ .blueprint = blueprint, .origin = origin };
+    self.reconfigure();
+    return self;
+}
+
+/// Rebuilds signal drivers and power networks from the blueprint after it was edited.
+/// Per-device state and outputs are kept.
+pub fn reconfigure(self: *Machine) void {
+    const blueprint = self.blueprint;
+    self.drivers = @splat(@splat(null));
+    self.network_of = @splat(none);
+    self.network_count = 0;
     for (blueprint.wires[0..blueprint.wire_count]) |w| {
         if (Device.ports(blueprint.devices[w.to.device].kind)[w.to.port].kind == .signal) self.drivers[w.to.device][w.to.port] = w.from;
     }
@@ -63,7 +74,16 @@ pub fn init(blueprint: *const Blueprint, origin: [3]f32) Machine {
         }
         self.network_of[d] = self.network_of[root];
     }
-    return self;
+}
+
+/// Mirrors `Blueprint.removeDevice` on the per-device arrays; call it after that, then
+/// `reconfigure`.
+pub fn removeDevice(self: *Machine, index: usize) void {
+    const count = self.blueprint.device_count + 1;
+    inline for (.{ &self.outputs, &self.previous, &self.state, &self.last_input }) |array| {
+        std.mem.copyForwards(@TypeOf(array[0]), array[index .. count - 1], array[index + 1 .. count]);
+        array[count - 1] = std.mem.zeroes(@TypeOf(array[0]));
+    }
 }
 
 fn find(parent: *[max_devices]u8, x: u8) u8 {
@@ -102,6 +122,9 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
             },
             .motor => self.networks[self.network_of[d]].demand += def.watts * @abs(std.math.clamp(self.input(d, 1), -1, 1)),
             .steering => self.outputs[d][1] = std.math.clamp(self.input(d, 0), -1, 1),
+            .lamp => if (self.input(d, 1) > 0.5) {
+                self.networks[self.network_of[d]].demand += def.watts;
+            },
             .latch => {
                 const toggle = self.input(d, 0);
                 if (toggle > 0.5 and self.last_input[d] <= 0.5) self.state[d] = 1 - self.state[d];
@@ -129,6 +152,7 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
     // Actuators move and motors drive at rated output scaled by satisfaction (brownout).
     for (bp.devices[0..bp.device_count], 0..) |def, d| {
         if (def.kind == .motor) self.outputs[d][2] = std.math.clamp(self.input(d, 1), -1, 1) * self.satisfaction(d);
+        if (def.kind == .lamp) self.outputs[d][2] = if (self.input(d, 1) > 0.5 and self.satisfaction(d) > 0) 1 else 0;
         if (def.kind != .actuator) continue;
         const target = std.math.clamp(self.input(d, 1), 0, 1);
         const max_step = def.speed / Blueprint.length(def.travel) * dt * self.satisfaction(d);
@@ -297,4 +321,33 @@ test "seat controls drive a powered motor and steering; power limits drive outpu
     // A rotated frame carries device positions with it.
     m.rotation = R.axisAngle(.{ 1, 0, 0 }, std.math.pi / 2.0);
     try std.testing.expectApproxEqAbs(@as(f32, 1), m.devicePosition(1)[2], 1e-5);
+}
+
+test "edits reconfigure a live machine: a lamp lights only when switched and powered" {
+    var bp = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"bench","devices":[
+        \\ {"id":"gen","kind":"generator","watts":50},
+        \\ {"id":"button","kind":"button"},
+        \\ {"id":"toggle","kind":"latch"},
+        \\ {"id":"lamp","kind":"lamp","watts":20}],
+        \\ "wires":[["button.pressed","toggle.toggle"],["toggle.state","lamp.on"]]}
+    );
+    var m = Machine.init(&bp, .{ 0, 0, 0 });
+    m.step(.{ .pressed = 1 }, 1.0 / 60.0);
+    run(&m, .{}, 3);
+    try std.testing.expectEqual(@as(f32, 1), m.state[2]);
+    // Switched on but unpowered: dark.
+    try std.testing.expectEqual(@as(f32, 0), m.outputs[3][2]);
+    try bp.connect(.{ .device = 0, .port = 0 }, .{ .device = 3, .port = 0 });
+    m.reconfigure();
+    run(&m, .{}, 2);
+    try std.testing.expectEqual(@as(f32, 1), m.outputs[3][2]);
+    try std.testing.expectEqual(@as(f32, 20), m.network(3).?.demand);
+    // Removing the button keeps the latch state (now at index 1) and the lamp lit.
+    try bp.removeDevice(1);
+    m.removeDevice(1);
+    m.reconfigure();
+    run(&m, .{}, 2);
+    try std.testing.expectEqual(@as(f32, 1), m.state[1]);
+    try std.testing.expectEqual(@as(f32, 1), m.outputs[2][2]);
 }
