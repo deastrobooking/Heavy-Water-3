@@ -69,13 +69,40 @@ Acceptance evidence for the bus: a headless test presses a workshop button whose
 
 Deferred: editing a prefab's parts and numeric parameters in place (today a prefab is edited by placing it, rewiring or retuning it, and capturing it again).
 
-## 6. Procedural facilities — next
+## Canopy world
 
-Facilities generated from explicit requirements (rooms, access, power, puzzles built from the machine kit) and validated by a solver before they appear. The first slice: a generator that places a small powered facility from blueprint rooms with doors and verifies every room is reachable and every door powered.
+The game's direction is set in [world and systems](world.md): Arbors 300–600 m tall, a canopy city of grafted towers and bridge roads, painterly cel shading, and three braided play styles (explore, engineer, grow) over a procedural city the player extends. The phases below build it. Each is a runnable slice with headless acceptance tests, native Zig throughout.
 
-## 7–8. Mods and scale — later
+## 6. Canopy foundations — next
 
-7. Versioned mod packages and a constrained public API; evaluate a native Zig WASM runtime before selecting a scripting approach.
-8. Repeatable 10K/100K/1M workloads with GPU culling, LOD, indirect submission, streaming budgets, and CPU/GPU/memory percentile reports.
+Make the engine able to hold a vertical world and look like one.
 
-PBR, shadows, HDR, clustered lights, and postprocessing should develop alongside measurable scenes. Long-term research remains World Genome, civilization archaeology, Machine DNA, procedural graph compilation, and solver-verified dungeons. None is represented as implemented by this bootstrap.
+1. Static triangle-mesh and oriented-box colliders in `physics/`, with the character walking curved surfaces and angled decks.
+2. Streaming and level of detail for tall placed content, not only ground chunks; measure a 600 m test tree from 1 km.
+3. Painterly cel-shading pass: toon ramp, rim light, silhouette outlines, aerial haze, day/night with emissive lumen.
+4. One hand-authored test Arbor (trunk, two branch platforms, a bridge) to measure collision, streaming, and the look before generating any.
+
+Acceptance: walk up a trunk ramp onto a branch platform and across an angled bridge, and render the test Arbor within frame budget at 1 km and up close.
+
+## 7. Arbor genome
+
+Genome-driven procedural mega-trees: versioned genes (phyllotaxis, apical dominance, tropisms, platform tendency, vascular capacity, lumen), space-colonization branching, trunk and branch meshes with colliders, flattened platforms, and each tree's vascular graph. Sap taps draw from their tree's capacity, extending machine power networks to trees. Acceptance: the same seed grows the same tree; different genomes give measurably different silhouettes; taps on one tree brown out together.
+
+## 8. Canopy city
+
+A district layout graph (Arbors and grafted towers as nodes, bridge roads as edges); a bridge-road generator (the 14 m standard section, vine-cable suspension, trunk plazas, market bays); a tower generator; and solver validation (every district reachable, grades at most 6%, clearances kept) before anything appears. Player-built bridges, taps, and grafts persist as world deltas over the generated city. Acceptance: a generated district passes the solver, can be driven and walked end to end, and a player-added bridge survives save and load.
+
+## 9. Living city
+
+Traffic on bridge lane graphs (reusing the vehicle), pedestrians on walkway graphs, shops that trade parts and blueprints, bioluminescent day/night, and Rootsong (the machine signal bus limited to trees that share roots). Acceptance: traffic reroutes around a removed bridge and shops restock over a day.
+
+## 10. Rootdeep and shrines
+
+The wild forest floor under the city, and shrines: seed-vault facilities built from the machine kit and verified solvable by a solver before they appear. Acceptance: every generated shrine is solvable by the verifier, and completing one yields a blueprint or genome fragment usable in the other loops.
+
+## 11–12. Mods and scale — later
+
+11. Versioned mod packages and a constrained public API; evaluate a native Zig WASM runtime before selecting a scripting approach.
+12. Repeatable 10K/100K/1M workloads with GPU culling, LOD, indirect submission, streaming budgets, and CPU/GPU/memory percentile reports.
+
+Lighting (the cel pipeline, shadows through the canopy, clustered lumen lights, postprocessing) should develop alongside measurable scenes, serving the painterly direction rather than physically based realism. Long-term research remains World Genome, civilization archaeology, Machine DNA, procedural graph compilation, and solver-verified dungeons. None is represented as implemented by this bootstrap.

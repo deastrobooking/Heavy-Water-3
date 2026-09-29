@@ -1,6 +1,6 @@
 # Heavy Water
 
-A Zig/Mach 3D engine foundation for a procedural science-fiction exploration and engineering game.
+A native Zig engine (on Mach) for a science-fiction exploration and engineering game: *The Legend of Zelda* meets sci-fi anime, in a city that grows through genetically engineered trees 300–600 m tall. See [world and systems](docs/world.md).
 
 The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps, radio transmitters and receivers) on a snapping grid; with the wire tool you connect their ports in the world. Capture any machine or circuit as a prefab to place copies, and inspect a machine's power networks, device outputs, and wires. Quicksave/quickload stores the whole world, including what you built, rewired, and captured. Every engine system is native Zig; Mach provides the platform and GPU layer.
 
@@ -70,4 +70,4 @@ Local validation targets Apple Silicon / Metal. Linux/Vulkan and Windows/D3D12 a
 
 Known upstream limitation: programmatically changing window dimensions deadlocks in this Mach revision's macOS resize callback. This application does not change dimensions after startup. The renderer recreates its depth buffer when framebuffer dimensions change, but interactive drag-resize has not been validated here. See the [validation notes](docs/validation.md).
 
-Read [architecture and ownership](docs/architecture.md) and the [milestone roadmap](docs/roadmap.md).
+Read [world and systems](docs/world.md), [architecture and ownership](docs/architecture.md), and the [milestone roadmap](docs/roadmap.md).
