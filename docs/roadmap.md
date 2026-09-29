@@ -2,7 +2,7 @@
 
 Engine tooling is native Zig: physics, asset compilation, navigation, and other engine systems are written in Zig rather than bound from C/C++ libraries. Mach (platform, GPU) is the foundation layer.
 
-The two supplied plans define a sci-fi exploration game that grows into a reusable engine and creator platform. Problems should constrain the player without prescribing a single solution. Engine features should arrive through runnable slices.
+Heavy Water is a sci-fi exploration and engineering game that grows into a reusable engine and creator platform. This roadmap is the single planning document. Problems should constrain the player without prescribing a single solution. Engine features should arrive through runnable slices.
 
 ## 1. Engine bootstrap — implemented
 
