@@ -23,7 +23,7 @@ thread: mach.Thread = undefined,
 timer: mach.time.Timer = undefined,
 window: mach.ObjectID = undefined,
 show_metrics: bool = true,
-culling: bool = false,
+culling: bool = true,
 captured: bool = false,
 rendered_frames_seen: u64 = 0,
 smoke_stage: u64 = 0,
@@ -31,8 +31,8 @@ smoke_stage: u64 = 0,
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io) !void {
     self.* = .{ .timer = mach.time.Timer.start(io) };
     core.on_exit = app_mod.id.deinit;
-    self.window = try core.windows.new(.{ .title = "Heavy Water | Engine Field Test", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
-    try TestWorld.populate(world, options.seed);
+    self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
+    TestWorld.configure(world, options.seed);
 }
 
 pub fn start(self: *App, core: *mach.Core, app_mod: mach.Mod(App), core_mod: mach.Mod(mach.Core)) !void {
@@ -65,7 +65,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         else => {},
     };
     self.engine.input.sample(core);
-    if (options.smoke_frames > 0) self.exerciseSmoke();
+    if (options.smoke_frames > 0 and options.benchmark_frames == 0) self.exerciseSmoke();
     self.engine.update(self.timer.lap());
 }
 
@@ -76,12 +76,13 @@ fn exerciseSmoke(self: *App) void {
     switch (stage) {
         1 => {
             self.culling = true;
+            self.engine.camera.position = mach.math.vec3(180, 35, 120);
             self.engine.camera.yaw = 0.4;
         },
         2 => {
             // Look away to exercise a frame with zero visible relics.
             self.engine.camera.yaw = std.math.pi;
-            self.engine.camera.position = mach.math.vec3(0, 27, -90);
+            self.engine.camera.position = mach.math.vec3(-400, 35, -300);
         },
         3 => {
             self.show_metrics = false;

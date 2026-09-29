@@ -6,6 +6,8 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption(u64, "seed", b.option(u64, "seed", "World seed") orelse 0x4845415659);
     options.addOption(u32, "smoke_frames", b.option(u32, "smoke-frames", "Exit after N rendered frames (0 = interactive)") orelse 0);
+    options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run the streaming route for N measured frames, after 60 warm-up frames") orelse 0);
+    options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));

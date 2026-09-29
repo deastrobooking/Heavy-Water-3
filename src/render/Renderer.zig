@@ -4,53 +4,33 @@ const gpu = mach.gpu;
 const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Mesh = @import("Mesh.zig");
-const Chunk = @import("../procedural/Chunk.zig");
-const Material = @import("Material.zig");
-const Visibility = @import("Visibility.zig");
+const Scene = @import("StreamingScene.zig");
+const Seed = @import("../procedural/Seed.zig");
+const FrameStats = @import("../engine/FrameStats.zig");
+const Flythrough = @import("../engine/Flythrough.zig");
 const Overlay = @import("Overlay.zig");
 const options = @import("options");
 const Renderer = @This();
 
 pub const mach_module = .renderer;
 pub const mach_systems = .{ .init, .render, .deinit };
-const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32 };
+const Instance = Scene.Instance;
+comptime {
+    if (options.upload_budget < Scene.chunk_bytes) @compileError("upload-budget-kib must be at least 278");
+}
 const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32 };
-const GpuMesh = struct {
-    vertices: *gpu.Buffer,
-    indices: *gpu.Buffer,
-    vertex_bytes: usize,
-    index_count: u32,
-
-    fn upload(device: *gpu.Device, queue: *gpu.Queue, mesh: Mesh) GpuMesh {
-        const vb = device.createBuffer(&.{ .label = "mesh vertices", .size = mesh.vertices.len * @sizeOf(Mesh.Vertex), .usage = .{ .vertex = true, .copy_dst = true } });
-        const ib = device.createBuffer(&.{ .label = "mesh indices", .size = mesh.indices.len * 4, .usage = .{ .index = true, .copy_dst = true } });
-        queue.writeBuffer(vb, 0, mesh.vertices);
-        queue.writeBuffer(ib, 0, mesh.indices);
-        return .{ .vertices = vb, .indices = ib, .vertex_bytes = mesh.vertices.len * @sizeOf(Mesh.Vertex), .index_count = @intCast(mesh.indices.len) };
-    }
-    fn draw(self: GpuMesh, pass: *gpu.RenderPassEncoder, instances: u32, first: u32) void {
-        pass.setVertexBuffer(0, self.vertices, 0, self.vertex_bytes);
-        pass.setIndexBuffer(self.indices, .uint32, 0, self.index_count * 4);
-        pass.drawIndexed(self.index_count, instances, 0, 0, first);
-    }
-    fn deinit(self: GpuMesh) void {
-        self.indices.release();
-        self.vertices.release();
-    }
-};
-
 // Written by App.publish only inside Core's render mutex.
 camera: Camera = .{},
 tick: u64 = 0,
 show_metrics: bool = true,
 culling: bool = false,
-// Immutable world presentation copied before either thread starts.
-instances: [World.max_objects + 1]Instance = undefined,
-visible: [World.max_objects + 1]Instance = undefined,
+scene: Scene = undefined,
+seed: u64 = 0,
+intervals: FrameStats = .{},
+cpu_times: FrameStats = .{},
+percentiles: FrameStats.Summary = .{ .p50 = 0, .p95 = 0, .p99 = 0, .worst = 0, .mean = 0 },
 pipeline: ?*gpu.RenderPipeline = null,
 overlay_pipeline: ?*gpu.RenderPipeline = null,
-terrain: ?GpuMesh = null,
-relic: ?GpuMesh = null,
 uniform: ?*gpu.Buffer = null,
 instance_buffer: ?*gpu.Buffer = null,
 overlay_buffer: ?*gpu.Buffer = null,
@@ -66,19 +46,10 @@ overlay: Overlay = .{},
 timer: mach.time.Timer = undefined,
 frames: u64 = 0,
 frame_ms: f32 = 0,
+underfilled_frames: u64 = 0,
 
-pub fn init(self: *Renderer, world: *World, io: std.Io) void {
-    self.* = .{ .timer = mach.time.Timer.start(io) };
-    self.instances[0] = .{ .translation_scale = .{ 0, 0, 0, 1 }, .tint = Material.terrain };
-    world.objects.lock();
-    defer world.objects.unlock();
-    var iter = world.objects.slice();
-    var i: usize = 1;
-    while (iter.next()) |id| : (i += 1) {
-        const object = world.objects.getValue(id);
-        self.instances[i] = .{ .translation_scale = object.transform.toInstance(), .tint = object.tint };
-    }
-    std.debug.assert(i == World.max_objects + 1);
+pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Allocator) !void {
+    self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .scene = try Scene.init(allocator, io, world.seed) };
 }
 
 fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void {
@@ -95,7 +66,7 @@ fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void 
     const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{layout} }));
     defer pipeline_layout.release();
     self.uniform = device.createBuffer(&.{ .label = "camera", .size = @sizeOf(Frame), .usage = .{ .uniform = true, .copy_dst = true } });
-    self.instance_buffer = device.createBuffer(&.{ .label = "instances", .size = @sizeOf(@TypeOf(self.instances)), .usage = .{ .vertex = true, .copy_dst = true } });
+    self.instance_buffer = device.createBuffer(&.{ .label = "instances", .size = Scene.max_instances * @sizeOf(Instance), .usage = .{ .vertex = true, .copy_dst = true } });
     self.texture = device.createTexture(&.{ .label = "surface checker", .size = .{ .width = 2, .height = 2 }, .format = .rgba8_unorm, .usage = .{ .texture_binding = true, .copy_dst = true } });
     self.texture_view = self.texture.?.createView(&.{});
     self.sampler = device.createSampler(&.{ .address_mode_u = .repeat, .address_mode_v = .repeat, .mag_filter = .nearest, .min_filter = .nearest });
@@ -111,6 +82,7 @@ fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void 
             .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
             .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
             .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
+            .{ .format = .float32x3, .offset = 32, .shader_location = 5 },
         } }),
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Instance), .step_mode = .instance, .attributes = &.{
             .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
@@ -126,12 +98,7 @@ fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void 
         .primitive = .{ .cull_mode = .none },
         .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .less },
     });
-    const terrain = try Chunk.generate(allocator, options.seed, 0, 0);
-    defer terrain.deinit(allocator);
-    self.terrain = GpuMesh.upload(device, window.queue, terrain);
-    const relic = try Mesh.cube(allocator);
-    defer relic.deinit(allocator);
-    self.relic = GpuMesh.upload(device, window.queue, relic);
+    try self.scene.setup(device, window.queue, allocator);
 
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
     defer hud_shader.release();
@@ -144,7 +111,7 @@ fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void 
         .fragment = &hud_fragment,
     });
     self.overlay_buffer = device.createBuffer(&.{ .label = "debug overlay", .size = Overlay.capacity * @sizeOf(Overlay.Vertex), .usage = .{ .vertex = true, .copy_dst = true } });
-    std.log.info("Heavy Water: seed={d}, generator=1, objects={d}, terrain triangles={d}", .{ options.seed, World.max_objects, self.terrain.?.index_count / 3 });
+    std.log.info("Heavy Water: seed={d}, generator={d}, streaming pool=49 chunks, GPU pool=25 chunks, upload budget={d}", .{ self.seed, Seed.generator_version, options.upload_budget });
     self.timer.reset();
 }
 
@@ -160,6 +127,8 @@ fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32) void {
 
 pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void {
     if (self.pipeline == null) try self.setup(core, allocator);
+    var cpu_timer = mach.time.Timer.start(self.timer.io);
+    if (options.benchmark_frames > 0) self.camera = Flythrough.camera(self.frames -| Flythrough.warmup_frames, options.benchmark_frames);
     const window = core.windows.getValue(core.window);
     if (window.framebuffer_width == 0 or window.framebuffer_height == 0) return;
     const back = window.swap_chain.getCurrentTextureView() orelse return;
@@ -169,18 +138,12 @@ pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !
     self.frame_ms = if (self.frames == 0) elapsed * 1000 else self.frame_ms * 0.95 + elapsed * 50;
     const vp = self.camera.viewProjection(@as(f32, @floatFromInt(self.width)) / @as(f32, @floatFromInt(self.height)));
     const frame = Frame{ .vp = vp, .eye = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z(), 1 } };
-    self.visible[0] = self.instances[0];
-    var count: u32 = 1;
-    for (self.instances[1..]) |instance| {
-        const t = instance.translation_scale;
-        if (self.culling and !Visibility.sphereVisible(vp, .{ t[0], t[1] + t[3], t[2] }, 1.225 * t[3])) continue;
-        self.visible[count] = instance;
-        count += 1;
-    }
+    self.scene.prepare(window.queue, self.camera, vp, self.culling, options.upload_budget);
+    const count = self.scene.instance_count;
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
     defer encoder.release();
     encoder.writeBuffer(self.uniform.?, 0, &[_]Frame{frame});
-    encoder.writeBuffer(self.instance_buffer.?, 0, self.visible[0..count]);
+    encoder.writeBuffer(self.instance_buffer.?, 0, self.scene.instances[0..count]);
     if (self.show_metrics) {
         self.buildOverlay(count - 1, window.width, window.height);
         encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
@@ -192,9 +155,8 @@ pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !
     defer pass.release();
     pass.setPipeline(self.pipeline.?);
     pass.setBindGroup(0, self.bind_group.?, &.{});
-    pass.setVertexBuffer(1, self.instance_buffer.?, 0, @sizeOf(@TypeOf(self.instances)));
-    self.terrain.?.draw(pass, 1, 0);
-    if (count > 1) self.relic.?.draw(pass, count - 1, 1);
+    pass.setVertexBuffer(1, self.instance_buffer.?, 0, Scene.max_instances * @sizeOf(Instance));
+    self.scene.draw(pass);
     pass.end();
     if (self.show_metrics) {
         const hud = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .load, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 } }} }));
@@ -207,8 +169,19 @@ pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !
     const command = encoder.finish(&.{});
     defer command.release();
     window.queue.submit(&.{command});
+    if (options.benchmark_frames == 0 or self.frames >= Flythrough.warmup_frames) {
+        self.intervals.record(elapsed * 1000);
+        self.cpu_times.record(cpu_timer.read() * 1000);
+        if (self.scene.active_missing > 0) self.underfilled_frames += 1;
+    }
+    if (self.frames % 30 == 0) self.percentiles = self.intervals.summary();
     self.frames += 1;
-    if (options.smoke_frames > 0 and self.frames >= options.smoke_frames) {
+    if (options.benchmark_frames > 0 and self.frames >= options.benchmark_frames + Flythrough.warmup_frames) {
+        self.reportBenchmark();
+        core.exit();
+    }
+
+    if (options.benchmark_frames == 0 and options.smoke_frames > 0 and self.frames >= options.smoke_frames) {
         std.log.info("Smoke complete: {d} frames, {d} submitted objects, {d} simulation ticks", .{ self.frames, count - 1, self.tick });
         core.exit();
     }
@@ -220,19 +193,30 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
     self.overlay.height = @floatFromInt(@max(height, 1));
     const ink: [4]f32 = .{ 0.70, 0.84, 0.86, 1 };
     const cyan: [4]f32 = .{ 0.24, 0.88, 0.82, 1 };
-    self.overlay.rect(16, 16, 368, 152, .{ 0.02, 0.035, 0.05, 1 });
-    self.overlay.rect(16, 16, 3, 152, cyan);
-    self.overlay.text(30, 30, "HEAVY WATER / ENGINE FIELD TEST", cyan);
-    var buffer: [96]u8 = undefined;
-    const timing = std.fmt.bufPrint(&buffer, "FPS {d:.0}  FRAME {d:.2} MS", .{ 1000 / @max(self.frame_ms, 0.001), self.frame_ms }) catch unreachable;
-    self.overlay.text(30, 51, timing, ink);
-    const objects = std.fmt.bufPrint(&buffer, "OBJECTS {d}/1000  DRAWS {d}", .{ count, @as(u32, if (count > 0) 3 else 2) }) catch unreachable;
-    self.overlay.text(30, 69, objects, ink);
-    const seed = std.fmt.bufPrint(&buffer, "SEED {d}  GEN 1", .{options.seed}) catch unreachable;
-    self.overlay.text(30, 87, seed, ink);
-    self.overlay.text(30, 108, "WASD MOVE  QE RISE  SHIFT FAST", ink);
-    self.overlay.text(30, 126, "CLICK LOOK  ESC RELEASE  R RESET", ink);
-    self.overlay.text(30, 144, if (self.culling) "F1 HUD  C CULLING ON" else "F1 HUD  C CULLING OFF", cyan);
+    self.overlay.rect(16, 16, 448, 242, .{ 0.02, 0.035, 0.05, 1 });
+    self.overlay.rect(16, 16, 3, 242, cyan);
+    self.overlay.text(30, 30, "HEAVY WATER / PROCEDURAL FRONTIER", cyan);
+    var buffer: [128]u8 = undefined;
+    self.overlay.text(30, 51, std.fmt.bufPrint(&buffer, "FPS {d:.0}  FRAME {d:.2} MS", .{ 1000 / @max(self.frame_ms, 0.001), self.frame_ms }) catch unreachable, ink);
+    self.overlay.text(30, 69, std.fmt.bufPrint(&buffer, "P50 {d:.1}  P95 {d:.1}  P99 {d:.1} MS", .{ self.percentiles.p50, self.percentiles.p95, self.percentiles.p99 }) catch unreachable, ink);
+    self.overlay.text(30, 87, std.fmt.bufPrint(&buffer, "CHUNKS GPU {d}/25  CACHE {d}/49  ACTIVE {d}", .{ self.scene.resident_count, self.scene.stats.ready, self.scene.stats.active }) catch unreachable, ink);
+    self.overlay.text(30, 105, std.fmt.bufPrint(&buffer, "QUEUED {d}  GENERATED {d}  CANCEL {d}", .{ self.scene.stats.queued, self.scene.stats.generated, self.scene.stats.canceled }) catch unreachable, ink);
+    self.overlay.text(30, 123, std.fmt.bufPrint(&buffer, "UPLOAD {d} KIB  CPU POOL {d} KIB", .{ self.scene.upload_bytes / 1024, self.scene.stats.cpu_bytes / 1024 }) catch unreachable, ink);
+    self.overlay.text(30, 141, std.fmt.bufPrint(&buffer, "OBJECTS {d}  TERRAIN DRAWS {d}", .{ count, self.scene.terrain_draws }) catch unreachable, ink);
+    self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "SEED {d}  GEN {d}", .{ self.seed, Seed.generator_version }) catch unreachable, ink);
+    self.overlay.text(30, 185, "WASD MOVE  QE RISE  SHIFT FAST", ink);
+    self.overlay.text(30, 203, "CLICK LOOK  ESC RELEASE  R RESET", ink);
+    self.overlay.text(30, 221, if (self.culling) "F1 HUD  C CULLING ON" else "F1 HUD  C CULLING OFF", cyan);
+}
+
+fn reportBenchmark(self: *Renderer) void {
+    const interval = self.intervals.summary();
+    const cpu = self.cpu_times.summary();
+    std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d}}}", .{
+        self.seed,                         Seed.generator_version,          self.intervals.total,           interval.p50,            interval.p95,              interval.p99,                 cpu.p50,               cpu.p95,                    cpu.p99,
+        self.scene.stats.generated,        self.scene.stats.canceled,       self.scene.uploads,             self.scene.evictions,    self.scene.center_changes, self.scene.peak_upload_bytes, options.upload_budget, self.scene.stats.cpu_bytes, Scene.gpu_pool_bytes,
+        self.scene.stats.pool_allocations, self.scene.gpu_pool_allocations, self.scene.peak_resident_count, self.underfilled_frames,
+    });
 }
 
 pub fn deinit(self: *Renderer) void {
@@ -241,8 +225,7 @@ pub fn deinit(self: *Renderer) void {
     if (self.bind_group) |p| p.release();
     if (self.pipeline) |p| p.release();
     if (self.overlay_pipeline) |p| p.release();
-    if (self.terrain) |m| m.deinit();
-    if (self.relic) |m| m.deinit();
+    self.scene.destroy();
     if (self.uniform) |p| p.release();
     if (self.instance_buffer) |p| p.release();
     if (self.overlay_buffer) |p| p.release();
