@@ -238,7 +238,7 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
     self.overlay.text(30, 185, "WASD MOVE  SPACE JUMP  SHIFT FAST", ink);
     self.overlay.text(30, 203, "V WALK/FLY  QE FLY RISE  R RESET", ink);
     self.overlay.text(30, 221, "CLICK LOOK/GRAB  RMB SALVAGE  ESC", ink);
-    self.overlay.text(30, 239, "F5 SAVE  F9 LOAD  I INSPECT  P CAPTURE", ink);
+    self.overlay.text(30, 239, "F2 VIEW  F4 CHARACTER  F5 SAVE  F9 LOAD", ink);
     self.overlay.text(30, 257, if (self.culling) "F1 HUD  C CULLING ON" else "F1 HUD  C CULLING OFF", cyan);
 }
 

@@ -20,6 +20,17 @@ Three ways to play, braided so each feeds the others. None is a mode; the player
 
 A good session moves around the loop: a shrine yields a pump blueprint, the pump powers a new lift, the lift reaches a branch where a new district can take root.
 
+## The player
+
+The protagonist is the player's own ranger-engineer: named and customized, not a fixed hero. A new game opens the character creator, and it can be reopened at any time.
+
+- Name: 1–20 letters, digits, spaces, or hyphens.
+- Proportions: height 1.62–1.98 m, build 85–115%.
+- Palettes chosen to suit the painterly direction: eight skin tones, eight hair colors, eight outfit colors, and five bioluminescent accents (the visor and belt glow like Arbor lumen).
+- Hair: short, ponytail, long, crest (anime), or ranger hood.
+
+Clothing, gear, and accent unlocks found while exploring are future growth for this system.
+
 ## The Arbors
 
 ### Anatomy and strata
@@ -106,7 +117,6 @@ The style is painterly cel shading: readable at 500 m, lush up close.
 
 ## Open questions
 
-- The player character: a named protagonist or a customizable ranger-engineer?
 - Traversal verbs beyond walking, driving, and lifts: a glider, climbing, grapple vines?
 - Threats: wildlife and ancient guardians in the Rootdeep, blight on the trees, or rival factions in the city?
 - Economy: what shops trade, and whether sap is currency.

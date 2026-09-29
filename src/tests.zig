@@ -21,6 +21,9 @@ test {
     _ = @import("game/Save.zig");
     _ = @import("game/Sandbox.zig");
     _ = @import("game/Build.zig");
+    _ = @import("game/Profile.zig");
+    _ = @import("game/Avatar.zig");
+    _ = @import("game/Creator.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");
     _ = @import("machine/Machine.zig");

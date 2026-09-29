@@ -4,15 +4,16 @@ const Catalog = @import("../asset/Catalog.zig");
 const Modifications = @import("../world/Modifications.zig");
 const Player = @import("Player.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
+const Profile = @import("Profile.zig");
 
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
 /// into a world with the same seed, generator version, and content version; old worlds must not
 /// silently regenerate with different rules.
 /// v2 added machine state; v3 vehicle bodies; v4 made the save describe the whole world:
 /// every placed machine as a full blueprint document (so rewiring persists) with its origin
-/// and quarter-turn yaw, and every crate; v5 added the captured prefab library.
-/// Older saves are rejected, not migrated.
-pub const format_version: u32 = 5;
+/// and quarter-turn yaw, and every crate; v5 added the captured prefab library; v6 the player's
+/// name and appearance. Older saves are rejected, not migrated.
+pub const format_version: u32 = 6;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -39,6 +40,7 @@ pub const Document = struct {
     content: u32 = Catalog.content_version,
     tick: u64,
     player: PlayerState,
+    profile: Profile.Doc,
     props: []const PropState,
     collected: []const Modifications.ObjectRef,
     machines: []const MachineState,
@@ -107,7 +109,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const collected = [_]Modifications.ObjectRef{.{ .x = -3, .z = 2, .id = 17 }};
     const devices = [_]Blueprint.DocDevice{.{ .id = "lamp", .kind = .lamp, .watts = 5 }};
     const machines = [_]MachineState{.{ .slot = 3, .blueprint = .{ .format = 1, .name = "bench", .devices = &devices }, .origin = .{ 1, 2, 3 }, .yaw = 1, .states = &.{0} }};
-    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{} };
+    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{} };
     const bytes = try encode(allocator, doc);
     defer allocator.free(bytes);
     const back = try decode(allocator, bytes, doc.seed, 4, 8);
@@ -126,7 +128,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 5", "\"format\": 4");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 6", "\"format\": 5");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
 }

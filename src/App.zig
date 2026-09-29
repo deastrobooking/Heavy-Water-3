@@ -12,6 +12,7 @@ const Save = @import("game/Save.zig");
 const Build = @import("game/Build.zig");
 const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
+const Creator = @import("game/Creator.zig");
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -52,6 +53,38 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     TestWorld.configure(world, options.seed);
     try self.sandbox.init(options.seed, &world.catalog, &self.engine.camera);
     self.importPrefabs();
+    // A new game begins by creating the character (not in unattended smoke or benchmark runs).
+    if (options.smoke_frames == 0 and options.benchmark_frames == 0) self.sandbox.creator.begin(self.sandbox.profile);
+}
+
+/// While the creator is open, every key goes to it.
+fn creatorKey(self: *App, key: mach.Core.KeyButtonID) void {
+    const k: Creator.Key = switch (key) {
+        .up => .up,
+        .down => .down,
+        .left => .left,
+        .right => .right,
+        .enter, .kp_enter => .enter,
+        .escape => .escape,
+        .backspace, .delete => .backspace,
+        .space => .{ .char = ' ' },
+        .minus => .{ .char = '-' },
+        else => blk: {
+            const tag = @tagName(key);
+            if (tag.len == 1) break :blk .{ .char = tag[0] };
+            const digits = [_][]const u8{ "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" };
+            for (digits, 0..) |d, i| if (std.mem.eql(u8, tag, d)) break :blk .{ .char = '0' + @as(u8, @intCast(i)) };
+            return;
+        },
+    };
+    switch (self.sandbox.creator.key(k)) {
+        .editing => {},
+        .confirmed => |profile| {
+            self.sandbox.profile = profile;
+            self.report("WELCOME, {s}", .{profile.name()});
+        },
+        .canceled => {},
+    }
 }
 
 /// Loads every valid blueprint in the prefab directory into the palette; invalid files are
@@ -98,8 +131,10 @@ pub fn update(self: *App, core: *mach.Core) void {
     var events = core.events(.default);
     while (events.next()) |event| switch (event) {
         .close => core.exit(),
-        .key_press => |key| switch (key.key) {
+        .key_press => |key| if (self.sandbox.creator.open) self.creatorKey(key.key) else switch (key.key) {
             .escape => self.capture(core, false),
+            .f2 => self.actions.toggle_view = true,
+            .f4 => self.actions.open_creator = true,
             .r => self.actions.reset = true,
             .v => self.actions.toggle_mode = true,
             .f1 => self.show_metrics = !self.show_metrics,
@@ -184,6 +219,10 @@ fn exerciseSmoke(self: *App) void {
     const camera = &self.engine.camera;
     switch (stage) {
         1 => {
+            // Create a character through the same key path the window uses.
+            self.sandbox.creator.begin(self.sandbox.profile);
+            for ([_]mach.Core.KeyButtonID{ .backspace, .backspace, .backspace, .backspace, .backspace, .backspace, .s, .o, .r, .a, .down, .right, .down, .down, .down, .right, .enter }) |key| self.creatorKey(key);
+            std.log.info("Smoke character: {s}, hair style {s}", .{ self.sandbox.profile.name(), @tagName(self.sandbox.profile.hair_style) });
             self.culling = true;
             self.sandbox.player.setMode(.fly, camera.*);
             camera.position = mach.math.vec3(180, 35, 120);
@@ -195,8 +234,9 @@ fn exerciseSmoke(self: *App) void {
             camera.position = mach.math.vec3(-400, 35, -300);
         },
         3 => {
-            // Walk mode at spawn, aim at the crate row, and grab.
+            // Walk mode at spawn in third person, aim at the crate row, and grab.
             self.show_metrics = false;
+            self.sandbox.view = .third;
             self.sandbox.player.mode = .walk;
             self.sandbox.resetPlayer(camera);
             const crate = self.sandbox.cratePosition(1);
@@ -277,8 +317,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.crosshair = sandbox.seated == null and (self.captured or sandbox.player.mode == .walk);
-    renderer.hud_lines[0].set("{s}  TOOL {s}  SALVAGED {d}  1 HANDS 2 BUILD 3 WIRE", .{ if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", @tagName(sandbox.tools.tool), sandbox.modifications.len });
+    renderer.crosshair = sandbox.seated == null and !sandbox.creator.open and (self.captured or sandbox.player.mode == .walk);
+    renderer.hud_lines[0].set("{s}  {s}  TOOL {s}  SALVAGED {d}  1 2 3 TOOLS", .{ sandbox.profile.name(), if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", @tagName(sandbox.tools.tool), sandbox.modifications.len });
     if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;
@@ -305,7 +345,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .none => renderer.hud_lines[1] = .{},
     }
     renderer.panel_count = 0;
-    if (self.inspecting and sandbox.seated == null) {
+    if (sandbox.creator.open) {
+        var lines: [Renderer.panel_capacity]Creator.Line = undefined;
+        const count = sandbox.creator.lines(&lines);
+        for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});
+        renderer.panel_count = count;
+    } else if (self.inspecting and sandbox.seated == null) {
         var lines: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
         const count = Build.inspect(sandbox, &lines);
         for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});

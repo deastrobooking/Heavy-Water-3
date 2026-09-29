@@ -16,6 +16,9 @@ const R = Physics.Rotation;
 const Player = @import("Player.zig");
 const Save = @import("Save.zig");
 const Build = @import("Build.zig");
+const Profile = @import("Profile.zig");
+const Avatar = @import("Avatar.zig");
+const Creator = @import("Creator.zig");
 const Sandbox = @This();
 
 /// The interactive session: a walking player, physical crates, placed machines (a powered
@@ -62,6 +65,10 @@ pub const Actions = packed struct {
     /// Step the aimed transmitter or receiver's channel down or up (any tool).
     channel_down: bool = false,
     channel_up: bool = false,
+    /// Switch between first- and third-person view.
+    toggle_view: bool = false,
+    /// Open the character creator.
+    open_creator: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire.
     select_tool: u2 = 0,
 };
@@ -85,8 +92,18 @@ const machine_flag: u32 = 1 << 31;
 const part_flag: u32 = 1 << 30;
 const chassis_flag: u32 = 1 << 29;
 
+pub const View = enum { first, third };
+pub const third_person_distance: f32 = 4;
+
 seed: u64,
 catalog: *const Catalog,
+profile: Profile = .{},
+creator: Creator = .{},
+view: View = .first,
+/// The body's facing; follows the camera except while the creator is open.
+body_yaw: f32 = 0,
+walk_phase: f32 = 0,
+walk_amount: f32 = 0,
 physics: Physics,
 player: Player = .{},
 crates: [max_crates]Physics.Body = @splat(.none),
@@ -334,7 +351,26 @@ pub fn resetPlayer(self: *Sandbox, camera: *Camera) void {
     camera.position = self.player.eye();
 }
 
-pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt: f32) !void {
+/// Where aiming starts: the camera in first person, the character's eyes otherwise.
+fn aimCamera(self: *const Sandbox, camera: Camera) Camera {
+    var aim = camera;
+    if (self.bodyShown()) aim.position = self.player.eye();
+    return aim;
+}
+
+/// The avatar is drawn in third person and in the creator, on foot only.
+pub fn bodyShown(self: *const Sandbox) bool {
+    return self.seated == null and self.player.mode == .walk and (self.view == .third or self.creator.open);
+}
+
+pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Actions, dt: f32) !void {
+    if (raw_actions.open_creator and self.seated == null and !self.creator.open) self.creator.begin(self.profile);
+    if (raw_actions.toggle_view) self.view = if (self.view == .first) .third else .first;
+    // The creator freezes the character and every tool.
+    const frozen = self.creator.open;
+    const input: Input = if (frozen) .{} else raw_input;
+    const actions: Actions = if (frozen) .{} else raw_actions;
+    if (frozen) camera.yaw = self.body_yaw;
     if (actions.reset) self.resetPlayer(camera);
     if (actions.toggle_mode and self.seated == null) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
     if (actions.select_tool != 0 and self.seated == null) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
@@ -344,13 +380,18 @@ pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt:
         primary = false;
     }
     if (self.seated == null) self.player.step(&self.physics, camera, input, dt);
+    if (!frozen) self.body_yaw = camera.yaw;
+    const ground_speed = @sqrt(self.player.velocity[0] * self.player.velocity[0] + self.player.velocity[2] * self.player.velocity[2]);
+    self.walk_phase = @mod(self.walk_phase + ground_speed * dt * 2.4, 2 * std.math.pi);
+    self.walk_amount = if (self.player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
     self.stepMachines(dt);
+    const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
         // Spring the held crate toward a point in front of the eye; physics still resolves contacts.
         const body = self.crates[i];
         const p = self.physics.position(body).?;
-        const f = camera.forward();
-        const goal = camera.position.add(&f.mulScalar(hold_distance));
+        const f = aim.forward();
+        const goal = aim.position.add(&f.mulScalar(hold_distance));
         var v: Physics.Vec3 = .{ (goal.x() - p[0]) * 12, (goal.y() - p[1]) * 12, (goal.z() - p[2]) * 12 };
         const speed = @sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
         if (speed > 15) v = .{ v[0] * 15 / speed, v[1] * 15 / speed, v[2] * 15 / speed };
@@ -366,10 +407,15 @@ pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt:
         self.target = .none;
         return;
     }
-    self.refreshNearby(camera.position);
+    self.placeCamera(camera);
+    if (frozen) {
+        self.target = .none;
+        return;
+    }
+    self.refreshNearby(aim.position);
     // Build and wire tools reach farther and ignore relics.
     const hands = self.tools.tool == .hands;
-    self.target = self.pick(camera.position, camera.forward(), if (hands) reach else Build.build_reach, hands);
+    self.target = self.pick(aim.position, aim.forward(), if (hands) reach else Build.build_reach, hands);
     if (actions.channel_down or actions.channel_up) Build.adjustChannel(self, if (actions.channel_up) 1 else -1);
     switch (self.tools.tool) {
         .hands => {
@@ -389,8 +435,28 @@ pub fn step(self: *Sandbox, camera: *Camera, input: Input, actions: Actions, dt:
                 else => {},
             };
         },
-        .build, .wire => try Build.update(self, camera.*, primary, actions),
+        .build, .wire => try Build.update(self, aim, primary, actions),
     }
+}
+
+/// Creator: face the character from the front. Third person: behind and above the eyes,
+/// kept above the terrain. First person: at the eyes (set by the player step).
+fn placeCamera(self: *const Sandbox, camera: *Camera) void {
+    if (self.player.mode != .walk) return;
+    const eye = self.player.eye();
+    if (self.creator.open) {
+        const front = R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 0, 0, 2.8 });
+        camera.position = math.vec3(self.player.feet[0] + front[0], self.player.feet[1] + 1.35, self.player.feet[2] + front[2]);
+        camera.yaw = self.body_yaw + std.math.pi;
+        camera.pitch = -0.1;
+        return;
+    }
+    if (self.view == .first) return;
+    const f = camera.forward();
+    var p = math.vec3(eye.x() - f.x() * third_person_distance, eye.y() + 0.3 - f.y() * third_person_distance, eye.z() - f.z() * third_person_distance);
+    const ground = Terrain.surface(self.seed, p.x(), p.z()).height + 0.4;
+    if (p.y() < ground) p = math.vec3(p.x(), ground, p.z());
+    camera.position = p;
 }
 
 pub fn enterVehicle(self: *Sandbox, machine: u8, camera: *Camera) void {
@@ -581,6 +647,9 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
             n += 1;
         }
     }
+    if (self.bodyShown() and n < out.len) {
+        n += Avatar.build(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, self.catalog.content.block, out[n..]);
+    }
     return Build.publish(self, out, n);
 }
 
@@ -652,6 +721,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .seed = self.seed,
         .tick = self.tick,
         .player = .{ .feet = self.player.feet, .yaw = camera.yaw, .pitch = camera.pitch, .mode = self.player.mode },
+        .profile = self.profile.toDoc(),
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
         .machines = machines[0..machine_count],
@@ -670,6 +740,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     const parsed = try Save.decode(allocator, bytes, self.seed, max_crates, max_machines);
     defer parsed.deinit();
     const doc = parsed.value;
+    const profile = try Profile.fromDoc(doc.profile);
     const blueprints = try allocator.alloc(Blueprint, doc.machines.len);
     defer allocator.free(blueprints);
     var bodies: usize = doc.props.len;
@@ -717,7 +788,10 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.prefab_count = doc.prefabs.len;
     self.modifications.clear();
     for (doc.collected) |ref| _ = try self.modifications.remove(ref);
+    self.profile = profile;
+    self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
+    self.body_yaw = doc.player.yaw;
     camera.yaw = doc.player.yaw;
     camera.pitch = std.math.clamp(doc.player.pitch, -1.5, 1.5);
     camera.position = self.player.eye();
@@ -977,4 +1051,52 @@ test "rover: enter from its side, drive forward on machine power, exit, park, an
     try sandbox.restore(std.testing.allocator, bytes, &camera);
     // Loading rebuilds the world, so the chassis has a new handle.
     try std.testing.expectEqualDeep(stopped, sandbox.physics.rigidPose(sandbox.machines[m].vehicle.?.rigid).?);
+}
+
+test "a named, customized character is shown in third person, aims from its eyes, and persists" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+
+    // Creator: the character is frozen and faced; tools and movement do nothing.
+    try run(&sandbox, &camera, .{}, .{ .open_creator = true }, 1);
+    try std.testing.expect(sandbox.creator.open and sandbox.bodyShown());
+    const feet = sandbox.player.feet;
+    try run(&sandbox, &camera, .{ .forward = 1 }, .{ .interact = true }, 30);
+    try std.testing.expectApproxEqAbs(feet[2], sandbox.player.feet[2], 0.001);
+    try std.testing.expectApproxEqAbs(sandbox.body_yaw + std.math.pi, camera.yaw, 1e-5);
+    while (sandbox.creator.draft.name_len > 0) _ = sandbox.creator.key(.backspace);
+    for ("Ash") |c| _ = sandbox.creator.key(.{ .char = c });
+    for (0..4) |_| _ = sandbox.creator.key(.down);
+    _ = sandbox.creator.key(.right);
+    sandbox.profile = sandbox.creator.key(.enter).confirmed;
+    try std.testing.expectEqualStrings("ASH", sandbox.profile.name());
+
+    // Third person: the camera sits behind the eyes, but aiming still starts at the eyes,
+    // so the crate ahead is still the target.
+    try run(&sandbox, &camera, .{}, .{ .toggle_view = true }, 1);
+    camera.yaw = 0;
+    camera.pitch = -0.2;
+    try run(&sandbox, &camera, .{ .forward = 1 }, .{}, 100);
+    camera.pitch = -0.35;
+    try run(&sandbox, &camera, .{}, .{}, 2);
+    const eye = sandbox.player.eye();
+    try std.testing.expect(camera.position.z() < eye.z() - 2);
+    try std.testing.expect(sandbox.target == .prop);
+    var parts: [World.max_props]World.Prop = undefined;
+    const drawn = sandbox.publishProps(&parts);
+    var avatar_parts: usize = 0;
+    for (parts[0..drawn]) |part| avatar_parts += @intFromBool(@abs(part.transform.position[0] - sandbox.player.feet[0]) < 0.6 and @abs(part.transform.position[2] - sandbox.player.feet[2]) < 0.6);
+    try std.testing.expect(avatar_parts >= 9);
+
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    var other_camera: Camera = .{};
+    var other: Sandbox = undefined;
+    try other.init(sandbox.seed, &catalog, &other_camera);
+    try other.restore(std.testing.allocator, bytes, &other_camera);
+    try std.testing.expectEqualDeep(sandbox.profile, other.profile);
+    try std.testing.expect(other.creator.confirmed);
 }

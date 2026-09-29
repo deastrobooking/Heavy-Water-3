@@ -69,6 +69,10 @@ Acceptance evidence for the bus: a headless test presses a workshop button whose
 
 Deferred: editing a prefab's parts and numeric parameters in place (today a prefab is edited by placing it, rewiring or retuning it, and capturing it again).
 
+## Player character — implemented
+
+A customizable, nameable ranger-engineer: the creator on a new game (F4 any time), name and appearance palettes, a block-built avatar with a walk cycle and lumen accents, third-person view (F2) with eye-origin aiming, and the profile in save format v6. Acceptance evidence: headless tests freeze input in the creator, confirm a named profile, target a crate from the eyes in third person, draw the avatar, and restore the profile from a save.
+
 ## Canopy world
 
 The game's direction is set in [world and systems](world.md): Arbors 300–600 m tall, a canopy city of grafted towers and bridge roads, painterly cel shading, and three braided play styles (explore, engineer, grow) over a procedural city the player extends. The phases below build it. Each is a runnable slice with headless acceptance tests, native Zig throughout.
