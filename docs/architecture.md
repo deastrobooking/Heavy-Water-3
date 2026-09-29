@@ -4,7 +4,15 @@
 
 `App.zig` is the composition root. Mach provides platform, input events, typed objects, math, graphics, and scheduling. `engine/` owns timing and input actions, `world/` owns camera and world data, `render/` owns GPU resources and presentation, and `game/TestWorld.zig` supplies the initial content. Procedural generation and machine graph evaluation can run without a window.
 
-The game populates a generic world collection. The renderer does not import the game. The initial renderer assumes one terrain mesh and one shared relic mesh; mesh/material handles and content loading belong to the next asset milestone. This is a deliberate two-batch baseline, not a general scene renderer yet.
+The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game. `render/StreamingScene.zig` draws one terrain mesh per resident chunk plus one shared relic mesh and one shared vegetation mesh; mesh/material handles and content loading belong to the next asset milestone.
+
+## Chunk streaming
+
+`world/Streamer.zig` owns a fixed pool of 49 CPU payload slots (generation radius 3). Each slot has a state (`empty → queued → generating → ready`, or `canceling`) and an atomic token. A handle is `(slot, token)`; any requeue, eviction, or cancel increments the token, so stale handles fail validation instead of reading recycled data.
+
+Only the render thread calls `plan()`. It evicts slots outside the generation radius and queues missing keys ring by ring from the center. One worker thread takes the nearest queued slot, releases the mutex, and fills the payload in place. Terrain generation checks the slot token once per row and abandons stale work. A `generating` slot that falls out of range becomes `canceling` and is not reused until the worker acknowledges it, so the worker never writes into a slot the planner has reassigned.
+
+A ready payload is immutable until the next `plan()`. `StreamingScene` keeps 25 persistent GPU chunk buffers (render radius 2), fills them nearest-first, and stops when the frame's upload byte budget would be exceeded. Resident chunks whose handle changes or that leave the render radius are released immediately. Generation never runs on the render thread.
 
 ## Mach modules, collections, and threading
 
@@ -22,11 +30,11 @@ The fixed-step clock limits catch-up to eight steps and accounts for discarded t
 
 World space is left-handed, +Y up, forward +Z. Mach matrices use column storage, column vectors, and `projection × view × model`. Perspective depth maps the near plane to 0 and the far plane to 1. Tests enforce this convention.
 
-GPU vertices contain packed position, normal, and UV arrays (32 bytes). Instances contain translation/uniform scale and tint (32 bytes). The camera uniform is a 4×4 matrix plus padded eye position (80 bytes). Normals need no inverse transpose with positive uniform scale. Rotation and non-uniform scaling are not exposed yet.
+GPU vertices contain packed position, normal, UV, and linear vertex color (44 bytes). Instances contain translation/uniform scale and tint (32 bytes). The camera uniform is a 4×4 matrix plus padded eye position (80 bytes). Normals need no inverse transpose with positive uniform scale. Rotation and non-uniform scaling are not exposed yet.
 
-Opaque terrain and relics share a pipeline with a depth32 attachment. Terrain uses one indexed draw; relics use one indexed instanced draw. The HUD uses a separate color-only pass and one draw. The two-texel checker texture is generated at startup; the bitmap HUD uses fixed CPU storage and requires no font dependency. Shaders are embedded beside their renderer source for now; an asset compiler and shader reload will later consume `assets/`.
+Opaque terrain and scatter share a pipeline with a depth32 attachment. Each visible terrain chunk uses one indexed draw; relics and vegetation each use one indexed instanced draw. The HUD uses a separate color-only pass and one draw. The two-texel checker texture is generated at startup; the bitmap HUD uses fixed CPU storage and requires no font dependency. Shaders are embedded beside their renderer source for now; an asset compiler and shader reload will later consume `assets/`.
 
-CPU culling compacts surviving instances into preallocated storage; it uses conservative sphere/plane tests. Culling starts disabled so the initial workload actually submits 1,000 instances.
+CPU culling tests chunk bounding spheres, then compacts surviving scatter instances into preallocated storage using conservative sphere/plane tests. Culling starts enabled.
 
 ## Ownership and allocators
 
@@ -34,7 +42,10 @@ CPU culling compacts surviving instances into preallocated storage; it uses cons
 | --- | --- | --- |
 | Core windows, platform, device, queue, swapchain | Mach Core | Application |
 | Typed world collection | Mach module system | Application |
-| CPU terrain and cube mesh allocations | Renderer setup, explicit supplied allocator | Freed after GPU upload |
+| Streamer and 49 chunk payloads (~13.6 MiB) | Renderer's StreamingScene, supplied allocator | Two allocations at startup; freed after the worker joins |
+| Streaming worker thread | Streamer | Started with the scene; canceled and joined in shutdown |
+| 25 GPU chunk vertex/index buffer pairs (~6.8 MiB) | StreamingScene | Created on first render; recycled, never reallocated |
+| Relic and vegetation CPU meshes | Renderer setup, explicit supplied allocator | Freed after GPU upload |
 | GPU meshes, uniform and instance buffers, texture, sampler, pipelines | Renderer | Created lazily on render thread; released in shutdown |
 | Depth texture and view | Renderer | Recreated on framebuffer resize; view released before texture |
 | Camera and simulation clock | App's Engine | Application |
@@ -47,7 +58,9 @@ Shutdown follows Mach's examples: signal Core exit, join the app thread, release
 
 ## Deterministic generation
 
-Generator version 1 uses an explicit wrapping SplitMix64 hash, signed lattice coordinates, smooth value noise, and two height octaves. Heights and normals sample global coordinates, including samples beyond chunk edges. Adjacent chunk positions and normals are tested at negative coordinates. Scatter is keyed by world seed and object index and does not depend on iteration scheduling.
+Generator version 2 uses an explicit wrapping SplitMix64 hash, signed lattice coordinates, smooth value noise, and two height octaves. Heights, normals, and biome weights sample global coordinates, including samples beyond chunk edges, so seams need no stitching. Adjacent chunk positions and normals are tested at negative coordinates. Chunk keys are clamped to ±4096 because terrain uses f32 world positions; floating origins come later.
+
+Biome weights (arid, meadow, wetland) come from one continuous low-frequency moisture field with no per-chunk normalization. Scatter evaluates 192 candidates per chunk from a chunk seed. A candidate's `local_id` is its candidate index, so rejected candidates leave gaps rather than shifting later IDs. Slope limits are 0.88 (relics) and 0.94 (vegetation) on the surface normal's Y component; arid regions thin vegetation. An object's stable identity is `(seed, generator version, chunk key, local_id)`, which is what saved modifications will reference.
 
 The same seed/version/build reproduces this scene. Cross-architecture floating-point bit identity is not promised. A future save format must persist seed, generator version, content version, and modifications; old worlds must not silently use a new generator.
 

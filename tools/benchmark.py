@@ -59,6 +59,8 @@ def main():
         "pool_allocations_bounded": result["pool_allocations"] == 2 and result["gpu_pool_allocations"] == 50,
         "streaming_exercised": result["chunk_crossings"] >= 30 and result["evictions"] > 0 and result["uploads"] > 25,
         "active_ring_covered": result["underfilled_frames"] == 0,
+        # macOS throttles occluded or backgrounded windows to ~1 Hz; such runs are not representative.
+        "presentation_unthrottled": result["interval_p99_ms"] < 100,
     }
     report = {"timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
               "host": platform.platform(), "machine": platform.machine(), "optimize": "ReleaseFast",

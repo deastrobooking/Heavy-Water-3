@@ -12,18 +12,18 @@ The two supplied plans define a sci-fi exploration game that grows into a reusab
 - Deterministic generation and initial scalar machine graph tests.
 - Explicit ownership and limits documented.
 
-The world is one bounded heightfield. There is no player collision, imported art, save format, audio, or machine gameplay yet.
+## 2. Procedural test world — implemented
 
-## 2. Procedural test world — next
+1. Generational chunk handles; active (3×3), render (5×5), and generation (7×7) radii.
+2. One background worker, per-slot cancellation tokens checked per terrain row, and a per-frame GPU upload byte budget.
+3. Continuous world-space biome masks, slope-aware scatter, and `(seed, generator, chunk, local_id)` object identity.
+4. `tools/benchmark.py`: fixed fly-through with interval/CPU percentiles, upload, residency, and pool-allocation counters.
 
-1. Chunk handles and bounded active/render/generation radii.
-2. Background generation queue with cancellation and bounded upload budget.
-3. Biome masks, slope-aware scatter, and deterministic chunk-local object IDs.
-4. A fly-through streaming benchmark with frame percentiles and allocation counters.
+Acceptance evidence: seam tests (including negative coordinates), a fixed 49-slot CPU pool and 25-slot GPU pool that never grow, generation off the render thread, and a test that unloads and regenerates a chunk with an identical fingerprint. See [validation](validation.md).
 
-Acceptance: move across chunk boundaries without cracks, unbounded memory growth, or synchronous generation stalls; unload and regenerate the same chunks reproducibly.
+Still absent: player collision, imported art, save format, audio, and machine gameplay.
 
-## 3. Interaction and assets
+## 3. Interaction and assets — next
 
 Add a versioned glTF-to-runtime asset path, mesh/material handles, a physics adapter, player collision, object picking, pickup, and one usable tool. Keep external physics handles behind engine APIs. Acceptance: walk through the terrain test world, interact with a physical object, and reload its saved modification.
 

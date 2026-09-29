@@ -2,7 +2,7 @@
 
 A Zig/Mach 3D engine foundation for a procedural science-fiction exploration and engineering game.
 
-The first executable is an engine field test: one seeded terrain chunk, 1,000 instanced relics, a free camera, depth testing, a checker texture, directional lighting, distance fog, optional CPU frustum culling, and an in-window metrics overlay. It is a rendering and simulation foundation; gameplay, physics, streaming, and editing come next.
+The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. It is a rendering and simulation foundation; gameplay, physics, and editing come next.
 
 ## Run
 
@@ -24,7 +24,7 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | Left click, then mouse | Capture pointer and look |
 | Escape | Release pointer |
 | R | Reset camera |
-| C | Toggle CPU frustum culling (off initially to submit all 1,000 objects) |
+| C | Toggle CPU frustum culling (on initially) |
 | F1 | Toggle metrics |
 | Window close | Quit |
 
@@ -35,15 +35,18 @@ python3 tools/zig.py build run -Doptimize=ReleaseSafe
 python3 tools/zig.py build run -Dseed=42
 python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/zig.py build -Doptimize=ReleaseFast
+python3 tools/benchmark.py            # fixed fly-through route, writes .tools/streaming-benchmark.json
 ```
 
 `build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises camera changes, culling (including an empty view), and HUD toggling. Use at least 16 frames to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
+
+The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
 
 ## Pinned foundation
 
 - Mach: [`7ed0d504a9569fd4ad840ecb10ead16b90a8926e`](https://code.hexops.org/hexops/mach/src/commit/7ed0d504a9569fd4ad840ecb10ead16b90a8926e/build.zig.zon), package hash in `build.zig.zon`.
 - Mach nominated Zig: `2026.4.10-mach` = `0.16.0-dev.3142+5ccfeb926`.
-- Generator version: `1`; default seed: `310399555161`.
+- Generator version: `2`; default seed: `310399555161`.
 
 The compiler matches this Mach revision's manifest. The [nomination history](https://machengine.org/docs/nominated-zig/) also lists newer compilers; upgrading the compiler and Mach must be a tested change together.
 
