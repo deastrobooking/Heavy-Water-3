@@ -29,4 +29,5 @@ test {
     _ = @import("machine/Machine.zig");
     _ = @import("physics/Rotation.zig");
     _ = @import("physics/Vehicle.zig");
+    _ = @import("physics/TriangleMesh.zig");
 }

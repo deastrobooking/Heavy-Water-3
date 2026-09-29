@@ -81,7 +81,7 @@ The game's direction is set in [world and systems](world.md): Arbors 300–600 m
 
 Make the engine able to hold a vertical world and look like one.
 
-1. Static triangle-mesh and oriented-box colliders in `physics/`, with the character walking curved surfaces and angled decks.
+1. Done: static triangle-mesh colliders with a BVH, and oriented boxes built from them. The character climbs a 15° mesh ramp, is stopped by an 80° wall, and stands on and climbs a 5° deck; crates rest on mesh floors; rigid bodies settle on tilted mesh decks; wheels, picking, and placement see meshes.
 2. Streaming and level of detail for tall placed content, not only ground chunks; measure a 600 m test tree from 1 km.
 3. Painterly cel-shading pass: toon ramp, rim light, silhouette outlines, aerial haze, day/night with emissive lumen.
 4. One hand-authored test Arbor (trunk, two branch platforms, a bridge) to measure collision, streaming, and the look before generating any.

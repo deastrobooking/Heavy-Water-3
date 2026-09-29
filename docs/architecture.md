@@ -40,6 +40,18 @@ Gameplay calls only `physics/Physics.zig`: bodies are `Physics.Body` handles, an
 
 `physics/Rigid.zig` adds oriented rigid boxes (`Physics.Rigid` handles, eight at most) for bodies that must rotate. It has quaternion orientation, box inertia, force and torque accumulation, and linear and angular damping. Contacts come from sample points: the rigid box's 26 corner, edge-midpoint, and face-center points tested against terrain and every nearby axis-aligned box, plus each box's corners tested against the rigid box. Velocities are solved with eight iterations of sequential impulses (accumulated normal impulse, two-axis Coulomb friction), then positions are corrected along contact normals, split with dynamic boxes by mass. It handles resting, tipping, sliding, walls, and shoving props; edge-edge crossings between sample points can be missed. The character treats rigid boxes as walls. `castRay` finds the nearest terrain, box, or rigid surface and reports that surface's velocity. `physics/Rotation.zig` holds the vector and quaternion math.
 
+`physics/TriangleMesh.zig` is the static mesh collider: triangles with precomputed normals (degenerate slivers dropped) and a bounding-volume hierarchy (median split on the longest axis, four triangles per leaf), queried by ray (Möller–Trumbore, two-sided), box overlap, and closest point. `Physics.createMesh` owns one per handle (64 at most), with storage from a caller-supplied allocator that `destroyMesh` or `Physics.deinit` frees. `createBox` builds an oriented static box as twelve outward-facing triangles; angled decks and walls use it. Every consumer sees meshes:
+
+- Triangles with a normal Y of at least 0.6 are floors; steeper ones are walls.
+- The character stands on the highest floor hit by five downward rays (center and four points at 0.7 r) within step height.
+- Wall triangles push it out horizontally at three heights on its axis.
+- Upward rays set ceilings.
+- Dynamic boxes rest on floors under their footprint.
+- Rigid-body sample points up to 0.3 m behind a face get contacts along its normal.
+- Picking (`Hit.mesh`), surface rays for wheels, and placement overlap all include meshes.
+
+Dynamic boxes are not yet pushed out of mesh walls.
+
 `physics/Vehicle.zig` is a raycast vehicle over one rigid chassis, built only on the public API. Each wheel casts along the chassis' down axis. The spring-damper force pushes along the ground normal, so a pitched chassis leaks no tangential force. Tire forces combine drive (fading to zero at `max_speed`), brake, and rolling resistance longitudinally with lateral grip. Both cancel sliding velocity using the true effective mass at the contact (`rigidEffectiveMass`, so forces below the center of mass cannot overshoot into roll) plus gravity's pull along the contact plane (so a braked vehicle holds on slopes). The result is clamped to a friction circle of grip × load and applied at a point raised toward the center of mass (`roll_influence`). Surface velocity is subtracted, so wheels work on moving platforms. Restitution, rotation, and continuous collision are out of scope for now; they will be added to the native Zig backend, and callers will not change.
 
 `procedural/Terrain.zig` answers height and face-normal queries on the exact triangles `Chunk.fill` renders, so collision matches the visible ground. Physics receives it through a `Ground` callback, independent of whether a chunk is streamed in.

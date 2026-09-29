@@ -27,6 +27,13 @@ pub const RigidDesc = struct {
     user: u32 = 0,
 };
 pub const Pose = struct { position: Vec3, orientation: Quat };
+pub const MeshTag = struct {};
+/// Static triangle-mesh collider (trunks, ramps, decks). Oriented boxes are built as meshes.
+pub const MeshCollider = Handle.Handle(MeshTag);
+pub const max_meshes = 64;
+/// Triangles whose normal has at least this Y component are floors; steeper ones are walls.
+pub const walkable_normal_y: f32 = 0.6;
+pub const TriangleMesh = @import("TriangleMesh.zig");
 pub const Motion6 = struct { linear: Vec3, angular: Vec3 };
 /// A solid surface hit by `castRay`, with the surface's own velocity at that point.
 pub const SurfaceHit = struct { distance: f32, point: Vec3, normal: Vec3, velocity: Vec3 };
@@ -50,8 +57,8 @@ pub const Ground = struct {
     context: ?*const anyopaque = null,
     sample: *const fn (context: ?*const anyopaque, x: f32, z: f32) GroundSample,
 };
-/// Exactly one of `body` or `rigid` is set.
-pub const Hit = struct { body: Body = .none, rigid: Rigid = .none, distance: f32, point: Vec3, normal: Vec3, user: u32 };
+/// Exactly one of `body`, `rigid`, or `mesh` is set.
+pub const Hit = struct { body: Body = .none, rigid: Rigid = .none, mesh: MeshCollider = .none, distance: f32, point: Vec3, normal: Vec3, user: u32 };
 /// Upright cylinder with its origin at the feet.
 pub const Character = struct { radius: f32 = 0.35, height: f32 = 1.8, step: f32 = 0.4, push: f32 = 2.5 };
 /// `support` is the body stood on, or `.none` on terrain or in the air.
@@ -62,6 +69,35 @@ backend: Backend,
 
 pub fn init(ground: Ground) Physics {
     return .{ .backend = .{ .ground = ground } };
+}
+
+/// Builds a static mesh collider; its triangle and BVH storage come from `allocator` and are
+/// freed by `destroyMesh` or `deinit`.
+pub fn createMesh(self: *Physics, allocator: std.mem.Allocator, positions: []const Vec3, indices: []const u32, user: u32) !MeshCollider {
+    var mesh = try TriangleMesh.build(allocator, positions, indices);
+    errdefer mesh.deinit();
+    return self.backend.meshes.add(.{ .mesh = mesh, .user = user });
+}
+
+/// A static oriented box (an angled deck or wall) as a twelve-triangle mesh.
+pub fn createBox(self: *Physics, allocator: std.mem.Allocator, center: Vec3, half: Vec3, rotation: Quat, user: u32) !MeshCollider {
+    var positions: [8]Vec3 = undefined;
+    var indices: [36]u32 = undefined;
+    TriangleMesh.boxGeometry(center, half, rotation, &positions, &indices);
+    return self.createMesh(allocator, &positions, &indices, user);
+}
+
+pub fn destroyMesh(self: *Physics, mesh: MeshCollider) void {
+    if (self.backend.meshes.get(mesh)) |entry| {
+        entry.mesh.deinit();
+        _ = self.backend.meshes.remove(mesh);
+    }
+}
+
+/// Frees every mesh collider (bodies and rigid bodies own no heap memory).
+pub fn deinit(self: *Physics) void {
+    var live = self.backend.meshes.live.iterator(.{});
+    while (live.next()) |i| self.destroyMesh(self.backend.meshes.idAt(i));
 }
 
 pub fn createBody(self: *Physics, desc: BodyDesc) !Body {
@@ -118,6 +154,11 @@ pub fn overlapsBox(self: *const Physics, center: Vec3, half: Vec3) bool {
         var hit = true;
         for (0..3) |k| hit = hit and @abs(r.position[k] - center[k]) < r.radius() + half[k];
         if (hit) return true;
+    }
+    var meshes = self.backend.meshes.live.iterator(.{});
+    var scratch: [1]u32 = undefined;
+    while (meshes.next()) |i| {
+        if (self.backend.meshes.items[i].mesh.overlap(Rotation.sub(center, half), Rotation.add(center, half), &scratch) > 0) return true;
     }
     return false;
 }

@@ -29,6 +29,21 @@ pub const BodyState = struct {
 ground: Physics.Ground,
 bodies: Handle.Pool(Physics.BodyTag, BodyState, Physics.max_bodies) = .{},
 rigids: Handle.Pool(Physics.RigidTag, Rigid.State, Physics.max_rigids) = .{},
+meshes: Handle.Pool(Physics.MeshTag, MeshEntry, Physics.max_meshes) = .{},
+
+pub const MeshEntry = struct { mesh: Physics.TriangleMesh, user: u32 };
+
+/// Highest walkable mesh surface hit by a downward ray from `top`, within `depth`.
+pub fn meshFloor(self: *const BoxWorld, top: Vec3, depth: f32) ?f32 {
+    var best: ?f32 = null;
+    var live = self.meshes.live.iterator(.{});
+    while (live.next()) |i| {
+        const hit = self.meshes.items[i].mesh.raycast(top, .{ 0, -1, 0 }, depth) orelse continue;
+        if (hit.normal[1] < Physics.walkable_normal_y) continue;
+        if (best == null or hit.point[1] > best.?) best = hit.point[1];
+    }
+    return best;
+}
 
 pub fn createRigid(self: *BoxWorld, desc: Physics.RigidDesc) !Physics.Rigid {
     for (desc.half_extents ++ desc.position ++ desc.orientation ++ desc.linear ++ desc.angular) |v| if (!std.math.isFinite(v)) return error.InvalidBody;
@@ -94,8 +109,12 @@ fn solveGround(self: *BoxWorld) void {
         // Highest terrain under the footprint's corners and center supports the box.
         var support = -std.math.inf(f32);
         for ([_][2]f32{ .{ 0, 0 }, .{ -1, -1 }, .{ 1, -1 }, .{ -1, 1 }, .{ 1, 1 } }) |c| {
-            const s = self.ground.sample(self.ground.context, b.position[0] + c[0] * b.half[0], b.position[2] + c[1] * b.half[2]);
+            const x = b.position[0] + c[0] * b.half[0];
+            const z = b.position[2] + c[1] * b.half[2];
+            const s = self.ground.sample(self.ground.context, x, z);
             support = @max(support, s.height);
+            // Mesh floors below the box's center height also support it.
+            if (self.meshFloor(.{ x, b.position[1], z }, b.half[1] + 0.5)) |floor| support = @max(support, floor);
         }
         const bottom = b.position[1] - b.half[1];
         if (bottom < support) {
@@ -160,6 +179,12 @@ pub fn raycast(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
         if (hit.distance > max_distance or (best != null and hit.distance >= best.?.distance)) continue;
         best = .{ .rigid = self.rigids.idAt(i), .distance = hit.distance, .point = hit.point, .normal = hit.normal, .user = self.rigids.items[i].user };
     }
+    var meshes = self.meshes.live.iterator(.{});
+    while (meshes.next()) |i| {
+        const limit = if (best) |b| b.distance else max_distance;
+        const hit = self.meshes.items[i].mesh.raycast(origin, direction, limit) orelse continue;
+        best = .{ .mesh = self.meshes.idAt(i), .distance = hit.distance, .point = hit.point, .normal = hit.normal, .user = self.meshes.items[i].user };
+    }
     return best;
 }
 
@@ -204,6 +229,12 @@ pub fn castRay(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
         if (hit.distance > max_distance or (best != null and hit.distance >= best.?.distance)) continue;
         best = .{ .distance = hit.distance, .point = hit.point, .normal = hit.normal, .velocity = r.pointVelocity(hit.point) };
     }
+    var meshes = self.meshes.live.iterator(.{});
+    while (meshes.next()) |i| {
+        const limit = if (best) |b| b.distance else max_distance;
+        const hit = self.meshes.items[i].mesh.raycast(origin, direction, limit) orelse continue;
+        best = .{ .distance = hit.distance, .point = hit.point, .normal = hit.normal, .velocity = .{ 0, 0, 0 } };
+    }
     return best;
 }
 
@@ -241,6 +272,7 @@ pub fn moveCharacter(self: *BoxWorld, shape: Physics.Character, start: Vec3, dis
 /// Pushes the character's cylinder horizontally out of boxes it overlaps and nudges dynamic ones.
 fn pushOut(self: *BoxWorld, shape: Physics.Character, feet: *Vec3) void {
     self.pushOutRigids(shape, feet);
+    self.pushOutMeshes(shape, feet);
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = &self.bodies.items[i];
@@ -322,6 +354,43 @@ fn pushOutRigids(self: *BoxWorld, shape: Physics.Character, feet: *Vec3) void {
     }
 }
 
+/// Steep mesh triangles (walls, trunks) push the character out horizontally; walkable ones
+/// are floors handled by support. Tested at three heights on the character's axis.
+fn pushOutMeshes(self: *BoxWorld, shape: Physics.Character, feet: *Vec3) void {
+    var candidates: [64]u32 = undefined;
+    var live = self.meshes.live.iterator(.{});
+    while (live.next()) |i| {
+        const mesh = &self.meshes.items[i].mesh;
+        const lo: Vec3 = .{ feet[0] - shape.radius, feet[1] + shape.step, feet[2] - shape.radius };
+        const hi: Vec3 = .{ feet[0] + shape.radius, feet[1] + shape.height, feet[2] + shape.radius };
+        const n = mesh.overlap(lo, hi, &candidates);
+        for (candidates[0..n]) |t| {
+            const tri = mesh.triangles[t];
+            if (tri.normal[1] >= Physics.walkable_normal_y) continue;
+            for ([_]f32{ shape.step + 0.05, shape.height / 2, shape.height - 0.05 }) |h| {
+                const p: Vec3 = .{ feet[0], feet[1] + h, feet[2] };
+                const c = Physics.TriangleMesh.closestPoint(tri, p);
+                var dx = p[0] - c[0];
+                var dz = p[2] - c[2];
+                var distance = @sqrt(dx * dx + dz * dz);
+                if (distance >= shape.radius or @abs(p[1] - c[1]) > shape.radius) continue;
+                if (distance < 1e-5) {
+                    // On the plane: leave along the face normal's horizontal direction.
+                    const l = @max(1e-5, @sqrt(tri.normal[0] * tri.normal[0] + tri.normal[2] * tri.normal[2]));
+                    dx = tri.normal[0] / l;
+                    dz = tri.normal[2] / l;
+                    distance = 0;
+                } else {
+                    dx /= distance;
+                    dz /= distance;
+                }
+                feet[0] += dx * (shape.radius - distance);
+                feet[2] += dz * (shape.radius - distance);
+            }
+        }
+    }
+}
+
 fn overlapsFootprint(shape: Physics.Character, feet: Vec3, b: BodyState) bool {
     const cx = std.math.clamp(feet[0], b.position[0] - b.half[0], b.position[0] + b.half[0]);
     const cz = std.math.clamp(feet[2], b.position[2] - b.half[2], b.position[2] + b.half[2]);
@@ -332,6 +401,11 @@ fn overlapsFootprint(shape: Physics.Character, feet: Vec3, b: BodyState) bool {
 fn characterSupport(self: *const BoxWorld, shape: Physics.Character, feet: Vec3) struct { height: f32, body: Physics.Body } {
     var support = self.ground.sample(self.ground.context, feet[0], feet[2]).height;
     var body: Physics.Body = .none;
+    // Walkable mesh floors under the footprint (center and four points inside the radius).
+    const r = shape.radius * 0.7;
+    for ([_][2]f32{ .{ 0, 0 }, .{ r, 0 }, .{ -r, 0 }, .{ 0, r }, .{ 0, -r } }) |o| {
+        if (self.meshFloor(.{ feet[0] + o[0], feet[1] + shape.step, feet[2] + o[1] }, shape.step + 60)) |floor| support = @max(support, floor);
+    }
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = self.bodies.items[i];
@@ -351,6 +425,11 @@ fn characterCeiling(self: *const BoxWorld, shape: Physics.Character, feet: Vec3)
         const b = self.bodies.items[i];
         const bottom = b.position[1] - b.half[1];
         if (bottom >= feet[1] + shape.height - 0.01 and overlapsFootprint(shape, feet, b)) ceiling = @min(ceiling, bottom);
+    }
+    var meshes = self.meshes.live.iterator(.{});
+    while (meshes.next()) |i| {
+        const hit = self.meshes.items[i].mesh.raycast(.{ feet[0], feet[1] + shape.height - 0.05, feet[2] }, .{ 0, 1, 0 }, 50) orelse continue;
+        ceiling = @min(ceiling, hit.point[1]);
     }
     return ceiling;
 }
@@ -472,4 +551,73 @@ test "rigid bodies stop at static walls and block the character; surface rays re
     try std.testing.expectEqual(@as(f32, 2), hit.velocity[1]);
     const ground = physics.castRay(.{ -20, 1, 0 }, .{ 0, -1, 0 }, 5, .none).?;
     try std.testing.expectApproxEqAbs(@as(f32, 1), ground.distance, 0.001);
+}
+
+test "character climbs a mesh ramp, is stopped by a steep wall, and stands on an angled deck" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    const allocator = std.testing.allocator;
+    const shape: Physics.Character = .{};
+    // 15° ramp rising along +Z from z = 2 to z = 22, 4 m wide.
+    const rise = 20 * @tan(@as(f32, 15.0) * std.math.pi / 180.0);
+    const ramp = [_]Vec3{ .{ -2, 0, 2 }, .{ 2, 0, 2 }, .{ -2, rise, 22 }, .{ 2, rise, 22 } };
+    _ = try physics.createMesh(allocator, &ramp, &.{ 0, 2, 1, 1, 2, 3 }, 7);
+    var feet: Vec3 = .{ 0, 0, 0 };
+    var grounded = false;
+    for (0..300) |_| {
+        const r = physics.moveCharacter(shape, feet, .{ 0, -0.1, 0.06 }, true);
+        feet = r.feet;
+        grounded = r.grounded;
+    }
+    try std.testing.expect(feet[2] > 16 and feet[2] < 22);
+    // A cylinder on a slope rests on its uphill footprint sample, 0.7 r × tan 15° above center.
+    const center_height = (feet[2] - 2) / 20 * rise;
+    try std.testing.expectApproxEqAbs(center_height + shape.radius * 0.7 * rise / 20, feet[1], 0.01);
+    try std.testing.expect(grounded);
+
+    // An 80° wall (a steep quad) blocks walking along +X.
+    const lean = 4 * @tan(@as(f32, 10.0) * std.math.pi / 180.0);
+    const wall = [_]Vec3{ .{ 10, 0, -3 }, .{ 10, 0, 3 }, .{ 10 + lean, 4, -3 }, .{ 10 + lean, 4, 3 } };
+    _ = try physics.createMesh(allocator, &wall, &.{ 0, 1, 2, 2, 1, 3 }, 8);
+    feet = .{ 6, 0, 0 };
+    for (0..120) |_| feet = physics.moveCharacter(shape, feet, .{ 0.08, -0.1, 0 }, true).feet;
+    // The wall leans away; above step height (0.45 m) its face is at x = 10 + 0.45 · tan 10°.
+    const face = 10 + (shape.step + 0.05) * lean / 4;
+    try std.testing.expectApproxEqAbs(face - shape.radius, feet[0], 0.02);
+
+    // A deck tilted 5° about Z, top surface around y = 3 near its center.
+    const tilt = R.axisAngle(.{ 0, 0, 1 }, @as(f32, 5.0) * std.math.pi / 180.0);
+    const deck = try physics.createBox(allocator, .{ 30, 2.8, 0 }, .{ 6, 0.2, 2 }, tilt, 9);
+    feet = .{ 30, 3.5, 0 };
+    for (0..30) |_| feet = physics.moveCharacter(shape, feet, .{ 0, -0.1, 0 }, true).feet;
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), feet[1], 0.05);
+    // Walking toward the high end climbs the deck.
+    for (0..40) |_| feet = physics.moveCharacter(shape, feet, .{ 0.1, -0.1, 0 }, true).feet;
+    try std.testing.expect(feet[1] > 3.2);
+
+    // Rays and picking see meshes; placement overlap does too.
+    const hit = physics.raycast(.{ 30, 10, 0 }, .{ 0, -1, 0 }, 20, .none).?;
+    try std.testing.expect(hit.mesh.eql(deck) and hit.user == 9);
+    try std.testing.expect(physics.castRay(.{ 0, 10, 12 }, .{ 0, -1, 0 }, 20, .none).?.distance < 10);
+    try std.testing.expect(physics.overlapsBox(.{ 30, 3, 0 }, .{ 0.5, 0.5, 0.5 }));
+    physics.destroyMesh(deck);
+    try std.testing.expect(!physics.overlapsBox(.{ 30, 3, 0 }, .{ 0.5, 0.5, 0.5 }));
+}
+
+test "crates rest on mesh floors and rigid bodies settle on a tilted mesh deck" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    const allocator = std.testing.allocator;
+    const floor = [_]Vec3{ .{ -5, 3, -5 }, .{ 5, 3, -5 }, .{ -5, 3, 5 }, .{ 5, 3, 5 } };
+    _ = try physics.createMesh(allocator, &floor, &.{ 0, 2, 1, 1, 2, 3 }, 1);
+    const crate = try physics.createBody(.{ .half_extents = .{ 0.4, 0.4, 0.4 }, .position = .{ 0, 6, 0 } });
+    const deck = try physics.createBox(allocator, .{ 20, 2, 0 }, .{ 4, 0.25, 3 }, R.axisAngle(.{ 1, 0, 0 }, 0.08), 2);
+    _ = deck;
+    const box = try physics.createRigid(.{ .half_extents = .{ 0.5, 0.3, 0.5 }, .position = .{ 20, 4, 0 }, .mass = 30 });
+    for (0..240) |_| physics.step(1.0 / 60.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.4), physics.position(crate).?[1], 0.02);
+    const pose = physics.rigidPose(box).?;
+    // Resting on the deck top (y ≈ 2.25 at its center), not on the ground below.
+    try std.testing.expect(pose.position[1] > 2.4 and pose.position[1] < 2.7);
+    try std.testing.expect(R.length(physics.rigidVelocity(box).?.linear) < 0.2);
 }

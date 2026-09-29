@@ -168,6 +168,33 @@ fn gather(world: *const BoxWorld, body: State, out: *[max_contacts]Contact) usiz
             n += 1;
         }
     };
+    // Sample points behind a mesh face (within 0.3 m) are pushed out along the face normal.
+    var meshes = world.meshes.live.iterator(.{});
+    var candidates: [32]u32 = undefined;
+    while (meshes.next()) |mi| {
+        const mesh = &world.meshes.items[mi].mesh;
+        var outside = false;
+        for (0..3) |k| outside = outside or body.position[k] + radius < mesh.lo[k] or body.position[k] - radius > mesh.hi[k];
+        if (outside) continue;
+        for ([_]f32{ -1, 0, 1 }) |sx| for ([_]f32{ -1, 0, 1 }) |sy| for ([_]f32{ -1, 0, 1 }) |sz| {
+            if (sx == 0 and sy == 0 and sz == 0) continue;
+            if (n == out.len) return n;
+            const p = body.toWorld(.{ sx * body.half[0], sy * body.half[1], sz * body.half[2] });
+            const count = mesh.overlap(R.sub(p, .{ 0.3, 0.3, 0.3 }), R.add(p, .{ 0.3, 0.3, 0.3 }), &candidates);
+            var deepest: ?Contact = null;
+            for (candidates[0..count]) |t| {
+                const tri = mesh.triangles[t];
+                const c = @import("TriangleMesh.zig").closestPoint(tri, p);
+                const behind = -R.dot(R.sub(p, c), tri.normal);
+                if (behind <= 0 or behind > 0.3 or R.length(R.sub(p, c)) > behind + 1e-4) continue;
+                if (deepest == null or behind > deepest.?.depth) deepest = .{ .point = p, .normal = tri.normal, .depth = behind, .other = null };
+            }
+            if (deepest) |contact| {
+                out[n] = contact;
+                n += 1;
+            }
+        };
+    }
     var live = world.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = world.bodies.items[i];
