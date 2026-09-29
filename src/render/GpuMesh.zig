@@ -32,6 +32,11 @@ pub fn draw(self: GpuMesh, pass: *gpu.RenderPassEncoder, instances: u32, first: 
     pass.setIndexBuffer(self.indices, .uint32, 0, self.index_count * 4);
     pass.drawIndexed(self.index_count, instances, 0, 0, first);
 }
+pub fn drawRange(self: GpuMesh, pass: *gpu.RenderPassEncoder, first_index: u32, index_count: u32, instances: u32, first: u32) void {
+    pass.setVertexBuffer(0, self.vertices, 0, self.vertex_bytes);
+    pass.setIndexBuffer(self.indices, .uint32, 0, self.index_count * 4);
+    pass.drawIndexed(index_count, instances, first_index, 0, first);
+}
 pub fn deinit(self: GpuMesh) void {
     self.indices.release();
     self.vertices.release();

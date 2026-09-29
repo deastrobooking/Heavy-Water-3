@@ -1,5 +1,11 @@
 # Assets
 
-The bootstrap generates its terrain, relic mesh, checker texture, and debug glyphs in code. WGSL currently lives in `src/render/` and is embedded by the renderer.
+Terrain, relic and vegetation meshes, the checker texture, and debug glyphs are generated in code. WGSL lives in `src/render/` and is embedded by the renderer.
 
-This directory is reserved for authored source content and the forthcoming versioned asset compiler. No external art is needed to run the field test.
+`source/` holds authored glTF 2.0 content. The build runs `asset-compiler` (from `src/asset_compiler.zig`) on each source file and embeds the resulting `HWMS` runtime model; `zig build assets` also installs them in `zig-out/assets/` for inspection.
+
+Supported input: `.gltf` with base64 data-URI or relative external buffers, and `.glb`; triangle primitives with `POSITION` and `NORMAL` (float), optional `TEXCOORD_0`; `u8`/`u16`/`u32` or absent indices; node TRS or matrix transforms (baked, including mirrored ones); `baseColorFactor` per material. Textures, skins, morph targets, sparse and normalized accessors, required extensions, and URIs outside the source directory are rejected.
+
+- `source/crate.gltf`: the supply crate (1.06 × 0.8 × 1.06 m), two materials (`hull`, `band`), one planar and one interleaved buffer view.
+
+Changing the runtime layout means bumping `Model.format_version`. Changing what shipped content means (IDs, dimensions) means bumping `Catalog.content_version`, which invalidates saves.

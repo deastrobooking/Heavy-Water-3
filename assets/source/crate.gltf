@@ -1,0 +1,196 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "Heavy Water hand-authored crate"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "supply_crate",
+   "mesh": 0
+  }
+ ],
+ "meshes": [
+  {
+   "name": "supply_crate",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1,
+      "TEXCOORD_0": 2
+     },
+     "indices": 3,
+     "material": 0
+    },
+    {
+     "attributes": {
+      "POSITION": 4,
+      "NORMAL": 5,
+      "TEXCOORD_0": 6
+     },
+     "indices": 7,
+     "material": 1
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "hull",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.86,
+     0.46,
+     0.16,
+     1
+    ],
+    "metallicFactor": 0.2,
+    "roughnessFactor": 0.7
+   }
+  },
+  {
+   "name": "band",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.18,
+     0.2,
+     0.23,
+     1
+    ],
+    "metallicFactor": 0.8,
+    "roughnessFactor": 0.4
+   }
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3",
+   "min": [
+    -0.5,
+    -0.4,
+    -0.5
+   ],
+   "max": [
+    0.5,
+    0.4,
+    0.5
+   ]
+  },
+  {
+   "bufferView": 1,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 3,
+   "byteOffset": 0,
+   "componentType": 5123,
+   "count": 36,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 4,
+   "byteOffset": 0,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3",
+   "min": [
+    -0.53,
+    -0.1,
+    -0.53
+   ],
+   "max": [
+    0.53,
+    0.1,
+    0.53
+   ]
+  },
+  {
+   "bufferView": 4,
+   "byteOffset": 12,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 4,
+   "byteOffset": 24,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 5,
+   "byteOffset": 0,
+   "componentType": 5121,
+   "count": 36,
+   "type": "SCALAR"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 288,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 288,
+   "byteLength": 288,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 576,
+   "byteLength": 192,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 768,
+   "byteLength": 72,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 840,
+   "byteLength": 768,
+   "byteStride": 32,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 1608,
+   "byteLength": 36,
+   "target": 34963
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 1644,
+   "uri": "data:application/octet-stream;base64,AAAAv83MzL4AAAC/AAAAv83MzD4AAAC/AAAAP83MzD4AAAC/AAAAP83MzL4AAAC/AAAAP83MzL4AAAA/AAAAP83MzD4AAAA/AAAAv83MzD4AAAA/AAAAv83MzL4AAAA/AAAAv83MzL4AAAA/AAAAv83MzD4AAAA/AAAAv83MzD4AAAC/AAAAv83MzL4AAAC/AAAAP83MzL4AAAC/AAAAP83MzD4AAAC/AAAAP83MzD4AAAA/AAAAP83MzL4AAAA/AAAAv83MzD4AAAC/AAAAv83MzD4AAAA/AAAAP83MzD4AAAA/AAAAP83MzD4AAAC/AAAAv83MzL4AAAA/AAAAv83MzL4AAAC/AAAAP83MzL4AAAC/AAAAP83MzL4AAAA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAAAAAAAAAAACAPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAABAAIAAAACAAMABAAFAAYABAAGAAcACAAJAAoACAAKAAsADAANAA4ADAAOAA8AEAARABIAEAASABMAFAAVABYAFAAWABcAFK4Hv83MzL0Urge/AAAAAAAAAAAAAIC/AAAAAAAAAAAUrge/zczMPRSuB78AAAAAAAAAAAAAgL8AAAAAAACAPxSuBz/NzMw9FK4HvwAAAAAAAAAAAACAvwAAgD8AAIA/FK4HP83MzL0Urge/AAAAAAAAAAAAAIC/AACAPwAAAAAUrgc/zczMvRSuBz8AAAAAAAAAAAAAgD8AAAAAAAAAABSuBz/NzMw9FK4HPwAAAAAAAAAAAACAPwAAAAAAAIA/FK4Hv83MzD0Urgc/AAAAAAAAAAAAAIA/AACAPwAAgD8Urge/zczMvRSuBz8AAAAAAAAAAAAAgD8AAIA/AAAAABSuB7/NzMy9FK4HPwAAgL8AAAAAAAAAAAAAAAAAAAAAFK4Hv83MzD0Urgc/AACAvwAAAAAAAAAAAAAAAAAAgD8Urge/zczMPRSuB78AAIC/AAAAAAAAAAAAAIA/AACAPxSuB7/NzMy9FK4HvwAAgL8AAAAAAAAAAAAAgD8AAAAAFK4HP83MzL0Urge/AACAPwAAAAAAAAAAAAAAAAAAAAAUrgc/zczMPRSuB78AAIA/AAAAAAAAAAAAAAAAAACAPxSuBz/NzMw9FK4HPwAAgD8AAAAAAAAAAAAAgD8AAIA/FK4HP83MzL0Urgc/AACAPwAAAAAAAAAAAACAPwAAAAAUrge/zczMPRSuB78AAAAAAACAPwAAAAAAAAAAAAAAABSuB7/NzMw9FK4HPwAAAAAAAIA/AAAAAAAAAAAAAIA/FK4HP83MzD0Urgc/AAAAAAAAgD8AAAAAAACAPwAAgD8Urgc/zczMPRSuB78AAAAAAACAPwAAAAAAAIA/AAAAABSuB7/NzMy9FK4HPwAAAAAAAIC/AAAAAAAAAAAAAAAAFK4Hv83MzL0Urge/AAAAAAAAgL8AAAAAAAAAAAAAgD8Urgc/zczMvRSuB78AAAAAAACAvwAAAAAAAIA/AACAPxSuBz/NzMy9FK4HPwAAAAAAAIC/AAAAAAAAgD8AAAAAAAECAAIDBAUGBAYHCAkKCAoLDA0ODA4PEBESEBITFBUWFBYX"
+  }
+ ]
+}

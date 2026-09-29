@@ -21,13 +21,20 @@ The two supplied plans define a sci-fi exploration game that grows into a reusab
 
 Acceptance evidence: seam tests (including negative coordinates), a fixed 49-slot CPU pool and 25-slot GPU pool that never grow, generation off the render thread, and a test that unloads and regenerates a chunk with an identical fingerprint. See [validation](validation.md).
 
-Still absent: player collision, imported art, save format, audio, and machine gameplay.
+## 3. Interaction and assets — implemented
 
-## 3. Interaction and assets — next
+1. `asset-compiler` runs in the build graph: glTF 2.0 (`.gltf`/`.glb`) → versioned `HWMS` runtime models with submeshes and materials. The app embeds and validates them.
+2. Typed generational mesh, material, and body handles through one `Catalog`; the renderer resolves handles each frame.
+3. `physics/Physics.zig` is the engine API; `BoxWorld.zig` is a small built-in backend (axis-aligned boxes, no rotation). No backend type crosses the API, so Jolt or another engine can replace it.
+4. Walking character with ground and box collision, step-up, jump, and prop pushing; exact triangle-accurate terrain queries.
+5. Picking (crates via physics raycast, relics by stable ID, terrain occlusion), pickup/carry/throw, and one tool: the salvage cutter.
+6. JSON save format v1 with seed, generator, and content versions; atomic writes; reject-before-apply loading.
 
-Add a versioned glTF-to-runtime asset path, mesh/material handles, a physics adapter, player collision, object picking, pickup, and one usable tool. Keep external physics handles behind engine APIs. Acceptance: walk through the terrain test world, interact with a physical object, and reload its saved modification.
+Acceptance evidence: a headless test walks to a crate, carries and drops it, saves, disturbs the world, and reloads the crate's exact position. Another removes a relic, verifies regeneration still yields the same ID, and restores the removal from a save. The real app grabs a crate and round-trips a save in smoke mode. See [validation](validation.md).
 
-## 4. Machines
+Known limits: boxes do not rotate, stacking is soft, and there is no continuous collision for fast throws. The built-in backend was chosen over binding Jolt now because the pinned Zig 0.16 dev compiler makes a C++ dependency a risk; revisit when vehicles or rotating bodies are needed.
+
+## 4. Machines — next
 
 Add typed ports, power and signal networks, sensors/controllers/actuators, fixed-step execution, and versioned blueprints. Acceptance: build a powered door and elevator with the same APIs; introduce a simple vehicle only after those work.
 

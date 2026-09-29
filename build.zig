@@ -9,9 +9,19 @@ pub fn build(b: *std.Build) void {
     options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run the streaming route for N measured frames, after 60 warm-up frames") orelse 0);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });
+    // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
+    // output is embedded, so the app never parses glTF at runtime.
+    const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
+    const compile_crate = b.addRunArtifact(compiler);
+    compile_crate.addFileArg(b.path("assets/source/crate.gltf"));
+    const crate = compile_crate.addOutputFileArg("crate.hwmesh");
+    const assets = b.step("assets", "Compile source assets into zig-out/assets");
+    assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
+
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
     app.addOptions("options", options);
+    app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     const exe = @import("mach").addExecutable(mach.builder, .{ .name = "heavy-water", .app = app, .target = target, .optimize = optimize });
     if (target.result.os.tag == .linux) {
         exe.use_llvm = true;
@@ -23,6 +33,8 @@ pub fn build(b: *std.Build) void {
     b.step("run", "Explore the engine test world").dependOn(&run.step);
     const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }) });
     tests.root_module.addImport("mach", mach.module("mach"));
+    tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
+    tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     b.step("test", "Run deterministic engine tests (no window)").dependOn(&b.addRunArtifact(tests).step);
     b.step("check", "Compile the application").dependOn(&exe.step);
 }

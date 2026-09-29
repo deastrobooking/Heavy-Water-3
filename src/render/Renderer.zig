@@ -9,6 +9,7 @@ const Seed = @import("../procedural/Seed.zig");
 const FrameStats = @import("../engine/FrameStats.zig");
 const Flythrough = @import("../engine/Flythrough.zig");
 const Overlay = @import("Overlay.zig");
+const Modifications = @import("../world/Modifications.zig");
 const options = @import("options");
 const Renderer = @This();
 
@@ -24,6 +25,11 @@ camera: Camera = .{},
 tick: u64 = 0,
 show_metrics: bool = true,
 culling: bool = false,
+props: [World.max_props]World.Prop = undefined,
+prop_count: usize = 0,
+modifications: Modifications = .{},
+hud_lines: [3]Overlay.Line = @splat(.{}),
+crosshair: bool = false,
 scene: Scene = undefined,
 seed: u64 = 0,
 intervals: FrameStats = .{},
@@ -49,10 +55,10 @@ frame_ms: f32 = 0,
 underfilled_frames: u64 = 0,
 
 pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Allocator) !void {
-    self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .scene = try Scene.init(allocator, io, world.seed) };
+    self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .scene = try Scene.init(allocator, io, world.seed, &world.catalog) };
 }
 
-fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void {
+fn setup(self: *Renderer, core: *mach.Core) !void {
     const window = core.windows.getValue(core.window);
     const device = window.device;
     const shader = device.createShaderModuleWGSL("scene.wgsl", @embedFile("scene.wgsl"));
@@ -98,7 +104,7 @@ fn setup(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void 
         .primitive = .{ .cull_mode = .none },
         .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .less },
     });
-    try self.scene.setup(device, window.queue, allocator);
+    self.scene.setup(device, window.queue);
 
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
     defer hud_shader.release();
@@ -125,8 +131,8 @@ fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32) void {
     self.height = height;
 }
 
-pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !void {
-    if (self.pipeline == null) try self.setup(core, allocator);
+pub fn render(self: *Renderer, core: *mach.Core) !void {
+    if (self.pipeline == null) try self.setup(core);
     var cpu_timer = mach.time.Timer.start(self.timer.io);
     if (options.benchmark_frames > 0) self.camera = Flythrough.camera(self.frames -| Flythrough.warmup_frames, options.benchmark_frames);
     const window = core.windows.getValue(core.window);
@@ -138,16 +144,14 @@ pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !
     self.frame_ms = if (self.frames == 0) elapsed * 1000 else self.frame_ms * 0.95 + elapsed * 50;
     const vp = self.camera.viewProjection(@as(f32, @floatFromInt(self.width)) / @as(f32, @floatFromInt(self.height)));
     const frame = Frame{ .vp = vp, .eye = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z(), 1 } };
-    self.scene.prepare(window.queue, self.camera, vp, self.culling, options.upload_budget);
+    self.scene.prepare(window.queue, self.camera, vp, self.culling, options.upload_budget, &self.modifications, self.props[0..self.prop_count]);
     const count = self.scene.instance_count;
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
     defer encoder.release();
     encoder.writeBuffer(self.uniform.?, 0, &[_]Frame{frame});
     encoder.writeBuffer(self.instance_buffer.?, 0, self.scene.instances[0..count]);
-    if (self.show_metrics) {
-        self.buildOverlay(count - 1, window.width, window.height);
-        encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
-    }
+    self.buildOverlay(count - 1, window.width, window.height);
+    if (self.overlay.len > 0) encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
     const pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
         .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = 0.055, .g = 0.10, .b = 0.14, .a = 1 } }},
         .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .discard, .depth_clear_value = 1 },
@@ -158,7 +162,7 @@ pub fn render(self: *Renderer, core: *mach.Core, allocator: std.mem.Allocator) !
     pass.setVertexBuffer(1, self.instance_buffer.?, 0, Scene.max_instances * @sizeOf(Instance));
     self.scene.draw(pass);
     pass.end();
-    if (self.show_metrics) {
+    if (self.overlay.len > 0) {
         const hud = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .load, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 } }} }));
         defer hud.release();
         hud.setPipeline(self.overlay_pipeline.?);
@@ -193,8 +197,20 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
     self.overlay.height = @floatFromInt(@max(height, 1));
     const ink: [4]f32 = .{ 0.70, 0.84, 0.86, 1 };
     const cyan: [4]f32 = .{ 0.24, 0.88, 0.82, 1 };
-    self.overlay.rect(16, 16, 448, 242, .{ 0.02, 0.035, 0.05, 1 });
-    self.overlay.rect(16, 16, 3, 242, cyan);
+    if (self.crosshair) {
+        const cx = self.overlay.width / 2;
+        const cy = self.overlay.height / 2;
+        self.overlay.rect(cx - 7, cy - 1, 14, 2, cyan);
+        self.overlay.rect(cx - 1, cy - 7, 2, 14, cyan);
+    }
+    // Interaction status stays visible with metrics hidden.
+    const status_y = self.overlay.height - 76;
+    for (self.hud_lines, 0..) |line, i| if (line.len > 0) {
+        self.overlay.text(30, status_y + @as(f32, @floatFromInt(i)) * 18, line.slice(), if (i == 0) cyan else ink);
+    };
+    if (!self.show_metrics) return;
+    self.overlay.rect(16, 16, 448, 278, .{ 0.02, 0.035, 0.05, 1 });
+    self.overlay.rect(16, 16, 3, 278, cyan);
     self.overlay.text(30, 30, "HEAVY WATER / PROCEDURAL FRONTIER", cyan);
     var buffer: [128]u8 = undefined;
     self.overlay.text(30, 51, std.fmt.bufPrint(&buffer, "FPS {d:.0}  FRAME {d:.2} MS", .{ 1000 / @max(self.frame_ms, 0.001), self.frame_ms }) catch unreachable, ink);
@@ -204,9 +220,11 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
     self.overlay.text(30, 123, std.fmt.bufPrint(&buffer, "UPLOAD {d} KIB  CPU POOL {d} KIB", .{ self.scene.upload_bytes / 1024, self.scene.stats.cpu_bytes / 1024 }) catch unreachable, ink);
     self.overlay.text(30, 141, std.fmt.bufPrint(&buffer, "OBJECTS {d}  TERRAIN DRAWS {d}", .{ count, self.scene.terrain_draws }) catch unreachable, ink);
     self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "SEED {d}  GEN {d}", .{ self.seed, Seed.generator_version }) catch unreachable, ink);
-    self.overlay.text(30, 185, "WASD MOVE  QE RISE  SHIFT FAST", ink);
-    self.overlay.text(30, 203, "CLICK LOOK  ESC RELEASE  R RESET", ink);
-    self.overlay.text(30, 221, if (self.culling) "F1 HUD  C CULLING ON" else "F1 HUD  C CULLING OFF", cyan);
+    self.overlay.text(30, 185, "WASD MOVE  SPACE JUMP  SHIFT FAST", ink);
+    self.overlay.text(30, 203, "V WALK/FLY  QE FLY RISE  R RESET", ink);
+    self.overlay.text(30, 221, "CLICK LOOK/GRAB  RMB SALVAGE  ESC", ink);
+    self.overlay.text(30, 239, "F5 SAVE  F9 LOAD", ink);
+    self.overlay.text(30, 257, if (self.culling) "F1 HUD  C CULLING ON" else "F1 HUD  C CULLING OFF", cyan);
 }
 
 fn reportBenchmark(self: *Renderer) void {

@@ -1,6 +1,23 @@
+const std = @import("std");
 const Overlay = @This();
 pub const Vertex = extern struct { position: [2]f32, color: [4]f32 };
-pub const capacity = 18000;
+pub const capacity = 48000;
+/// Fixed-capacity text published from the application thread.
+pub const Line = struct {
+    text: [64]u8 = undefined,
+    len: u8 = 0,
+
+    pub fn set(self: *Line, comptime fmt: []const u8, args: anytype) void {
+        const written = std.fmt.bufPrint(&self.text, fmt, args) catch self.text[0..];
+        // The bitmap font has no lowercase glyphs.
+        for (written) |*c| c.* = std.ascii.toUpper(c.*);
+        self.len = @intCast(written.len);
+    }
+
+    pub fn slice(self: *const Line) []const u8 {
+        return self.text[0..self.len];
+    }
+};
 vertices: [capacity]Vertex = undefined,
 len: usize = 0,
 width: f32 = 1,

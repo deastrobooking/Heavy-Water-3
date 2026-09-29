@@ -2,9 +2,9 @@
 
 ## Boundaries
 
-`App.zig` is the composition root. Mach provides platform, input events, typed objects, math, graphics, and scheduling. `engine/` owns timing and input actions, `world/` owns camera and world data, `render/` owns GPU resources and presentation, and `game/TestWorld.zig` supplies the initial content. Procedural generation and machine graph evaluation can run without a window.
+`App.zig` is the composition root. Mach provides platform, input events, typed objects, math, graphics, and scheduling. `engine/` owns timing, input actions, and typed handles; `world/` owns camera, chunk keys, streaming, and procedural modifications; `asset/` owns glTF import, the runtime model format, and the catalog; `physics/` exposes the physics API; `render/` owns GPU resources and presentation; `game/` holds the player, the interactive `Sandbox` session, and saves. Procedural generation, asset compilation, physics, gameplay, saves, and machine graph evaluation all run without a window.
 
-The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game. `render/StreamingScene.zig` draws one terrain mesh per resident chunk plus one shared relic mesh and one shared vegetation mesh; mesh/material handles and content loading belong to the next asset milestone.
+The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game: the app publishes `World.Prop` values (catalog mesh handle, transform, tint), the `Modifications` removal set, and preformatted HUD lines. `render/StreamingScene.zig` draws one terrain mesh per resident chunk plus one shared relic mesh and one shared vegetation mesh; mesh/material handles and content loading belong to the next asset milestone.
 
 ## Chunk streaming
 
@@ -18,13 +18,33 @@ A ready payload is immutable until the next `plan()`. `StreamingScene` keeps 25 
 
 The registered modules are `Core`, `App`, `World`, and `Renderer`. `World.objects` is `mach.Objects(.{}, Renderable)` with Mach-managed IDs and storage. It contains translation/uniform scale and material tint. Collection access uses `lock` / `unlock` and batched iteration.
 
-Startup: `Core.init → World.init → App.init → Renderer.init → App.start → Core.main`.
+Startup: `Core.init → World.init (loads the catalog) → App.init (spawns the sandbox) → Renderer.init → App.start → Core.main`. Shutdown: `App.stop → Renderer.deinit → World.deinit`, so GPU copies are released before the catalog's CPU models.
 
-Application thread: consume events → map movement actions → advance 60 Hz simulation → `Core.snapshotStart` → publish camera/tick/debug switches → `Core.snapshotEnd`.
+Application thread: consume events into edge-triggered actions → sample held keys → apply mouse look → run each 60 Hz step (player, held-object spring, physics, picking, then grab/salvage) → `Core.snapshotStart` → publish camera, props, changed removals, and HUD → `Core.snapshotEnd`. Quicksave and quickload do synchronous file I/O on the application thread between steps; rendering continues.
 
 Mach holds its render mutex while invoking `Renderer.render`. The publisher writes render state only inside that same mutex. Static instances are copied before the application thread starts. There is no shared mutable camera access during rendering. Dynamic worlds will need versioned render snapshots or `Core.snapshotObjects` instead of the current one-time instance copy.
 
 The fixed-step clock limits catch-up to eight steps and accounts for discarded time. Camera movement is normalized, mouse rotation is independent of timestep, focus loss clears input, and pitch is clamped. Render interpolation and replay input capture remain future work.
+
+## Assets and handles
+
+`engine/Handle.zig` provides `Handle(Tag)` (16-bit index, 16-bit generation; generation 0 is never issued) and a fixed-capacity `Pool`. Mesh, material, and physics body handles are distinct types.
+
+`asset_compiler` is a host executable in the build graph. It imports glTF with `asset/Gltf.zig`, bakes node transforms, merges primitives into submeshes by material, and writes `asset/Model.zig`'s `HWMS` format v1: a header, materials (base color, name), submesh ranges, 44-byte vertices, and `u32` indices, little-endian. The app embeds the output. `Model.decode` validates magic, version, vertex layout, exact length, index and submesh ranges, and finite floats before allocating anything visible. A layout change bumps `format_version`; the decoder never guesses.
+
+`asset/Catalog.zig` registers the built-in relic and plant meshes and each compiled model, assigning one material handle per submesh, and exposes named content handles. It is immutable after `World.init`, so both threads read it without locks. `StreamingScene` uploads each catalog mesh once and resolves handles per draw; props are drawn once per submesh with instance tint × material base color.
+
+## Physics and interaction
+
+Gameplay calls only `physics/Physics.zig`: bodies are `Physics.Body` handles, and descriptors, hits, ground samples, and character results are engine types. `BoxWorld.zig` is the built-in backend: axis-aligned boxes without rotation, semi-implicit Euler, four positional solver iterations against the ground and each other (O(n²), 128 bodies), Coulomb-style ground friction, and slab raycasts. The character is an upright cylinder swept in sub-steps of half its radius. It is pushed out of boxes, steps onto surfaces up to 0.4 m, snaps down slopes, and shoves dynamic boxes it walks into. Restitution, rotation, and continuous collision are out of scope; a heavier backend can replace this file without changing callers.
+
+`procedural/Terrain.zig` answers height and face-normal queries on the exact triangles `Chunk.fill` renders, so collision matches the visible ground. Physics receives it through a `Ground` callback, independent of whether a chunk is streamed in.
+
+`game/Sandbox.zig` owns the physics world, player, six supply crates, held-object state, and the `Modifications` set. A held crate keeps colliding: gravity is suspended and a velocity spring pulls it toward a point 2.2 m ahead, and it drops if wedged more than 4 m away. Picking casts the view ray 6 m against physics bodies and against relic boxes regenerated for the 3×3 chunks around the eye, occluded by terrain. The salvage cutter records a relic's `(chunk, local_id)` in `Modifications`, a sorted, bounded set; the renderer filters regenerated scatter against it.
+
+## Saves
+
+`game/Save.zig` writes JSON format v1: format, seed, generator version, content version, tick, player pose and mode, crate positions/velocities by stable prop ID, and removed relic IDs. Writes go to a temporary file and are renamed over `saves/quicksave.json`. Loading parses and validates everything (versions, seed, ID ranges, duplicates, finite values) before touching the session, so a rejected save changes nothing. Procedural content is never stored; it is regenerated from seed and generator version, and the saved deltas are applied on top.
 
 ## Coordinates and GPU layout
 
@@ -45,7 +65,10 @@ CPU culling tests chunk bounding spheres, then compacts surviving scatter instan
 | Streamer and 49 chunk payloads (~13.6 MiB) | Renderer's StreamingScene, supplied allocator | Two allocations at startup; freed after the worker joins |
 | Streaming worker thread | Streamer | Started with the scene; canceled and joined in shutdown |
 | 25 GPU chunk vertex/index buffer pairs (~6.8 MiB) | StreamingScene | Created on first render; recycled, never reallocated |
-| Relic and vegetation CPU meshes | Renderer setup, explicit supplied allocator | Freed after GPU upload |
+| Asset catalog (CPU models, material table) | World | Loaded in `World.init`; freed in `World.deinit` after the renderer |
+| GPU copies of catalog meshes | StreamingScene | Uploaded on first render; released in shutdown |
+| Physics bodies, player, crates, modifications | App's Sandbox (fixed capacity) | Application |
+| Save encode/decode buffers | App, supplied allocator | Freed before the key handler returns |
 | GPU meshes, uniform and instance buffers, texture, sampler, pipelines | Renderer | Created lazily on render thread; released in shutdown |
 | Depth texture and view | Renderer | Recreated on framebuffer resize; view released before texture |
 | Camera and simulation clock | App's Engine | Application |
