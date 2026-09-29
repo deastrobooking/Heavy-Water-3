@@ -21,11 +21,13 @@ struct VertexOut {
     @location(3) translation_scale: vec4<f32>,
     @location(4) tint: vec4<f32>,
     @location(5) color: vec3<f32>,
+    @location(6) stretch: vec4<f32>,
 ) -> VertexOut {
     var out: VertexOut;
-    let world = position * translation_scale.w + translation_scale.xyz;
+    let world = position * stretch.xyz * translation_scale.w + translation_scale.xyz;
     out.clip = frame.view_projection * vec4<f32>(world, 1.0);
-    out.normal = normal;
+    // Inverse-transpose of a diagonal scale: divide, then renormalize in the fragment stage.
+    out.normal = normal / stretch.xyz;
     out.uv = uv;
     out.tint = tint * vec4<f32>(color, 1.0);
     out.world = world;

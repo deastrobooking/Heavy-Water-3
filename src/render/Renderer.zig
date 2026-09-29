@@ -93,6 +93,7 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Instance), .step_mode = .instance, .attributes = &.{
             .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
             .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
+            .{ .format = .float32x4, .offset = 32, .shader_location = 6 },
         } }),
     };
     const fragment = gpu.FragmentState.init(.{ .module = shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format }} });

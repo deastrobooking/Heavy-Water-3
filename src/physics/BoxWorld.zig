@@ -1,6 +1,7 @@
 //! Built-in physics backend: axis-aligned boxes without rotation, semi-implicit Euler,
 //! positional contact resolution against the ground and each other, and Coulomb-style ground
-//! friction. It has no angular dynamics, continuous collision, restitution, or broadphase
+//! friction. Kinematic bodies follow their velocity exactly and push dynamic bodies and the
+//! character without being pushed back. It has no angular dynamics, continuous collision, restitution, or broadphase
 //! (O(n²) over at most 128 bodies). Adequate for props and the character; not a rigid-body engine.
 const std = @import("std");
 const Handle = @import("../engine/Handle.zig");
@@ -18,6 +19,7 @@ pub const BodyState = struct {
     inv_mass: f32,
     friction: f32,
     gravity_scale: f32 = 1,
+    kinematic: bool = false,
     grounded: bool = false,
     user: u32,
 };
@@ -33,7 +35,8 @@ pub fn create(self: *BoxWorld, desc: Physics.BodyDesc) !Physics.Body {
         .position = desc.position,
         .velocity = if (desc.motion == .static) .{ 0, 0, 0 } else desc.velocity,
         .half = desc.half_extents,
-        .inv_mass = if (desc.motion == .static) 0 else 1 / desc.mass,
+        .inv_mass = if (desc.motion == .dynamic) 1 / desc.mass else 0,
+        .kinematic = desc.motion == .kinematic,
         .friction = desc.friction,
         .user = desc.user,
     });
@@ -47,8 +50,8 @@ pub fn step(self: *BoxWorld, dt: f32) void {
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = &self.bodies.items[i];
-        if (b.inv_mass == 0) continue;
-        b.velocity[1] += Physics.gravity * b.gravity_scale * dt;
+        if (b.inv_mass == 0 and !b.kinematic) continue;
+        if (!b.kinematic) b.velocity[1] += Physics.gravity * b.gravity_scale * dt;
         for (0..3) |axis| b.position[axis] += b.velocity[axis] * dt;
         b.grounded = false;
     }
@@ -145,14 +148,16 @@ pub fn moveCharacter(self: *BoxWorld, shape: Physics.Character, start: Vec3, dis
     var feet = start;
     // Sub-steps no longer than half the radius keep thin contacts from tunneling.
     const horizontal = @sqrt(displacement[0] * displacement[0] + displacement[2] * displacement[2]);
-    const steps: usize = @intFromFloat(@min(64, @ceil(horizontal / (shape.radius * 0.5))));
+    // At least one pass, so a kinematic body moving into a standing character pushes it out.
+    const steps: usize = @max(1, @as(usize, @intFromFloat(@min(64, @ceil(horizontal / (shape.radius * 0.5))))));
     for (0..steps) |_| {
         feet[0] += displacement[0] / @as(f32, @floatFromInt(steps));
         feet[2] += displacement[2] / @as(f32, @floatFromInt(steps));
         self.pushOut(shape, &feet);
     }
     var result: Physics.CharacterResult = .{ .feet = feet, .grounded = false, .hit_ceiling = false };
-    const support = self.characterSupport(shape, feet);
+    const found = self.characterSupport(shape, feet);
+    const support = found.height;
     const target = feet[1] + displacement[1];
     if (displacement[1] > 0) {
         const ceiling = self.characterCeiling(shape, feet);
@@ -161,9 +166,11 @@ pub fn moveCharacter(self: *BoxWorld, shape: Physics.Character, start: Vec3, dis
             result.hit_ceiling = true;
         } else result.feet[1] = target;
     } else result.feet[1] = target;
-    if (result.feet[1] <= support or (snap and displacement[1] <= 0 and result.feet[1] - support <= shape.step)) {
+    // `snap` is the caller's decision (grounded and not jumping); platform carry may make displacement positive.
+    if (result.feet[1] <= support or (snap and result.feet[1] - support <= shape.step)) {
         result.feet[1] = support;
         result.grounded = true;
+        result.support = found.body;
     }
     return result;
 }
@@ -221,16 +228,20 @@ fn overlapsFootprint(shape: Physics.Character, feet: Vec3, b: BodyState) bool {
     return (feet[0] - cx) * (feet[0] - cx) + (feet[2] - cz) * (feet[2] - cz) < shape.radius * shape.radius;
 }
 
-/// Highest standable surface under the character: terrain or a box top within step reach.
-fn characterSupport(self: *const BoxWorld, shape: Physics.Character, feet: Vec3) f32 {
+/// Highest standable surface under the character: terrain (no body) or a box top within step reach.
+fn characterSupport(self: *const BoxWorld, shape: Physics.Character, feet: Vec3) struct { height: f32, body: Physics.Body } {
     var support = self.ground.sample(self.ground.context, feet[0], feet[2]).height;
+    var body: Physics.Body = .none;
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = self.bodies.items[i];
         const top = b.position[1] + b.half[1];
-        if (top <= feet[1] + shape.step and top > support and overlapsFootprint(shape, feet, b)) support = top;
+        if (top <= feet[1] + shape.step and top > support and overlapsFootprint(shape, feet, b)) {
+            support = top;
+            body = self.bodies.idAt(i);
+        }
     }
-    return support;
+    return .{ .height = support, .body = body };
 }
 
 fn characterCeiling(self: *const BoxWorld, shape: Physics.Character, feet: Vec3) f32 {
@@ -303,4 +314,24 @@ test "character is blocked by static boxes, steps onto low ones, and pushes dyna
         physics.step(1.0 / 60.0);
     }
     try std.testing.expect(physics.position(prop).?[2] > 1.2);
+}
+
+test "kinematic platforms carry props, push the character, and ignore gravity" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    const shape: Physics.Character = .{};
+    const lift = try physics.createBody(.{ .half_extents = .{ 1, 0.1, 1 }, .position = .{ 0, 0.1, 0 }, .motion = .kinematic });
+    const crate = try physics.createBody(.{ .half_extents = .{ 0.3, 0.3, 0.3 }, .position = .{ 0.5, 0.5, 0 } });
+    physics.setVelocity(lift, .{ 0, 1, 0 });
+    for (0..120) |_| physics.step(1.0 / 60.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.1), physics.position(lift).?[1], 0.001);
+    // The crate rides on top of the platform.
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), physics.position(crate).?[1], 0.02);
+    // The character standing on the platform reports it as support.
+    const on = physics.moveCharacter(shape, .{ -0.5, 2.2, 0 }, .{ 0, -0.1, 0 }, true);
+    try std.testing.expect(on.grounded and on.support.eql(lift));
+    // A door sliding into a still character pushes it out.
+    const door = try physics.createBody(.{ .half_extents = .{ 1, 1, 0.1 }, .position = .{ 10, 1, 0 }, .motion = .kinematic });
+    const pushed = physics.moveCharacter(shape, .{ 10.5, 0, 0.05 }, .{ 0, 0, 0 }, true);
+    try std.testing.expect(@abs(pushed.feet[2]) >= 0.1 + shape.radius - 0.001);
+    _ = door;
 }

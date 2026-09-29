@@ -12,7 +12,8 @@ pub const Body = Handle.Handle(BodyTag);
 pub const max_bodies = 128;
 pub const gravity: f32 = -9.81;
 
-pub const Motion = enum { dynamic, static };
+/// Kinematic bodies move only by the velocity set on them and are never pushed.
+pub const Motion = enum { dynamic, kinematic, static };
 pub const BodyDesc = struct {
     half_extents: Vec3,
     position: Vec3,
@@ -32,7 +33,8 @@ pub const Ground = struct {
 pub const Hit = struct { body: Body, distance: f32, point: Vec3, normal: Vec3, user: u32 };
 /// Upright cylinder with its origin at the feet.
 pub const Character = struct { radius: f32 = 0.35, height: f32 = 1.8, step: f32 = 0.4, push: f32 = 2.5 };
-pub const CharacterResult = struct { feet: Vec3, grounded: bool, hit_ceiling: bool };
+/// `support` is the body stood on, or `.none` on terrain or in the air.
+pub const CharacterResult = struct { feet: Vec3, grounded: bool, hit_ceiling: bool, support: Body = .none };
 pub const BoxHit = struct { distance: f32, point: Vec3, normal: Vec3 };
 
 backend: Backend,
@@ -93,6 +95,7 @@ pub fn raycast(self: *const Physics, origin: Vec3, direction: Vec3, max_distance
 }
 
 /// Sweeps a character through bodies and ground; dynamic bodies it walks into are pushed.
+/// With `snap`, the character stays on any support within step height (walking downhill, riding lifts).
 pub fn moveCharacter(self: *Physics, shape: Character, feet: Vec3, displacement: Vec3, snap: bool) CharacterResult {
     return self.backend.moveCharacter(shape, feet, displacement, snap);
 }

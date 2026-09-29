@@ -14,7 +14,8 @@ const Model = @import("../asset/Model.zig");
 const World = @import("../world/World.zig");
 const Modifications = @import("../world/Modifications.zig");
 const Scene = @This();
-pub const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32 };
+/// Per-axis `stretch` supports scaled boxes; the shader corrects normals for it.
+pub const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32, stretch: [4]f32 = .{ 1, 1, 1, 0 } };
 pub const max_instances = Streamer.render_capacity * Scatter.capacity + 1 + World.max_props * Model.max_submeshes;
 /// One instanced draw of a catalog submesh.
 const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32 };
@@ -185,7 +186,7 @@ fn gatherProps(self: *Scene, props: []const World.Prop) void {
             const color = (self.catalog.material(entry.materials[s]) orelse continue).base_color;
             for (props) |prop| {
                 if (!prop.mesh.eql(handle)) continue;
-                self.instances[self.instance_count] = .{ .translation_scale = prop.transform.toInstance(), .tint = multiply(prop.tint, color) };
+                self.instances[self.instance_count] = .{ .translation_scale = prop.transform.toInstance(), .tint = multiply(prop.tint, color), .stretch = .{ prop.size[0], prop.size[1], prop.size[2], 0 } };
                 self.instance_count += 1;
             }
             if (self.instance_count == first) break;

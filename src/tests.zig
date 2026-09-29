@@ -20,4 +20,7 @@ test {
     _ = @import("physics/BoxWorld.zig");
     _ = @import("game/Save.zig");
     _ = @import("game/Sandbox.zig");
+    _ = @import("machine/Device.zig");
+    _ = @import("machine/Blueprint.zig");
+    _ = @import("machine/Machine.zig");
 }

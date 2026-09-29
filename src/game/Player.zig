@@ -16,6 +16,8 @@ const air_accel: f32 = 8;
 feet: Physics.Vec3 = .{ 0, 0, 0 },
 velocity: Physics.Vec3 = .{ 0, 0, 0 },
 grounded: bool = false,
+/// Body stood on last step; its velocity carries the player (moving platforms).
+support: Physics.Body = .none,
 mode: Mode = .walk,
 shape: Physics.Character = .{},
 
@@ -27,6 +29,7 @@ pub fn setMode(self: *Player, mode: Mode, camera: Camera) void {
     self.mode = mode;
     self.velocity = .{ 0, 0, 0 };
     self.grounded = false;
+    self.support = .none;
     self.feet = .{ camera.position.x(), camera.position.y() - eye_height, camera.position.z() };
 }
 
@@ -54,15 +57,18 @@ pub fn step(self: *Player, physics: *Physics, camera: *Camera, input: Input, dt:
     self.velocity[1] += Physics.gravity * dt;
     if (input.jump and self.grounded) self.velocity[1] = jump_speed;
 
-    const result = physics.moveCharacter(self.shape, self.feet, .{ self.velocity[0] * dt, self.velocity[1] * dt, self.velocity[2] * dt }, self.grounded and self.velocity[1] <= 0);
-    // Blocked motion loses the velocity that could not be applied.
-    const moved_x = (result.feet[0] - self.feet[0]) / dt;
-    const moved_z = (result.feet[2] - self.feet[2]) / dt;
+    const carry = if (self.grounded) physics.velocity(self.support) orelse Physics.Vec3{ 0, 0, 0 } else Physics.Vec3{ 0, 0, 0 };
+    const displacement: Physics.Vec3 = .{ (self.velocity[0] + carry[0]) * dt, (self.velocity[1] + carry[1]) * dt, (self.velocity[2] + carry[2]) * dt };
+    const result = physics.moveCharacter(self.shape, self.feet, displacement, self.grounded and self.velocity[1] <= 0);
+    // Blocked motion loses the velocity that could not be applied (platform carry excluded).
+    const moved_x = (result.feet[0] - self.feet[0]) / dt - carry[0];
+    const moved_z = (result.feet[2] - self.feet[2]) / dt - carry[2];
     if (@abs(moved_x) < @abs(self.velocity[0])) self.velocity[0] = moved_x;
     if (@abs(moved_z) < @abs(self.velocity[2])) self.velocity[2] = moved_z;
     if (result.grounded and self.velocity[1] < 0) self.velocity[1] = 0;
     if (result.hit_ceiling and self.velocity[1] > 0) self.velocity[1] = 0;
     self.feet = result.feet;
     self.grounded = result.grounded;
+    self.support = result.support;
     camera.position = self.eye();
 }

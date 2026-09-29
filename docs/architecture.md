@@ -2,7 +2,7 @@
 
 ## Boundaries
 
-`App.zig` is the composition root. Mach provides platform, input events, typed objects, math, graphics, and scheduling. `engine/` owns timing, input actions, and typed handles; `world/` owns camera, chunk keys, streaming, and procedural modifications; `asset/` owns glTF import, the runtime model format, and the catalog; `physics/` exposes the physics API; `render/` owns GPU resources and presentation; `game/` holds the player, the interactive `Sandbox` session, and saves. Procedural generation, asset compilation, physics, gameplay, saves, and machine graph evaluation all run without a window.
+`App.zig` is the composition root. Mach provides platform, input events, typed objects, math, graphics, and scheduling. `engine/` owns timing, input actions, and typed handles; `world/` owns camera, chunk keys, streaming, and procedural modifications; `asset/` owns glTF import, the runtime model format, and the catalog; `machine/` owns devices, blueprints, and machine simulation; `physics/` exposes the physics API; `render/` owns GPU resources and presentation; `game/` holds the player, the interactive `Sandbox` session, and saves. Procedural generation, asset compilation, physics, gameplay, saves, and machine graph evaluation all run without a window.
 
 The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game: the app publishes `World.Prop` values (catalog mesh handle, transform, tint), the `Modifications` removal set, and preformatted HUD lines. `render/StreamingScene.zig` draws one terrain mesh per resident chunk plus one shared relic mesh and one shared vegetation mesh; mesh/material handles and content loading belong to the next asset milestone.
 
@@ -36,7 +36,7 @@ The fixed-step clock limits catch-up to eight steps and accounts for discarded t
 
 ## Physics and interaction
 
-Gameplay calls only `physics/Physics.zig`: bodies are `Physics.Body` handles, and descriptors, hits, ground samples, and character results are engine types. `BoxWorld.zig` is the built-in backend: axis-aligned boxes without rotation, semi-implicit Euler, four positional solver iterations against the ground and each other (O(n²), 128 bodies), Coulomb-style ground friction, and slab raycasts. The character is an upright cylinder swept in sub-steps of half its radius. It is pushed out of boxes, steps onto surfaces up to 0.4 m, snaps down slopes, and shoves dynamic boxes it walks into. Restitution, rotation, and continuous collision are out of scope for now; they will be added to the native Zig backend, and callers will not change.
+Gameplay calls only `physics/Physics.zig`: bodies are `Physics.Body` handles, and descriptors, hits, ground samples, and character results are engine types. `BoxWorld.zig` is the built-in backend: axis-aligned dynamic, kinematic, and static boxes without rotation, semi-implicit Euler, four positional solver iterations against the ground and each other (O(n²), 128 bodies), Coulomb-style ground friction, and slab raycasts. The character is an upright cylinder swept in sub-steps of half its radius. It is pushed out of boxes (including kinematic ones moving into it), steps onto surfaces up to 0.4 m, snaps to supports within step height when the caller asks, reports the body it stands on, and shoves dynamic boxes it walks into. Kinematic bodies move only by the velocity set on them, ignore gravity and the ground, and push dynamic bodies without being pushed back; the player adds its support body's velocity to its own, which is how it rides lifts. Restitution, rotation, and continuous collision are out of scope for now; they will be added to the native Zig backend, and callers will not change.
 
 `procedural/Terrain.zig` answers height and face-normal queries on the exact triangles `Chunk.fill` renders, so collision matches the visible ground. Physics receives it through a `Ground` callback, independent of whether a chunk is streamed in.
 
@@ -44,13 +44,13 @@ Gameplay calls only `physics/Physics.zig`: bodies are `Physics.Body` handles, an
 
 ## Saves
 
-`game/Save.zig` writes JSON format v1: format, seed, generator version, content version, tick, player pose and mode, crate positions/velocities by stable prop ID, and removed relic IDs. Writes go to a temporary file and are renamed over `saves/quicksave.json`. Loading parses and validates everything (versions, seed, ID ranges, duplicates, finite values) before touching the session, so a rejected save changes nothing. Procedural content is never stored; it is regenerated from seed and generator version, and the saved deltas are applied on top.
+`game/Save.zig` writes JSON format v2: format, seed, generator version, content version, tick, player pose and mode, crate positions/velocities by stable prop ID, removed relic IDs, and per-machine device state (blueprint name plus latch values and actuator positions in device order). v1 saves are rejected, not migrated. Content version 2 added the machines. Writes go to a temporary file and are renamed over `saves/quicksave.json`. Loading parses and validates everything (versions, seed, ID ranges, duplicates, finite values, machine names and state ranges, restored into copies first) before touching the session, so a rejected save changes nothing. Procedural content is never stored; it is regenerated from seed and generator version, and the saved deltas are applied on top.
 
 ## Coordinates and GPU layout
 
 World space is left-handed, +Y up, forward +Z. Mach matrices use column storage, column vectors, and `projection × view × model`. Perspective depth maps the near plane to 0 and the far plane to 1. Tests enforce this convention.
 
-GPU vertices contain packed position, normal, UV, and linear vertex color (44 bytes). Instances contain translation/uniform scale and tint (32 bytes). The camera uniform is a 4×4 matrix plus padded eye position (80 bytes). Normals need no inverse transpose with positive uniform scale. Rotation and non-uniform scaling are not exposed yet.
+GPU vertices contain packed position, normal, UV, and linear vertex color (44 bytes). Instances contain translation/uniform scale, tint, and per-axis stretch (48 bytes). The shader divides normals by the stretch and renormalizes, which is the inverse transpose of a diagonal scale. The camera uniform is a 4×4 matrix plus padded eye position (80 bytes). Rotation is not exposed yet.
 
 Opaque terrain and scatter share a pipeline with a depth32 attachment. Each visible terrain chunk uses one indexed draw; relics and vegetation each use one indexed instanced draw. The HUD uses a separate color-only pass and one draw. The two-texel checker texture is generated at startup; the bitmap HUD uses fixed CPU storage and requires no font dependency. Shaders are embedded beside their renderer source for now; an asset compiler and shader reload will later consume `assets/`.
 
@@ -67,7 +67,8 @@ CPU culling tests chunk bounding spheres, then compacts surviving scatter instan
 | 25 GPU chunk vertex/index buffer pairs (~6.8 MiB) | StreamingScene | Created on first render; recycled, never reallocated |
 | Asset catalog (CPU models, material table) | World | Loaded in `World.init`; freed in `World.deinit` after the renderer |
 | GPU copies of catalog meshes | StreamingScene | Uploaded on first render; released in shutdown |
-| Physics bodies, player, crates, modifications | App's Sandbox (fixed capacity) | Application |
+| Physics bodies, player, crates, machines, modifications | App's Sandbox (fixed capacity) | Application |
+| Parsed blueprints | Catalog (fixed capacity, parsed from embedded validated JSON) | Application |
 | Save encode/decode buffers | App, supplied allocator | Freed before the key handler returns |
 | GPU meshes, uniform and instance buffers, texture, sampler, pipelines | Renderer | Created lazily on render thread; released in shutdown |
 | Depth texture and view | Renderer | Recreated on framebuffer resize; view released before texture |
@@ -85,11 +86,28 @@ Generator version 2 uses an explicit wrapping SplitMix64 hash, signed lattice co
 
 Biome weights (arid, meadow, wetland) come from one continuous low-frequency moisture field with no per-chunk normalization. Scatter evaluates 192 candidates per chunk from a chunk seed. A candidate's `local_id` is its candidate index, so rejected candidates leave gaps rather than shifting later IDs. Slope limits are 0.88 (relics) and 0.94 (vegetation) on the surface normal's Y component; arid regions thin vegetation. An object's stable identity is `(seed, generator version, chunk key, local_id)`, which is what saved modifications will reference.
 
-The same seed/version/build reproduces this scene. Cross-architecture floating-point bit identity is not promised. A future save format must persist seed, generator version, content version, and modifications; old worlds must not silently use a new generator.
+The same seed/version/build reproduces this scene. Cross-architecture floating-point bit identity is not promised. Saves persist seed, generator version, content version, and modifications; old worlds never silently use a new generator.
 
-## Machine seed implementation
+## Machines
 
-`machine/` provides an allocation-free, 128-node scalar graph with constants, addition, multiplication, and comparison. Nodes may refer only to earlier nodes, which establishes evaluation order and prevents cycles. It has tests for results, invalid references, and capacity. This library is not connected to objects or player interactions yet. It is not a sandbox, physical simulation, graph editor, or serialization format.
+`machine/Device.zig` defines device kinds and a fixed, typed port table for each: power or signal, input or output, and a default value for unconnected signal inputs.
+
+| Kind | Role | Ports |
+| --- | --- | --- |
+| generator | source | out `power`; in `enable` (default 1) |
+| button | sensor | out `pressed` (1 for the step after a press) |
+| proximity | sensor | out `present` (player feet inside its box) |
+| latch | controller | in `toggle` (rising edge); out `state` |
+| logic | controller | in `a`–`d`; out `out` (last node of its graph) |
+| actuator | actuator | in `power`, `target` (0..1); out `position` |
+
+`machine/Blueprint.zig` parses JSON blueprint format v1: a name, static structure parts (offset, size, color), devices (id, kind, offset, size, color, and kind-specific `watts`, `speed`, `travel`, or logic `nodes`), and wires as `["device.port", "device.port"]`. It validates everything: format, names, capacities (24 devices, 16 parts, 48 wires, 64 logic nodes), finite values, positive sizes, parameters per kind, logic graphs (inputs in range, references only to earlier nodes), port existence, output→input direction, matching port kinds, and at most one driver per signal input. The result is a fixed-capacity value with resolved indices. `asset-compiler` runs the same validation on `assets/source/blueprints/*.json` during the build, so an invalid machine fails the build.
+
+`machine/Machine.zig` is one placed blueprint. Each fixed step it copies outputs to a previous buffer, and every signal input reads that buffer, giving one step of latency per hop, determinism independent of device order, and permitted wiring cycles. Power ports are joined into networks by union-find at instancing. Each step, a network sums generator supply and the rated watts of actuators that are still moving. Satisfaction is 0 without supply, otherwise `min(1, supply / demand)`, and actuators move at rated speed times satisfaction (brownout). Persistent state is one float per device (latch value, actuator position); `restore` validates ranges. The machine has no physics dependency.
+
+`machine/Graph.zig` is the controller evaluator shared by logic devices: constants, inputs, add, multiply, and greater-than, evaluated in order into caller storage without allocating.
+
+`game/Sandbox.zig` places each blueprint with its origin on the highest terrain under its structure. It creates static bodies for parts, generators, and buttons and a kinematic body for each actuator, steps machines before physics, and drives each actuator body by setting the velocity that reaches the machine's position this step. Physics user data tags machine bodies so picking can resolve a device. Pressing a button is delivered on the next machine step. The test world has a powered door (button → latch → logic OR proximity → door actuator, 200 W generator) and an elevator (two call buttons → logic OR → latch → platform actuator, 250 W generator), built from the same device kinds.
 
 ## Rendering growth path
 

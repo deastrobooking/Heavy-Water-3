@@ -2,7 +2,7 @@
 
 A Zig/Mach 3D engine foundation for a procedural science-fiction exploration and engineering game.
 
-The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, and quicksave/quickload those changes. Machines and editing come next.
+The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator built from data-driven machine blueprints, and quicksave/quickload all of it. Every engine system is native Zig; Mach provides the platform and GPU layer. Vehicles and in-game editing come next.
 
 ## Run
 
@@ -24,7 +24,7 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | V | Toggle walking and free flight |
 | Q / E | Descend / ascend (flight) |
 | Left click, then mouse | Capture pointer and look |
-| Left click (captured) | Grab or drop the crate under the crosshair |
+| Left click (captured) | Grab or drop the crate, or press the machine button, under the crosshair |
 | Right click (captured) | Salvage cutter: remove the relic under the crosshair |
 | F5 / F9 | Quicksave / quickload `saves/quicksave.json` |
 | Escape | Release pointer |
@@ -36,7 +36,7 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 ```sh
 python3 tools/zig.py build test
 python3 tools/zig.py build check
-python3 tools/zig.py build assets        # compiled runtime models in zig-out/assets
+python3 tools/zig.py build assets        # compiled models and validated blueprints in zig-out/assets
 python3 tools/zig.py build run -Doptimize=ReleaseSafe
 python3 tools/zig.py build run -Dseed=42
 python3 tools/zig.py build run -Dsmoke-frames=120

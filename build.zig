@@ -17,11 +17,21 @@ pub fn build(b: *std.Build) void {
     const crate = compile_crate.addOutputFileArg("crate.hwmesh");
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
+    // Blueprints are validated by the same tool; an invalid machine fails the build.
+    const blueprint_names = [_][]const u8{ "powered_door", "elevator" };
+    var blueprints: [blueprint_names.len]std.Build.LazyPath = undefined;
+    for (blueprint_names, &blueprints) |name, *output| {
+        const check_blueprint = b.addRunArtifact(compiler);
+        check_blueprint.addFileArg(b.path(b.fmt("assets/source/blueprints/{s}.json", .{name})));
+        output.* = check_blueprint.addOutputFileArg(b.fmt("{s}.json", .{name}));
+        assets.dependOn(&b.addInstallFileWithDir(output.*, .{ .custom = "assets/blueprints" }, b.fmt("{s}.json", .{name})).step);
+    }
 
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
     app.addOptions("options", options);
     app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
+    for (blueprint_names, blueprints) |name, output| app.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     const exe = @import("mach").addExecutable(mach.builder, .{ .name = "heavy-water", .app = app, .target = target, .optimize = optimize });
     if (target.result.os.tag == .linux) {
         exe.use_llvm = true;
@@ -35,6 +45,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("mach", mach.module("mach"));
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
     tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
+    for (blueprint_names, blueprints) |name, output| tests.root_module.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     b.step("test", "Run deterministic engine tests (no window)").dependOn(&b.addRunArtifact(tests).step);
     b.step("check", "Compile the application").dependOn(&exe.step);
 }

@@ -5,9 +5,10 @@ const Catalog = @import("../asset/Catalog.zig");
 pub const mach_module = .world;
 pub const mach_systems = .{ .init, .deinit };
 pub const Renderable = struct { transform: Transform, tint: [4]f32 };
-pub const max_props = 16;
+pub const max_props = 64;
 /// A dynamic catalog-backed object, published to the renderer each simulation tick.
-pub const Prop = struct { mesh: Catalog.MeshHandle, transform: Transform, tint: [4]f32 };
+/// `size` scales the mesh per axis on top of the transform's uniform scale.
+pub const Prop = struct { mesh: Catalog.MeshHandle, transform: Transform, tint: [4]f32, size: [3]f32 = .{ 1, 1, 1 } };
 /// Mach owns collection storage and generational IDs; app owns the lifetime of the world.
 objects: mach.Objects(.{}, Renderable),
 seed: u64 = 0,

@@ -30,6 +30,13 @@ pub fn cube(allocator: std.mem.Allocator) !Mesh {
     return .{ .vertices = vertices, .indices = indices };
 }
 
+/// Centered unit cube (-0.5..0.5 on each axis) for instances scaled per axis.
+pub fn block(allocator: std.mem.Allocator) !Mesh {
+    const mesh = try cube(allocator);
+    for (mesh.vertices) |*v| v.position[1] = v.position[1] / 2 - 0.5;
+    return mesh;
+}
+
 /// A faceted, six-sided alien shrub. Shared by all vegetation instances.
 pub fn vegetation(allocator: std.mem.Allocator) !Mesh {
     const vertices = try allocator.alloc(Vertex, 18);

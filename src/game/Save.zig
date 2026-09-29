@@ -7,11 +7,14 @@ const Player = @import("Player.zig");
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
 /// into a world with the same seed, generator version, and content version; old worlds must not
 /// silently regenerate with different rules.
-pub const format_version: u32 = 1;
+/// v2 added machine state. Older saves are rejected rather than migrated.
+pub const format_version: u32 = 2;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
 pub const PropState = struct { id: u32, position: [3]f32, velocity: [3]f32 };
+/// Persistent per-device machine state, in blueprint device order.
+pub const MachineState = struct { blueprint: []const u8, states: []const f32 };
 pub const PlayerState = struct { feet: [3]f32, yaw: f32, pitch: f32, mode: Player.Mode };
 pub const Document = struct {
     format: u32 = format_version,
@@ -22,6 +25,7 @@ pub const Document = struct {
     player: PlayerState,
     props: []const PropState,
     collected: []const Modifications.ObjectRef,
+    machines: []const MachineState,
 };
 
 pub fn encode(allocator: std.mem.Allocator, doc: Document) ![]u8 {
@@ -72,7 +76,8 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const allocator = std.testing.allocator;
     const props = [_]PropState{.{ .id = 1, .position = .{ 1, 2, 3 }, .velocity = .{ 0, 0, 0 } }};
     const collected = [_]Modifications.ObjectRef{.{ .x = -3, .z = 2, .id = 17 }};
-    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .props = &props, .collected = &collected };
+    const machines = [_]MachineState{.{ .blueprint = "powered_door", .states = &.{ 0, 1, 0.5 } }};
+    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .props = &props, .collected = &collected, .machines = &machines };
     const bytes = try encode(allocator, doc);
     defer allocator.free(bytes);
     const back = try decode(allocator, bytes, doc.seed, 4);
@@ -80,6 +85,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     try std.testing.expectEqualDeep(props[0], back.value.props[0]);
     try std.testing.expectEqualDeep(collected[0], back.value.collected[0]);
     try std.testing.expectEqual(Player.Mode.walk, back.value.player.mode);
+    try std.testing.expectEqualSlices(f32, machines[0].states, back.value.machines[0].states);
 
     try std.testing.expectError(error.SeedMismatch, decode(allocator, bytes, 1, 4));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 1));
@@ -87,7 +93,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 1", "\"format\": 2");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 2", "\"format\": 1");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4));
 }

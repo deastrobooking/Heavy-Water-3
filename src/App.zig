@@ -68,7 +68,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         },
         .mouse_press => |mouse| switch (mouse.button) {
             .left => if (self.captured) {
-                self.actions.grab = true;
+                self.actions.interact = true;
             } else self.capture(core, true),
             .right => if (self.captured) {
                 self.actions.salvage = true;
@@ -138,13 +138,13 @@ fn exerciseSmoke(self: *App) void {
             self.show_metrics = false;
             self.sandbox.player.mode = .walk;
             self.sandbox.resetPlayer(camera);
-            const crate = self.sandbox.propPosition(1);
+            const crate = self.sandbox.cratePosition(1);
             const eye = camera.position;
             const dx = crate[0] - eye.x();
             const dz = crate[2] - eye.z();
             camera.yaw = std.math.atan2(dx, dz);
             camera.pitch = std.math.atan2(crate[1] - eye.y(), @sqrt(dx * dx + dz * dz));
-            self.actions.grab = true;
+            self.actions.interact = true;
         },
         4 => {
             // In-memory save/restore round trip; never touches the user's save file.
@@ -152,7 +152,9 @@ fn exerciseSmoke(self: *App) void {
             const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE SAVE {s}", .{@errorName(err)});
             defer self.allocator.free(bytes);
             self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE LOAD {s}", .{@errorName(err)});
-            std.log.info("Smoke interaction: held={any}, save round trip {d} bytes", .{ held, bytes.len });
+            std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machine_count, bytes.len });
+            // Press the door button; the rest of the run renders the door opening.
+            self.sandbox.press = self.sandbox.findDevice(0, "button");
         },
         else => {},
     }
@@ -186,6 +188,16 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     } else switch (sandbox.target) {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
         .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  RMB SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
+        .device => |ref| {
+            const machine = &sandbox.machines[ref.machine].machine;
+            const def = machine.blueprint.device(ref.device);
+            switch (def.kind) {
+                .button => renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
+                .generator => renderer.hud_lines[1].set("GENERATOR {d:.0} W  LOAD {d:.0} W", .{ machine.outputs[ref.device][0], machine.network(ref.device).?.demand }),
+                .actuator => renderer.hud_lines[1].set("{s} {d:.0}%  POWER {d:.0}%", .{ def.name(), machine.state[ref.device] * 100, machine.satisfaction(ref.device) * 100 }),
+                else => renderer.hud_lines[1].set("{s}", .{def.name()}),
+            }
+        },
         .none => renderer.hud_lines[1] = .{},
     }
     renderer.hud_lines[2] = if (self.engine.time.tick < self.status_until) self.status else .{};
