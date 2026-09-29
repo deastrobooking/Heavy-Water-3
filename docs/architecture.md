@@ -6,6 +6,10 @@
 
 The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game: the app publishes `World.Prop` values (catalog mesh handle, transform, tint), the `Modifications` removal set, and preformatted HUD lines. `render/StreamingScene.zig` draws one terrain mesh per resident chunk plus one shared relic mesh and one shared vegetation mesh; mesh/material handles and content loading belong to the next asset milestone.
 
+## Test Arbor
+
+`procedural/TestArbor.zig` describes the phase 6 measuring stick relative to a trunk-base origin: a 320 m trunk tapering from 22 m to 10 m radius (buried 14 m), a 150-step spiral ramp 4 m wide with an outer curb that climbs for 92% of its 2.5 turns and runs level onto the platform, a 30 × 14 m branch platform at 40 m, a 14 m-wide bridge road descending 4 m over 40 m, and a 20 m tower whose top is 36 m. `renderMesh` produces one vertex-colored mesh (registered in the catalog), and `createColliders` builds the trunk and ramp as mesh colliders and the rest as oriented boxes, all from the same description. The Sandbox places it 80 m from the spawn, with the ramp's foot on the terrain. Its colliders are tagged as world geometry, which occludes picking without becoming a target. The Sandbox now takes an allocator for collider storage and frees it in `deinit`.
+
 ## Chunk streaming
 
 `world/Streamer.zig` owns a fixed pool of 49 CPU payload slots (generation radius 3). Each slot has a state (`empty → queued → generating → ready`, or `canceling`) and an atomic token. A handle is `(slot, token)`; any requeue, eviction, or cancel increments the token, so stale handles fail validation instead of reading recycled data.
@@ -82,11 +86,11 @@ The avatar is drawn in third person (F2) and in the creator, on foot only. The t
 
 ## Coordinates and GPU layout
 
-World space is left-handed, +Y up, forward +Z. Mach matrices use column storage, column vectors, and `projection × view × model`. Perspective depth maps the near plane to 0 and the far plane to 1. Tests enforce this convention.
+World space is left-handed, +Y up, forward +Z. Mach matrices use column storage, column vectors, and `projection × view × model`. Perspective depth is reversed and infinite-far: depth = near / z (1 at the near plane, toward 0 at infinity), with a greater-than depth test and a clear to 0. With a 32-bit float depth buffer, this keeps distinct depths at 1 km and 1.001 km. Tests enforce the convention and its monotonicity.
 
 GPU vertices contain packed position, normal, UV, and linear vertex color (44 bytes). Instances contain translation/uniform scale, tint, per-axis stretch, and a rotation quaternion (64 bytes). The shader stretches, then rotates, then scales and translates; normals are divided by the stretch (the inverse transpose of a diagonal scale) and rotated. Mach's native WGSL compiler does not implement the `cross` builtin, so the shader defines its own. The camera uniform is a 4×4 matrix plus padded eye position (80 bytes).
 
-Opaque terrain and scatter share a pipeline with a depth32 attachment. Each visible terrain chunk uses one indexed draw; relics and vegetation each use one indexed instanced draw. The HUD uses a separate color-only pass and one draw. The two-texel checker texture is generated at startup; the bitmap HUD uses fixed CPU storage and requires no font dependency. Shaders are embedded beside their renderer source for now; an asset compiler and shader reload will later consume `assets/`.
+Opaque terrain and scatter share a pipeline with a depth32 attachment. Each visible terrain chunk uses one indexed draw; relics and vegetation each use one indexed instanced draw. The HUD uses a separate color-only pass and one draw. Fog is height-aware haze: ground haze reaches full strength by about 380 m (hiding the streamed terrain's edge) but fades with world height (e-folding 90 m), and a separate aerial term tints everything with distance (e-folding 2.2 km). Tall content stays visible above the ground haze. The two-texel checker texture is generated at startup; the bitmap HUD uses fixed CPU storage and requires no font dependency. Shaders are embedded beside their renderer source for now; an asset compiler and shader reload will later consume `assets/`.
 
 CPU culling tests chunk bounding spheres, then compacts surviving scatter instances into preallocated storage using conservative sphere/plane tests. Culling starts enabled.
 

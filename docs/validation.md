@@ -85,6 +85,14 @@ Not yet verified by hand: how the avatar and palettes look on screen, and the cr
 
 - Debug unit suite: 69/69 passed. The BVH ray cast matches brute force over 300 random rays on a bumpy 800-triangle grid; oriented boxes face outward; mesh build cleans up on allocation failure. Acceptance: the character climbs a 15° ramp, resting on its uphill footprint sample (0.7 r × tan 15° above center, within 1 cm); it stops at a leaning 80° wall exactly one radius from the face above step height; it lands on a 5° deck at y = 3.0 (±5 cm) and climbs toward the high end; picking reports the deck mesh and user; placement overlap sees the deck until it is destroyed; a crate rests on a mesh floor at 3.4 m (±2 cm); a rigid box settles on a tilted deck.
 
+## Test Arbor and depth (phase 6)
+
+- Debug and ReleaseSafe unit suites: 71/71 passed, with no leaks under the testing allocator (every test Sandbox is deinitialized). New coverage: test Arbor geometry (ramp grade under 12%, platform, bridge ends, and tower meeting at 40 m and 36 m within 1 cm, valid render mesh); the reversed infinite projection (near → 1, monotonic toward 0, distinct depths at 1 km and 1.001 km); and the full walk acceptance: steered up the whole spiral ramp at sprint input without dropping more than 0.6 m below its surface, reaching platform height (±0.3 m), then down the bridge road to the tower top (±0.1 m), grounded.
+- Found and fixed by the walk test: the ramp first reached 40 m only at the platform's center line and ran into the platform's side 0.8 m below its top. It now levels out for the last 8% of its sweep.
+- ReleaseSafe 300-frame smoke with `MTL_DEBUG_LAYER=1` (reversed depth, the test Arbor drawn): no validation errors, clean exit. Streaming benchmark: all checks pass (interval P99 21.0 ms, render CPU P99 0.8 ms).
+
+Not yet verified by hand: how the tree reads on screen and at distance, and haze tuning.
+
 ## Upstream programmatic resize issue
 
 A ReleaseSafe smoke run with Metal API validation reproduced a hang after setting `Core.windows.width/height` from the application thread. Sampling showed the main thread in `macOS.tick → NSWindow.setFrame_display_animate → windowDidResize → handleResize → windows.lock`. `tick` already owns that non-reentrant lock. The renderer and application then wait on the same collection lock. This is in the pinned Mach source, not a GPU validation error.

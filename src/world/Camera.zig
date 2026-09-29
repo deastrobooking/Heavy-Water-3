@@ -7,7 +7,6 @@ yaw: f32 = 0,
 pitch: f32 = -0.30,
 fov: f32 = std.math.pi / 3.0,
 near: f32 = 0.1,
-far: f32 = 400,
 
 pub fn look(self: *Camera, x: f32, y: f32) void {
     self.yaw = @mod(self.yaw + x * 0.0025, 2 * std.math.pi);
@@ -27,10 +26,11 @@ pub fn move(self: *Camera, input: Input, dt: f32) void {
     self.position = self.position.add(&delta.mulScalar(dt * (if (input.fast) @as(f32, 35) else 12)));
 }
 
+/// Reversed, infinite-far perspective: depth = near / z, so the near plane maps to 1 and
+/// infinity to 0. With a float depth buffer this keeps precision across kilometers.
 pub fn projection(self: Camera, aspect: f32) math.Mat4x4 {
     const y = 1 / @tan(self.fov / 2);
-    const z = self.far / (self.far - self.near);
-    return math.Mat4x4.init(&math.vec4(y / aspect, 0, 0, 0), &math.vec4(0, y, 0, 0), &math.vec4(0, 0, z, -self.near * z), &math.vec4(0, 0, 1, 0));
+    return math.Mat4x4.init(&math.vec4(y / aspect, 0, 0, 0), &math.vec4(0, y, 0, 0), &math.vec4(0, 0, 0, self.near), &math.vec4(0, 0, 1, 0));
 }
 
 pub fn viewProjection(self: Camera, aspect: f32) math.Mat4x4 {
@@ -41,13 +41,22 @@ pub fn viewProjection(self: Camera, aspect: f32) math.Mat4x4 {
     return self.projection(aspect).mul(&view);
 }
 
-test "left handed projection maps near and far to zero and one" {
+test "reversed infinite projection maps near to one, far toward zero, monotonically" {
     const c: Camera = .{};
     const p = c.projection(16.0 / 9.0);
     const n = p.mulVec(&math.vec4(0, 0, c.near, 1));
-    const f = p.mulVec(&math.vec4(0, 0, c.far, 1));
-    try std.testing.expectApproxEqAbs(@as(f32, 0), n.z() / n.w(), 0.00001);
-    try std.testing.expectApproxEqAbs(@as(f32, 1), f.z() / f.w(), 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), n.z() / n.w(), 0.00001);
+    var previous: f32 = 1;
+    for ([_]f32{ 1, 10, 100, 1000, 5000 }) |z| {
+        const d = p.mulVec(&math.vec4(0, 0, z, 1));
+        const depth = d.z() / d.w();
+        try std.testing.expect(depth < previous and depth > 0);
+        previous = depth;
+    }
+    // Distinct depths at 1 km and 1.001 km in 32-bit float.
+    const a = p.mulVec(&math.vec4(0, 0, 1000, 1));
+    const b = p.mulVec(&math.vec4(0, 0, 1001, 1));
+    try std.testing.expect(a.z() / a.w() != b.z() / b.w());
 }
 
 test "translated and rotated camera projects its forward direction to screen center" {

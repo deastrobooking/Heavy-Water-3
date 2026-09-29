@@ -523,7 +523,7 @@ const Terrain = @import("../procedural/Terrain.zig");
 fn testWorld(sb: *Sandbox, catalog: *Catalog, camera: *Camera) !void {
     try catalog.load(std.testing.allocator);
     errdefer catalog.deinit(std.testing.allocator);
-    try sb.init(310399555161, catalog, camera);
+    try sb.init(std.testing.allocator, 310399555161, catalog, camera);
 }
 
 fn tick(sb: *Sandbox, camera: *Camera, actions: Sandbox.Actions) !void {
@@ -561,6 +561,7 @@ test "build a workshop circuit from the palette, wire it in the world, light it,
     var sb: Sandbox = undefined;
     try testWorld(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
     try tick(&sb, &camera, .{ .select_tool = 2 });
     try std.testing.expectEqual(Tool.build, sb.tools.tool);
     try placeAt(&sb, &camera, .generator, 3, -3);
@@ -602,7 +603,8 @@ test "build a workshop circuit from the palette, wire it in the world, light it,
     defer std.testing.allocator.free(bytes);
     var other_camera: Camera = .{};
     var other: Sandbox = undefined;
-    try other.init(sb.seed, &catalog, &other_camera);
+    try other.init(std.testing.allocator, sb.seed, &catalog, &other_camera);
+    defer other.deinit();
     try std.testing.expectEqual(@as(?u8, null), other.workshop);
     try other.restore(std.testing.allocator, bytes, &other_camera);
     const ow = other.workshop.?;
@@ -628,6 +630,7 @@ test "prefabs snap and rotate, overlapping placements are refused, and removal f
     var sb: Sandbox = undefined;
     try testWorld(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
     const before = sb.machineCount();
     try tick(&sb, &camera, .{ .select_tool = 2 });
     try tick(&sb, &camera, .{ .rotate = true });
@@ -687,6 +690,7 @@ test "capture a circuit as a prefab, place an independent copy, inspect it, and 
     var sb: Sandbox = undefined;
     try testWorld(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
     const refs = try benchCircuit(&sb, 3);
     try tick(&sb, &camera, .{ .select_tool = 2 });
     try aimDevice(&sb, &camera, refs[3]);
@@ -741,7 +745,8 @@ test "capture a circuit as a prefab, place an independent copy, inspect it, and 
     defer std.testing.allocator.free(bytes);
     var other_camera: Camera = .{};
     var other: Sandbox = undefined;
-    try other.init(sb.seed, &catalog, &other_camera);
+    try other.init(std.testing.allocator, sb.seed, &catalog, &other_camera);
+    defer other.deinit();
     try other.restore(std.testing.allocator, bytes, &other_camera);
     try std.testing.expectEqual(@as(usize, 1), other.prefab_count);
     try std.testing.expectEqualStrings("circuit_1", other.prefabs[0].name());
@@ -754,6 +759,7 @@ test "a button on one machine lights a lamp on another over a bus channel, and c
     var sb: Sandbox = undefined;
     try testWorld(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
     // Sender: workshop button → latch → transmitter.
     const kits = [_]Item{ .button, .latch, .transmitter };
     var refs: [3]Sandbox.DeviceRef = undefined;
@@ -801,7 +807,8 @@ test "a button on one machine lights a lamp on another over a bus channel, and c
     defer std.testing.allocator.free(bytes);
     var other_camera: Camera = .{};
     var other: Sandbox = undefined;
-    try other.init(sb.seed, &catalog, &other_camera);
+    try other.init(std.testing.allocator, sb.seed, &catalog, &other_camera);
+    defer other.deinit();
     try other.restore(std.testing.allocator, bytes, &other_camera);
     try std.testing.expectEqual(@as(u16, Device.max_channels), other.machines[other.workshop.?].blueprint.devices[2].channel);
 }

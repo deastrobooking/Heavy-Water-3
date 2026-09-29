@@ -62,9 +62,19 @@ pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Alloc
     self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .scene = try Scene.init(allocator, io, world.seed, &world.catalog) };
 }
 
+/// Async validation errors from the device driver; the WebGPU-style API otherwise reports
+/// success even when a descriptor is rejected, so this is the only observable failure path.
+fn onDeviceError(_: void, typ: gpu.ErrorType, message: [*:0]const u8) callconv(.@"inline") void {
+    std.log.err("GPU device error ({s}): {s}", .{ @tagName(typ), message });
+}
+
 fn setup(self: *Renderer, core: *mach.Core) !void {
     const window = core.windows.getValue(core.window);
     const device = window.device;
+    device.setUncapturedErrorCallback({}, onDeviceError);
+    // Every field below is nulled by its errdefer so a failure partway leaves deinit() safe to
+    // release only what was actually created; render() turns a setup failure into a clean exit
+    // instead of letting it reach Mach's panic-on-error callback dispatch.
     const shader = device.createShaderModuleWGSL("scene.wgsl", @embedFile("scene.wgsl"));
     defer shader.release();
     const layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
@@ -76,10 +86,15 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{layout} }));
     defer pipeline_layout.release();
     self.uniform = device.createBuffer(&.{ .label = "camera", .size = @sizeOf(Frame), .usage = .{ .uniform = true, .copy_dst = true } });
+    errdefer { self.uniform.?.release(); self.uniform = null; }
     self.instance_buffer = device.createBuffer(&.{ .label = "instances", .size = Scene.max_instances * @sizeOf(Instance), .usage = .{ .vertex = true, .copy_dst = true } });
+    errdefer { self.instance_buffer.?.release(); self.instance_buffer = null; }
     self.texture = device.createTexture(&.{ .label = "surface checker", .size = .{ .width = 2, .height = 2 }, .format = .rgba8_unorm, .usage = .{ .texture_binding = true, .copy_dst = true } });
+    errdefer { self.texture.?.release(); self.texture = null; }
     self.texture_view = self.texture.?.createView(&.{});
+    errdefer { self.texture_view.?.release(); self.texture_view = null; }
     self.sampler = device.createSampler(&.{ .address_mode_u = .repeat, .address_mode_v = .repeat, .mag_filter = .nearest, .min_filter = .nearest });
+    errdefer { self.sampler.?.release(); self.sampler = null; }
     const pixels = [_]u8{ 240, 240, 240, 255, 190, 200, 205, 255, 190, 200, 205, 255, 240, 240, 240, 255 };
     window.queue.writeTexture(&.{ .texture = self.texture.? }, &.{ .bytes_per_row = 8, .rows_per_image = 2 }, &.{ .width = 2, .height = 2 }, &pixels);
     self.bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = layout, .entries = &.{
@@ -87,6 +102,7 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         gpu.BindGroup.Entry.initTextureView(1, self.texture_view.?),
         gpu.BindGroup.Entry.initSampler(2, self.sampler.?),
     } }));
+    errdefer { self.bind_group.?.release(); self.bind_group = null; }
     const buffers = [_]gpu.VertexBufferLayout{
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Mesh.Vertex), .attributes = &.{
             .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
@@ -108,8 +124,9 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         .vertex = gpu.VertexState.init(.{ .module = shader, .entry_point = "vertex_main", .buffers = &buffers }),
         .fragment = &fragment,
         .primitive = .{ .cull_mode = .none },
-        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .less },
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .greater },
     });
+    errdefer { self.pipeline.?.release(); self.pipeline = null; }
     self.scene.setup(device, window.queue);
 
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
@@ -122,7 +139,9 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         } })} }),
         .fragment = &hud_fragment,
     });
+    errdefer { self.overlay_pipeline.?.release(); self.overlay_pipeline = null; }
     self.overlay_buffer = device.createBuffer(&.{ .label = "debug overlay", .size = Overlay.capacity * @sizeOf(Overlay.Vertex), .usage = .{ .vertex = true, .copy_dst = true } });
+    errdefer { self.overlay_buffer.?.release(); self.overlay_buffer = null; }
     std.log.info("Heavy Water: seed={d}, generator={d}, streaming pool=49 chunks, GPU pool=25 chunks, upload budget={d}", .{ self.seed, Seed.generator_version, options.upload_budget });
     self.timer.reset();
 }
@@ -138,7 +157,13 @@ fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32) void {
 }
 
 pub fn render(self: *Renderer, core: *mach.Core) !void {
-    if (self.pipeline == null) try self.setup(core);
+    // A setup failure must not reach Mach's callback dispatch: it panics on any returned error,
+    // skipping App.stop/Renderer.deinit and leaking the streaming worker and GPU resources.
+    if (self.pipeline == null) self.setup(core) catch |err| {
+        std.log.err("renderer setup failed, exiting: {s}", .{@errorName(err)});
+        core.exit();
+        return;
+    };
     var cpu_timer = mach.time.Timer.start(self.timer.io);
     if (options.benchmark_frames > 0) self.camera = Flythrough.camera(self.frames -| Flythrough.warmup_frames, options.benchmark_frames);
     const window = core.windows.getValue(core.window);
@@ -160,7 +185,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     if (self.overlay.len > 0) encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
     const pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
         .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = 0.055, .g = 0.10, .b = 0.14, .a = 1 } }},
-        .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .discard, .depth_clear_value = 1 },
+        .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .discard, .depth_clear_value = 0 },
     }));
     defer pass.release();
     pass.setPipeline(self.pipeline.?);

@@ -13,6 +13,7 @@ test {
     _ = @import("engine/Flythrough.zig");
     _ = @import("engine/Handle.zig");
     _ = @import("procedural/Terrain.zig");
+    _ = @import("procedural/TestArbor.zig");
     _ = @import("asset/Model.zig");
     _ = @import("asset/Gltf.zig");
     _ = @import("asset/Catalog.zig");

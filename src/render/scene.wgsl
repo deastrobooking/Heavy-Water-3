@@ -49,6 +49,11 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
     let sunlight = max(dot(normalize(in.normal), normalize(vec3<f32>(-0.4, 0.8, -0.3))), 0.0);
     let texel = textureSample(surface_texture, surface_sampler, in.uv).rgb;
     let color = in.tint.rgb * texel * (0.28 + sunlight * 0.85);
-    let fog = clamp(distance(in.world, frame.eye.xyz) / 380.0, 0.0, 0.94);
+    // Height-aware haze: ground haze hides the streamed terrain's edge (~320 m), tall shapes
+    // rise out of it, and everything picks up aerial tint with distance.
+    let d = distance(in.world, frame.eye.xyz);
+    let ground = clamp((d - 40.0) / 340.0, 0.0, 1.0) * exp(-max(in.world.y, 0.0) / 90.0);
+    let aerial = 1.0 - exp(-d / 2200.0);
+    let fog = clamp(max(ground, aerial), 0.0, 0.95);
     return vec4<f32>(mix(color, vec3<f32>(0.055, 0.10, 0.14), fog), 1.0);
 }

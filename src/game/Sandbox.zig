@@ -19,6 +19,7 @@ const Build = @import("Build.zig");
 const Profile = @import("Profile.zig");
 const Avatar = @import("Avatar.zig");
 const Creator = @import("Creator.zig");
+const TestArbor = @import("../procedural/TestArbor.zig");
 const Sandbox = @This();
 
 /// The interactive session: a walking player, physical crates, placed machines (a powered
@@ -91,12 +92,20 @@ pub const Placed = struct {
 const machine_flag: u32 = 1 << 31;
 const part_flag: u32 = 1 << 30;
 const chassis_flag: u32 = 1 << 29;
+/// Generated world geometry (the test Arbor): occludes picking, never a target.
+const world_flag: u32 = 1 << 28;
+/// Test Arbor placement relative to the spawn point.
+pub const arbor_offset: [2]f32 = .{ 60, 80 };
 
 pub const View = enum { first, third };
 pub const third_person_distance: f32 = 4;
 
 seed: u64,
 catalog: *const Catalog,
+/// Owns mesh-collider storage; `deinit` frees it.
+allocator: std.mem.Allocator,
+arbor_origin: ?Physics.Vec3 = null,
+arbor_colliders: [5]Physics.MeshCollider = @splat(.none),
 profile: Profile = .{},
 creator: Creator = .{},
 view: View = .first,
@@ -135,9 +144,11 @@ notice_len: usize = 0,
 notice_until: u64 = 0,
 
 /// Initializes in place: physics keeps a pointer to `seed` for terrain queries.
-pub fn init(self: *Sandbox, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
-    self.* = .{ .seed = seed, .catalog = catalog, .physics = undefined };
+pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
+    self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined };
     self.physics = .init(.{ .context = &self.seed, .sample = groundSample });
+    errdefer self.physics.deinit();
+    try self.placeArbor(spawn[0] + arbor_offset[0], spawn[2] + arbor_offset[1]);
     const half = self.crateHalf();
     for (crate_offsets) |offset| {
         const x = spawn[0] + offset[0];
@@ -156,6 +167,19 @@ pub fn init(self: *Sandbox, seed: u64, catalog: *const Catalog, camera: *Camera)
         _ = try self.spawnMachine(null, bp.*, self.groundOrigin(bp, x, z, 0), 0, false);
     }
     self.resetPlayer(camera);
+}
+
+/// Frees mesh colliders. Bodies and machines own no heap memory.
+pub fn deinit(self: *Sandbox) void {
+    self.physics.deinit();
+}
+
+/// Places the test Arbor with its ramp starting on the terrain at the given trunk center.
+fn placeArbor(self: *Sandbox, x: f32, z: f32) !void {
+    const start = TestArbor.rampPoint(0);
+    const origin: Physics.Vec3 = .{ x, Terrain.surface(self.seed, x + start[0], z + start[2]).height, z };
+    _ = try TestArbor.createColliders(self.allocator, &self.physics, origin, world_flag, &self.arbor_colliders);
+    self.arbor_origin = origin;
 }
 
 pub fn say(self: *Sandbox, comptime fmt: []const u8, args: anytype) void {
@@ -571,7 +595,7 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distan
         // Crates carry their slot; machine devices and vehicle chassis (→ seat) carry machine
         // and device; structure parts carry their machine.
         const machine: u8 = @intCast((hit.user >> 8) & 0xFF);
-        best = if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .{ .structure = machine } else .{ .device = .{ .machine = machine, .device = @intCast(hit.user & 0xFF) } };
+        best = if (hit.user & world_flag != 0) .none else if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .{ .structure = machine } else .{ .device = .{ .machine = machine, .device = @intCast(hit.user & 0xFF) } };
     }
     if (relics) for (self.nearby) |chunk| for (chunk.objects[0..chunk.count]) |object| {
         if (object.kind != .relic) continue;
@@ -612,6 +636,10 @@ pub fn devicePosition(self: *const Sandbox, ref: DeviceRef) Physics.Vec3 {
 /// Render view of crates, machines, and (with the build or wire tool) previews and wires.
 pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     var n: usize = 0;
+    if (self.arbor_origin) |origin| if (n < out.len) {
+        out[n] = .{ .mesh = self.catalog.content.test_arbor, .transform = .{ .position = origin }, .tint = .{ 1, 1, 1, 1 } };
+        n += 1;
+    };
     for (0..max_crates) |i| {
         if (!self.crateLive(i)) continue;
         if (n == out.len) return n;
@@ -803,7 +831,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
 fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {
     try catalog.load(std.testing.allocator);
     errdefer catalog.deinit(std.testing.allocator);
-    try sandbox.init(310399555161, catalog, camera);
+    try sandbox.init(std.testing.allocator, 310399555161, catalog, camera);
 }
 
 fn run(sandbox: *Sandbox, camera: *Camera, input: Input, actions: Actions, steps: usize) !void {
@@ -817,6 +845,7 @@ test "walk to a crate, carry it, drop it, save, disturb, and reload the modifica
     var sandbox: Sandbox = undefined;
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
 
     // Settle: the player stands on the terrain and crates rest without sinking.
     try run(&sandbox, &camera, .{}, .{}, 120);
@@ -866,7 +895,8 @@ test "walk to a crate, carry it, drop it, save, disturb, and reload the modifica
     // A save from another seed is rejected without changing the session.
     var other: Sandbox = undefined;
     var other_camera: Camera = .{};
-    try other.init(42, &catalog, &other_camera);
+    try other.init(std.testing.allocator, 42, &catalog, &other_camera);
+    defer other.deinit();
     try std.testing.expectError(error.SeedMismatch, other.restore(std.testing.allocator, bytes, &other_camera));
 }
 
@@ -876,6 +906,7 @@ test "salvage removes a relic by stable ID, survives regeneration, and round-tri
     var sandbox: Sandbox = undefined;
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
     sandbox.player.mode = .fly;
 
     // Find a relic in the spawn chunk and aim at it from two meters away.
@@ -933,6 +964,7 @@ test "powered door blocks, opens from its button, lets the player through, and r
     var sandbox: Sandbox = undefined;
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
     const door = sandbox.findDevice(0, "door").?;
     const button = sandbox.findDevice(0, "button").?;
     const origin = sandbox.machines[0].machine.origin;
@@ -976,6 +1008,7 @@ test "elevator carries the player to the landing with the same machine APIs" {
     var sandbox: Sandbox = undefined;
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
     const platform = sandbox.findDevice(1, "platform").?;
     const call_low = sandbox.findDevice(1, "call_low").?;
     const origin = sandbox.machines[1].machine.origin;
@@ -1011,6 +1044,7 @@ test "rover: enter from its side, drive forward on machine power, exit, park, an
     var sandbox: Sandbox = undefined;
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
     const m: u8 = 2;
     const rigid = sandbox.machines[m].vehicle.?.rigid;
     try run(&sandbox, &camera, .{}, .{}, 120);
@@ -1059,6 +1093,7 @@ test "a named, customized character is shown in third person, aims from its eyes
     var sandbox: Sandbox = undefined;
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
 
     // Creator: the character is frozen and faced; tools and movement do nothing.
     try run(&sandbox, &camera, .{}, .{ .open_creator = true }, 1);
@@ -1095,8 +1130,66 @@ test "a named, customized character is shown in third person, aims from its eyes
     defer std.testing.allocator.free(bytes);
     var other_camera: Camera = .{};
     var other: Sandbox = undefined;
-    try other.init(sandbox.seed, &catalog, &other_camera);
+    try other.init(std.testing.allocator, sandbox.seed, &catalog, &other_camera);
+    defer other.deinit();
     try other.restore(std.testing.allocator, bytes, &other_camera);
     try std.testing.expectEqualDeep(sandbox.profile, other.profile);
     try std.testing.expect(other.creator.confirmed);
+}
+
+test "walk the test Arbor: up the spiral ramp, onto the branch platform, across the bridge road" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const origin = sandbox.arbor_origin.?;
+    const start = R.add(origin, TestArbor.rampPoint(0));
+    sandbox.player = .{ .feet = .{ start[0], start[1] + 0.2, start[2] } };
+    camera.position = sandbox.player.eye();
+    camera.pitch = 0;
+    const end_angle = TestArbor.rampEndAngle();
+    var travelled: f32 = 0;
+    var previous_angle: f32 = 0;
+    var worst: f32 = 0;
+    var steps: usize = 0;
+    // Steer along the ramp's center line until the ramp's full sweep is covered.
+    while (travelled < end_angle and steps < 7000) : (steps += 1) {
+        const local = R.sub(sandbox.player.feet, origin);
+        const angle = std.math.atan2(local[2], local[0]);
+        var delta = angle - previous_angle;
+        if (delta < -std.math.pi) delta += 2 * std.math.pi;
+        if (delta > std.math.pi) delta -= 2 * std.math.pi;
+        travelled += delta;
+        previous_angle = angle;
+        // Height below the ramp surface at this point of the sweep: how far we fell, if at all.
+        const expected = TestArbor.rampPoint(std.math.clamp(travelled / end_angle, 0, 1))[1];
+        worst = @min(worst, local[1] - expected);
+        const radius = @sqrt(local[0] * local[0] + local[2] * local[2]);
+        const center = TestArbor.trunkRadius(local[1]) + TestArbor.ramp_clearance + TestArbor.ramp_width / 2;
+        const tangent: Physics.Vec3 = .{ -@sin(angle), 0, @cos(angle) };
+        const radial: Physics.Vec3 = .{ @cos(angle), 0, @sin(angle) };
+        const heading = R.add(tangent, R.scale(radial, (center - radius) * 0.5));
+        camera.yaw = std.math.atan2(heading[0], heading[2]);
+        try sandbox.step(&camera, .{ .forward = 1, .fast = true }, .{}, 1.0 / 60.0);
+    }
+    try std.testing.expect(travelled >= end_angle);
+    try std.testing.expect(worst > -0.6);
+    try std.testing.expectApproxEqAbs(origin[1] + TestArbor.platform_height, sandbox.player.feet[1], 0.3);
+
+    // Out along the branch platform and down the bridge road to the tower top.
+    const out: Physics.Vec3 = .{ @cos(end_angle), 0, @sin(end_angle) };
+    camera.yaw = std.math.atan2(out[0], out[2]);
+    var lowest = std.math.inf(f32);
+    for (0..1500) |_| {
+        try sandbox.step(&camera, .{ .forward = 1 }, .{}, 1.0 / 60.0);
+        lowest = @min(lowest, sandbox.player.feet[1] - origin[1]);
+        if (R.dot(R.sub(sandbox.player.feet, origin), out) > 102) break;
+    }
+    const along = R.dot(R.sub(sandbox.player.feet, origin), out);
+    try std.testing.expect(along > 90);
+    try std.testing.expect(lowest > TestArbor.tower_top - 0.3);
+    try std.testing.expectApproxEqAbs(origin[1] + TestArbor.tower_top, sandbox.player.feet[1], 0.1);
+    try std.testing.expect(sandbox.player.grounded);
 }

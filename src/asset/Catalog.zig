@@ -29,6 +29,8 @@ pub const Content = struct {
     block: MeshHandle,
     /// Unit cylinder along X for wheels.
     wheel: MeshHandle,
+    /// The hand-authored test Arbor (phase 6), relative to its trunk-base origin.
+    test_arbor: MeshHandle,
     powered_door: *const Blueprint,
     elevator: *const Blueprint,
     rover: *const Blueprint,
@@ -49,6 +51,7 @@ pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
     self.content.plant = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.vegetation(allocator), .named("plant", .{ 1, 1, 1, 1 })));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
+    self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
     self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
     // Blueprints were validated at build time; parsing again guards against a stale build.
     self.content.powered_door = try self.addBlueprint(allocator, @embedFile("powered_door.blueprint"));

@@ -84,7 +84,7 @@ Make the engine able to hold a vertical world and look like one.
 1. Done: static triangle-mesh colliders with a BVH, and oriented boxes built from them. The character climbs a 15° mesh ramp, is stopped by an 80° wall, and stands on and climbs a 5° deck; crates rest on mesh floors; rigid bodies settle on tilted mesh decks; wheels, picking, and placement see meshes.
 2. Streaming and level of detail for tall placed content, not only ground chunks; measure a 600 m test tree from 1 km.
 3. Painterly cel-shading pass: toon ramp, rim light, silhouette outlines, aerial haze, day/night with emissive lumen.
-4. One hand-authored test Arbor (trunk, two branch platforms, a bridge) to measure collision, streaming, and the look before generating any.
+4. Done: a hand-authored test Arbor (`procedural/TestArbor.zig`) 80 m from the spawn, with a 320 m tapered trunk, a 2.5-turn spiral ramp with a curb, a branch platform at 40 m, a 14 m bridge road descending 5.7° to a tower top at 36 m, and render mesh and colliders from one description. The walk acceptance passes headlessly: up the ramp without dropping below its surface, onto the platform (±0.3 m), and down the bridge to the tower top (±0.1 m). Rendering switched to reversed, infinite-far depth with a height-aware haze so the tree is visible above the ground haze.
 
 Acceptance: walk up a trunk ramp onto a branch platform and across an angled bridge, and render the test Arbor within frame budget at 1 km and up close.
 

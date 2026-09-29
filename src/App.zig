@@ -51,7 +51,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     core.on_exit = app_mod.id.deinit;
     self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
-    try self.sandbox.init(options.seed, &world.catalog, &self.engine.camera);
+    try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
     self.importPrefabs();
     // A new game begins by creating the character (not in unattended smoke or benchmark runs).
     if (options.smoke_frames == 0 and options.benchmark_frames == 0) self.sandbox.creator.begin(self.sandbox.profile);
@@ -366,6 +366,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
 
 pub fn stop(self: *App) void {
     self.thread.join();
+    defer self.sandbox.deinit();
     // The app thread has exited, so the sandbox can be read safely.
     if (self.smoke_rover_start) |origin| {
         const now = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
