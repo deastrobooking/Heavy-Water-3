@@ -2,7 +2,7 @@
 
 A Zig/Mach 3D engine foundation for a procedural science-fiction exploration and engineering game.
 
-The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps) on a snapping grid; with the wire tool you connect their ports in the world. Quicksave/quickload stores the whole world, including what you built and rewired. Every engine system is native Zig; Mach provides the platform and GPU layer.
+The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. You start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps) on a snapping grid; with the wire tool you connect their ports in the world. Capture any machine or circuit as a prefab to place copies, and inspect a machine's power networks, device outputs, and wires. Quicksave/quickload stores the whole world, including what you built, rewired, and captured. Every engine system is native Zig; Mach provides the platform and GPU layer.
 
 ## Run
 
@@ -29,6 +29,8 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | Right click (captured), hands | Salvage cutter: remove the relic under the crosshair |
 | Build tool | Tab next palette item, T rotate 90°, left click place (green preview), right click remove the crate, device, or machine under the crosshair |
 | Wire tool | Left click a source device, then a target (Tab cycles valid port pairs), left click to connect; right click disconnects the aimed device's inputs or cancels |
+| P (build or wire tool) | Capture the aimed machine as a prefab: added to the palette and exported to `saves/prefabs/<name>.json` |
+| I | Toggle the inspection panel for the aimed machine |
 | W / S, A / D (driving) | Throttle and reverse, steer |
 | Space (driving) | Brake (an empty rover holds its parking brake) |
 | F5 / F9 | Quicksave / quickload `saves/quicksave.json` |
@@ -48,6 +50,8 @@ python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/zig.py build -Doptimize=ReleaseFast
 python3 tools/benchmark.py            # fixed fly-through route, writes .tools/streaming-benchmark.json
 ```
+
+Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.
 
 `build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, pressing the door button, and driving the rover. It never writes the save file. Use at least 16 frames to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
 

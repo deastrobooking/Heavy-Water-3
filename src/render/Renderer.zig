@@ -15,6 +15,7 @@ const Renderer = @This();
 
 pub const mach_module = .renderer;
 pub const mach_systems = .{ .init, .render, .deinit };
+pub const panel_capacity = 16;
 const Instance = Scene.Instance;
 comptime {
     if (options.upload_budget < Scene.chunk_bytes) @compileError("upload-budget-kib must be at least 278");
@@ -29,6 +30,9 @@ props: [World.max_props]World.Prop = undefined,
 prop_count: usize = 0,
 modifications: Modifications = .{},
 hud_lines: [3]Overlay.Line = @splat(.{}),
+/// Machine inspection text (right side), drawn even with metrics hidden.
+panel: [panel_capacity]Overlay.Line = @splat(.{}),
+panel_count: usize = 0,
 crosshair: bool = false,
 scene: Scene = undefined,
 seed: u64 = 0,
@@ -210,6 +214,15 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
     for (self.hud_lines, 0..) |line, i| if (line.len > 0) {
         self.overlay.text(30, status_y + @as(f32, @floatFromInt(i)) * 18, line.slice(), if (i == 0) cyan else ink);
     };
+    if (self.panel_count > 0) {
+        const x = self.overlay.width - 16 - 520;
+        const h = @as(f32, @floatFromInt(self.panel_count)) * 18 + 22;
+        self.overlay.rect(x, 16, 520, h, .{ 0.02, 0.035, 0.05, 1 });
+        self.overlay.rect(x, 16, 3, h, cyan);
+        for (self.panel[0..self.panel_count], 0..) |line, i| {
+            self.overlay.text(x + 14, 28 + @as(f32, @floatFromInt(i)) * 18, line.slice(), if (i == 0) cyan else ink);
+        }
+    }
     if (!self.show_metrics) return;
     self.overlay.rect(16, 16, 448, 278, .{ 0.02, 0.035, 0.05, 1 });
     self.overlay.rect(16, 16, 3, 278, cyan);
@@ -225,7 +238,7 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
     self.overlay.text(30, 185, "WASD MOVE  SPACE JUMP  SHIFT FAST", ink);
     self.overlay.text(30, 203, "V WALK/FLY  QE FLY RISE  R RESET", ink);
     self.overlay.text(30, 221, "CLICK LOOK/GRAB  RMB SALVAGE  ESC", ink);
-    self.overlay.text(30, 239, "F5 SAVE  F9 LOAD", ink);
+    self.overlay.text(30, 239, "F5 SAVE  F9 LOAD  I INSPECT  P CAPTURE", ink);
     self.overlay.text(30, 257, if (self.culling) "F1 HUD  C CULLING ON" else "F1 HUD  C CULLING OFF", cyan);
 }
 

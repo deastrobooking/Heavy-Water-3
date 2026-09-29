@@ -49,7 +49,7 @@ Acceptance evidence: headless tests walk into the closed door, press its button,
 
 The rover was added only after the door and elevator worked, as planned. A headless test enters it, drives it more than 4 m on motor power, exits, verifies the parking brake, and reloads its pose. Physics tests hold it on a 20° slope in both headings and roll it freely when released.
 
-## 5. Creation — first slice implemented
+## 5. Creation — prefabs and inspection implemented
 
 1. Build tool: a palette of crates, prefab machines (powered door, elevator, rover), and loose devices (generator, button, latch, logic OR, lamp), with 0.5 m grid snapping, quarter-turn rotation, surface or terrain-footprint snapping, a green or red preview, overlap and player rejection, and removal.
 2. Wire tool: connect any output to a compatible input on the same machine, cycling valid port pairs; disconnect a device's inputs. Every edit goes through `Blueprint.connect` / `addDevice` / `removeDevice`, the same checks the file format uses. Live machines `reconfigure` and keep their state.
@@ -58,7 +58,12 @@ The rover was added only after the door and elevator worked, as planned. A headl
 
 Acceptance evidence: headless tests build a generator, button, latch, and lamp from the palette, wire them in the world, light the lamp with the button, reload the circuit into a fresh session with the lamp lit, and remove a device (dropping its wires). They also place a rotated door on the grid, refuse an overlapping second one, and remove it.
 
-Next in this phase: prefab editing (save a workshop circuit or an edited machine as a reusable blueprint and place copies), a machine inspection panel (ports, wires, network supply and demand), and wires between machines through explicit connector devices.
+5. Prefabs: P captures the aimed machine (a workshop circuit is recentred onto its lowest device) under a unique name, adds it to the build palette after the built-ins, stores it in the world save (format v5), and exports it to `saves/prefabs/<name>.json`. Valid files there are imported into every session; invalid ones are skipped with the validation error logged.
+6. Inspection: I shows the aimed machine's name, slot, power networks (supply, demand, satisfaction), each device's live outputs, and its wires.
+
+Acceptance evidence: a headless test captures a four-device circuit, places a copy that works independently (its lamp lights, the original's does not), inspects the copy's network and outputs, rewires the copy without changing the prefab, and restores the prefab library from a save. A manual run imported one valid prefab file and skipped a broken one with `InvalidDeviceParameters`.
+
+Next in this phase: wires between machines through explicit connector devices (a sender and receiver pair with a channel), and editing a prefab's parts and parameters in place.
 
 ## 6–8. Facilities, mods, and scale — later
 

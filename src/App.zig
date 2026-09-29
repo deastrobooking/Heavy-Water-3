@@ -10,6 +10,8 @@ const TestWorld = @import("game/TestWorld.zig");
 const Sandbox = @import("game/Sandbox.zig");
 const Save = @import("game/Save.zig");
 const Build = @import("game/Build.zig");
+const Blueprint = @import("machine/Blueprint.zig");
+const prefab_dir = "saves/prefabs";
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -41,6 +43,7 @@ smoke_rover_start: ?[3]f32 = null,
 status: Overlay.Line = .{},
 status_until: u64 = 0,
 published_revision: ?u64 = null,
+inspecting: bool = false,
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io };
@@ -48,6 +51,43 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
     try self.sandbox.init(options.seed, &world.catalog, &self.engine.camera);
+    self.importPrefabs();
+}
+
+/// Loads every valid blueprint in the prefab directory into the palette; invalid files are
+/// skipped with a log line, never partially applied.
+fn importPrefabs(self: *App) void {
+    var dir = std.Io.Dir.cwd().openDir(self.io, prefab_dir, .{ .iterate = true }) catch return;
+    defer dir.close(self.io);
+    var it = dir.iterate();
+    var loaded: usize = 0;
+    while (it.next(self.io) catch null) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".json")) continue;
+        const bytes = dir.readFileAlloc(self.io, entry.name, self.allocator, .limited(1 << 20)) catch |err| {
+            std.log.warn("prefab {s}: {s}", .{ entry.name, @errorName(err) });
+            continue;
+        };
+        defer self.allocator.free(bytes);
+        const bp = Blueprint.parse(self.allocator, bytes) catch |err| {
+            std.log.warn("prefab {s}: {s}", .{ entry.name, @errorName(err) });
+            continue;
+        };
+        _ = self.sandbox.addPrefab(bp) catch break;
+        loaded += 1;
+    }
+    if (loaded > 0) std.log.info("Imported {d} prefabs from {s}", .{ loaded, prefab_dir });
+}
+
+/// Writes a captured prefab as a blueprint file other worlds import at startup.
+fn exportPrefab(self: *App, index: usize) void {
+    var arena: std.heap.ArenaAllocator = .init(self.allocator);
+    defer arena.deinit();
+    const bp = &self.sandbox.prefabs[index];
+    const doc = bp.toDoc(arena.allocator()) catch return self.report("EXPORT FAILED", .{});
+    const json = std.json.Stringify.valueAlloc(arena.allocator(), doc, .{ .whitespace = .indent_2 }) catch return self.report("EXPORT FAILED", .{});
+    const path = std.fmt.allocPrint(arena.allocator(), "{s}/{s}.json", .{ prefab_dir, bp.name() }) catch return;
+    Save.writeFile(self.io, path, json) catch |err| return self.report("EXPORT FAILED {s}", .{@errorName(err)});
+    std.log.info("Exported prefab {s}", .{path});
 }
 
 pub fn start(self: *App, core: *mach.Core, app_mod: mach.Mod(App), core_mod: mach.Mod(mach.Core)) !void {
@@ -71,6 +111,8 @@ pub fn update(self: *App, core: *mach.Core) void {
             .three => self.actions.select_tool = 3,
             .tab => self.actions.next_item = true,
             .t => self.actions.rotate = true,
+            .p => self.actions.capture = true,
+            .i => self.inspecting = !self.inspecting,
             else => {},
         },
         .mouse_press => |mouse| switch (mouse.button) {
@@ -104,6 +146,10 @@ pub fn update(self: *App, core: *mach.Core) void {
         self.sandbox.step(&self.engine.camera, self.engine.input, self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
         self.actions = .{};
     }
+    if (self.sandbox.exported) |index| {
+        self.sandbox.exported = null;
+        self.exportPrefab(index);
+    }
 }
 
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
@@ -124,6 +170,8 @@ fn quickload(self: *App) void {
     const bytes = Save.readFile(self.io, self.allocator, Save.default_path) catch |err| return self.report("LOAD FAILED {s}", .{@errorName(err)});
     defer self.allocator.free(bytes);
     self.sandbox.restore(self.allocator, bytes, &self.engine.camera) catch |err| return self.report("LOAD FAILED {s}", .{@errorName(err)});
+    // Prefabs saved with the world come first; the shared library fills in the rest.
+    self.importPrefabs();
     self.report("LOADED {s}", .{Save.default_path});
 }
 
@@ -197,7 +245,14 @@ fn smokeBuild(self: *App) void {
     }
     sb.machines[w].machine.reconfigure();
     sb.press = refs[1];
-    std.log.info("Smoke build: workshop devices={d} wires={d}", .{ bp.device_count, bp.wire_count });
+    // Capture it as a prefab (without exporting into the user's library) and place a copy.
+    sb.target = .{ .device = refs[3] };
+    Build.capture(sb);
+    sb.exported = null;
+    sb.tools = .{};
+    const copy_origin = .{ base.x() + 3, @import("procedural/Terrain.zig").surface(sb.seed, base.x() + 3, base.z() - 8).height, base.z() - 8 };
+    const copy = sb.spawnMachine(null, sb.prefabs[sb.prefab_count - 1], copy_origin, 1, false) catch |err| return self.report("SMOKE COPY {s}", .{@errorName(err)});
+    std.log.info("Smoke build: workshop devices={d} wires={d}; prefab {s} placed in slot {d}", .{ bp.device_count, bp.wire_count, sb.prefabs[sb.prefab_count - 1].name(), copy });
 }
 
 fn capture(self: *App, core: *mach.Core, enabled: bool) void {
@@ -245,6 +300,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             }
         },
         .none => renderer.hud_lines[1] = .{},
+    }
+    renderer.panel_count = 0;
+    if (self.inspecting and sandbox.seated == null) {
+        var lines: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
+        const count = Build.inspect(sandbox, &lines);
+        for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});
+        renderer.panel_count = count;
     }
     var hint_buffer: [96]u8 = undefined;
     const hint = Build.hint(sandbox, &hint_buffer);

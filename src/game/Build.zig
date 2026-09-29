@@ -19,16 +19,45 @@ pub const build_reach: f32 = 14;
 pub const grid: f32 = 0.5;
 pub const max_candidates = 16;
 
-pub const Preview = struct { item: Item, origin: Vec3, center: Vec3, half: Vec3, yaw: u2, valid: bool };
+pub const builtin_count = std.meta.fields(Item).len;
+/// A palette entry: a built-in item or a captured prefab (index into `Sandbox.prefabs`).
+pub const Entry = union(enum) { item: Item, prefab: usize };
+pub const Preview = struct { entry: Entry, origin: Vec3, center: Vec3, half: Vec3, yaw: u2, valid: bool };
 pub const State = struct {
     tool: Tool = .hands,
-    item: Item = .crate,
+    /// Palette position: built-in items first, then prefabs.
+    slot: usize = 0,
     yaw: u2 = 0,
     preview: ?Preview = null,
     wire_from: ?Sandbox.DeviceRef = null,
     wire_choice: usize = 0,
     kit_serial: u32 = 0,
+    prefab_serial: u32 = 0,
 };
+
+pub fn paletteLen(sb: *const Sandbox) usize {
+    return builtin_count + sb.prefab_count;
+}
+
+pub fn current(sb: *const Sandbox) Entry {
+    const slot = sb.tools.slot % paletteLen(sb);
+    return if (slot < builtin_count) .{ .item = @enumFromInt(slot) } else .{ .prefab = slot - builtin_count };
+}
+
+pub fn entryName(sb: *const Sandbox, e: Entry) []const u8 {
+    return switch (e) {
+        .item => |item| itemName(item),
+        .prefab => |i| sb.prefabs[i].name(),
+    };
+}
+
+/// The blueprint an entry places as a whole machine, if it is one.
+fn blueprintOf(sb: *const Sandbox, e: Entry) ?*const Blueprint {
+    return switch (e) {
+        .item => |item| prefab(sb, item),
+        .prefab => |i| &sb.prefabs[i],
+    };
+}
 pub const Bounds = struct { lo: Vec3, hi: Vec3 };
 
 pub fn itemName(item: Item) []const u8 {
@@ -105,8 +134,8 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
         .hands => {},
         .build => {
             if (actions.next_item) {
-                st.item = @enumFromInt((@intFromEnum(st.item) + 1) % std.meta.fields(Item).len);
-                sb.say("{s}", .{itemName(st.item)});
+                st.slot = (st.slot + 1) % paletteLen(sb);
+                sb.say("{s}", .{entryName(sb, current(sb))});
             }
             if (actions.rotate) st.yaw +%= 1;
             st.preview = preview(sb, camera);
@@ -116,9 +145,11 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
                 } else sb.say("aim at the ground within {d:.0} m", .{build_reach});
             }
             if (actions.secondary) remove(sb, sb.target);
+            if (actions.capture) capture(sb);
         },
         .wire => {
             if (actions.next_item) st.wire_choice += 1;
+            if (actions.capture) capture(sb);
             if (primary) wireClick(sb);
             if (actions.secondary) {
                 if (st.wire_from != null) {
@@ -156,8 +187,9 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
     const x = snap(hit.point[0]);
     const z = snap(hit.point[2]);
     const st = sb.tools;
-    var result: Preview = .{ .item = st.item, .origin = undefined, .center = undefined, .half = undefined, .yaw = st.yaw, .valid = true };
-    if (prefab(sb, st.item)) |bp| {
+    const e = current(sb);
+    var result: Preview = .{ .entry = e, .origin = undefined, .center = undefined, .half = undefined, .yaw = st.yaw, .valid = true };
+    if (blueprintOf(sb, e)) |bp| {
         result.origin = sb.groundOrigin(bp, x, z, st.yaw);
         var bounds = footprint(bp, st.yaw);
         // Foundations may sink into the terrain; only the part above ground must be clear.
@@ -168,7 +200,7 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
             result.half[k] = (bounds.hi[k] - bounds.lo[k]) / 2;
         }
     } else {
-        result.half = if (st.item == .crate) sb.crateHalf() else Sandbox.halve(kitDevice(st.item, "x").size);
+        result.half = if (e.item == .crate) sb.crateHalf() else Sandbox.halve(kitDevice(e.item, "x").size);
         const top = supportAt(sb, x, hit.point[1], z);
         result.center = .{ x, top + result.half[1] + 0.01, z };
         result.origin = result.center;
@@ -185,22 +217,27 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
 }
 
 pub fn place(sb: *Sandbox, p: Preview) !void {
-    switch (p.item) {
+    if (blueprintOf(sb, p.entry)) |bp| {
+        _ = sb.spawnMachine(null, bp.*, p.origin, p.yaw, false) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)});
+        return sb.say("placed {s}", .{entryName(sb, p.entry)});
+    }
+    const item = p.entry.item;
+    switch (item) {
         .crate => _ = sb.spawnCrate(p.center, .{ 0, 0, 0 }) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)}),
-        .powered_door, .elevator, .rover => _ = sb.spawnMachine(null, prefab(sb, p.item).?.*, p.origin, p.yaw, false) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)}),
+        .powered_door, .elevator, .rover => unreachable,
         .generator, .button, .latch, .logic_or, .lamp => {
             sb.tools.kit_serial += 1;
             var id_buffer: [Blueprint.id_len]u8 = undefined;
-            const tag = switch (p.item) {
+            const tag = switch (item) {
                 .generator => "gen",
                 .logic_or => "or",
-                else => @tagName(p.item),
+                else => @tagName(item),
             };
             const id = std.fmt.bufPrint(&id_buffer, "{s}{d}", .{ tag, sb.tools.kit_serial }) catch unreachable;
-            _ = sb.addWorkshopDevice(kitDevice(p.item, id), p.center) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)});
+            _ = sb.addWorkshopDevice(kitDevice(item, id), p.center) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)});
         },
     }
-    sb.say("placed {s}", .{itemName(p.item)});
+    sb.say("placed {s}", .{itemName(item)});
 }
 
 /// Removes a crate, a workshop device, or a whole placed machine. A vehicle being driven
@@ -284,12 +321,122 @@ fn wireClick(sb: *Sandbox) void {
     st.wire_choice = 0;
 }
 
+/// Copies the aimed machine's blueprint (with its current wiring) into the prefab library,
+/// selects it in the build palette, and flags it for export. Loose workshop devices are
+/// recentred so the copy's lowest device sits on the placement origin.
+pub fn capture(sb: *Sandbox) void {
+    const m: u8 = switch (sb.target) {
+        .device => |d| d.machine,
+        .structure => |x| x,
+        else => return sb.say("aim at a machine to capture it", .{}),
+    };
+    const placed = &sb.machines[m];
+    var bp = placed.blueprint;
+    if (placed.workshop) recenter(&bp);
+    const base_full = if (placed.workshop) "circuit" else placed.blueprint.name();
+    const base = base_full[0..@min(base_full.len, Blueprint.name_len - 6)];
+    var name_buffer: [Blueprint.name_len]u8 = undefined;
+    // Pick the first free "<base>_<n>" name.
+    while (true) {
+        sb.tools.prefab_serial += 1;
+        const name = std.fmt.bufPrint(&name_buffer, "{s}_{d}", .{ base, sb.tools.prefab_serial }) catch unreachable;
+        const taken = for (sb.prefabs[0..sb.prefab_count]) |*existing| {
+            if (std.mem.eql(u8, existing.name(), name)) break true;
+        } else false;
+        if (taken) continue;
+        bp.setName(name) catch unreachable;
+        break;
+    }
+    const index = sb.addPrefab(bp) catch |err| return sb.say("cannot capture: {s}", .{@errorName(err)});
+    sb.exported = index;
+    sb.tools.tool = .build;
+    sb.tools.wire_from = null;
+    sb.tools.slot = builtin_count + index;
+    sb.say("captured {s}: now in the build palette", .{sb.prefabs[index].name()});
+}
+
+fn recenter(bp: *Blueprint) void {
+    var center: [2]f32 = .{ 0, 0 };
+    var bottom = std.math.inf(f32);
+    const n: f32 = @floatFromInt(bp.device_count);
+    for (bp.devices[0..bp.device_count]) |d| {
+        center[0] += d.offset[0] / n;
+        center[1] += d.offset[2] / n;
+        bottom = @min(bottom, d.offset[1] - d.size[1] / 2);
+    }
+    for (bp.devices[0..bp.device_count]) |*d| {
+        d.offset[0] = snap(d.offset[0] - center[0]);
+        d.offset[2] = snap(d.offset[2] - center[1]);
+        d.offset[1] -= bottom;
+    }
+}
+
+pub const PanelLine = struct {
+    text: [64]u8 = undefined,
+    len: usize = 0,
+
+    pub fn slice(self: *const PanelLine) []const u8 {
+        return self.text[0..self.len];
+    }
+};
+
+/// Inspection text for the aimed machine: identity, power networks, device outputs, wires.
+/// Returns the number of lines written (the last says how many were cut when full).
+pub fn inspect(sb: *const Sandbox, lines: []PanelLine) usize {
+    const m: u8 = switch (sb.target) {
+        .device => |d| d.machine,
+        .structure => |x| x,
+        else => return 0,
+    };
+    const placed = &sb.machines[m];
+    const bp = &placed.blueprint;
+    const machine = &placed.machine;
+    var n: usize = 0;
+    const Writer = struct {
+        fn line(out: []PanelLine, count: *usize, comptime fmt: []const u8, args: anytype) void {
+            if (count.* >= out.len) return;
+            const text = std.fmt.bufPrint(&out[count.*].text, fmt, args) catch out[count.*].text[0..];
+            out[count.*].len = text.len;
+            count.* += 1;
+        }
+    };
+    Writer.line(lines, &n, "{s}  SLOT {d}  DEVICES {d}  WIRES {d}", .{ bp.name(), m, bp.device_count, bp.wire_count });
+    for (machine.networks[0..machine.network_count], 0..) |net, i| {
+        Writer.line(lines, &n, "NET {d}  SUPPLY {d:.0} W  DEMAND {d:.0} W  {d:.0}%", .{ i, net.supply, net.demand, net.satisfaction * 100 });
+    }
+    const reserve = @min(bp.wire_count, 4);
+    var shown: usize = 0;
+    for (bp.devices[0..bp.device_count], 0..) |*d, i| {
+        if (n + reserve + 1 >= lines.len) break;
+        var values: [48]u8 = undefined;
+        var used: usize = 0;
+        for (Device.ports(d.kind), 0..) |port, k| {
+            if (port.direction != .output) continue;
+            const text = std.fmt.bufPrint(values[used..], " {s} {d:.2}", .{ port.name, machine.outputs[i][k] }) catch break;
+            used += text.len;
+        }
+        Writer.line(lines, &n, "{s} {s}:{s}", .{ d.name(), @tagName(d.kind), values[0..used] });
+        shown += 1;
+    }
+    for (bp.wires[0..bp.wire_count], 0..) |w, i| {
+        if (n + 1 >= lines.len and i + 1 < bp.wire_count) {
+            Writer.line(lines, &n, "... {d} MORE WIRES", .{bp.wire_count - i});
+            break;
+        }
+        const a = bp.devices[w.from.device];
+        const b = bp.devices[w.to.device];
+        Writer.line(lines, &n, "{s}.{s} > {s}.{s}", .{ a.name(), Device.ports(a.kind)[w.from.port].name, b.name(), Device.ports(b.kind)[w.to.port].name });
+    }
+    if (shown < bp.device_count and n < lines.len) Writer.line(lines, &n, "... {d} MORE DEVICES", .{bp.device_count - shown});
+    return n;
+}
+
 /// One HUD line describing the active tool.
 pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools;
     return switch (st.tool) {
         .hands => "",
-        .build => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE", .{itemName(st.item)}) catch buffer,
+        .build => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE", .{entryName(sb, current(sb))}) catch buffer,
         .wire => if (pendingWire(sb)) |w| blk: {
             const bp = &sb.machines[st.wire_from.?.machine].blueprint;
             const a = bp.devices[w.from.device];
@@ -315,7 +462,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     const block = sb.catalog.content.block;
     if (st.tool == .build) if (st.preview) |p| {
         const tint: [4]f32 = if (p.valid) .{ 0.35, 1.0, 0.45, 1 } else .{ 1.0, 0.3, 0.25, 1 };
-        if (prefab(sb, p.item)) |bp| {
+        if (blueprintOf(sb, p.entry)) |bp| {
             const q = Sandbox.yawRotation(p.yaw);
             for (bp.parts[0..bp.part_count]) |part| {
                 if (n == out.len) return n;
@@ -327,10 +474,10 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
                 n += 1;
             };
         } else if (n < out.len) {
-            out[n] = if (p.item == .crate)
+            out[n] = if (p.entry.item == .crate)
                 .{ .mesh = sb.catalog.content.crate, .transform = .{ .position = p.center }, .tint = tint }
             else
-                .{ .mesh = block, .transform = .{ .position = p.center }, .tint = tint, .size = kitDevice(p.item, "x").size };
+                .{ .mesh = block, .transform = .{ .position = p.center }, .tint = tint, .size = kitDevice(p.entry.item, "x").size };
             n += 1;
         }
     };
@@ -373,7 +520,7 @@ fn aim(camera: *Camera, point: Vec3) void {
 
 /// Aims at a ground point relative to the spawn and places the selected palette item there.
 fn placeAt(sb: *Sandbox, camera: *Camera, item: Item, dx: f32, dz: f32) !void {
-    sb.tools.item = item;
+    sb.tools.slot = @intFromEnum(item);
     const x = Sandbox.spawn[0] + dx;
     const z = Sandbox.spawn[2] + dz;
     aim(camera, .{ x, Terrain.surface(sb.seed, x, z).height, z });
@@ -481,7 +628,7 @@ test "prefabs snap and rotate, overlapping placements are refused, and removal f
     try std.testing.expectApproxEqAbs(@as(f32, 0), open[0] - closed[0], 1e-4);
 
     // Same spot again: the preview is red and nothing is placed.
-    sb.tools.item = .powered_door;
+    sb.tools.slot = @intFromEnum(Item.powered_door);
     try tick(&sb, &camera, .{});
     try std.testing.expect(!sb.tools.preview.?.valid);
     try tick(&sb, &camera, .{ .interact = true });
@@ -494,4 +641,89 @@ test "prefabs snap and rotate, overlapping placements are refused, and removal f
     try tick(&sb, &camera, .{ .secondary = true });
     try std.testing.expectEqual(before, sb.machineCount());
     try std.testing.expect(!sb.machines[m].active);
+}
+
+/// Builds generator → lamp power and button → latch → lamp signal in the workshop directly.
+fn benchCircuit(sb: *Sandbox, dx: f32) ![4]Sandbox.DeviceRef {
+    const kits = [_]Item{ .generator, .button, .latch, .lamp };
+    var refs: [4]Sandbox.DeviceRef = undefined;
+    for (kits, 0..) |item, i| {
+        const x = Sandbox.spawn[0] + dx + @as(f32, @floatFromInt(i)) * 1.5;
+        const z = Sandbox.spawn[2] - 3;
+        var id: [8]u8 = undefined;
+        refs[i] = try sb.addWorkshopDevice(kitDevice(item, try std.fmt.bufPrint(&id, "k{d}", .{i})), .{ x, Terrain.surface(sb.seed, x, z).height + 0.7, z });
+    }
+    const placed = &sb.machines[refs[0].machine];
+    try placed.blueprint.connect(.{ .device = refs[0].device, .port = 0 }, .{ .device = refs[3].device, .port = 0 });
+    try placed.blueprint.connect(.{ .device = refs[1].device, .port = 0 }, .{ .device = refs[2].device, .port = 0 });
+    try placed.blueprint.connect(.{ .device = refs[2].device, .port = 1 }, .{ .device = refs[3].device, .port = 1 });
+    placed.machine.reconfigure();
+    return refs;
+}
+
+test "capture a circuit as a prefab, place an independent copy, inspect it, and keep prefabs in saves" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testWorld(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    const refs = try benchCircuit(&sb, 3);
+    try tick(&sb, &camera, .{ .select_tool = 2 });
+    try aimDevice(&sb, &camera, refs[3]);
+    try tick(&sb, &camera, .{ .capture = true });
+    try std.testing.expectEqual(@as(usize, 1), sb.prefab_count);
+    try std.testing.expectEqual(@as(?usize, 0), sb.exported);
+    try std.testing.expectEqualStrings("circuit_1", sb.prefabs[0].name());
+    try std.testing.expect(current(&sb) == .prefab);
+    // Recentered: the lowest device rests on the origin.
+    var bottom = std.math.inf(f32);
+    for (sb.prefabs[0].devices[0..4]) |d| bottom = @min(bottom, d.offset[1] - d.size[1] / 2);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), bottom, 1e-5);
+
+    // Place a copy elsewhere: a separate machine with its own generator and wiring.
+    const before = sb.machineCount();
+    const x = Sandbox.spawn[0] + 4;
+    const z = Sandbox.spawn[2] - 9;
+    aim(&camera, .{ x, Terrain.surface(sb.seed, x, z).height, z });
+    try tick(&sb, &camera, .{});
+    try std.testing.expect(sb.tools.preview.?.valid);
+    try tick(&sb, &camera, .{ .interact = true });
+    try std.testing.expectEqual(before + 1, sb.machineCount());
+    const copy: u8 = for (sb.machines, 0..) |placed, i| {
+        if (placed.active and std.mem.eql(u8, placed.blueprint.name(), "circuit_1")) break @intCast(i);
+    } else return error.TestUnexpectedResult;
+    try std.testing.expect(!sb.machines[copy].workshop);
+    try std.testing.expectEqual(@as(usize, 3), sb.machines[copy].blueprint.wire_count);
+
+    // Walk up to the copy and press its button: only the copy's lamp lights.
+    try tick(&sb, &camera, .{ .select_tool = 1 });
+    sb.player.feet = .{ x, Terrain.surface(sb.seed, x, z + 3).height, z + 3 };
+    camera.position = sb.player.eye();
+    try aimDevice(&sb, &camera, .{ .machine = copy, .device = 1 });
+    try tick(&sb, &camera, .{ .interact = true });
+    for (0..5) |_| try tick(&sb, &camera, .{});
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[copy].machine.outputs[3][2]);
+    try std.testing.expectEqual(@as(f32, 0), sb.machines[refs[0].machine].machine.outputs[3][2]);
+
+    // Inspection reports supply and demand and lists devices and wires.
+    try aimDevice(&sb, &camera, .{ .machine = copy, .device = 3 });
+    var lines: [14]PanelLine = @splat(.{});
+    const count = inspect(&sb, &lines);
+    try std.testing.expect(count >= 1 + 1 + 4 + 3);
+    try std.testing.expectEqualStrings("NET 0  SUPPLY 200 W  DEMAND 25 W  100%", lines[1].slice());
+    try std.testing.expect(std.mem.indexOf(u8, lines[5].slice(), "lit 1.00") != null);
+
+    // Rewiring the copy leaves the prefab intact.
+    _ = sb.machines[copy].blueprint.disconnectInputs(3);
+    try std.testing.expectEqual(@as(usize, 3), sb.prefabs[0].wire_count);
+
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    var other_camera: Camera = .{};
+    var other: Sandbox = undefined;
+    try other.init(sb.seed, &catalog, &other_camera);
+    try other.restore(std.testing.allocator, bytes, &other_camera);
+    try std.testing.expectEqual(@as(usize, 1), other.prefab_count);
+    try std.testing.expectEqualStrings("circuit_1", other.prefabs[0].name());
+    try std.testing.expectEqual(@as(usize, 1), other.machines[copy].blueprint.wire_count);
 }

@@ -23,6 +23,7 @@ const Sandbox = @This();
 /// (hands, build, wire), and versioned saves that describe the whole world.
 pub const max_crates = 32;
 pub const max_machines = 16;
+pub const max_prefabs = 16;
 pub const reach: f32 = 6;
 pub const hold_distance: f32 = 2.2;
 pub const spawn: Physics.Vec3 = .{ 0, 0, -58 };
@@ -56,6 +57,8 @@ pub const Actions = packed struct {
     /// Palette item (build) or port pair (wire).
     next_item: bool = false,
     rotate: bool = false,
+    /// Capture the aimed machine as a prefab (build or wire tool).
+    capture: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire.
     select_tool: u2 = 0,
 };
@@ -99,6 +102,11 @@ nearby_center: ?Key = null,
 nearby: [9]NearbyChunk = undefined,
 tick: u64 = 0,
 tools: Build.State = .{},
+/// Player-captured blueprints, placeable from the build palette after the built-ins.
+prefabs: [max_prefabs]Blueprint = undefined,
+prefab_count: usize = 0,
+/// Prefab captured this step, for the application to export to disk.
+exported: ?usize = null,
 /// Short status text for the HUD (uppercase-safe), shown until `notice_until`.
 notice: [64]u8 = undefined,
 notice_len: usize = 0,
@@ -136,6 +144,15 @@ pub fn say(self: *Sandbox, comptime fmt: []const u8, args: anytype) void {
 
 pub fn noticeText(self: *const Sandbox) []const u8 {
     return if (self.tick < self.notice_until) self.notice[0..self.notice_len] else "";
+}
+
+/// Adds a validated prefab; an existing name is kept, not duplicated.
+pub fn addPrefab(self: *Sandbox, bp: Blueprint) !usize {
+    for (self.prefabs[0..self.prefab_count], 0..) |*existing, i| if (std.mem.eql(u8, existing.name(), bp.name())) return i;
+    if (self.prefab_count == max_prefabs) return error.TooManyPrefabs;
+    self.prefabs[self.prefab_count] = bp;
+    self.prefab_count += 1;
+    return self.prefab_count - 1;
 }
 
 pub fn crateHalf(self: *const Sandbox) Physics.Vec3 {
@@ -629,6 +646,11 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
         .machines = machines[0..machine_count],
+        .prefabs = prefabs: {
+            const docs = try arena.alloc(Blueprint.Doc, self.prefab_count);
+            for (docs, self.prefabs[0..self.prefab_count]) |*doc, *bp| doc.* = try bp.toDoc(arena);
+            break :prefabs docs;
+        },
     });
 }
 
@@ -658,6 +680,9 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
         }
     }
     if (bodies > Physics.max_bodies or rigids > Physics.max_rigids or workshops > 1) return error.InvalidSave;
+    if (doc.prefabs.len > max_prefabs) return error.InvalidSave;
+    var prefabs: [max_prefabs]Blueprint = undefined;
+    for (doc.prefabs, prefabs[0..doc.prefabs.len]) |source, *bp| bp.* = try Blueprint.fromDoc(source);
 
     // Validated: tear down and rebuild.
     self.release();
@@ -679,6 +704,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
             if (def.kind == .actuator) self.physics.setTransform(placed.devices[d], placed.machine.devicePosition(d), .{ 0, 0, 0 });
         }
     }
+    @memcpy(self.prefabs[0..doc.prefabs.len], prefabs[0..doc.prefabs.len]);
+    self.prefab_count = doc.prefabs.len;
     self.modifications.clear();
     for (doc.collected) |ref| _ = try self.modifications.remove(ref);
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
