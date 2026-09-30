@@ -73,6 +73,16 @@ Deferred: editing a prefab's parts and numeric parameters in place (today a pref
 
 A customizable, nameable ranger-engineer: the creator on a new game (F4 any time), name and appearance palettes, a block-built avatar with a walk cycle and lumen accents, third-person view (F2) with eye-origin aiming, and the profile in save format v6. Acceptance evidence: headless tests freeze input in the creator, confirm a named profile, target a crate from the eyes in third person, draw the avatar, and restore the profile from a save.
 
+## Traversal and local co-op — implemented
+
+Starfall's traversal verbs are ported to metres, seconds and the fixed step. They cover buffered and coyote jumps, wall slides, wall jumps, jump-started climbing, ledge hang and mantle, rolls, stomps, swimming volumes, and four traversal kits: grapple, hover jet, flight and hoverboard. Up to four local players share one window in split screen. The macOS GameController bridge handles drop-in join and leave, and F6 adds a keyboard-less guest for testing.
+
+Each view streams its own terrain under one shared per-frame upload budget, and each player's own body is hidden only in their own first-person view. Guests can move, climb, grapple, and press buttons, and proximity sensors see all players.
+
+Acceptance evidence: headless tests cover the traversal verbs and the climb gate. Another test has three guests join, move and look independently while P1 stands still, open the powered door from its button, leave, and rejoin beside P1 after a save round trip. A layout test tiles one to four views. A ReleaseSafe smoke run with Metal validation exercises four, two and one views. See [validation](validation.md).
+
+Limits: guests do not build, wire, carry, drive, salvage, or persist. Players do not collide with each other. Only macOS controllers are read. The canopy benchmark measures one view; split-screen CPU cost has no benchmark yet.
+
 ## Canopy world
 
 The game's direction is set in [world and systems](world.md): Arbors 300–600 m tall, a canopy city of grafted towers and bridge roads, painterly cel shading, and three braided play styles (explore, engineer, grow) over a procedural city the player extends. The phases below build it. Each is a runnable slice with headless acceptance tests, native Zig throughout.

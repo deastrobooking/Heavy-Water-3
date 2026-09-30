@@ -135,6 +135,14 @@ The experiment was terminated and the programmatic size change removed from the 
 - Whole-process memory instrumentation: Mach's stock entrypoint currently omits module-container teardown.
 - Deterministic screenshot regression tests and CPU/GPU percentile benchmarks.
 
+## Traversal and local co-op — 2026-09-30
+
+- Debug suite: **103/103 tests pass**. New tests cover the controller (buffered versus dropped early jump, stomp bounce, roll collider height, climb gate and mantle onto a 3 m block, grapple zip to a static anchor, glide, triple-tap hover). They also cover co-op proximity sensing, split-screen tiling, and the four-player Sandbox acceptance. In that acceptance, three guests join, P1 stays put within 0.05 m while P2 walks, P3 strafes and P4 turns 2.8 rad, all four bodies are published with owner tags, and P3 presses the powered-door button and the door opens. A guest then leaves, and the save contains no guest data but loads with guests beside P1.
+- The previous controller commit had broken three existing acceptance tests (the crate carry, the powered door, and the third-person character). Walking into the crate row or the closed door started a climb over it. Climbing now starts only from a jump into a wall; all three pass again.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames**: players went 1 → 4 → 2 → 1. Views 2–4 each created their own streaming pool (49 CPU / 25 GPU chunks) once. There were no validation errors and the exit was clean (code 0). P2 walked under its own input while P1 flew to the far Arbors. The rover displacement (1.3 m) matches the pre-change build on the same run (1.2 m).
+- Single-view streaming benchmark after the change, ReleaseSafe, **900 measured frames**: render CPU P50/P99 **0.805/1.085 ms**, interval P99 20.976 ms. Peak upload was 284,204 B, peak residency 25 chunks, with zero underfilled frames and unchanged pool allocation counts (2 CPU, 50 GPU).
+- Not measured: split-screen CPU/GPU cost as a benchmark, a physical controller test (no pad was attached to this machine; the pad path is covered by the `Gamepads` unit test and the same `Input` route the guests use), and a manual visual review of the split layouts.
+
 ## Canopy district milestone — 2026-09-30
 
 - ReleaseSafe suite: **95/95 tests pass**, including all existing ramp, machine, sap, physics, streaming, and asset tests. The application compile check passes.

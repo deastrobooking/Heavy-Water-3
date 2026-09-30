@@ -16,6 +16,8 @@ const none: u8 = 0xFF;
 /// What the machine can sense this step.
 pub const Environment = struct {
     player_feet: [3]f32 = .{ 0, -1e9, 0 },
+    /// Local co-op players besides P1; proximity sensors see anyone.
+    other_feet: []const [3]f32 = &.{},
     /// Device index of a button pressed this step.
     pressed: ?u8 = null,
     /// Driver input for this machine's seat, when occupied.
@@ -125,9 +127,8 @@ pub fn prepare(self: *Machine, env: Environment) void {
             .sap_tap => self.outputs[d][0] = 0,
             .button => self.outputs[d][0] = if (env.pressed == @as(u8, @intCast(d))) 1 else 0,
             .proximity => {
-                const local = R.inverseRotate(self.rotation, R.sub(env.player_feet, self.worldOffset(def.offset)));
-                var inside = true;
-                for (0..3) |k| inside = inside and @abs(local[k]) <= def.size[k] / 2;
+                var inside = self.senses(d, env.player_feet);
+                for (env.other_feet) |feet| inside = inside or self.senses(d, feet);
                 self.outputs[d][0] = if (inside) 1 else 0;
             },
             .seat => {
@@ -224,6 +225,14 @@ pub fn network(self: *const Machine, device: usize) ?Network {
 }
 
 /// Frame-relative offset to world space.
+/// Whether `point` lies inside proximity device `d`'s rotated box.
+fn senses(self: *const Machine, d: usize, point: [3]f32) bool {
+    const def = self.blueprint.devices[d];
+    const local = R.inverseRotate(self.rotation, R.sub(point, self.worldOffset(def.offset)));
+    for (0..3) |k| if (@abs(local[k]) > def.size[k] / 2) return false;
+    return true;
+}
+
 pub fn worldOffset(self: *const Machine, offset: [3]f32) [3]f32 {
     return R.add(self.origin, R.rotate(self.rotation, offset));
 }
@@ -314,6 +323,10 @@ test "shared power browns out, disabled generators stop actuators, and logic com
     // Player leaves: targets drop to 0 and both return.
     run(&m, .{}, 200);
     try std.testing.expectEqual(@as(f32, 0), m.state[4]);
+    // A co-op player in the sensor counts the same as P1.
+    const guests = [_][3]f32{ .{ 40, 0, 0 }, .{ 0.5, 0.5, -0.5 } };
+    run(&m, .{ .other_feet = &guests }, 2 + 60);
+    try std.testing.expect(m.state[4] > 0.4);
 
     const off = try Blueprint.parse(std.testing.allocator,
         \\{"format":1,"name":"off","devices":[

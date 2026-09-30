@@ -29,6 +29,18 @@ fn axis(core: *mach.Core, positive: mach.Core.KeyButtonID, negative: mach.Core.K
     return @as(f32, @floatFromInt(@intFromBool(core.keyPressed(positive)))) - @as(f32, @floatFromInt(@intFromBool(core.keyPressed(negative))));
 }
 
+/// Folds a controller driving the same player into keyboard input: the larger move wins,
+/// buttons and edges combine. Look is applied separately as a turn rate.
+pub fn merge(self: *Input, pad: Input) void {
+    if (@abs(pad.forward) + @abs(pad.right) > @abs(self.forward) + @abs(self.right)) {
+        self.forward = pad.forward;
+        self.right = pad.right;
+    }
+    inline for (.{ "fast", "jump", "jump_pressed", "dodge", "dodge_held", "stomp", "grapple", "mantle", "cycle_mode" }) |field| {
+        @field(self, field) = @field(self, field) or @field(pad, field);
+    }
+}
+
 /// Edges remain latched across frames with no simulation step, then are consumed once.
 pub fn clearEdges(self: *Input) void {
     self.jump_pressed = false;

@@ -255,7 +255,9 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                 self.velocity = @splat(0);
                 controlled = true;
             }
-        } else if (pushing and self.climb_energy > 7) {
+        } else if (pushing and !self.grounded and self.climb_energy > 7) {
+            // Starfall climbs on any push; here a climb starts from a jump into the face,
+            // so walking into a closed door or crate row is blocked rather than scaled.
             self.motion = .climb;
             self.velocity = @splat(0);
             self.grounded = false;
@@ -423,4 +425,115 @@ fn move(self: *Player, physics: *Physics, dt: f32) void {
     }
     if (self.grounded and self.velocity[1] < 0) self.velocity[1] = 0;
     self.knockback = R.scale(self.knockback, @exp(-9 * dt));
+}
+
+fn flatGround(_: ?*const anyopaque, _: f32, _: f32) Physics.GroundSample {
+    return .{ .height = 0, .normal = .{ 0, 1, 0 } };
+}
+const test_dt: f32 = 1.0 / 60.0;
+fn runFor(p: *Player, physics: *Physics, camera: *Camera, input: Input, steps: usize) void {
+    for (0..steps) |_| {
+        p.step(physics, camera, input, test_dt);
+        physics.step(test_dt);
+    }
+}
+
+test "a jump pressed just before landing is buffered; one pressed too early is dropped" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .yaw = 0, .pitch = 0 };
+    for ([_]f32{ 0.3, 3 }) |press_height| {
+        var p: Player = .{ .feet = .{ 0, 6, 0 } };
+        while (p.feet[1] > press_height) runFor(&p, &physics, &camera, .{}, 1);
+        runFor(&p, &physics, &camera, .{ .jump_pressed = true }, 1);
+        var launched = false;
+        for (0..60) |_| {
+            runFor(&p, &physics, &camera, .{}, 1);
+            launched = launched or p.velocity[1] > 5;
+        }
+        try std.testing.expectEqual(press_height < 1, launched);
+    }
+}
+
+test "stomp slams down and bounces on landing; a fast grounded dodge rolls low" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .yaw = 0, .pitch = 0 };
+    var p: Player = .{ .feet = .{ 0, 8, 0 } };
+    runFor(&p, &physics, &camera, .{ .stomp = true }, 1);
+    try std.testing.expectEqual(Motion.stomp, p.motion);
+    try std.testing.expect(p.velocity[1] < -20);
+    var bounce: f32 = 0;
+    for (0..90) |_| {
+        runFor(&p, &physics, &camera, .{}, 1);
+        bounce = @max(bounce, p.velocity[1]);
+    }
+    try std.testing.expect(bounce > 8);
+    runFor(&p, &physics, &camera, .{ .forward = 1 }, 90);
+    try std.testing.expect(p.grounded);
+    runFor(&p, &physics, &camera, .{ .forward = 1, .dodge = true }, 1);
+    try std.testing.expectEqual(Motion.roll, p.motion);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.95), p.shape.height, 0.001);
+    runFor(&p, &physics, &camera, .{ .forward = 1 }, 60);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.8), p.shape.height, 0.001);
+}
+
+test "walking into a wall is blocked; jumping into it climbs and mantles onto the top" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    // A 3 m block whose near face is at z = 1.75.
+    _ = try physics.createBox(std.testing.allocator, .{ 0, 1.5, 2.75 }, .{ 2, 1.5, 1 }, R.identity, 0);
+    var camera: Camera = .{ .yaw = 0, .pitch = 0 };
+    var p: Player = .{ .feet = .{ 0, 0, 0 } };
+    for (0..90) |_| {
+        runFor(&p, &physics, &camera, .{ .forward = 1 }, 1);
+        try std.testing.expect(p.motion != .climb and p.motion != .mantle);
+    }
+    try std.testing.expect(p.grounded and p.feet[2] < 1.75 and p.feet[1] < 0.01);
+    runFor(&p, &physics, &camera, .{ .forward = 1, .jump_pressed = true }, 1);
+    var climbed = false;
+    for (0..240) |_| {
+        runFor(&p, &physics, &camera, .{ .forward = 1 }, 1);
+        climbed = climbed or p.motion == .climb;
+        if (p.grounded and p.feet[1] > 2.95) break;
+    }
+    try std.testing.expect(climbed);
+    try std.testing.expect(p.grounded and p.feet[1] > 2.95 and p.feet[2] > 1.75);
+}
+
+test "grapple zips toward a static anchor and releases on arrival; flight glides" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    _ = try physics.createBox(std.testing.allocator, .{ 0, 10, 31 }, .{ 5, 10, 1 }, R.identity, 0);
+    var camera: Camera = .{ .yaw = 0, .pitch = std.math.atan2(@as(f32, 1.4), 28) };
+    var p: Player = .{ .feet = .{ 0, 0, 0 } };
+    runFor(&p, &physics, &camera, .{}, 10);
+    runFor(&p, &physics, &camera, .{ .grapple = true }, 1);
+    try std.testing.expect(p.grapple.mode == .windup);
+    var zipped = false;
+    for (0..150) |_| {
+        runFor(&p, &physics, &camera, .{}, 1);
+        zipped = zipped or p.motion == .grapple_zip;
+    }
+    try std.testing.expect(zipped and p.feet[2] > 26);
+    try std.testing.expect(p.grapple.mode == .ready or p.grapple.mode == .cooldown);
+
+    var glider: Player = .{ .feet = .{ 50, 30, 0 }, .traversal = .flight };
+    runFor(&glider, &physics, &camera, .{}, 40);
+    runFor(&glider, &physics, &camera, .{ .jump = true }, 60);
+    try std.testing.expectEqual(Motion.glide, glider.motion);
+    try std.testing.expect(glider.velocity[1] >= -3.5);
+    try std.testing.expect(glider.fuel < 100);
+}
+
+test "three quick jump taps toggle hover" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{};
+    var p: Player = .{};
+    for (0..3) |_| {
+        runFor(&p, &physics, &camera, .{ .jump_pressed = true }, 1);
+        runFor(&p, &physics, &camera, .{}, 5);
+    }
+    try std.testing.expect(p.hover_enabled);
 }

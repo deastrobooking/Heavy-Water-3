@@ -23,8 +23,14 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | Control | Action |
 | --- | --- |
 | W / A / S / D | Walk (or fly) |
-| Space | Jump |
+| Space | Jump (buffered, with coyote time); hold in the air to use the traversal kit; three quick taps toggle hover. Jump into a wall to climb it; jump off a wall to wall-jump |
 | Shift | Sprint / fly faster |
+| Left Ctrl | Roll when running (hoverboard: boost; flight: air dash while held with Space) |
+| X | Stomp in the air; bounces on landing |
+| G | Grapple a static surface (grapple kit): zip, or swing from high anchors; again to release |
+| B | Cycle traversal kit: grapple → hover jet → flight → hoverboard |
+| F | Hold at a ledge to hang; again to mantle up |
+| F6 | Add a guest player (P2–P4) beside you, or remove the last keyboard-added guest |
 | V | Toggle walking and free flight |
 | F2 | First- / third-person view |
 | F4 | Character creator (also opens on a new game): arrows choose and change, type the name, Enter confirms, Escape cancels |
@@ -48,6 +54,25 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | F1 | Toggle metrics |
 | Window close | Quit |
 
+### Local co-op
+
+Up to four players share one window. Each extra player gets a split-screen view: two players stack top and bottom, three put P3 across the bottom, and four use quadrants. On macOS, controllers with Apple's extended gamepad profile (Xbox, PlayStation, and MFi pads) are read through the GameController framework. The first three controllers belong to P2, P3 and P4, and a fourth controller also drives P1 alongside the keyboard.
+
+| Pad | Action |
+| --- | --- |
+| Menu | Join or leave; disconnecting a pad also leaves |
+| Left / right stick | Move / look |
+| A | Jump (same traversal rules as Space) |
+| B | Roll / boost / dash |
+| X | Press the aimed button; hold to hang and mantle |
+| Y | First- / third-person view |
+| LB / RB | Grapple / cycle traversal kit |
+| LT | Sprint |
+| Left stick click | Stomp |
+| Options | Respawn beside P1 |
+
+Guests have the full traversal controller, their own camera, and hands that press machine buttons; proximity sensors see every player. Building, wiring, carrying crates, driving, salvage, and saving remain P1's. Guests are not written to saves; after a load they rejoin beside P1.
+
 ```sh
 python3 tools/zig.py build test
 python3 tools/zig.py build check
@@ -63,7 +88,7 @@ python3 tools/benchmark.py --arbor 1  # Seeded narrow Arbor (2 selects the sprea
 
 Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.
 
-`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, rendering a full day/night cycle, visiting both generated Arbors, overloading two sap beacons on one tree, previewing a city bridge, and restoring its completed geometry from an in-memory save. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
+`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, rendering a full day/night cycle, visiting both generated Arbors, overloading two sap beacons on one tree, previewing a city bridge, and restoring its completed geometry from an in-memory save. Three guests join partway through, which exercises four-, two- and one-view split screen. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
 
 The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. The `--canopy` route stays aimed at the Arbor, verifies both mesh detail levels and a render CPU P99 under 16.667 ms, and crosses at least 12 chunk boundaries. These measurements do not measure GPU execution time. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
 

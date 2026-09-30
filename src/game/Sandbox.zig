@@ -107,6 +107,27 @@ pub const arbor_offset: [2]f32 = .{ 60, 80 };
 
 pub const View = enum { first, third };
 pub const third_person_distance: f32 = 4;
+pub const max_players = 4;
+/// A drop-in local co-op player (P2–P4): the full traversal controller, its own camera and
+/// view, and hands that press buttons. P1 alone builds, drives, carries, and saves; guests
+/// are session-only and are not written to saves.
+pub const Guest = struct {
+    active: bool = false,
+    player: Player = .{},
+    camera: Camera = .{},
+    view: View = .third,
+    profile: Profile = .{},
+    body_yaw: f32 = 0,
+    walk_phase: f32 = 0,
+    walk_amount: f32 = 0,
+    target: Target = .none,
+    /// Written by the application before each fixed step; edges are consumed by it.
+    input: Input = .{},
+    interact: bool = false,
+    toggle_view: bool = false,
+};
+/// Where guests appear relative to P1's facing: left, right, and behind.
+const guest_offsets = [_]Physics.Vec3{ .{ -1.6, 0, -0.6 }, .{ 1.6, 0, -0.6 }, .{ 0, 0, -2 } };
 
 seed: u64,
 catalog: *const Catalog,
@@ -131,6 +152,7 @@ walk_phase: f32 = 0,
 walk_amount: f32 = 0,
 physics: Physics,
 player: Player = .{},
+guests: [max_players - 1]Guest = @splat(.{}),
 crates: [max_crates]Physics.Body = @splat(.none),
 machines: [max_machines]Placed = @splat(.{}),
 /// Slot of the machine that holds loose devices placed from the palette.
@@ -413,6 +435,64 @@ pub fn bodyShown(self: *const Sandbox) bool {
     return self.seated == null and self.player.mode == .walk and (self.view == .third or self.creator.open);
 }
 
+/// Guest `index` (0 = P2) joins beside P1 with a distinct accent and outfit.
+pub fn joinGuest(self: *Sandbox, index: usize) void {
+    var profile: Profile = .{ .accent = @intCast((index + 1) % Profile.accent_colors.len), .outfit = @intCast((index * 3 + 2) % Profile.outfit_colors.len), .hair_color = @intCast((index * 2 + 3) % Profile.hair_colors.len) };
+    var name: [2]u8 = .{ 'P', '2' + @as(u8, @intCast(index)) };
+    profile.setName(&name) catch unreachable;
+    self.guests[index] = .{ .active = true, .profile = profile };
+    self.respawnGuest(index);
+}
+
+pub fn leaveGuest(self: *Sandbox, index: usize) void {
+    self.guests[index].active = false;
+}
+
+pub fn guestCount(self: *const Sandbox) usize {
+    var n: usize = 0;
+    for (self.guests) |g| n += @intFromBool(g.active);
+    return n;
+}
+
+/// Places a guest on the floor beside P1, facing the same way, with fresh traversal state.
+pub fn respawnGuest(self: *Sandbox, index: usize) void {
+    const g = &self.guests[index];
+    var feet = R.add(self.player.feet, R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), guest_offsets[index]));
+    const terrain = Terrain.surface(self.seed, feet[0], feet[2]).height;
+    feet[1] = if (self.physics.castRay(R.add(feet, .{ 0, 2, 0 }), .{ 0, -1, 0 }, 8, .none)) |hit| @max(hit.point[1], terrain) + 0.01 else terrain;
+    g.player = .{ .feet = feet };
+    g.camera = .{ .yaw = self.body_yaw, .pitch = -0.2 };
+    g.body_yaw = self.body_yaw;
+    g.camera.position = g.player.eye();
+    g.target = .none;
+}
+
+fn stride(player: Player, phase: *f32, amount: *f32, dt: f32) void {
+    const ground_speed = @sqrt(player.velocity[0] * player.velocity[0] + player.velocity[2] * player.velocity[2]);
+    phase.* = @mod(phase.* + ground_speed * dt * 2.4, 2 * std.math.pi);
+    amount.* = if (player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
+}
+
+fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
+    defer {
+        g.interact = false;
+        g.toggle_view = false;
+    }
+    if (g.toggle_view) g.view = if (g.view == .first) .third else .first;
+    g.camera.turn(g.input.look_x, g.input.look_y, dt);
+    g.player.step(&self.physics, &g.camera, g.input, dt);
+    g.body_yaw = g.camera.yaw;
+    stride(g.player, &g.walk_phase, &g.walk_amount, dt);
+    if (g.view == .third) self.chase(g.player.eye(), &g.camera);
+    // Hands only: aim from the eyes and press buttons. Machines see it on the next step.
+    const eye = g.player.eye();
+    g.target = self.pick(eye, g.camera.forward(), reach, false);
+    if (g.interact and g.target == .device) {
+        const d = g.target.device;
+        if (self.machines[d.machine].blueprint.devices[d.device].kind == .button and self.press == null) self.press = d;
+    }
+}
+
 pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Actions, dt: f32) !void {
     if (raw_actions.open_creator and self.seated == null and !self.creator.open) self.creator.begin(self.profile);
     if (raw_actions.toggle_view) self.view = if (self.view == .first) .third else .first;
@@ -431,9 +511,8 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     }
     if (self.seated == null) self.player.step(&self.physics, camera, input, dt);
     if (!frozen) self.body_yaw = camera.yaw;
-    const ground_speed = @sqrt(self.player.velocity[0] * self.player.velocity[0] + self.player.velocity[2] * self.player.velocity[2]);
-    self.walk_phase = @mod(self.walk_phase + ground_speed * dt * 2.4, 2 * std.math.pi);
-    self.walk_amount = if (self.player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
+    stride(self.player, &self.walk_phase, &self.walk_amount, dt);
+    for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);
     self.stepMachines(dt);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
@@ -502,6 +581,11 @@ fn placeCamera(self: *const Sandbox, camera: *Camera) void {
         return;
     }
     if (self.view == .first) return;
+    self.chase(eye, camera);
+}
+
+/// Third person: behind and above the eyes along the view direction, kept above the terrain.
+fn chase(self: *const Sandbox, eye: math.Vec3, camera: *Camera) void {
     const f = camera.forward();
     var p = math.vec3(eye.x() - f.x() * third_person_distance, eye.y() + 0.3 - f.y() * third_person_distance, eye.z() - f.z() * third_person_distance);
     const ground = Terrain.surface(self.seed, p.x(), p.z()).height + 0.4;
@@ -556,10 +640,16 @@ fn followVehicle(self: *Sandbox, m: u8, camera: *Camera) void {
 fn stepMachines(self: *Sandbox, dt: f32) void {
     const previous = self.bus;
     self.bus = @splat(0);
+    var others: [max_players - 1][3]f32 = undefined;
+    var other_count: usize = 0;
+    for (self.guests) |g| if (g.active) {
+        others[other_count] = g.player.feet;
+        other_count += 1;
+    };
     defer for (&self.machines) |*placed| if (placed.active) placed.machine.transmit(&self.bus);
     for (&self.machines, 0..) |*placed, m| {
         if (!placed.active) continue;
-        var env: Machine.Environment = .{ .player_feet = self.player.feet, .bus = &previous };
+        var env: Machine.Environment = .{ .player_feet = self.player.feet, .other_feet = others[0..other_count], .bus = &previous };
         if (self.press) |p| if (p.machine == m) {
             env.pressed = p.device;
         };
@@ -824,10 +914,20 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
             n += 1;
         }
     }
-    if (self.bodyShown() and n < out.len) {
-        n += Avatar.build(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, self.catalog.content.block, out[n..]);
+    // Every walking body is published; each player's own first-person view hides its owner tag.
+    if (self.seated == null and self.player.mode == .walk and n < out.len) {
+        n = avatar(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, 1, self.catalog.content.block, out, n);
     }
+    for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount }, @intCast(i + 2), self.catalog.content.block, out, n);
+    };
     return Build.publish(self, out, n);
+}
+
+fn avatar(profile: Profile, pose: Avatar.Pose, owner: u8, block: Catalog.MeshHandle, out: []World.Prop, start: usize) usize {
+    const end = start + Avatar.build(profile, pose, block, out[start..]);
+    for (out[start..end]) |*part| part.owner = owner;
+    return end;
 }
 
 /// Static and vehicle-mounted lamps share the same power-driven emissive material.
@@ -996,6 +1096,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.tick = doc.tick;
     self.target = .none;
     self.press = null;
+    // Guests are not saved; they rejoin beside the restored P1.
+    for (&self.guests, 0..) |*g, i| if (g.active) self.respawnGuest(i);
     self.sap_stats = @splat(.{});
     self.tap_links = @splat(@splat(null));
 }
@@ -1594,4 +1696,74 @@ test "walk both Arbor spurs and their complete trunk plazas" {
             try std.testing.expect(sb.player.grounded);
         }
     }
+}
+
+test "four local players: guests join beside P1, move and look independently, press a button, and leave" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    try run(&sandbox, &camera, .{}, .{}, 30);
+    for (0..3) |i| sandbox.joinGuest(i);
+    try std.testing.expectEqual(@as(usize, 3), sandbox.guestCount());
+    try run(&sandbox, &camera, .{}, .{}, 30);
+    const p1 = sandbox.player.feet;
+    var starts: [3]Physics.Vec3 = undefined;
+    for (sandbox.guests, &starts) |g, *start| {
+        try std.testing.expect(g.player.grounded);
+        try std.testing.expect(R.length(R.sub(g.player.feet, p1)) > 1.2);
+        start.* = g.player.feet;
+    }
+
+    // Three different pads for one second; P1 stands still.
+    const yaw = sandbox.guests[2].camera.yaw;
+    sandbox.guests[0].input = .{ .forward = 1 };
+    sandbox.guests[1].input = .{ .right = 1 };
+    sandbox.guests[2].input = .{ .look_x = 1 };
+    try run(&sandbox, &camera, .{}, .{}, 60);
+    try std.testing.expect(R.length(R.sub(sandbox.player.feet, p1)) < 0.05);
+    try std.testing.expect(sandbox.guests[0].player.feet[2] - starts[0][2] > 3);
+    try std.testing.expect(sandbox.guests[1].player.feet[0] - starts[1][0] > 3);
+    try std.testing.expect(R.length(R.sub(sandbox.guests[2].player.feet, starts[2])) < 0.05);
+    try std.testing.expectApproxEqAbs(yaw + 2.8, sandbox.guests[2].camera.yaw, 0.05);
+    // Guests default to third person: each camera sits behind its own eyes.
+    for (sandbox.guests) |g| try std.testing.expect(g.camera.position.sub(&g.player.eye()).len() > 3);
+
+    // Every body is published and tagged with its owner, P1's included while in first person.
+    var parts: [World.max_props]World.Prop = undefined;
+    const drawn = sandbox.publishProps(&parts);
+    var owned: [5]usize = @splat(0);
+    for (parts[0..drawn]) |part| owned[part.owner] += 1;
+    for (owned[1..]) |count| try std.testing.expect(count >= 9);
+
+    // P3 walks up to the powered door's button and presses it; the door opens for everyone.
+    for (&sandbox.guests) |*g| g.input = .{};
+    const button = sandbox.findDevice(0, "button").?;
+    const door = sandbox.findDevice(0, "door").?;
+    const origin = sandbox.machines[0].machine.origin;
+    const g = &sandbox.guests[1];
+    g.player = .{ .feet = .{ origin[0], origin[1] + 0.1, origin[2] - 3 } };
+    g.view = .first;
+    try run(&sandbox, &camera, .{}, .{}, 30);
+    g.camera.position = g.player.eye();
+    aimAt(&g.camera, sandbox.devicePosition(button));
+    try run(&sandbox, &camera, .{}, .{}, 1);
+    try std.testing.expect(g.target == .device and g.target.device.device == button.device);
+    g.interact = true;
+    try run(&sandbox, &camera, .{}, .{}, 150);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), sandbox.machines[0].machine.state[door.device], 0.0001);
+
+    // Leaving removes the body; saves ignore guests, and loading returns them beside P1.
+    sandbox.leaveGuest(2);
+    try std.testing.expectEqual(@as(usize, 2), sandbox.guestCount());
+    owned = @splat(0);
+    for (parts[0..sandbox.publishProps(&parts)]) |part| owned[part.owner] += 1;
+    try std.testing.expectEqual(@as(usize, 0), owned[4]);
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "guest") == null);
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    for (sandbox.guests[0..2]) |guest| try std.testing.expect(R.length(R.sub(guest.player.feet, sandbox.player.feet)) < 3);
 }

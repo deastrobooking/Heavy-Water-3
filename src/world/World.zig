@@ -19,6 +19,9 @@ pub const Prop = struct {
     rotation: [4]f32 = .{ 0, 0, 0, 1 },
     lod: Catalog.MeshHandle = .none,
     lod_distance: f32 = 0,
+    /// 0 for world content; 1–4 for a local player's avatar, which that player's own view
+    /// hides in first person while every other split-screen view still draws it.
+    owner: u8 = 0,
 
     pub fn effectiveMesh(self: Prop, camera_position: [3]f32) Catalog.MeshHandle {
         if (self.lod.eql(.none) or self.lod_distance <= 0) return self.mesh;

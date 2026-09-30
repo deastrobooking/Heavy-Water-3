@@ -14,6 +14,8 @@ const Build = @import("game/Build.zig");
 const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
+const Gamepads = @import("engine/Gamepads.zig");
+const Profile = @import("game/Profile.zig");
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -46,6 +48,9 @@ status: Overlay.Line = .{},
 status_until: u64 = 0,
 published_revision: ?u64 = null,
 inspecting: bool = false,
+pads: Gamepads = .{},
+/// Guests joined from a controller leave when it disconnects; F6 and smoke guests stay.
+pad_guests: [Sandbox.max_players - 1]bool = @splat(false),
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io };
@@ -152,6 +157,12 @@ pub fn update(self: *App, core: *mach.Core) void {
             .left_bracket => self.actions.channel_down = true,
             .right_bracket => self.actions.channel_up = true,
             .i => self.inspecting = !self.inspecting,
+            .space => self.engine.input.jump_pressed = true,
+            .left_control => self.engine.input.dodge = true,
+            .x => self.engine.input.stomp = true,
+            .g => self.engine.input.grapple = true,
+            .b => self.engine.input.cycle_mode = true,
+            .f6 => self.toggleGuest(),
             else => {},
         },
         .mouse_press => |mouse| switch (mouse.button) {
@@ -175,6 +186,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         else => {},
     };
     self.engine.input.sample(core);
+    self.pollPads();
     if (options.smoke_frames > 0 and options.benchmark_frames == 0) {
         self.exerciseSmoke();
         // The last smoke stage drives the rover at full throttle.
@@ -182,13 +194,74 @@ pub fn update(self: *App, core: *mach.Core) void {
     }
     const steps = self.engine.advance(self.timer.lap());
     for (0..steps) |_| {
+        self.routePads();
         self.sandbox.step(&self.engine.camera, self.engine.input, self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
         self.actions = .{};
+        self.engine.input.clearEdges();
+        self.pads.consume();
     }
     if (self.sandbox.exported) |index| {
         self.sandbox.exported = null;
         self.exportPrefab(index);
     }
+}
+
+/// Joins and leaves happen once per frame; the Menu edge is cleared here so a frame without a
+/// fixed step cannot toggle twice.
+fn pollPads(self: *App) void {
+    self.pads.poll();
+    for (&self.pads.commands, 0..) |*cmd, c| {
+        const p = Gamepads.playerIndex(c);
+        if (p == 0) {
+            self.engine.input.merge(cmd.input);
+            continue;
+        }
+        const g = p - 1;
+        if (cmd.join) {
+            if (self.sandbox.guests[g].active) self.sandbox.leaveGuest(g) else self.sandbox.joinGuest(g);
+            self.pad_guests[g] = self.sandbox.guests[g].active;
+            self.report("P{d} {s}", .{ p + 1, if (self.pad_guests[g]) "JOINED" else "LEFT" });
+        } else if (!cmd.connected and self.pad_guests[g]) {
+            self.sandbox.leaveGuest(g);
+            self.pad_guests[g] = false;
+            self.report("P{d} CONTROLLER DISCONNECTED", .{p + 1});
+        }
+        if (cmd.respawn and self.sandbox.guests[g].active) self.sandbox.respawnGuest(g);
+        cmd.join = false;
+        cmd.respawn = false;
+    }
+}
+
+/// Hands each pad's latest command to its player for the coming fixed step.
+fn routePads(self: *App) void {
+    for (self.pads.commands, 0..) |cmd, c| {
+        const p = Gamepads.playerIndex(c);
+        if (p == 0) {
+            if (!cmd.connected) continue;
+            self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
+            self.actions.interact = self.actions.interact or cmd.interact;
+            self.actions.toggle_view = self.actions.toggle_view or cmd.view;
+            continue;
+        }
+        if (!self.pad_guests[p - 1]) continue;
+        const g = &self.sandbox.guests[p - 1];
+        g.input = cmd.input;
+        g.interact = g.interact or cmd.interact;
+        g.toggle_view = g.toggle_view or cmd.view;
+    }
+}
+
+/// F6: add the next free guest (idle unless a controller drives it), or remove the last.
+fn toggleGuest(self: *App) void {
+    for (self.sandbox.guests, 0..) |g, i| if (!g.active) {
+        self.sandbox.joinGuest(i);
+        return self.report("P{d} JOINED  CONNECT A CONTROLLER TO PLAY", .{i + 2});
+    };
+    var i: usize = self.sandbox.guests.len;
+    while (i > 0) : (i -= 1) if (!self.pad_guests[i - 1]) {
+        self.sandbox.leaveGuest(i - 1);
+        return self.report("P{d} LEFT", .{i + 1});
+    };
 }
 
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
@@ -241,6 +314,11 @@ fn exerciseSmoke(self: *App) void {
             self.sandbox.view = .third;
             self.sandbox.player.mode = .walk;
             self.sandbox.resetPlayer(camera);
+            // Four-way split screen: three guests with their own inputs and third-person views.
+            for (0..3) |i| self.sandbox.joinGuest(i);
+            self.sandbox.guests[0].input = .{ .forward = 1 };
+            self.sandbox.guests[1].input = .{ .look_x = 0.5 };
+            self.sandbox.guests[2].view = .first;
             const crate = self.sandbox.cratePosition(1);
             const eye = camera.position;
             const dx = crate[0] - eye.x();
@@ -278,6 +356,9 @@ fn exerciseSmoke(self: *App) void {
             self.show_metrics = true;
         },
         7 => {
+            // Two guests leave: the remaining pair splits top and bottom.
+            self.sandbox.leaveGuest(1);
+            self.sandbox.leaveGuest(2);
             const flow = self.sandbox.sap_stats[1];
             std.log.info("Smoke sap: tree 1 demand={d:.0} W supply={d:.0} W satisfaction={d:.0}%", .{ flow.demand, flow.supplied, flow.satisfaction * 100 });
             const origin = self.sandbox.treeOrigin(2);
@@ -297,6 +378,8 @@ fn exerciseSmoke(self: *App) void {
             camera.pitch = std.math.atan2(point[1] - camera.position.y(), @sqrt(dx * dx + dz * dz));
         },
         9 => {
+            std.log.info("Smoke co-op: P2 at {d:.1} {d:.1} {d:.1}, motion {s}", .{ self.sandbox.guests[0].player.feet[0], self.sandbox.guests[0].player.feet[1], self.sandbox.guests[0].player.feet[2], @tagName(self.sandbox.guests[0].player.motion) });
+            self.sandbox.leaveGuest(0);
             _ = self.sandbox.addBridge(.{ .a = 0, .b = 3 }) catch |err| return self.report("SMOKE BRIDGE {s}", .{@errorName(err)});
             const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE CITY SAVE {s}", .{@errorName(err)});
             defer self.allocator.free(bytes);
@@ -305,7 +388,7 @@ fn exerciseSmoke(self: *App) void {
         },
         else => {},
     }
-    std.log.info("Smoke stage {d}: culling={any}, hud={any}, mode={s}", .{ stage, self.culling, self.show_metrics, @tagName(self.sandbox.player.mode) });
+    std.log.info("Smoke stage {d}: culling={any}, hud={any}, mode={s}, players={d}", .{ stage, self.culling, self.show_metrics, @tagName(self.sandbox.player.mode), 1 + self.sandbox.guestCount() });
 }
 
 fn smokeSap(self: *App) void {
@@ -358,7 +441,7 @@ fn capture(self: *App, core: *mach.Core, enabled: bool) void {
 
 pub fn publish(self: *App, renderer: *Renderer) void {
     self.rendered_frames_seen = renderer.frames;
-    renderer.camera = self.engine.camera;
+    renderer.views[0].camera = self.engine.camera;
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
     renderer.show_metrics = self.show_metrics;
@@ -370,9 +453,22 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.crosshair = sandbox.seated == null and !sandbox.creator.open and (self.captured or sandbox.player.mode == .walk);
+    renderer.views[0].crosshair = sandbox.seated == null and !sandbox.creator.open and (self.captured or sandbox.player.mode == .walk);
+    renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
+    renderer.view_count = 1;
+    for (&sandbox.guests, 0..) |*g, i| if (g.active) {
+        const view = &renderer.views[renderer.view_count];
+        view.* = .{ .camera = g.camera, .hide_owner = if (g.view == .first) @intCast(i + 2) else 0, .crosshair = true, .accent = Profile.accent_colors[g.profile.accent] };
+        view.lines[0].set("{s}  {s}  {s}  FUEL {d:.0}", .{ g.profile.name(), @tagName(g.player.motion), @tagName(g.player.traversal), g.player.fuel });
+        if (g.target == .device) {
+            const def = sandbox.machines[g.target.device.machine].blueprint.device(g.target.device.device);
+            if (def.kind == .button) view.lines[1].set("{s} BUTTON  X PRESS", .{def.name()});
+        }
+        renderer.view_count += 1;
+    };
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
-    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  TOOL {s}  SALVAGED {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", @tagName(sandbox.tools.tool), sandbox.modifications.len });
+    const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "FLY" else @tagName(sandbox.player.motion);
+    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SALVAGED {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.modifications.len });
     if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;

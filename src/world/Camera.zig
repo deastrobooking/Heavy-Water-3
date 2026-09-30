@@ -13,6 +13,11 @@ pub fn look(self: *Camera, x: f32, y: f32) void {
     self.pitch = std.math.clamp(self.pitch - y * 0.0025, -1.5, 1.5);
 }
 
+/// Stick look: a deflection of 1 turns at a fixed angular rate, independent of frame rate.
+pub fn turn(self: *Camera, x: f32, y: f32, dt: f32) void {
+    self.look(x * 2.8 * dt / 0.0025, y * 1.9 * dt / 0.0025);
+}
+
 pub fn forward(self: Camera) math.Vec3 {
     return math.vec3(@sin(self.yaw) * @cos(self.pitch), @sin(self.pitch), @cos(self.yaw) * @cos(self.pitch));
 }

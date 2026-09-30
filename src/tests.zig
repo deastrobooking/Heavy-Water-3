@@ -1,6 +1,7 @@
 test {
     _ = @import("engine/Time.zig");
     _ = @import("world/Camera.zig");
+    _ = @import("render/Layout.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");
@@ -29,6 +30,8 @@ test {
     _ = @import("game/Build.zig");
     _ = @import("game/Profile.zig");
     _ = @import("game/Avatar.zig");
+    _ = @import("game/Player.zig");
+    _ = @import("engine/Gamepads.zig");
     _ = @import("game/Creator.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");

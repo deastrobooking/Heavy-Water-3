@@ -4,7 +4,7 @@ pub const Vertex = extern struct { position: [2]f32, color: [4]f32 };
 pub const capacity = 48000;
 /// Fixed-capacity text published from the application thread.
 pub const Line = struct {
-    text: [64]u8 = undefined,
+    text: [96]u8 = undefined,
     len: u8 = 0,
 
     pub fn set(self: *Line, comptime fmt: []const u8, args: anytype) void {

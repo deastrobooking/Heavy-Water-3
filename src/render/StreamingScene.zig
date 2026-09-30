@@ -34,6 +34,8 @@ draw_count: usize = 0,
 prop_count: u32 = 0,
 residents: [Streamer.render_capacity]Resident = undefined,
 initialized: bool = false,
+/// Split-screen views after the first borrow the primary scene's catalog meshes.
+owns_meshes: bool = true,
 instances: [max_instances]Instance = undefined,
 instance_count: u32 = 1,
 relic_count: u32 = 0,
@@ -69,6 +71,17 @@ pub fn setup(self: *Scene, device: *gpu.Device, queue: *gpu.Queue) void {
     while (live.next()) |i| self.meshes[i] = GpuMesh.upload(device, queue, self.catalog.meshes.items[i].model.mesh);
 }
 
+/// Another view of the same world: its own streamer and terrain pool, shared catalog meshes.
+pub fn setupShared(self: *Scene, device: *gpu.Device, primary: *const Scene) void {
+    for (&self.residents) |*resident| {
+        resident.* = .{ .mesh = GpuMesh.allocate(device, Chunk.vertex_count, Chunk.index_count) };
+        self.gpu_pool_allocations += 2;
+    }
+    self.initialized = true;
+    self.meshes = primary.meshes;
+    self.owns_meshes = false;
+}
+
 fn gpuMesh(self: *const Scene, handle: Catalog.MeshHandle) ?*const GpuMesh {
     if (self.catalog.mesh(handle) == null) return null;
     return if (self.meshes[handle.index]) |*mesh| mesh else null;
@@ -80,7 +93,8 @@ fn baseColor(self: *const Scene, handle: Catalog.MeshHandle) [4]f32 {
     return (self.catalog.material(entry.materials[0]) orelse return .{ 1, 1, 1, 1 }).base_color;
 }
 
-pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Mat4x4, culling: bool, upload_budget: usize, removed: *const Modifications, props: []const World.Prop) void {
+/// `hide_owner` (nonzero) skips that player's avatar parts: its own first-person view.
+pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Mat4x4, culling: bool, upload_budget: usize, removed: *const Modifications, props: []const World.Prop, hide_owner: u8) void {
     const center = Key.fromPosition(camera.position.x(), camera.position.z());
     if (self.last_center) |previous| {
         if (!Key.eql(center, previous)) self.center_changes += 1;
@@ -150,7 +164,7 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
     self.peak_resident_count = @max(self.peak_resident_count, self.resident_count);
     self.relic_count = self.gather(.relic, vp, culling, removed);
     self.plant_count = self.gather(.vegetation, vp, culling, removed);
-    self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() });
+    self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
 
 fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) u32 {
@@ -175,7 +189,7 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
 
 /// Groups props by catalog mesh, then emits one instanced draw per submesh with its material color.
 /// A prop with a distance LOD is grouped under whichever handle `effectiveMesh` picks this frame.
-fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32) void {
+fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32, hide_owner: u8) void {
     self.draw_count = 0;
     self.prop_count = 0;
     var live = self.catalog.meshes.live.iterator(.{});
@@ -187,6 +201,7 @@ fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32)
             const first = self.instance_count;
             const color = (self.catalog.material(entry.materials[s]) orelse continue).base_color;
             for (props) |prop| {
+                if (hide_owner != 0 and prop.owner == hide_owner) continue;
                 if (!prop.effectiveMesh(camera_position).eql(handle)) continue;
                 self.instances[self.instance_count] = .{ .translation_scale = prop.transform.toInstance(), .tint = multiply(prop.tint, color), .stretch = .{ prop.size[0], prop.size[1], prop.size[2], 0 }, .rotation = prop.rotation };
                 self.instance_count += 1;
@@ -213,5 +228,5 @@ pub fn draw(self: *Scene, pass: *gpu.RenderPassEncoder) void {
 pub fn destroy(self: *Scene) void {
     self.stream.destroy();
     if (self.initialized) for (self.residents) |resident| resident.mesh.deinit();
-    for (self.meshes) |mesh| if (mesh) |m| m.deinit();
+    if (self.owns_meshes) for (self.meshes) |mesh| if (mesh) |m| m.deinit();
 }

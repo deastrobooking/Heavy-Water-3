@@ -83,7 +83,34 @@ Wires between different machines are rejected; signals cross machines through tr
 
 `game/Profile.zig` holds the name (validated, stored uppercase for the bitmap font) and appearance: proportions plus indices into fixed palettes. `game/Creator.zig` edits a draft through abstract keys (testable without a window). A name is required, and Escape only works after a first confirmation. The application maps window keys onto those abstract keys while the creator is open, and the creator's lines render in the right-hand panel. `game/Avatar.zig` builds the visible body from scaled, rotated blocks, with limbs swinging from hip and shoulder pivots by a walk phase that advances with ground speed; the visor and belt use the glowing accent.
 
-The avatar is drawn in third person (F2) and in the creator, on foot only. The third-person camera sits 4 m behind and 0.3 m above the eyes, kept above the terrain. Aiming, picking, holding, and building still start at the eyes, so the same target is chosen in either view. While the creator is open, input and tools are frozen and the camera faces the character.
+The avatar appears in your own view in third person (F2) and in the creator, on foot only. It is always published for the other split-screen views (see local co-op below). The third-person camera sits 4 m behind and 0.3 m above the eyes, kept above the terrain. Aiming, picking, holding, and building still start at the eyes, so the same target is chosen in either view. While the creator is open, input and tools are frozen and the camera faces the character.
+
+## Traversal
+
+`game/Player.zig` ports Starfall's traversal verbs to metres, seconds and the fixed step. Every timer, resource and attachment belongs to one `Player`, so four players never share state. Movement still goes through `Physics.moveCharacter` in substeps of at most 0.18 m, so a dash or zip cannot tunnel through thin decks. The verbs:
+
+- Jumps use a 0.18 s buffer and 0.16 s of coyote time, with variable height on release.
+- On walls you get wall slides, two wall jumps per landing, and climbing on its own energy bar. Climbing starts only from a jump into the wall: Starfall climbs on any push, but here walking into a closed door or a crate row must stop you.
+- A ledge hang (F, up to 2.5 s) leads to a mantle that lifts clear of the edge before moving onto it.
+- Grounded rolls lower the collider to 0.95 m. A stomp slams down and bounces on landing.
+- Swimming uses optional authored water volumes, with breath.
+- Four traversal kits: grapple (with a hover jet), hover jet, flight (glide, jet, air dash) and hoverboard (boost, ground-following). They share fuel, and three quick jump taps toggle hover.
+
+The grapple only anchors to static mesh colliders beyond 3 m. It re-checks that surface every step and releases when the anchor disappears (for example, a removed bridge) or the line is blocked. Headless tests cover the jump buffer, stomp, roll, the climb and mantle, the grapple zip, the glide, and hover toggling.
+
+Keyboard edges (Space, Ctrl, X, G, B) latch in `Input` until a fixed step consumes them. `Input.merge` folds a controller driving P1 into the keyboard state.
+
+## Local co-op and split screen
+
+`engine/Gamepads.zig` polls up to four controllers once per frame through `platform/gamepad.m`. Mach's pinned platform layer has no controller API, so this small Objective-C bridge reads Apple's GameController extended profile and keeps each pad in a stable slot. Sticks use a radial dead zone. Button edges stay latched until the fixed step consumes them, and a disconnect clears the command. On other platforms `poll` returns no pads.
+
+`Sandbox.guests` holds three drop-in `Guest` players. Each has its own `Player`, `Camera`, first- or third-person view, profile (a distinct accent and outfit), gait and target. Guests step after P1 and before the machines, so proximity sensors see them through `Machine.Environment.other_feet`. Their hands pick along their own eye ray and can press buttons. Tools, carrying, vehicles and saves stay with P1.
+
+Every walking body is published as props tagged with `World.Prop.owner` (1–4). Each view hides only its own owner in first person, so everyone sees everyone else. Split-screen layout lives in `render/Layout.zig`.
+
+The renderer draws every view in one depth-cleared pass, each with its own viewport and scissor, camera uniform, bind group, and instance buffer. Every view also has its own `StreamingScene`, and therefore its own terrain streamer, which matters because players can be kilometres apart. Views 2–4 create their scene when first shown and keep it until shutdown. Their catalog meshes are borrowed from view 1 rather than uploaded again.
+
+All views share one per-frame terrain upload budget, with a different view getting first claim each frame. The outline pass runs once over the shared depth buffer, so the seams between views draw as ink dividers. The HUD places P1's lines and panel inside P1's view, and each guest's status in its own view and accent colour.
 
 ## Saves
 
@@ -118,6 +145,8 @@ CPU culling tests chunk bounding spheres, then compacts surviving scatter instan
 | Parsed blueprints | Catalog (fixed capacity, parsed from embedded validated JSON) | Application |
 | Save encode/decode buffers | App, supplied allocator | Freed before the key handler returns |
 | GPU meshes, uniform and instance buffers, texture, sampler, pipelines | Renderer | Created lazily on render thread; released in shutdown |
+| Split-screen views 2–4: StreamingScene, streamer thread, 49 payloads, 25 GPU chunk pairs, per-view uniform/instance buffers | Renderer, heap allocator | Created the first time that view is shown; kept (never regrown) until shutdown |
+| Guest players and controller state | App's Sandbox and Gamepads (fixed capacity) | Application; guests are session-only |
 | Depth texture and view | Renderer | Recreated on framebuffer resize; view released before texture |
 | Camera and simulation clock | App's Engine | Application |
 | Static, visible, and HUD CPU arrays | Renderer | Fixed capacity, no per-frame growth |
