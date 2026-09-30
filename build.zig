@@ -37,6 +37,11 @@ pub fn build(b: *std.Build) void {
     app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     for (blueprint_names, blueprints) |name, output| app.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     const exe = @import("mach").addExecutable(mach.builder, .{ .name = "heavy-water", .app = app, .target = target, .optimize = optimize });
+    if (target.result.os.tag == .macos) {
+        exe.root_module.addCSourceFile(.{ .file = b.path("src/platform/gamepad.m"), .flags = &.{"-fno-objc-arc"} });
+        exe.root_module.linkFramework("GameController", .{});
+        exe.root_module.linkFramework("Foundation", .{});
+    }
     if (target.result.os.tag == .linux) {
         exe.use_llvm = true;
         exe.use_lld = true;
