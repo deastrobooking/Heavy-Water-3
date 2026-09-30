@@ -6,6 +6,7 @@ const Blueprint = @import("../machine/Blueprint.zig");
 const Catalog = @This();
 const Arbor = @import("../procedural/Arbor.zig");
 const Seed = @import("../procedural/Seed.zig");
+const District = @import("../procedural/District.zig");
 pub const arbor_count = 2;
 pub const ArborAsset = struct { tree: Arbor.Tree, mesh: MeshHandle, lod: MeshHandle };
 
@@ -16,7 +17,7 @@ const MaterialTag = struct {};
 pub const MeshHandle = Handle.Handle(MeshTag);
 pub const MaterialHandle = Handle.Handle(MaterialTag);
 /// Bumped whenever shipped content changes meaning (IDs, dimensions); persisted in saves.
-pub const content_version: u32 = 4;
+pub const content_version: u32 = 5;
 pub const max_blueprints = 8;
 
 pub const Entry = struct {
@@ -41,6 +42,7 @@ pub const Content = struct {
     elevator: *const Blueprint,
     rover: *const Blueprint,
     sap_beacon: *const Blueprint,
+    district: MeshHandle,
 };
 
 meshes: Handle.Pool(MeshTag, Entry, mesh_capacity) = .{},
@@ -49,6 +51,7 @@ content: Content = undefined,
 blueprints: [max_blueprints]Blueprint = undefined,
 blueprint_count: usize = 0,
 arbors: [arbor_count]ArborAsset = undefined,
+district: District.Layout = undefined,
 
 /// Built-in procedural meshes plus compiled runtime models. Immutable after load, so the
 /// application and render threads may read it concurrently.
@@ -75,6 +78,9 @@ pub fn loadSeeded(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void
         asset.mesh = try self.register(allocator, try Model.fromMesh(allocator, try Arbor.mesh(allocator, &asset.tree, .full), .named("arbor", .{ 1, 1, 1, 1 })));
         asset.lod = try self.register(allocator, try Model.fromMesh(allocator, try Arbor.mesh(allocator, &asset.tree, .proxy), .named("arbor proxy", .{ 1, 1, 1, 1 })));
     }
+    self.district = try District.generate(seed);
+    const city = try District.geometry(&self.district);
+    self.content.district = try self.register(allocator, try Model.fromMesh(allocator, try District.mesh(allocator, city.slice(), false), .named("canopy district", .{ 1, 1, 1, 1 })));
     // Blueprints were validated at build time; parsing again guards against a stale build.
     self.content.powered_door = try self.addBlueprint(allocator, @embedFile("powered_door.blueprint"));
     self.content.elevator = try self.addBlueprint(allocator, @embedFile("elevator.blueprint"));

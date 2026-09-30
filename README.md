@@ -6,7 +6,7 @@ The executable is an engine field test: an unbounded-feeling seeded terrain stre
 
 The climbable test Arbor stands near spawn: follow its spiral ramp to a branch platform and cross the bridge to the tower. The world uses cel shading, rim light, depth silhouettes, and height-aware haze. A twenty-minute day/night cycle starts at 08:24; the HUD shows world time, and quickload restores it. Powered lamps and your ranger's lumen accents stay luminous after dusk (emissive surfaces, without local light casting or bloom).
 
-Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. This changes content to version 4; older content saves are rejected.
+Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. The grove now connects through a six-plaza canopy district with towers, trunk walkways, and vine-supported roads. Press **4** to build bridges between plaza markers; machines can be placed on elevated decks. See [canopy city](docs/city.md) for the route and construction controls. Saves now use format 7 and content version 5; older saves are rejected.
 
 ## Run
 
@@ -30,11 +30,12 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | F4 | Character creator (also opens on a new game): arrows choose and change, type the name, Enter confirms, Escape cancels |
 | Q / E | Descend / ascend (flight) |
 | Left click, then mouse | Capture pointer and look |
-| 1 / 2 / 3 | Hands / build tool / wire tool |
+| 1 / 2 / 3 / 4 | Hands / build tool / wire tool / bridge tool |
 | Left click (captured), hands | Grab or drop a crate, press a machine button, or enter the rover; exit the rover while driving |
 | Right click (captured), hands | Salvage cutter: remove the relic under the crosshair |
 | Build tool | Tab next palette item, T rotate 90°, left click place (green preview), right click remove the crate, device, or machine under the crosshair |
 | Wire tool | Left click a source device, then a target (Tab cycles valid port pairs), left click to connect; right click disconnects the aimed device's inputs or cancels |
+| Bridge tool | Click two visible plaza markers to preview and build; right click cancels a selection or removes your aimed bridge |
 | P (build or wire tool) | Capture the aimed machine as a prefab: added to the palette and exported to `saves/prefabs/<name>.json` |
 | I | Toggle the inspection panel for the aimed machine |
 | [ / ] | Change the aimed transmitter's or receiver's channel (1–64) |
@@ -62,7 +63,7 @@ python3 tools/benchmark.py --arbor 1  # Seeded narrow Arbor (2 selects the sprea
 
 Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.
 
-`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, rendering a full day/night cycle, visiting both generated Arbors, and overloading two sap beacons on one tree. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
+`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, rendering a full day/night cycle, visiting both generated Arbors, overloading two sap beacons on one tree, previewing a city bridge, and restoring its completed geometry from an in-memory save. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
 
 The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. The `--canopy` route stays aimed at the Arbor, verifies both mesh detail levels and a render CPU P99 under 16.667 ms, and crosses at least 12 chunk boundaries. These measurements do not measure GPU execution time. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
 

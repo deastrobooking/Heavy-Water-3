@@ -12,8 +12,9 @@ const Profile = @import("Profile.zig");
 /// v2 added machine state; v3 vehicle bodies; v4 made the save describe the whole world:
 /// every placed machine as a full blueprint document (so rewiring persists) with its origin
 /// and quarter-turn yaw, and every crate; v5 added the captured prefab library; v6 the player's
-/// name and appearance. Older saves are rejected, not migrated.
-pub const format_version: u32 = 6;
+/// name and appearance; v7 adds constructed bridge edges and the district generator version.
+/// Older saves are rejected, not migrated.
+pub const format_version: u32 = 7;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -39,6 +40,8 @@ pub const Document = struct {
     generator: u32 = Seed.generator_version,
     content: u32 = Catalog.content_version,
     arbor_generator: u32 = @import("../procedural/Arbor.zig").generator_version,
+    district_generator: u32 = @import("../procedural/District.zig").generator_version,
+    bridges: []const @import("../procedural/District.zig").Edge = &.{},
     tick: u64,
     player: PlayerState,
     profile: Profile.Doc,
@@ -65,6 +68,8 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (doc.generator != Seed.generator_version) return error.GeneratorMismatch;
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
     if (doc.arbor_generator != @import("../procedural/Arbor.zig").generator_version) return error.GeneratorMismatch;
+    if (doc.district_generator != @import("../procedural/District.zig").generator_version) return error.GeneratorMismatch;
+    if (doc.bridges.len > @import("../procedural/District.zig").max_bridges) return error.InvalidSave;
     if (doc.collected.len > Modifications.capacity or doc.props.len > prop_count) return error.InvalidSave;
     for (doc.player.feet) |v| if (!finite(v)) return error.InvalidSave;
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;
@@ -130,7 +135,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 6", "\"format\": 5");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 7", "\"format\": 6");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
 }

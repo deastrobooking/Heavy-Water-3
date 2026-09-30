@@ -23,6 +23,8 @@ const TestArbor = @import("../procedural/TestArbor.zig");
 const Sandbox = @This();
 const Arbor = @import("../procedural/Arbor.zig");
 const Sap = @import("../machine/Sap.zig");
+const District = @import("../procedural/District.zig");
+pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
 pub const SapLink = struct { tree: u8, node: u16 };
 
@@ -54,6 +56,7 @@ pub const Target = union(enum) {
     device: DeviceRef,
     /// A machine's static structure.
     structure: u8,
+    bridge: u8,
 };
 pub const Actions = packed struct {
     /// Tool primary: grab/press/enter (hands), place (build), connect (wire).
@@ -74,8 +77,8 @@ pub const Actions = packed struct {
     toggle_view: bool = false,
     /// Open the character creator.
     open_creator: bool = false,
-    /// 0 = unchanged, 1 hands, 2 build, 3 wire.
-    select_tool: u2 = 0,
+    /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges.
+    select_tool: u3 = 0,
 };
 const NearbyChunk = struct { key: Key, count: usize, objects: [Scatter.capacity]Scatter.Object };
 /// A machine slot: its own editable blueprint copy, runtime, placement, and bodies.
@@ -98,6 +101,7 @@ const part_flag: u32 = 1 << 30;
 const chassis_flag: u32 = 1 << 29;
 /// Arbor geometry: occludes picking, never a removable target.
 const world_flag: u32 = 1 << 28;
+const bridge_flag: u32 = 1 << 27;
 /// Test Arbor placement relative to the spawn point.
 pub const arbor_offset: [2]f32 = .{ 60, 80 };
 
@@ -109,6 +113,8 @@ catalog: *const Catalog,
 /// Owns mesh-collider storage; `deinit` frees it.
 allocator: std.mem.Allocator,
 arbor_origin: ?Physics.Vec3 = null,
+district_collider: Physics.MeshCollider = .none,
+bridges: [District.max_bridges]?PlacedBridge = @splat(null),
 /// Stable tree IDs: 0 is the test Arbor; 1 and 2 are seeded genome Arbors.
 generated_origins: [Catalog.arbor_count]Physics.Vec3 = undefined,
 generated_colliders: [Catalog.arbor_count]Physics.MeshCollider = @splat(.none),
@@ -167,6 +173,8 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
         origin.* = .{ point[0], Terrain.surface(seed, point[0], point[1]).height, point[1] };
         collider.* = try Arbor.createCollider(allocator, &self.physics, &asset.tree, origin.*, world_flag);
     }
+    const city = try District.geometry(&catalog.district);
+    self.district_collider = try District.collider(allocator, &self.physics, city.slice(), world_flag);
     const half = self.crateHalf();
     for (crate_offsets) |offset| {
         const x = spawn[0] + offset[0];
@@ -477,7 +485,7 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
                 else => {},
             };
         },
-        .build, .wire => try Build.update(self, aim, primary, actions),
+        .build, .wire, .bridge => try Build.update(self, aim, primary, actions),
     }
 }
 
@@ -511,14 +519,17 @@ pub fn enterVehicle(self: *Sandbox, machine: u8, camera: *Camera) void {
     self.followVehicle(machine, camera);
 }
 
-/// Steps out to the vehicle's left, onto the terrain.
+/// Steps out to the vehicle's left, onto the nearest floor.
 pub fn exitVehicle(self: *Sandbox, camera: *Camera) void {
     const m = self.seated orelse return;
     self.seated = null;
     const placed = &self.machines[m];
     const pose = self.physics.rigidPose(placed.vehicle.?.rigid).?;
     const side = R.add(pose.position, R.rotate(pose.orientation, .{ -(placed.blueprint.vehicle.?.size[0] / 2 + 1.2), 0, 0 }));
-    self.player = .{ .feet = .{ side[0], Terrain.surface(self.seed, side[0], side[2]).height, side[2] }, .mode = .walk };
+    // Leave onto the nearest surface beside the chassis, including canopy decks. If there
+    // is no nearby floor, start falling from the vehicle rather than teleporting to terrain.
+    const floor = self.physics.castRay(R.add(side, .{ 0, 0.5, 0 }), .{ 0, -1, 0 }, 3, placed.vehicle.?.rigid);
+    self.player = .{ .feet = .{ side[0], if (floor) |hit| hit.point[1] + 0.01 else side[1], side[2] }, .mode = .walk };
     camera.pitch = -0.2;
     camera.position = self.player.eye();
 }
@@ -582,6 +593,44 @@ fn stepMachines(self: *Sandbox, dt: f32) void {
         }
     }
     self.press = null;
+}
+
+pub fn bridgeEdges(self: *const Sandbox, out: *[District.max_bridges]District.Edge) []const District.Edge {
+    var n: usize = 0;
+    for (self.bridges) |maybe| if (maybe) |bridge| {
+        out[n] = bridge.edge;
+        n += 1;
+    };
+    return out[0..n];
+}
+
+pub fn validateBridge(self: *const Sandbox, edge: District.Edge) !void {
+    var edges: [District.max_bridges]District.Edge = undefined;
+    const current = self.bridgeEdges(&edges);
+    if (current.len == edges.len) return error.TooManyBridges;
+    edges[current.len] = edge;
+    try District.validate(&self.catalog.district, edges[0 .. current.len + 1]);
+}
+
+fn prepareBridge(self: *Sandbox, edge: District.Edge, slot: usize) !PlacedBridge {
+    const parts = try District.bridgeParts(District.span(&self.catalog.district, edge));
+    return .{ .edge = edge, .parts = parts, .collider = try District.collider(self.allocator, &self.physics, parts.slice(), bridge_flag | @as(u32, @intCast(slot))) };
+}
+
+pub fn addBridge(self: *Sandbox, edge: District.Edge) !u8 {
+    try self.validateBridge(edge);
+    const slot = for (self.bridges, 0..) |bridge, i| {
+        if (bridge == null) break i;
+    } else return error.TooManyBridges;
+    // A failed allocation leaves the graph and existing geometry untouched.
+    self.bridges[slot] = try self.prepareBridge(edge, slot);
+    return @intCast(slot);
+}
+
+pub fn removeBridge(self: *Sandbox, slot: usize) void {
+    if (slot >= self.bridges.len) return;
+    if (self.bridges[slot]) |bridge| self.physics.destroyMesh(bridge.collider);
+    self.bridges[slot] = null;
 }
 
 pub fn tree(self: *const Sandbox, index: usize) *const Arbor.Tree {
@@ -674,7 +723,7 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distan
         // Crates carry their slot; machine devices and vehicle chassis (→ seat) carry machine
         // and device; structure parts carry their machine.
         const machine: u8 = @intCast((hit.user >> 8) & 0xFF);
-        best = if (hit.user & world_flag != 0) .none else if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .{ .structure = machine } else .{ .device = .{ .machine = machine, .device = @intCast(hit.user & 0xFF) } };
+        best = if (hit.user & bridge_flag != 0) .{ .bridge = @intCast(hit.user & 0xff) } else if (hit.user & world_flag != 0) .none else if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .{ .structure = machine } else .{ .device = .{ .machine = machine, .device = @intCast(hit.user & 0xFF) } };
     }
     if (relics) for (self.nearby) |chunk| for (chunk.objects[0..chunk.count]) |object| {
         if (object.kind != .relic) continue;
@@ -714,7 +763,16 @@ pub fn devicePosition(self: *const Sandbox, ref: DeviceRef) Physics.Vec3 {
 
 /// Render view of crates, machines, and (with the build or wire tool) previews and wires.
 pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
-    var n: usize = 0;
+    if (out.len == 0) return 0;
+    out[0] = .{ .mesh = self.catalog.content.district, .transform = .{}, .tint = .{ 1, 1, 1, 1 } };
+    var n: usize = 1;
+    for (self.bridges) |maybe| if (maybe) |bridge| {
+        for (bridge.parts.slice()) |p| {
+            if (n == out.len) return n;
+            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = p.center }, .tint = p.color ++ [_]f32{1}, .size = p.size, .rotation = p.rotation };
+            n += 1;
+        }
+    };
     if (self.arbor_origin) |origin| if (n < out.len) {
         out[n] = .{ .mesh = self.catalog.content.test_arbor, .transform = .{ .position = origin }, .tint = .{ 1, 1, 1, 1 }, .lod = self.catalog.content.test_arbor_lod, .lod_distance = 450 };
         n += 1;
@@ -846,8 +904,10 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         machines[machine_count] = state;
         machine_count += 1;
     }
+    var bridge_edges: [District.max_bridges]District.Edge = undefined;
     return Save.encode(allocator, .{
         .seed = self.seed,
+        .bridges = self.bridgeEdges(&bridge_edges),
         .tick = self.tick,
         .player = .{ .feet = self.player.feet, .yaw = camera.yaw, .pitch = camera.pitch, .mode = self.player.mode },
         .profile = self.profile.toDoc(),
@@ -893,6 +953,12 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     var prefabs: [max_prefabs]Blueprint = undefined;
     for (doc.prefabs, prefabs[0..doc.prefabs.len]) |source, *bp| bp.* = try Blueprint.fromDoc(source);
 
+    try District.validate(&self.catalog.district, doc.bridges);
+    // Stage all allocating bridge work before committing any saved state.
+    var staged: [District.max_bridges]?PlacedBridge = @splat(null);
+    errdefer for (staged) |maybe| if (maybe) |bridge| self.physics.destroyMesh(bridge.collider);
+    for (doc.bridges, 0..) |edge, i| staged[i] = try self.prepareBridge(edge, i);
+
     // Validated: tear down and rebuild.
     self.release();
     self.seated = null;
@@ -913,6 +979,9 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
             if (def.kind == .actuator) self.physics.setTransform(placed.devices[d], placed.machine.devicePosition(d), .{ 0, 0, 0 });
         }
     }
+    for (0..District.max_bridges) |i| self.removeBridge(i);
+    self.bridges = staged;
+    staged = @splat(null);
     @memcpy(self.prefabs[0..doc.prefabs.len], prefabs[0..doc.prefabs.len]);
     self.prefab_count = doc.prefabs.len;
     self.modifications.clear();
@@ -1350,4 +1419,179 @@ test "separate machines brown out on one Arbor, another tree stays independent, 
     const tick_before = sb.tick;
     try std.testing.expectError(error.GeneratorMismatch, sb.restore(std.testing.allocator, incompatible, &camera));
     try std.testing.expectEqual(tick_before, sb.tick);
+}
+
+test "walk the entire canopy district loop continuously across every junction" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const nodes = catalog.district.nodes;
+    sb.player = .{ .feet = R.add(nodes[0].position, .{ 0, 0.2, 0 }) };
+    camera.position = sb.player.eye();
+    for ([_]usize{ 1, 2, 3, 4, 5, 0 }) |next| {
+        var steps: usize = 0;
+        while (steps < 4000) : (steps += 1) {
+            const delta = R.sub(nodes[next].position, sb.player.feet);
+            if (@sqrt(delta[0] * delta[0] + delta[2] * delta[2]) < 0.2) break;
+            camera.yaw = std.math.atan2(delta[0], delta[2]);
+            try sb.step(&camera, .{ .forward = 1, .fast = true }, .{}, 1.0 / 60.0);
+            try std.testing.expect(sb.player.feet[1] > nodes[0].position[1] - 0.3);
+        }
+        try std.testing.expect(steps < 4000);
+        try std.testing.expectApproxEqAbs(nodes[next].position[1], sb.player.feet[1], 0.15);
+        try std.testing.expect(sb.player.grounded);
+    }
+}
+
+test "drive the canopy loop on machine power without resetting the rover between roads" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const nodes = catalog.district.nodes;
+    const rigid = sb.machines[2].vehicle.?.rigid;
+    const first = R.sub(nodes[1].position, nodes[0].position);
+    sb.physics.setRigidState(rigid, .{ .position = R.add(nodes[0].position, .{ 0, 1.3, 0 }), .orientation = R.axisAngle(.{ 0, 1, 0 }, std.math.atan2(first[0], first[2])) }, @splat(0), @splat(0));
+    sb.enterVehicle(2, &camera);
+    var next: usize = 1;
+    var steps: usize = 0;
+    while (steps < 25000 and next <= nodes.len) : (steps += 1) {
+        const pose = sb.physics.rigidPose(rigid).?;
+        const delta = R.sub(nodes[next % nodes.len].position, pose.position);
+        const distance = @sqrt(delta[0] * delta[0] + delta[2] * delta[2]);
+        // Switch inside the broad plaza, leaving room for the vehicle's turning circle.
+        if (distance < 7) {
+            next += 1;
+            continue;
+        }
+        var angle = std.math.atan2(delta[0], delta[2]) - R.yaw(pose.orientation);
+        while (angle > std.math.pi) angle -= 2 * std.math.pi;
+        while (angle < -std.math.pi) angle += 2 * std.math.pi;
+        const speed = sb.machines[2].vehicle.?.forwardSpeed(&sb.physics);
+        const desired: f32 = if (distance < 30 or @abs(angle) > 0.3) 4 else 9;
+        try sb.step(&camera, .{ .forward = std.math.clamp((desired - speed) * 0.4, -0.5, 1), .right = std.math.clamp(angle * 3, -1, 1) }, .{}, 1.0 / 60.0);
+        try std.testing.expect(pose.position[1] > nodes[0].position[1]);
+        try std.testing.expect(R.rotate(pose.orientation, .{ 0, 1, 0 })[1] > 0.9);
+    }
+    if (next <= nodes.len) std.debug.print("rover stuck approaching plaza {d}, position {any}\n", .{ next % nodes.len, sb.physics.rigidPose(rigid).?.position });
+    try std.testing.expect(next > nodes.len);
+    sb.exitVehicle(&camera);
+    try run(&sb, &camera, .{}, .{}, 60);
+    try std.testing.expect(sb.player.grounded);
+    try std.testing.expectApproxEqAbs(nodes[0].position[1], sb.player.feet[1], 0.15);
+}
+
+test "player bridge collision and stable endpoints survive save load; invalid deltas leave world intact" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const edge: District.Edge = .{ .a = 0, .b = 3 };
+    const slot = try sb.addBridge(edge);
+    const middle = District.span(&catalog.district, edge).point(0.5);
+    const ray = R.add(middle, .{ 0, 5, 0 });
+    const hit = sb.physics.raycast(ray, .{ 0, -1, 0 }, 10, .none).?;
+    try std.testing.expect(hit.user & bridge_flag != 0);
+    // Traverse the new span through both plaza seams before persisting it.
+    sb.player = .{ .feet = R.add(catalog.district.nodes[0].position, .{ 0, 0.2, 0 }) };
+    camera.position = sb.player.eye();
+    const destination = catalog.district.nodes[3].position;
+    var steps: usize = 0;
+    while (steps < 3000) : (steps += 1) {
+        const delta = R.sub(destination, sb.player.feet);
+        if (R.length(delta) < 0.2) break;
+        camera.yaw = std.math.atan2(delta[0], delta[2]);
+        try sb.step(&camera, .{ .forward = 1, .fast = true }, .{}, 1.0 / 60.0);
+        try std.testing.expect(sb.player.feet[1] > catalog.district.nodes[0].position[1] - 0.3);
+    }
+    try std.testing.expect(steps < 3000);
+    try std.testing.expect(sb.player.grounded);
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sb.removeBridge(slot);
+    try std.testing.expect(sb.physics.castRay(ray, .{ 0, -1, 0 }, 10, .none) == null);
+    try sb.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqualDeep(edge, sb.bridges[0].?.edge);
+    try std.testing.expectApproxEqAbs(middle[1], sb.physics.castRay(ray, .{ 0, -1, 0 }, 10, .none).?.point[1], 0.01);
+    const parsed = try Save.decode(std.testing.allocator, bytes, sb.seed, max_crates, max_machines);
+    defer parsed.deinit();
+    var invalid = parsed.value;
+    invalid.bridges = &.{.{ .a = 0, .b = 99 }};
+    const bad = try Save.encode(std.testing.allocator, invalid);
+    defer std.testing.allocator.free(bad);
+    const before = sb.bridges[0].?.collider;
+    try std.testing.expectError(error.InvalidAnchor, sb.restore(std.testing.allocator, bad, &camera));
+    try std.testing.expectEqual(before, sb.bridges[0].?.collider);
+    try std.testing.expectEqualDeep(edge, sb.bridges[0].?.edge);
+}
+
+test "bridge allocation failure leaves existing bridge and session intact" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    _ = try sb.addBridge(.{ .a = 0, .b = 3 });
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    const before = sb.bridges[0].?.collider;
+    const feet = sb.player.feet;
+    const machines = sb.machineCount();
+    // Fail each allocation in staging, including triangle/BVH storage. Stop at the first
+    // successful complete restore, freeing its collider before the allocator leaves scope.
+    var fail_index: usize = 0;
+    while (fail_index < 32) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        sb.allocator = failing.allocator();
+        defer sb.allocator = std.testing.allocator;
+        if (sb.restore(std.testing.allocator, bytes, &camera)) |_| {
+            sb.removeBridge(0);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, sb.bridges[0].?.collider);
+            try std.testing.expectEqualDeep(feet, sb.player.feet);
+            try std.testing.expectEqual(machines, sb.machineCount());
+            try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+        }
+    }
+    try std.testing.expect(fail_index < 32);
+}
+
+test "walk both Arbor spurs and their complete trunk plazas" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    for ([_]usize{ 2, 4 }) |node_id| {
+        const node = catalog.district.nodes[node_id];
+        const tree_center = catalog.district.trees[node.tree.?].position;
+        sb.player = .{ .feet = R.add(node.position, .{ 0, 0.2, 0 }) };
+        camera.position = sb.player.eye();
+        const angle = std.math.atan2(node.position[0] - tree_center[0], node.position[2] - tree_center[2]);
+        for (0..33) |i| {
+            const theta = angle + @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 32;
+            const destination: Physics.Vec3 = .{ tree_center[0] + @sin(theta) * 30, node.position[1], tree_center[2] + @cos(theta) * 30 };
+            var steps: usize = 0;
+            while (steps < 600) : (steps += 1) {
+                const delta = R.sub(destination, sb.player.feet);
+                if (R.length(delta) < 0.2) break;
+                camera.yaw = std.math.atan2(delta[0], delta[2]);
+                try sb.step(&camera, .{ .forward = 1, .fast = true }, .{}, 1.0 / 60.0);
+                try std.testing.expect(sb.player.feet[1] > node.position[1] - 0.3);
+            }
+            try std.testing.expect(steps < 600);
+            try std.testing.expect(sb.player.grounded);
+        }
+    }
 }

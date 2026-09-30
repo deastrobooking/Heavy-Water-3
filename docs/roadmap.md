@@ -98,9 +98,13 @@ Acceptance tests cover same-seed reproduction, measurable silhouette changes, pa
 
 Limits: three fixed resident trees; conservative allocation without redistribution after branch bottlenecks; no runtime grafting or growth, in-game genome editor, pipes, or tree residency eviction yet.
 
-## 8. Canopy city
+## 8. Canopy city — implemented as a bounded district
 
-A district layout graph (Arbors and grafted towers as nodes, bridge roads as edges); a bridge-road generator (the 14 m standard section, vine-cable suspension, trunk plazas, market bays); a tower generator; and solver validation (every district reachable, grades at most 6%, clearances kept) before anything appears. Player-built bridges, taps, and grafts persist as world deltas over the generated city. Acceptance: a generated district passes the solver, can be driven and walked end to end, and a player-added bridge survives save and load.
+Implemented: a versioned six-plaza graph around the resident grove, three generated towers, 14 m bridge roads with vine cables and lane/walkway markings, trunk-ring plazas and spurs, and market canopies. Validation runs before geometry installation and checks reachability, grades at most 6%, road/terrain/trunk/plaza clearance, approaches, and market bays. Tool 4 previews, builds, and removes player spans between stable plaza IDs. Elevated prefab placement and vehicle exit use the deck beneath them. Save v7/content v5 persists bridge edges alongside existing machines and taps, staging collision allocations before replacing the live world.
+
+Acceptance: continuous walking and powered rover driving around the complete loop; elevated rover placement and exit; two-click bridge creation/removal; traversal and save/load of an added bridge; invalid graph and allocation-failure rejection without mutation. See [canopy city](city.md) and [validation](validation.md).
+
+Limits: fixed topology with seeded variation, one resident district, at most four added spans, decorative suspension and markets. Runtime woody grafting/growth remains deferred from phase 7; generated trunk walkways are static. The legacy test-Arbor approach retains its original steeper grade outside the new road solver.
 
 ## 9. Living city
 

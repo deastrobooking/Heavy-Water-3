@@ -12,7 +12,7 @@ const World = @import("../world/World.zig");
 const Sandbox = @import("Sandbox.zig");
 const Vec3 = Physics.Vec3;
 
-pub const Tool = enum { hands, build, wire };
+pub const Tool = enum { hands, build, wire, bridge };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
 pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon };
 pub const build_reach: f32 = 14;
@@ -33,6 +33,8 @@ pub const State = struct {
     wire_choice: usize = 0,
     kit_serial: u32 = 0,
     prefab_serial: u32 = 0,
+    bridge_from: ?u8 = null,
+    bridge_hover: ?u8 = null,
 };
 
 pub fn paletteLen(sb: *const Sandbox) usize {
@@ -130,6 +132,8 @@ pub fn selectTool(sb: *Sandbox, tool: Tool) void {
     sb.tools.preview = null;
     sb.tools.wire_from = null;
     sb.tools.wire_choice = 0;
+    sb.tools.bridge_from = null;
+    sb.tools.bridge_hover = null;
     if (tool != .hands) sb.release();
     sb.say("{s} tool", .{@tagName(tool)});
 }
@@ -138,6 +142,7 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
     const st = &sb.tools;
     switch (st.tool) {
         .hands => {},
+        .bridge => try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary),
         .build => {
             if (actions.next_item) {
                 st.slot = (st.slot + 1) % paletteLen(sb);
@@ -203,6 +208,24 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
     if (blueprintOf(sb, e)) |bp| {
         result.origin = sb.groundOrigin(bp, x, z, st.yaw);
         var bounds = footprint(bp, st.yaw);
+        if (hit.point[1] > Terrain.surface(sb.seed, x, z).height + 1) {
+            // Elevated construction must be supported across its whole footprint. Start rays
+            // just above the selected deck so upper floors cannot steal the placement.
+            var top = -std.math.inf(f32);
+            for (0..5) |ix| for (0..5) |iz| {
+                const px = x + bounds.lo[0] + (bounds.hi[0] - bounds.lo[0]) * @as(f32, @floatFromInt(ix)) / 4;
+                const pz = z + bounds.lo[2] + (bounds.hi[2] - bounds.lo[2]) * @as(f32, @floatFromInt(iz)) / 4;
+                const support = sb.physics.castRay(.{ px, hit.point[1] + 0.6, pz }, .{ 0, -1, 0 }, 1.2, .none);
+                if (support) |s| {
+                    top = @max(top, s.point[1]);
+                    if (s.normal[1] < 0.95) result.valid = false;
+                } else result.valid = false;
+            };
+            if (!std.math.isFinite(top)) top = hit.point[1];
+            const lift = if (bp.vehicle) |v| v.wheels[0].radius + v.wheels[0].rest - v.wheels[0].offset[1] + 0.1 else -bounds.lo[1] + 0.01;
+            result.origin = .{ x, top + lift, z };
+            if (hit.normal[1] < 0.95) result.valid = false;
+        }
         // Foundations may sink into the terrain; only the part above ground must be clear.
         bounds.lo[1] = @max(bounds.lo[1], 0.05);
         if (bounds.hi[1] <= bounds.lo[1]) bounds.hi[1] = bounds.lo[1] + 0.1;
@@ -223,7 +246,7 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
     for ([_]f32{ feet[0], feet[1] + shape.height / 2, feet[2] }, [_]f32{ shape.radius, shape.height / 2, shape.radius }, 0..) |c, h, k| {
         inside_player = inside_player and @abs(c - result.center[k]) < h + result.half[k];
     }
-    result.valid = !sb.physics.overlapsBox(result.center, clear) and !inside_player;
+    result.valid = result.valid and !sb.physics.overlapsBox(result.center, clear) and !inside_player;
     if (blueprintOf(sb, e)) |bp| {
         for (bp.devices[0..bp.device_count]) |d| {
             if (d.kind == .sap_tap and sb.sapAttachment(R.add(result.origin, R.rotate(Sandbox.yawRotation(st.yaw), d.offset))) == null) result.valid = false;
@@ -275,6 +298,10 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
             } else removeMachine(sb, d.machine);
         },
         .structure => |m| removeMachine(sb, m),
+        .bridge => |i| {
+            sb.removeBridge(i);
+            sb.say("removed bridge", .{});
+        },
         .relic, .none => sb.say("nothing to remove", .{}),
     }
 }
@@ -479,6 +506,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools;
     return switch (st.tool) {
         .hands => "",
+        .bridge => @import("BridgeTool.zig").hint(sb, buffer),
         .build => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE", .{entryName(sb, current(sb))}) catch buffer,
         .wire => if (pendingWire(sb)) |w| blk: {
             const bp = &sb.machines[st.wire_from.?.machine].blueprint;
@@ -503,6 +531,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     var n = start;
     const st = sb.tools;
     const block = sb.catalog.content.block;
+    if (st.tool == .bridge) return @import("BridgeTool.zig").publish(sb, out, start);
     if (st.tool == .build) if (st.preview) |p| {
         const tint: [4]f32 = if (p.valid) .{ 0.35, 1.0, 0.45, 1 } else .{ 1.0, 0.3, 0.25, 1 };
         if (blueprintOf(sb, p.entry)) |bp| {
@@ -891,4 +920,63 @@ test "sap beacon palette placement requires nearby wood and produces a powered i
     aim(&camera, .{ far_x, far_y, z });
     try tick(&sb, &camera, .{});
     try std.testing.expect(sb.tools.preview != null and !sb.tools.preview.?.valid);
+}
+
+test "place a rover on an elevated plaza and reject unsupported placement at its edge" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testWorld(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const plaza = catalog.district.nodes[1].position;
+    sb.player.mode = .fly;
+    camera.position = @import("mach").math.vec3(plaza[0], plaza[1] + 9, plaza[2] - 4);
+    selectTool(&sb, .build);
+    sb.tools.slot = @intFromEnum(Item.rover);
+    aim(&camera, plaza);
+    const p = preview(&sb, camera).?;
+    try std.testing.expect(p.valid);
+    try std.testing.expect(p.origin[1] > plaza[1] + 1);
+    const count = sb.machineCount();
+    try place(&sb, p);
+    try std.testing.expectEqual(count + 1, sb.machineCount());
+    for (0..120) |_| try tick(&sb, &camera, .{});
+    const vehicle = sb.machines[count].vehicle.?;
+    try std.testing.expectApproxEqAbs(plaza[1] + 1.09, sb.physics.rigidPose(vehicle.rigid).?.position[1], 0.15);
+    for (vehicle.state[0..4]) |wheel| try std.testing.expect(wheel.contact);
+    camera.position = @import("mach").math.vec3(plaza[0] + 19.5, plaza[1] + 8, plaza[2]);
+    aim(&camera, R.add(plaza, .{ 19.5, 0, 0 }));
+    try std.testing.expect(!preview(&sb, camera).?.valid);
+}
+
+test "bridge tool selects two visible plaza anchors, builds, cancels, and removes" {
+    const Bridge = @import("BridgeTool.zig");
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testWorld(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.player.mode = .fly;
+    selectTool(&sb, .bridge);
+    for ([_]u8{ 0, 3 }) |node| {
+        const point = Bridge.anchor(catalog.district.nodes[node]);
+        camera.position = @import("mach").math.vec3(point[0], point[1] + 8, point[2] - 8);
+        aim(&camera, point);
+        try Bridge.update(&sb, camera, true, false);
+    }
+    try std.testing.expectEqualDeep(@import("../procedural/District.zig").Edge{ .a = 0, .b = 3 }, sb.bridges[0].?.edge);
+    try std.testing.expect(sb.tools.bridge_from == null);
+    try Bridge.update(&sb, camera, true, false);
+    try std.testing.expectEqual(@as(?u8, 3), sb.tools.bridge_from);
+    const source = Bridge.anchor(catalog.district.nodes[3]);
+    camera.position = @import("mach").math.vec3(source[0], source[1] + 0.12, source[2]);
+    aim(&camera, Bridge.anchor(catalog.district.nodes[0]));
+    try std.testing.expectEqual(@as(?u8, 0), Bridge.aimedAnchor(&sb, camera));
+    try Bridge.update(&sb, camera, false, true);
+    try std.testing.expect(sb.tools.bridge_from == null);
+    sb.target = .{ .bridge = 0 };
+    try Bridge.update(&sb, camera, false, true);
+    try std.testing.expect(sb.bridges[0] == null);
 }

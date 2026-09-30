@@ -145,6 +145,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .one => self.actions.select_tool = 1,
             .two => self.actions.select_tool = 2,
             .three => self.actions.select_tool = 3,
+            .four => self.actions.select_tool = 4,
             .tab => self.actions.next_item = true,
             .t => self.actions.rotate = true,
             .p => self.actions.capture = true,
@@ -214,7 +215,7 @@ fn quickload(self: *App) void {
 }
 
 fn exerciseSmoke(self: *App) void {
-    const stage = @min(7, self.rendered_frames_seen * 8 / options.smoke_frames);
+    const stage = @min(9, self.rendered_frames_seen * 10 / options.smoke_frames);
     if (stage == self.smoke_stage) return;
     self.smoke_stage = stage;
     const camera = &self.engine.camera;
@@ -283,6 +284,24 @@ fn exerciseSmoke(self: *App) void {
             camera.position = mach.math.vec3(origin[0], origin[1] + 100, origin[2] - 1000);
             camera.yaw = 0;
             camera.pitch = 0.12;
+        },
+        8 => {
+            const nodes = self.sandbox.catalog.district.nodes;
+            Build.selectTool(&self.sandbox, .bridge);
+            self.sandbox.tools.bridge_from = 0;
+            camera.position = mach.math.vec3(nodes[0].position[0], nodes[0].position[1] + 20, nodes[0].position[2]);
+            const point = @import("game/BridgeTool.zig").anchor(nodes[3]);
+            const dx = point[0] - camera.position.x();
+            const dz = point[2] - camera.position.z();
+            camera.yaw = std.math.atan2(dx, dz);
+            camera.pitch = std.math.atan2(point[1] - camera.position.y(), @sqrt(dx * dx + dz * dz));
+        },
+        9 => {
+            _ = self.sandbox.addBridge(.{ .a = 0, .b = 3 }) catch |err| return self.report("SMOKE BRIDGE {s}", .{@errorName(err)});
+            const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE CITY SAVE {s}", .{@errorName(err)});
+            defer self.allocator.free(bytes);
+            self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE CITY LOAD {s}", .{@errorName(err)});
+            std.log.info("Smoke city: six plazas, bridge {d} > {d} restored with collision; save {d} bytes", .{ self.sandbox.bridges[0].?.edge.a, self.sandbox.bridges[0].?.edge.b, bytes.len });
         },
         else => {},
     }
@@ -363,6 +382,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     } else switch (sandbox.target) {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
         .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  RMB SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
+        .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;
