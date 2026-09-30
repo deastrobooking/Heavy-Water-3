@@ -3,7 +3,7 @@ const std = @import("std");
 /// Device kinds shared by every machine. Sensors produce signals, controllers transform them,
 /// actuators consume power and signals, and generators feed power networks.
 /// `seat`, `motor`, and `steering` exist only in vehicle blueprints.
-pub const Kind = enum { generator, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver };
+pub const Kind = enum { generator, sap_tap, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver };
 /// Channels of the world signal bus shared by transmitters and receivers on any machine.
 pub const max_channels = 64;
 pub const PortKind = enum { power, signal };
@@ -20,7 +20,7 @@ pub const max_ports = 5;
 /// Fixed port table per kind; a port's index in this table is its stable address.
 pub fn ports(kind: Kind) []const Port {
     return switch (kind) {
-        .generator => &.{
+        .generator, .sap_tap => &.{
             .{ .name = "power", .kind = .power, .direction = .output },
             .{ .name = "enable", .kind = .signal, .direction = .input, .default = 1 },
         },
@@ -55,7 +55,7 @@ pub fn ports(kind: Kind) []const Port {
             .{ .name = "throttle", .kind = .signal, .direction = .input },
             .{ .name = "drive", .kind = .signal, .direction = .output },
         },
-        // Draws watts while `on`; `lit` is 1 only when on and its network has supply.
+        // Draws watts while `on`; `lit` is the supplied fraction (0..1), exposing brownouts.
         .lamp => &.{
             .{ .name = "power", .kind = .power, .direction = .input },
             .{ .name = "on", .kind = .signal, .direction = .input },

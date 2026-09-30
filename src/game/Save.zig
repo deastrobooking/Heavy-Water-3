@@ -38,6 +38,7 @@ pub const Document = struct {
     seed: u64,
     generator: u32 = Seed.generator_version,
     content: u32 = Catalog.content_version,
+    arbor_generator: u32 = @import("../procedural/Arbor.zig").generator_version,
     tick: u64,
     player: PlayerState,
     profile: Profile.Doc,
@@ -63,6 +64,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) return error.GeneratorMismatch;
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
+    if (doc.arbor_generator != @import("../procedural/Arbor.zig").generator_version) return error.GeneratorMismatch;
     if (doc.collected.len > Modifications.capacity or doc.props.len > prop_count) return error.InvalidSave;
     for (doc.player.feet) |v| if (!finite(v)) return error.InvalidSave;
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;

@@ -6,6 +6,8 @@ The executable is an engine field test: an unbounded-feeling seeded terrain stre
 
 The climbable test Arbor stands near spawn: follow its spiral ramp to a branch platform and cross the bridge to the tower. The world uses cel shading, rim light, depth silhouettes, and height-aware haze. A twenty-minute day/night cycle starts at 08:24; the HUD shows world time, and quickload restores it. Powered lamps and your ranger's lumen accents stay luminous after dusk (emissive surfaces, without local light casting or bloom).
 
+Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. This changes content to version 4; older content saves are rejected.
+
 ## Run
 
 Python 3.10+ is the only bootstrap prerequisite. From this directory:
@@ -54,12 +56,13 @@ python3 tools/zig.py build run -Dseed=42
 python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/zig.py build -Doptimize=ReleaseFast
 python3 tools/benchmark.py            # fixed fly-through route, writes .tools/streaming-benchmark.json
-python3 tools/benchmark.py --canopy   # Arbor at close range and 1 km, writes .tools/canopy-benchmark.json
+python3 tools/benchmark.py --canopy   # Test Arbor at close range and 1 km
+python3 tools/benchmark.py --arbor 1  # Seeded narrow Arbor (2 selects the spreading Arbor)
 ```
 
 Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.
 
-`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, and rendering a full day/night cycle. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
+`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, rendering a full day/night cycle, visiting both generated Arbors, and overloading two sap beacons on one tree. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
 
 The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. The `--canopy` route stays aimed at the Arbor, verifies both mesh detail levels and a render CPU P99 under 16.667 ms, and crosses at least 12 chunk boundaries. These measurements do not measure GPU execution time. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
 

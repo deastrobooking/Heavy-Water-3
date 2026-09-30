@@ -214,7 +214,7 @@ fn quickload(self: *App) void {
 }
 
 fn exerciseSmoke(self: *App) void {
-    const stage = @min(5, self.rendered_frames_seen * 6 / options.smoke_frames);
+    const stage = @min(7, self.rendered_frames_seen * 8 / options.smoke_frames);
     if (stage == self.smoke_stage) return;
     self.smoke_stage = stage;
     const camera = &self.engine.camera;
@@ -265,9 +265,38 @@ fn exerciseSmoke(self: *App) void {
             self.sandbox.press = self.sandbox.findDevice(0, "button");
             self.sandbox.enterVehicle(2, camera);
         },
+        6 => {
+            if (self.sandbox.seated != null) self.sandbox.exitVehicle(camera);
+            self.sandbox.player.setMode(.fly, camera.*);
+            self.sandbox.view = .first;
+            self.smokeSap();
+            const origin = self.sandbox.treeOrigin(1);
+            camera.position = mach.math.vec3(origin[0], origin[1] + 80, origin[2] - 220);
+            camera.yaw = 0;
+            camera.pitch = 0.5;
+            self.show_metrics = true;
+        },
+        7 => {
+            const flow = self.sandbox.sap_stats[1];
+            std.log.info("Smoke sap: tree 1 demand={d:.0} W supply={d:.0} W satisfaction={d:.0}%", .{ flow.demand, flow.supplied, flow.satisfaction * 100 });
+            const origin = self.sandbox.treeOrigin(2);
+            camera.position = mach.math.vec3(origin[0], origin[1] + 100, origin[2] - 1000);
+            camera.yaw = 0;
+            camera.pitch = 0.12;
+        },
         else => {},
     }
     std.log.info("Smoke stage {d}: culling={any}, hud={any}, mode={s}", .{ stage, self.culling, self.show_metrics, @tagName(self.sandbox.player.mode) });
+}
+
+fn smokeSap(self: *App) void {
+    const sb = &self.sandbox;
+    const origin = sb.treeOrigin(1);
+    const radius = sb.tree(1).genome.base_radius;
+    for ([_]f32{ -3, 3 }) |z| {
+        const point: [3]f32 = .{ origin[0] + radius + 2, origin[1], origin[2] + z };
+        _ = sb.spawnMachine(null, sb.catalog.content.sap_beacon.*, point, 0, false) catch |err| return self.report("SMOKE SAP {s}", .{@errorName(err)});
+    }
 }
 
 fn smokeBuild(self: *App) void {
@@ -343,6 +372,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
                 .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
                 .transmitter, .receiver => renderer.hud_lines[1].set("{s} {s} CHANNEL {d}  [ ] CHANGE", .{ def.name(), @tagName(def.kind), def.channel }),
                 .lamp => renderer.hud_lines[1].set("{s} LAMP {s}", .{ def.name(), if (machine.outputs[ref.device][2] > 0) "LIT" else "DARK" }),
+                .sap_tap => {
+                    if (sandbox.tap_links[ref.machine][ref.device]) |link| {
+                        const stats = sandbox.sap_stats[link.tree];
+                        renderer.hud_lines[1].set("TREE {d} SAP {d:.0}/{d:.0} W  FLOW {d:.0}%", .{ link.tree, stats.supplied, stats.demand, stats.satisfaction * 100 });
+                    } else renderer.hud_lines[1].set("SAP TAP DETACHED  NEEDS WOOD WITHIN 4 M", .{});
+                },
                 .generator => renderer.hud_lines[1].set("GENERATOR {d:.0} W  LOAD {d:.0} W", .{ machine.outputs[ref.device][0], machine.network(ref.device).?.demand }),
                 .actuator => renderer.hud_lines[1].set("{s} {d:.0}%  POWER {d:.0}%", .{ def.name(), machine.state[ref.device] * 100, machine.satisfaction(ref.device) * 100 }),
                 else => renderer.hud_lines[1].set("{s}", .{def.name()}),

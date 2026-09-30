@@ -4,6 +4,10 @@ const Mesh = @import("../render/Mesh.zig");
 const Model = @import("Model.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Catalog = @This();
+const Arbor = @import("../procedural/Arbor.zig");
+const Seed = @import("../procedural/Seed.zig");
+pub const arbor_count = 2;
+pub const ArborAsset = struct { tree: Arbor.Tree, mesh: MeshHandle, lod: MeshHandle };
 
 pub const mesh_capacity = 16;
 pub const material_capacity = 64;
@@ -12,7 +16,7 @@ const MaterialTag = struct {};
 pub const MeshHandle = Handle.Handle(MeshTag);
 pub const MaterialHandle = Handle.Handle(MaterialTag);
 /// Bumped whenever shipped content changes meaning (IDs, dimensions); persisted in saves.
-pub const content_version: u32 = 3;
+pub const content_version: u32 = 4;
 pub const max_blueprints = 8;
 
 pub const Entry = struct {
@@ -36,6 +40,7 @@ pub const Content = struct {
     powered_door: *const Blueprint,
     elevator: *const Blueprint,
     rover: *const Blueprint,
+    sap_beacon: *const Blueprint,
 };
 
 meshes: Handle.Pool(MeshTag, Entry, mesh_capacity) = .{},
@@ -43,10 +48,15 @@ materials: Handle.Pool(MaterialTag, Model.Material, material_capacity) = .{},
 content: Content = undefined,
 blueprints: [max_blueprints]Blueprint = undefined,
 blueprint_count: usize = 0,
+arbors: [arbor_count]ArborAsset = undefined,
 
 /// Built-in procedural meshes plus compiled runtime models. Immutable after load, so the
 /// application and render threads may read it concurrently.
 pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
+    return self.loadSeeded(allocator, 0x4845415659);
+}
+
+pub fn loadSeeded(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void {
     self.* = .{};
     errdefer self.deinit(allocator);
     self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.cube(allocator), .named("relic", .{ 1, 1, 1, 1 })));
@@ -56,10 +66,20 @@ pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
     self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
     self.content.test_arbor_lod = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").lodMesh(allocator), .named("test arbor lod", .{ 1, 1, 1, 1 })));
     self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
+    for (&self.arbors, 0..) |*asset, i| {
+        const genome: Arbor.Genome = if (i == 0)
+            .{ .height = 420, .apical_dominance = 0.8, .vascular_capacity = 150, .lumen = .{ 0.15, 0.85, 0.7 } }
+        else
+            .{ .height = 340, .apical_dominance = 0.1, .gravitropism = 0.55, .platform_tendency = 0.9, .vascular_capacity = 300, .bark = .{ 0.42, 0.28, 0.18 }, .lumen = .{ 1, 0.65, 0.15 } };
+        asset.tree = try Arbor.grow(Seed.mix(seed ^ (0x4152424f52 + @as(u64, @intCast(i)))), genome);
+        asset.mesh = try self.register(allocator, try Model.fromMesh(allocator, try Arbor.mesh(allocator, &asset.tree, .full), .named("arbor", .{ 1, 1, 1, 1 })));
+        asset.lod = try self.register(allocator, try Model.fromMesh(allocator, try Arbor.mesh(allocator, &asset.tree, .proxy), .named("arbor proxy", .{ 1, 1, 1, 1 })));
+    }
     // Blueprints were validated at build time; parsing again guards against a stale build.
     self.content.powered_door = try self.addBlueprint(allocator, @embedFile("powered_door.blueprint"));
     self.content.elevator = try self.addBlueprint(allocator, @embedFile("elevator.blueprint"));
     self.content.rover = try self.addBlueprint(allocator, @embedFile("rover.blueprint"));
+    self.content.sap_beacon = try self.addBlueprint(allocator, @embedFile("sap_beacon.blueprint"));
 }
 
 fn addBlueprint(self: *Catalog, allocator: std.mem.Allocator, json: []const u8) !*const Blueprint {

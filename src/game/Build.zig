@@ -14,7 +14,7 @@ const Vec3 = Physics.Vec3;
 
 pub const Tool = enum { hands, build, wire };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
-pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver };
+pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon };
 pub const build_reach: f32 = 14;
 pub const grid: f32 = 0.5;
 pub const max_candidates = 16;
@@ -64,6 +64,8 @@ pub fn itemName(item: Item) []const u8 {
     return switch (item) {
         .logic_or => "logic or",
         .powered_door => "powered door",
+        .sap_tap => "sap tap",
+        .sap_beacon => "sap beacon",
         else => @tagName(item),
     };
 }
@@ -101,6 +103,7 @@ const or_nodes = [_]Node{ .{ .input = 0 }, .{ .input = 1 }, .{ .add = .{ .a = 0,
 /// Loose-device definitions; every one gets a pickable body so it can be wired.
 pub fn kitDevice(item: Item, id: []const u8) Blueprint.DocDevice {
     return switch (item) {
+        .sap_tap => .{ .id = id, .kind = .sap_tap, .size = .{ 0.6, 1, 0.6 }, .color = .{ 0.2, 0.9, 0.75, 1 }, .watts = 200, .body = true },
         .generator => .{ .id = id, .kind = .generator, .size = .{ 0.8, 1, 0.8 }, .color = .{ 0.85, 0.7, 0.2, 1 }, .watts = 200, .body = true },
         .button => .{ .id = id, .kind = .button, .size = .{ 0.35, 0.35, 0.35 }, .color = .{ 0.9, 0.25, 0.2, 1 }, .body = true },
         .latch => .{ .id = id, .kind = .latch, .size = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.55, 0.35, 0.75, 1 }, .body = true },
@@ -108,7 +111,7 @@ pub fn kitDevice(item: Item, id: []const u8) Blueprint.DocDevice {
         .lamp => .{ .id = id, .kind = .lamp, .size = .{ 0.35, 1.2, 0.35 }, .color = .{ 1, 0.9, 0.6, 1 }, .watts = 25, .body = true },
         .transmitter => .{ .id = id, .kind = .transmitter, .size = .{ 0.3, 1.4, 0.3 }, .color = .{ 0.95, 0.45, 0.8, 1 }, .channel = 1, .body = true },
         .receiver => .{ .id = id, .kind = .receiver, .size = .{ 0.5, 0.3, 0.5 }, .color = .{ 0.45, 0.55, 0.95, 1 }, .channel = 1, .body = true },
-        .crate, .powered_door, .elevator, .rover => unreachable,
+        .crate, .powered_door, .elevator, .rover, .sap_beacon => unreachable,
     };
 }
 
@@ -117,6 +120,7 @@ fn prefab(sb: *const Sandbox, item: Item) ?*const Blueprint {
         .powered_door => sb.catalog.content.powered_door,
         .elevator => sb.catalog.content.elevator,
         .rover => sb.catalog.content.rover,
+        .sap_beacon => sb.catalog.content.sap_beacon,
         else => null,
     };
 }
@@ -143,7 +147,12 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
             st.preview = preview(sb, camera);
             if (primary) {
                 if (st.preview) |p| {
-                    if (p.valid) try place(sb, p) else sb.say("blocked", .{});
+                    if (p.valid) {
+                        try place(sb, p);
+                    } else {
+                        const sap_item = p.entry == .item and (p.entry.item == .sap_tap or p.entry.item == .sap_beacon);
+                        if (sap_item) sb.say("blocked: tap needs clear space by wood", .{}) else sb.say("blocked", .{});
+                    }
                 } else sb.say("aim at the ground within {d:.0} m", .{build_reach});
             }
             if (actions.secondary) remove(sb, sb.target);
@@ -215,6 +224,11 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
         inside_player = inside_player and @abs(c - result.center[k]) < h + result.half[k];
     }
     result.valid = !sb.physics.overlapsBox(result.center, clear) and !inside_player;
+    if (blueprintOf(sb, e)) |bp| {
+        for (bp.devices[0..bp.device_count]) |d| {
+            if (d.kind == .sap_tap and sb.sapAttachment(R.add(result.origin, R.rotate(Sandbox.yawRotation(st.yaw), d.offset))) == null) result.valid = false;
+        }
+    } else if (e.item == .sap_tap and sb.sapAttachment(result.center) == null) result.valid = false;
     return result;
 }
 
@@ -226,8 +240,8 @@ pub fn place(sb: *Sandbox, p: Preview) !void {
     const item = p.entry.item;
     switch (item) {
         .crate => _ = sb.spawnCrate(p.center, .{ 0, 0, 0 }) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)}),
-        .powered_door, .elevator, .rover => unreachable,
-        .generator, .button, .latch, .logic_or, .lamp, .transmitter, .receiver => {
+        .powered_door, .elevator, .rover, .sap_beacon => unreachable,
+        .generator, .sap_tap, .button, .latch, .logic_or, .lamp, .transmitter, .receiver => {
             sb.tools.kit_serial += 1;
             var id_buffer: [Blueprint.id_len]u8 = undefined;
             const tag = switch (item) {
@@ -434,6 +448,15 @@ pub fn inspect(sb: *const Sandbox, lines: []PanelLine) usize {
         if (d.channel != 0) {
             const text = std.fmt.bufPrint(values[used..], " ch {d}", .{d.channel}) catch "";
             used += text.len;
+        }
+        if (d.kind == .sap_tap) {
+            if (sb.tap_links[m][i]) |link| {
+                const text = std.fmt.bufPrint(values[used..], " tree {d} node {d}", .{ link.tree, link.node }) catch "";
+                used += text.len;
+            } else {
+                const text = std.fmt.bufPrint(values[used..], " detached", .{}) catch "";
+                used += text.len;
+            }
         }
         Writer.line(lines, &n, "{s} {s}:{s}", .{ d.name(), @tagName(d.kind), values[0..used] });
         shown += 1;
@@ -826,4 +849,46 @@ test "a button on one machine lights a lamp on another over a bus channel, and c
     defer other.deinit();
     try other.restore(std.testing.allocator, bytes, &other_camera);
     try std.testing.expectEqual(@as(u16, Device.max_channels), other.machines[other.workshop.?].blueprint.devices[2].channel);
+}
+
+test "sap beacon palette placement requires nearby wood and produces a powered inspectable machine" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testWorld(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.player.mode = .fly;
+    selectTool(&sb, .build);
+    sb.tools.slot = @intFromEnum(Item.sap_beacon);
+    const origin = sb.treeOrigin(1);
+    const x = origin[0] + sb.tree(1).genome.base_radius + 2;
+    const z = origin[2];
+    const y = Terrain.surface(sb.seed, x, z).height;
+    camera.position = @import("mach").math.vec3(x, y + 5, z - 8);
+    aim(&camera, .{ x, y, z });
+    try tick(&sb, &camera, .{});
+    try std.testing.expect(sb.tools.preview != null and sb.tools.preview.?.valid);
+    const before = sb.machineCount();
+    try tick(&sb, &camera, .{ .interact = true });
+    try std.testing.expectEqual(before + 1, sb.machineCount());
+    for (0..4) |_| try tick(&sb, &camera, .{});
+    const m: u8 = @intCast(before);
+    try std.testing.expectEqual(@as(u8, 1), sb.tap_links[m][0].?.tree);
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[m].machine.outputs[2][2]);
+    sb.target = .{ .device = .{ .machine = m, .device = 0 } };
+    var lines: [16]PanelLine = undefined;
+    const count = inspect(&sb, &lines);
+    var named_tree = false;
+    for (lines[0..count]) |line| if (std.mem.indexOf(u8, line.slice(), "tree 1") != null) {
+        named_tree = true;
+    };
+    try std.testing.expect(named_tree);
+    // The same palette item is invalid away from wood, even over otherwise clear terrain.
+    const far_x = x + 45;
+    const far_y = Terrain.surface(sb.seed, far_x, z).height;
+    camera.position = @import("mach").math.vec3(far_x, far_y + 5, z - 8);
+    aim(&camera, .{ far_x, far_y, z });
+    try tick(&sb, &camera, .{});
+    try std.testing.expect(sb.tools.preview != null and !sb.tools.preview.?.valid);
 }

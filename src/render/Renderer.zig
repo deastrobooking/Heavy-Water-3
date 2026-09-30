@@ -211,6 +211,10 @@ fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32) void {
     self.height = height;
 }
 
+fn benchmarkArborMesh(self: *const Renderer) @import("../asset/Catalog.zig").MeshHandle {
+    return if (options.benchmark_arbor == 0) self.scene.catalog.content.test_arbor else self.scene.catalog.arbors[options.benchmark_arbor - 1].mesh;
+}
+
 pub fn render(self: *Renderer, core: *mach.Core) !void {
     // A setup failure must not reach Mach's callback dispatch: it panics on any returned error,
     // skipping App.stop/Renderer.deinit and leaking the streaming worker and GPU resources.
@@ -224,7 +228,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         const frame = self.frames -| Flythrough.warmup_frames;
         self.camera = Flythrough.camera(frame, options.benchmark_frames);
         if (options.benchmark_canopy) for (self.props[0..self.prop_count]) |prop| {
-            if (prop.mesh.eql(self.scene.catalog.content.test_arbor)) {
+            if (prop.mesh.eql(self.benchmarkArborMesh())) {
                 self.camera = Flythrough.canopyCamera(frame, options.benchmark_frames, prop.transform.position);
                 break;
             }
@@ -296,7 +300,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         if (self.scene.active_missing > 0) self.underfilled_frames += 1;
         const eye: [3]f32 = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z() };
         for (self.props[0..self.prop_count]) |prop| {
-            if (!prop.mesh.eql(self.scene.catalog.content.test_arbor)) continue;
+            if (!prop.mesh.eql(self.benchmarkArborMesh())) continue;
             if (prop.effectiveMesh(eye).eql(prop.mesh)) self.arbor_detail_frames += 1 else self.arbor_proxy_frames += 1;
         }
     }

@@ -103,6 +103,25 @@ Not yet verified by hand: how the tree reads on screen and at distance, and haze
 
 The benchmark measures render CPU submission cost and presentation intervals, not GPU execution time. Pixel-level appearance, outline thickness, color tuning, and manual day/night play remain unverified; no screenshot review was performed. The single test Arbor stays resident at both detail levels. Multi-Arbor residency, local lights, and bloom are not implemented by this change.
 
+## Arbor genomes and sap (2026-09-30)
+
+- ReleaseSafe suite: **85/85 tests pass**. New coverage includes deterministic bounded space colonization; genome validation; measurable narrow/broad silhouette differences; valid full/proxy/collision meshes; parent-before-child graph structure; allocation-failure cleanup; and landing/walking on a generated shelf at its rendered height. Existing full test-Arbor ramp/bridge walk remains passing.
+- Sap coverage: proportional root sharing and branch limits, order-independent grants, independent trees, exclusion of local generator supply and detached/disabled/idle taps, continuous lamp brownout, and shared power across separate machines. The sandbox test saves overloaded beacons, removes a load and observes recovery, reloads and reconnects both to the same tree, rejects a generator-version mismatch without mutating the session, and verifies a remote copied tap supplies nothing. Tree lumen publishes reduced emission under overload.
+- Build-tool acceptance: select the sap beacon from the palette, aim at terrain beside tree 1, obtain a valid preview, place it, receive full power, inspect its tree ID, then verify placement away from wood is invalid.
+- ReleaseSafe application compile and `build assets` pass. All four blueprints, including `sap_beacon.json`, are validated and installed. Formatting, diff whitespace checks, and benchmark CLI help pass.
+- **400-frame Metal validation smoke passes**, exit 0, no validation errors. It creates the player, grabs a crate, round-trips the save, builds/wires a lamp, drives the rover 3.3 m, views both generated Arbors, and reports `Smoke sap: tree 1 demand=300 W supply=150 W satisfaction=50%`. Final count: 509 simulation ticks, 861 submitted objects. The lighting cycle is swept across the run.
+
+Apple M3 Pro / Metal, ReleaseFast, seed 310399555161; each canopy run has 60 warm-up and 300 measured frames:
+
+| Route | CPU P50 / P95 / P99 (ms) | Presentation P99 (ms) | Detailed / proxy frames | Chunk crossings | Uploads / evictions |
+| --- | --- | --- | --- | --- | --- |
+| `--arbor 1` narrow crown | 0.561 / 0.744 / **0.868** | 20.987 | 174 / 126 | 14 | 95 / 70 |
+| `--arbor 2` spreading crown | 0.580 / 0.789 / **0.898** | 20.976 | 174 / 126 | 16 | 102 / 77 |
+
+Both reports pass all checks, including both LODs, the 16.667 ms render CPU budget, active-ring coverage (zero underfilled frames), and unthrottled presentation. Peak upload remains 284,204 B within 327,680 B; peak GPU terrain residency remains 25 chunks; terrain pools stay at 2 CPU and 50 GPU allocations. Reports are `.tools/canopy-1-benchmark.json` and `.tools/canopy-2-benchmark.json`.
+
+These are submission and presentation measurements, not GPU execution timings or an art review. The three trees and both of their mesh detail levels remain resident; terrain-pool counters do not represent total process/GPU memory. No screenshot or manual visual approval was performed. Runtime grafting/growth, tree eviction, and allocation of unused flow after branch bottlenecks remain deferred. See [Arbor genomes and sap](arbors.md) for controls and content-v4 save compatibility.
+
 ## Upstream programmatic resize issue
 
 A ReleaseSafe smoke run with Metal API validation reproduced a hang after setting `Core.windows.width/height` from the application thread. Sampling showed the main thread in `macOS.tick → NSWindow.setFrame_display_animate → windowDidResize → handleResize → windows.lock`. `tick` already owns that non-reentrant lock. The renderer and application then wait on the same collection lock. This is in the pinned Mach source, not a GPU validation error.

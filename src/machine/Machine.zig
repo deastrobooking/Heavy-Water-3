@@ -42,6 +42,8 @@ drivers: [max_devices][Device.max_ports]?Blueprint.PortRef = @splat(@splat(null)
 network_of: [max_devices]u8 = @splat(none),
 networks: [max_devices]Network = @splat(.{}),
 network_count: usize = 0,
+/// Resolved by the world after prepare and before requesting sap.
+connected_taps: [max_devices]bool = @splat(false),
 
 pub fn init(blueprint: *const Blueprint, origin: [3]f32) Machine {
     var self: Machine = .{ .blueprint = blueprint, .origin = origin };
@@ -101,8 +103,16 @@ fn input(self: *const Machine, device: usize, port: u8) f32 {
 }
 
 pub fn step(self: *Machine, env: Environment, dt: f32) void {
+    self.prepare(env);
+    self.finish(dt);
+}
+
+/// First pass: snapshot signals, evaluate controllers and collect regular supply/demand.
+/// The world inserts sap grants between this and finish, once all machines have prepared.
+pub fn prepare(self: *Machine, env: Environment) void {
     const bp = self.blueprint;
     self.previous = self.outputs;
+    self.connected_taps = @splat(false);
     for (self.networks[0..self.network_count]) |*n| n.* = .{};
     // Sensors, controllers, and power bookkeeping.
     for (bp.devices[0..bp.device_count], 0..) |def, d| {
@@ -112,6 +122,7 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
                 self.networks[self.network_of[d]].supply += supply;
                 self.outputs[d][0] = supply;
             },
+            .sap_tap => self.outputs[d][0] = 0,
             .button => self.outputs[d][0] = if (env.pressed == @as(u8, @intCast(d))) 1 else 0,
             .proximity => {
                 const local = R.inverseRotate(self.rotation, R.sub(env.player_feet, self.worldOffset(def.offset)));
@@ -150,6 +161,32 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
             },
         }
     }
+}
+
+/// Only the network's unmet demand is requested, weighted among enabled taps by rating.
+/// Disabled or idle taps cannot steal another machine's share of the tree.
+pub fn sapRequest(self: *const Machine, d: usize) f32 {
+    const def = self.blueprint.devices[d];
+    if (def.kind != .sap_tap or !self.connected_taps[d] or self.input(d, 1) <= 0.5) return 0;
+    const network_id = self.network_of[d];
+    const network_state = self.networks[network_id];
+    var rated: f32 = 0;
+    for (self.blueprint.devices[0..self.blueprint.device_count], 0..) |other, i| {
+        if (other.kind == .sap_tap and self.connected_taps[i] and self.network_of[i] == network_id and self.input(i, 1) > 0.5) rated += other.watts;
+    }
+    return @min(rated, @max(0, network_state.demand - network_state.supply)) * def.watts / rated;
+}
+
+pub fn grantSap(self: *Machine, d: usize, watts: f32) void {
+    std.debug.assert(self.blueprint.devices[d].kind == .sap_tap);
+    const grant = std.math.clamp(watts, 0, self.blueprint.devices[d].watts);
+    self.outputs[d][0] = grant;
+    self.networks[self.network_of[d]].supply += grant;
+}
+
+/// Second pass: resolve satisfaction, then advance actuators and drive outputs exactly once.
+pub fn finish(self: *Machine, dt: f32) void {
+    const bp = self.blueprint;
     for (self.networks[0..self.network_count]) |*n| {
         // No supply means nothing on the network runs, whatever its rating.
         n.satisfaction = if (n.supply <= 0) 0 else if (n.demand <= 0) 1 else @min(1, n.supply / n.demand);
@@ -157,7 +194,7 @@ pub fn step(self: *Machine, env: Environment, dt: f32) void {
     // Actuators move and motors drive at rated output scaled by satisfaction (brownout).
     for (bp.devices[0..bp.device_count], 0..) |def, d| {
         if (def.kind == .motor) self.outputs[d][2] = std.math.clamp(self.input(d, 1), -1, 1) * self.satisfaction(d);
-        if (def.kind == .lamp) self.outputs[d][2] = if (self.input(d, 1) > 0.5 and self.satisfaction(d) > 0) 1 else 0;
+        if (def.kind == .lamp) self.outputs[d][2] = if (self.input(d, 1) > 0.5) self.satisfaction(d) else 0;
         if (def.kind != .actuator) continue;
         const target = std.math.clamp(self.input(d, 1), 0, 1);
         const max_step = def.speed / Blueprint.length(def.travel) * dt * self.satisfaction(d);
@@ -396,4 +433,38 @@ test "transmitters and receivers carry a signal between machines through the bus
     try std.testing.expectError(error.InvalidDeviceParameters, Blueprint.parse(std.testing.allocator,
         \\{"format":1,"name":"bad","devices":[{"id":"l","kind":"latch","channel":3}]}
     ));
+}
+
+test "sap requests exclude regular supply, disconnected taps and disabled taps" {
+    const bp = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"sap","devices":[
+        \\ {"id":"tap","kind":"sap_tap","watts":200},
+        \\ {"id":"detached","kind":"sap_tap","watts":200},
+        \\ {"id":"cell","kind":"generator","watts":40},
+        \\ {"id":"on","kind":"logic","nodes":[{"constant":1}]},
+        \\ {"id":"lamp","kind":"lamp","watts":100}],
+        \\ "wires":[["tap.power","lamp.power"],["detached.power","lamp.power"],["cell.power","lamp.power"],["on.out","lamp.on"]]}
+    );
+    var machine = Machine.init(&bp, .{ 0, 0, 0 });
+    machine.step(.{}, 1.0 / 60.0);
+    machine.prepare(.{});
+    machine.connected_taps[0] = true;
+    try std.testing.expectEqual(@as(f32, 60), machine.sapRequest(0));
+    try std.testing.expectEqual(@as(f32, 0), machine.sapRequest(1));
+    machine.connected_taps[1] = true;
+    try std.testing.expectEqual(@as(f32, 30), machine.sapRequest(0));
+    try std.testing.expectEqual(@as(f32, 30), machine.sapRequest(1));
+    // Grant half the unmet demand: 40 W local + 30 W sap = 70% lamp brightness.
+    machine.grantSap(0, 15);
+    machine.grantSap(1, 15);
+    machine.finish(1.0 / 60.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), machine.outputs[4][2], 0.0001);
+    var disabled_bp = bp;
+    _ = try disabled_bp.addDevice(.{ .id = "off", .kind = .logic, .nodes = &.{.{ .constant = 0 }} });
+    try disabled_bp.connect(try disabled_bp.resolve("off.out"), try disabled_bp.resolve("tap.enable"));
+    var disabled = Machine.init(&disabled_bp, .{ 0, 0, 0 });
+    disabled.step(.{}, 1.0 / 60.0);
+    disabled.prepare(.{});
+    disabled.connected_taps[0] = true;
+    try std.testing.expectEqual(@as(f32, 0), disabled.sapRequest(0));
 }

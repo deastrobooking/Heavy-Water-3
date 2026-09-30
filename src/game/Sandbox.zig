@@ -21,6 +21,10 @@ const Avatar = @import("Avatar.zig");
 const Creator = @import("Creator.zig");
 const TestArbor = @import("../procedural/TestArbor.zig");
 const Sandbox = @This();
+const Arbor = @import("../procedural/Arbor.zig");
+const Sap = @import("../machine/Sap.zig");
+pub const sap_tree_count = 1 + Catalog.arbor_count;
+pub const SapLink = struct { tree: u8, node: u16 };
 
 /// The interactive session: a walking player, physical crates, placed machines (a powered
 /// door, an elevator, a drivable rover, and a player-built workshop circuit), three tools
@@ -92,7 +96,7 @@ pub const Placed = struct {
 const machine_flag: u32 = 1 << 31;
 const part_flag: u32 = 1 << 30;
 const chassis_flag: u32 = 1 << 29;
-/// Generated world geometry (the test Arbor): occludes picking, never a target.
+/// Arbor geometry: occludes picking, never a removable target.
 const world_flag: u32 = 1 << 28;
 /// Test Arbor placement relative to the spawn point.
 pub const arbor_offset: [2]f32 = .{ 60, 80 };
@@ -105,6 +109,12 @@ catalog: *const Catalog,
 /// Owns mesh-collider storage; `deinit` frees it.
 allocator: std.mem.Allocator,
 arbor_origin: ?Physics.Vec3 = null,
+/// Stable tree IDs: 0 is the test Arbor; 1 and 2 are seeded genome Arbors.
+generated_origins: [Catalog.arbor_count]Physics.Vec3 = undefined,
+generated_colliders: [Catalog.arbor_count]Physics.MeshCollider = @splat(.none),
+test_arbor_sap: Arbor.Tree = undefined,
+sap_stats: [sap_tree_count]Sap.Result = @splat(.{}),
+tap_links: [max_machines][Blueprint.max_devices]?SapLink = @splat(@splat(null)),
 arbor_colliders: [5]Physics.MeshCollider = @splat(.none),
 profile: Profile = .{},
 creator: Creator = .{},
@@ -149,6 +159,14 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.physics = .init(.{ .context = &self.seed, .sample = groundSample });
     errdefer self.physics.deinit();
     try self.placeArbor(spawn[0] + arbor_offset[0], spawn[2] + arbor_offset[1]);
+    self.test_arbor_sap = .{ .seed = seed, .genome = .{ .height = TestArbor.height, .base_radius = TestArbor.base_radius }, .count = 2 };
+    self.test_arbor_sap.nodes[0] = .{ .position = .{ 0, -TestArbor.bury, 0 }, .radius = TestArbor.base_radius, .parent = Arbor.none, .depth = 0 };
+    self.test_arbor_sap.nodes[1] = .{ .position = .{ 0, TestArbor.height, 0 }, .radius = TestArbor.top_radius, .parent = 0, .depth = 0 };
+    const grove = [_][2]f32{ .{ 240, 180 }, .{ -340, 300 } };
+    for (grove, &self.generated_origins, &self.generated_colliders, &catalog.arbors) |point, *origin, *collider, *asset| {
+        origin.* = .{ point[0], Terrain.surface(seed, point[0], point[1]).height, point[1] };
+        collider.* = try Arbor.createCollider(allocator, &self.physics, &asset.tree, origin.*, world_flag);
+    }
     const half = self.crateHalf();
     for (crate_offsets) |offset| {
         const x = spawn[0] + offset[0];
@@ -534,21 +552,27 @@ fn stepMachines(self: *Sandbox, dt: f32) void {
         if (self.press) |p| if (p.machine == m) {
             env.pressed = p.device;
         };
-        if (placed.vehicle) |*vehicle| {
+        if (placed.vehicle) |vehicle| {
             const driving = self.seated == @as(u8, @intCast(m));
             const pose = self.physics.rigidPose(vehicle.rigid).?;
             placed.machine.origin = pose.position;
             placed.machine.rotation = pose.orientation;
             if (driving) env.controls = self.driver_input;
-            placed.machine.step(env, dt);
+        }
+        placed.machine.prepare(env);
+    }
+    self.distributeSap();
+    for (&self.machines, 0..) |*placed, m| {
+        if (!placed.active) continue;
+        placed.machine.finish(dt);
+        if (placed.vehicle) |*vehicle| {
+            const driving = self.seated == @as(u8, @intCast(m));
             const v = placed.blueprint.vehicle.?;
             const out = placed.machine.outputs;
-            // An empty seat sets the parking brake.
             const brake = if (driving) out[v.seat][3] else 1;
             vehicle.step(&self.physics, .{ .drive = out[v.motor][2], .steer = out[v.steering][1], .brake = brake }, dt);
             continue;
         }
-        placed.machine.step(env, dt);
         const bp = &placed.blueprint;
         for (bp.devices[0..bp.device_count], 0..) |def, d| {
             if (def.kind != .actuator) continue;
@@ -558,6 +582,61 @@ fn stepMachines(self: *Sandbox, dt: f32) void {
         }
     }
     self.press = null;
+}
+
+pub fn tree(self: *const Sandbox, index: usize) *const Arbor.Tree {
+    return if (index == 0) &self.test_arbor_sap else &self.catalog.arbors[index - 1].tree;
+}
+
+pub fn treeOrigin(self: *const Sandbox, index: usize) Physics.Vec3 {
+    return if (index == 0) self.arbor_origin.? else self.generated_origins[index - 1];
+}
+
+/// Resolve by physical proximity, so copies and moving taps reconnect to the tree they touch.
+/// The lowest stable tree ID wins an exact tie. No arbitrary stored index can supply a remote tap.
+pub fn sapAttachment(self: *const Sandbox, position: Physics.Vec3) ?SapLink {
+    var best: ?SapLink = null;
+    var distance: f32 = 4;
+    for (0..sap_tree_count) |i| {
+        if (self.tree(i).attachment(R.sub(position, self.treeOrigin(i)), 4)) |hit| {
+            if (hit.distance <= distance and (best == null or hit.distance < distance)) {
+                best = .{ .tree = @intCast(i), .node = hit.node };
+                distance = hit.distance;
+            }
+        }
+    }
+    return best;
+}
+
+fn distributeSap(self: *Sandbox) void {
+    const capacity = max_machines * Blueprint.max_devices;
+    var requests: [sap_tree_count][capacity]Sap.Request = undefined;
+    var refs: [sap_tree_count][capacity]DeviceRef = undefined;
+    var counts: [sap_tree_count]usize = @splat(0);
+    self.tap_links = @splat(@splat(null));
+    for (&self.machines, 0..) |*placed, m| {
+        if (!placed.active) continue;
+        for (placed.blueprint.devices[0..placed.blueprint.device_count], 0..) |def, d| {
+            if (def.kind != .sap_tap) continue;
+            const link = self.sapAttachment(placed.machine.devicePosition(d)) orelse continue;
+            self.tap_links[m][d] = link;
+            placed.machine.connected_taps[d] = true;
+        }
+    }
+    for (&self.machines, 0..) |*placed, m| {
+        if (!placed.active) continue;
+        for (self.tap_links[m], 0..) |maybe_link, d| {
+            const link = maybe_link orelse continue;
+            const n = counts[link.tree];
+            requests[link.tree][n] = .{ .node = link.node, .watts = placed.machine.sapRequest(d) };
+            refs[link.tree][n] = .{ .machine = @intCast(m), .device = @intCast(d) };
+            counts[link.tree] += 1;
+        }
+    }
+    for (counts, 0..) |count, t| {
+        self.sap_stats[t] = Sap.allocate(self.tree(t), requests[t][0..count]);
+        for (requests[t][0..count], refs[t][0..count]) |request, ref| self.machines[ref.machine].machine.grantSap(ref.device, request.granted);
+    }
 }
 
 fn hold(self: *Sandbox, index: u32) void {
@@ -640,6 +719,21 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         out[n] = .{ .mesh = self.catalog.content.test_arbor, .transform = .{ .position = origin }, .tint = .{ 1, 1, 1, 1 }, .lod = self.catalog.content.test_arbor_lod, .lod_distance = 450 };
         n += 1;
     };
+    for (&self.catalog.arbors, self.generated_origins, 0..) |*asset, origin, i| {
+        if (n == out.len) return n;
+        out[n] = .{ .mesh = asset.mesh, .transform = .{ .position = origin }, .tint = .{ 1, 1, 1, 1 }, .lod = asset.lod, .lod_distance = 600 };
+        n += 1;
+        const health = self.sap_stats[i + 1].satisfaction;
+        const color = asset.tree.genome.lumen;
+        // Low trunk lumen marks where players can tap; shelf markers show stress in the crown.
+        const markers: usize = 1 + asset.tree.platform_count;
+        for (0..markers) |marker| {
+            if (n == out.len) return n;
+            const local: Physics.Vec3 = if (marker == 0) .{ asset.tree.genome.base_radius + 0.3, 2, 0 } else R.add(asset.tree.platforms[marker - 1].center, .{ 0, 2, 0 });
+            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = R.add(origin, local) }, .size = .{ 0.8, 2, 0.8 }, .tint = @import("../render/Material.zig").emissive(.{ color[0] * (0.25 + 0.75 * health), color[1] * (0.25 + 0.75 * health), color[2] * (0.25 + 0.75 * health), 1 }, health) };
+            n += 1;
+        }
+    }
     for (0..max_crates) |i| {
         if (!self.crateLive(i)) continue;
         if (n == out.len) return n;
@@ -682,9 +776,9 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
 fn deviceTint(machine: *const Machine, d: usize, highlight: f32) [4]f32 {
     const def = machine.blueprint.devices[d];
     var glow = highlight;
-    if ((def.kind == .generator and machine.outputs[d][0] == 0) or (def.kind == .actuator and machine.satisfaction(d) == 0)) glow *= 0.45;
+    if (((def.kind == .generator or def.kind == .sap_tap) and machine.outputs[d][0] == 0) or (def.kind == .actuator and machine.satisfaction(d) == 0)) glow *= 0.45;
     const emission: f32 = if (def.kind == .lamp) machine.outputs[d][2] else 0;
-    if (def.kind == .lamp and emission == 0) glow *= 0.35;
+    if (def.kind == .lamp) glow *= 0.2 + 0.8 * std.math.clamp(emission, 0, 1);
     return @import("../render/Material.zig").emissive(.{ def.color[0] * glow, def.color[1] * glow, def.color[2] * glow, 1 }, emission);
 }
 
@@ -833,6 +927,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.tick = doc.tick;
     self.target = .none;
     self.press = null;
+    self.sap_stats = @splat(.{});
+    self.tap_links = @splat(@splat(null));
 }
 
 fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {
@@ -1202,4 +1298,56 @@ test "walk the test Arbor: up the spiral ramp, onto the branch platform, across 
     try std.testing.expect(lowest > TestArbor.tower_top - 0.3);
     try std.testing.expectApproxEqAbs(origin[1] + TestArbor.tower_top, sandbox.player.feet[1], 0.1);
     try std.testing.expect(sandbox.player.grounded);
+}
+
+test "separate machines brown out on one Arbor, another tree stays independent, and saves reconnect taps" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const first = sb.treeOrigin(1);
+    const radius = sb.tree(1).genome.base_radius;
+    const beacon = catalog.content.sap_beacon.*;
+    const a = try sb.spawnMachine(null, beacon, R.add(first, .{ radius + 2, 0, -3 }), 0, false);
+    const b = try sb.spawnMachine(null, beacon, R.add(first, .{ radius + 2, 0, 3 }), 0, false);
+    const c = try sb.spawnMachine(null, beacon, R.add(sb.treeOrigin(2), .{ sb.tree(2).genome.base_radius + 2, 0, 0 }), 0, false);
+    try run(&sb, &camera, .{}, .{}, 4);
+    try std.testing.expectEqual(@as(u8, 1), sb.tap_links[a][0].?.tree);
+    try std.testing.expectEqual(@as(u8, 1), sb.tap_links[b][0].?.tree);
+    try std.testing.expectEqual(@as(u8, 2), sb.tap_links[c][0].?.tree);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), sb.machines[a].machine.outputs[2][2], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), sb.machines[b].machine.outputs[2][2], 0.0001);
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[c].machine.outputs[2][2]);
+    try std.testing.expectEqual(@as(f32, 150), sb.sap_stats[1].supplied);
+    var props: [World.max_props]World.Prop = undefined;
+    const n = sb.publishProps(&props);
+    const marker = R.add(first, .{ radius + 0.3, 2, 0 });
+    var stress_shown = false;
+    for (props[0..n]) |prop| if (std.meta.eql(prop.transform.position, marker)) {
+        try std.testing.expectEqual(@as(f32, 1.5), prop.tint[3]);
+        stress_shown = true;
+    };
+    try std.testing.expect(stress_shown);
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sb.removeMachine(a);
+    try run(&sb, &camera, .{}, .{}, 2);
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[b].machine.outputs[2][2]);
+    try sb.restore(std.testing.allocator, bytes, &camera);
+    try run(&sb, &camera, .{}, .{}, 4);
+    try std.testing.expectEqual(@as(u8, 1), sb.tap_links[a][0].?.tree);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), sb.machines[a].machine.outputs[2][2], 0.0001);
+    // A copied blueprint away from every tree cannot produce power.
+    const remote = try sb.spawnMachine(null, beacon, .{ 900, 40, 900 }, 0, false);
+    try run(&sb, &camera, .{}, .{}, 3);
+    try std.testing.expect(sb.tap_links[remote][0] == null);
+    try std.testing.expectEqual(@as(f32, 0), sb.machines[remote].machine.outputs[2][2]);
+    // Old procedural content must never silently replace geometry beneath a saved player.
+    const incompatible = try std.mem.replaceOwned(u8, std.testing.allocator, bytes, "\"arbor_generator\": 1", "\"arbor_generator\": 2");
+    defer std.testing.allocator.free(incompatible);
+    const tick_before = sb.tick;
+    try std.testing.expectError(error.GeneratorMismatch, sb.restore(std.testing.allocator, incompatible, &camera));
+    try std.testing.expectEqual(tick_before, sb.tick);
 }

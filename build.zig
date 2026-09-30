@@ -7,6 +7,9 @@ pub fn build(b: *std.Build) void {
     options.addOption(u64, "seed", b.option(u64, "seed", "World seed") orelse 0x4845415659);
     options.addOption(u32, "smoke_frames", b.option(u32, "smoke-frames", "Exit after N rendered frames (0 = interactive)") orelse 0);
     options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run the streaming route for N measured frames, after 60 warm-up frames") orelse 0);
+    const benchmark_arbor = b.option(u8, "benchmark-arbor", "Arbor to view on the canopy route: 0 test, 1 narrow genome, 2 spreading genome") orelse 0;
+    if (benchmark_arbor > 2) @panic("benchmark-arbor must be 0, 1, or 2");
+    options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });
@@ -19,7 +22,7 @@ pub fn build(b: *std.Build) void {
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
     // Blueprints are validated by the same tool; an invalid machine fails the build.
-    const blueprint_names = [_][]const u8{ "powered_door", "elevator", "rover" };
+    const blueprint_names = [_][]const u8{ "powered_door", "elevator", "rover", "sap_beacon" };
     var blueprints: [blueprint_names.len]std.Build.LazyPath = undefined;
     for (blueprint_names, &blueprints) |name, *output| {
         const check_blueprint = b.addRunArtifact(compiler);

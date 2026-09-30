@@ -64,7 +64,7 @@ pub const DeviceDef = struct {
     /// controllers only when the blueprint asks.
     pub fn hasBody(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
-            .generator, .button, .actuator, .lamp, .transmitter, .receiver => true,
+            .generator, .sap_tap, .button, .actuator, .lamp, .transmitter, .receiver => true,
             .proximity, .latch, .logic, .seat, .motor, .steering => false,
         };
     }
@@ -72,7 +72,7 @@ pub const DeviceDef = struct {
     /// Rendered as a block at its offset.
     pub fn visible(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
-            .generator, .button, .actuator, .seat, .motor, .lamp, .transmitter, .receiver => true,
+            .generator, .sap_tap, .button, .actuator, .seat, .motor, .lamp, .transmitter, .receiver => true,
             .proximity, .latch, .logic, .steering => false,
         };
     }
@@ -214,7 +214,7 @@ fn addDeviceChecked(self: *Blueprint, d: DocDevice, vehicle: bool) Error!u8 {
     try finite(&(d.offset ++ d.size ++ d.color ++ d.travel ++ [_]f32{ d.watts, d.speed }));
     try positive(d.size);
     switch (d.kind) {
-        .generator, .motor, .lamp => if (!(d.watts > 0) or d.speed != 0 or length(d.travel) != 0) return error.InvalidDeviceParameters,
+        .generator, .sap_tap, .motor, .lamp => if (!(d.watts > 0) or d.speed != 0 or length(d.travel) != 0) return error.InvalidDeviceParameters,
         .actuator => if (d.watts < 0 or !(d.speed > 0) or length(d.travel) == 0) return error.InvalidDeviceParameters,
         else => if (d.watts != 0 or d.speed != 0 or length(d.travel) != 0) return error.InvalidDeviceParameters,
     }

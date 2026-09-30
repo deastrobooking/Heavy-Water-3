@@ -15,6 +15,8 @@ test {
     _ = @import("engine/Sky.zig");
     _ = @import("procedural/Terrain.zig");
     _ = @import("procedural/TestArbor.zig");
+    _ = @import("procedural/Arbor.zig");
+    _ = @import("machine/Sap.zig");
     _ = @import("asset/Model.zig");
     _ = @import("asset/Gltf.zig");
     _ = @import("asset/Catalog.zig");
