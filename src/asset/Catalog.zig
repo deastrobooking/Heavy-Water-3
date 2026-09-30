@@ -31,6 +31,8 @@ pub const Content = struct {
     wheel: MeshHandle,
     /// The hand-authored test Arbor (phase 6), relative to its trunk-base origin.
     test_arbor: MeshHandle,
+    /// Coarse distance proxy for the test Arbor; see `World.Prop.effectiveMesh`.
+    test_arbor_lod: MeshHandle,
     powered_door: *const Blueprint,
     elevator: *const Blueprint,
     rover: *const Blueprint,
@@ -52,6 +54,7 @@ pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
     self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
+    self.content.test_arbor_lod = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").lodMesh(allocator), .named("test arbor lod", .{ 1, 1, 1, 1 })));
     self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
     // Blueprints were validated at build time; parsing again guards against a stale build.
     self.content.powered_door = try self.addBlueprint(allocator, @embedFile("powered_door.blueprint"));

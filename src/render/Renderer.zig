@@ -20,9 +20,16 @@ const Instance = Scene.Instance;
 comptime {
     if (options.upload_budget < Scene.chunk_bytes) @compileError("upload-budget-kib must be at least 278");
 }
-const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32 };
+const Sky = @import("../engine/Sky.zig");
+/// Matches `Frame` in scene.wgsl.
+const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32 };
 // Written by App.publish only inside Core's render mutex.
 camera: Camera = .{},
+/// Time of day in [0, 1) (0.5 noon), published by the application.
+time_of_day: f32 = 0.35,
+outline_pipeline: ?*gpu.RenderPipeline = null,
+outline_layout: ?*gpu.BindGroupLayout = null,
+outline_bind_group: ?*gpu.BindGroup = null,
 tick: u64 = 0,
 show_metrics: bool = true,
 culling: bool = false,
@@ -129,6 +136,26 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     errdefer { self.pipeline.?.release(); self.pipeline = null; }
     self.scene.setup(device, window.queue);
 
+    // Silhouette outlines: a fullscreen pass sampling scene depth, blended over the frame.
+    const outline_shader = device.createShaderModuleWGSL("outline.wgsl", @embedFile("outline.wgsl"));
+    defer outline_shader.release();
+    self.outline_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
+        gpu.BindGroupLayout.Entry.initTexture(0, .{ .fragment = true }, .depth, .dimension_2d, false),
+    } }));
+    const outline_pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{self.outline_layout.?} }));
+    defer outline_pipeline_layout.release();
+    const blend: gpu.BlendState = .{
+        .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+        .alpha = .{ .operation = .add, .src_factor = .zero, .dst_factor = .one },
+    };
+    const outline_fragment = gpu.FragmentState.init(.{ .module = outline_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format, .blend = &blend }} });
+    self.outline_pipeline = device.createRenderPipeline(&.{
+        .label = "silhouette outlines",
+        .layout = outline_pipeline_layout,
+        .vertex = gpu.VertexState.init(.{ .module = outline_shader, .entry_point = "vertex_main" }),
+        .fragment = &outline_fragment,
+    });
+
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
     defer hud_shader.release();
     const hud_fragment = gpu.FragmentState.init(.{ .module = hud_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format }} });
@@ -148,10 +175,15 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
 
 fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32) void {
     if (self.width == width and self.height == height) return;
+    if (self.outline_bind_group) |g| g.release();
     if (self.depth_view) |v| v.release();
     if (self.depth) |t| t.release();
-    self.depth = device.createTexture(&.{ .label = "scene depth", .size = .{ .width = width, .height = height }, .format = .depth32_float, .usage = .{ .render_attachment = true } });
+    // Sampled by the outline pass after the scene pass.
+    self.depth = device.createTexture(&.{ .label = "scene depth", .size = .{ .width = width, .height = height }, .format = .depth32_float, .usage = .{ .render_attachment = true, .texture_binding = true } });
     self.depth_view = self.depth.?.createView(&.{});
+    self.outline_bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.outline_layout.?, .entries = &.{
+        gpu.BindGroup.Entry.initTextureView(0, self.depth_view.?),
+    } }));
     self.width = width;
     self.height = height;
 }
@@ -174,7 +206,16 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const elapsed = self.timer.lap();
     self.frame_ms = if (self.frames == 0) elapsed * 1000 else self.frame_ms * 0.95 + elapsed * 50;
     const vp = self.camera.viewProjection(@as(f32, @floatFromInt(self.width)) / @as(f32, @floatFromInt(self.height)));
-    const frame = Frame{ .vp = vp, .eye = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z(), 1 } };
+    const light = Sky.at(self.time_of_day);
+    const frame = Frame{
+        .vp = vp,
+        .eye = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z(), 1 },
+        .light_direction = light.direction ++ [_]f32{0},
+        .light_color = light.color ++ [_]f32{0},
+        .ambient_sky = light.ambient_sky ++ [_]f32{0},
+        .ambient_ground = light.ambient_ground ++ [_]f32{0},
+        .horizon = light.horizon ++ [_]f32{light.night},
+    };
     self.scene.prepare(window.queue, self.camera, vp, self.culling, options.upload_budget, &self.modifications, self.props[0..self.prop_count]);
     const count = self.scene.instance_count;
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
@@ -184,8 +225,8 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     self.buildOverlay(count - 1, window.width, window.height);
     if (self.overlay.len > 0) encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
     const pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
-        .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = 0.055, .g = 0.10, .b = 0.14, .a = 1 } }},
-        .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .discard, .depth_clear_value = 0 },
+        .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = light.horizon[0], .g = light.horizon[1], .b = light.horizon[2], .a = 1 } }},
+        .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .store, .depth_clear_value = 0 },
     }));
     defer pass.release();
     pass.setPipeline(self.pipeline.?);
@@ -193,6 +234,14 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     pass.setVertexBuffer(1, self.instance_buffer.?, 0, Scene.max_instances * @sizeOf(Instance));
     self.scene.draw(pass);
     pass.end();
+    {
+        const outline = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .load, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 } }} }));
+        defer outline.release();
+        outline.setPipeline(self.outline_pipeline.?);
+        outline.setBindGroup(0, self.outline_bind_group.?, &.{});
+        outline.draw(3, 1, 0, 0);
+        outline.end();
+    }
     if (self.overlay.len > 0) {
         const hud = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .load, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 } }} }));
         defer hud.release();
@@ -278,6 +327,9 @@ fn reportBenchmark(self: *Renderer) void {
 }
 
 pub fn deinit(self: *Renderer) void {
+    if (self.outline_bind_group) |p| p.release();
+    if (self.outline_layout) |p| p.release();
+    if (self.outline_pipeline) |p| p.release();
     if (self.depth_view) |p| p.release();
     if (self.depth) |p| p.release();
     if (self.bind_group) |p| p.release();

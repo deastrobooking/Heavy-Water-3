@@ -194,6 +194,38 @@ pub fn renderMesh(allocator: std.mem.Allocator) !Mesh {
     return .{ .vertices = v, .indices = try allocator.dupe(u32, indices.items) };
 }
 
+/// Coarse silhouette-only proxy for distant viewing (roadmap phase 6, LOD for tall placed
+/// content): a low-segment tapered trunk with no ramp, platform, bridge, or tower detail.
+pub fn lodMesh(allocator: std.mem.Allocator) !Mesh {
+    const lod_segments = 8;
+    const rings = [_]f32{ -bury, 0, platform_height, height };
+    const vertices = try allocator.alloc(Mesh.Vertex, rings.len * (lod_segments + 1));
+    errdefer allocator.free(vertices);
+    const indices = try allocator.alloc(u32, (rings.len - 1) * lod_segments * 6);
+    for (rings, 0..) |y, ring| {
+        const r = trunkRadius(y);
+        for (0..lod_segments + 1) |i| {
+            const a = @as(f32, @floatFromInt(i)) / lod_segments * 2 * std.math.pi;
+            vertices[ring * (lod_segments + 1) + i] = .{
+                .position = .{ @cos(a) * r, y, @sin(a) * r },
+                .normal = R.normalize(.{ @cos(a), (base_radius - top_radius) / height, @sin(a) }),
+                .uv = .{ a * r / 4, y / 4 },
+                .color = bark,
+            };
+        }
+    }
+    var n: usize = 0;
+    for (0..rings.len - 1) |ring| for (0..lod_segments) |i| {
+        const a: u32 = @intCast(ring * (lod_segments + 1) + i);
+        const up: u32 = a + lod_segments + 1;
+        for ([_]u32{ a, up, a + 1, a + 1, up, up + 1 }) |index| {
+            indices[n] = index;
+            n += 1;
+        }
+    };
+    return .{ .vertices = vertices, .indices = indices };
+}
+
 /// Creates the colliders at `origin`: trunk and ramp as meshes, the rest as oriented boxes.
 /// Returns how many handles were written to `out`.
 pub fn createColliders(allocator: std.mem.Allocator, physics: *Physics, origin: Vec3, user: u32, out: *[5]Physics.MeshCollider) !usize {
@@ -240,3 +272,23 @@ test "test Arbor geometry: ramp grade, platform and bridge heights, and faces" {
     try std.testing.expect(mesh.vertices.len > 1000 and mesh.indices.len % 3 == 0);
     for (mesh.indices) |i| try std.testing.expect(i < mesh.vertices.len);
 }
+
+test "the LOD proxy is a much cheaper valid mesh spanning the same height" {
+    const allocator = std.testing.allocator;
+    const full = try renderMesh(allocator);
+    defer full.deinit(allocator);
+    const lod = try lodMesh(allocator);
+    defer lod.deinit(allocator);
+    try std.testing.expect(lod.vertices.len < full.vertices.len / 10);
+    try std.testing.expect(lod.indices.len % 3 == 0);
+    for (lod.indices) |i| try std.testing.expect(i < lod.vertices.len);
+    var min_y: f32 = std.math.inf(f32);
+    var max_y: f32 = -std.math.inf(f32);
+    for (lod.vertices) |v| {
+        min_y = @min(min_y, v.position[1]);
+        max_y = @max(max_y, v.position[1]);
+    }
+    try std.testing.expectApproxEqAbs(-bury, min_y, 1e-3);
+    try std.testing.expectApproxEqAbs(height, max_y, 1e-3);
+}
+

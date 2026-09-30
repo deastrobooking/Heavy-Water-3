@@ -637,7 +637,7 @@ pub fn devicePosition(self: *const Sandbox, ref: DeviceRef) Physics.Vec3 {
 pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     var n: usize = 0;
     if (self.arbor_origin) |origin| if (n < out.len) {
-        out[n] = .{ .mesh = self.catalog.content.test_arbor, .transform = .{ .position = origin }, .tint = .{ 1, 1, 1, 1 } };
+        out[n] = .{ .mesh = self.catalog.content.test_arbor, .transform = .{ .position = origin }, .tint = .{ 1, 1, 1, 1 }, .lod = self.catalog.content.test_arbor_lod, .lod_distance = 450 };
         n += 1;
     };
     for (0..max_crates) |i| {

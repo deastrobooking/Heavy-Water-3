@@ -150,7 +150,7 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
     self.peak_resident_count = @max(self.peak_resident_count, self.resident_count);
     self.relic_count = self.gather(.relic, vp, culling, removed);
     self.plant_count = self.gather(.vegetation, vp, culling, removed);
-    self.gatherProps(props);
+    self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() });
 }
 
 fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) u32 {
@@ -174,7 +174,8 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
 }
 
 /// Groups props by catalog mesh, then emits one instanced draw per submesh with its material color.
-fn gatherProps(self: *Scene, props: []const World.Prop) void {
+/// A prop with a distance LOD is grouped under whichever handle `effectiveMesh` picks this frame.
+fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32) void {
     self.draw_count = 0;
     self.prop_count = 0;
     var live = self.catalog.meshes.live.iterator(.{});
@@ -186,7 +187,7 @@ fn gatherProps(self: *Scene, props: []const World.Prop) void {
             const first = self.instance_count;
             const color = (self.catalog.material(entry.materials[s]) orelse continue).base_color;
             for (props) |prop| {
-                if (!prop.mesh.eql(handle)) continue;
+                if (!prop.effectiveMesh(camera_position).eql(handle)) continue;
                 self.instances[self.instance_count] = .{ .translation_scale = prop.transform.toInstance(), .tint = multiply(prop.tint, color), .stretch = .{ prop.size[0], prop.size[1], prop.size[2], 0 }, .rotation = prop.rotation };
                 self.instance_count += 1;
             }
