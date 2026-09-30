@@ -4,6 +4,8 @@ A native Zig engine (on Mach) for a science-fiction exploration and engineering 
 
 The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. Create and name your ranger, then start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps, radio transmitters and receivers) on a snapping grid; with the wire tool you connect their ports in the world. Capture any machine or circuit as a prefab to place copies, and inspect a machine's power networks, device outputs, and wires. Quicksave/quickload stores the whole world, including what you built, rewired, and captured. Every engine system is native Zig; Mach provides the platform and GPU layer.
 
+The climbable test Arbor stands near spawn: follow its spiral ramp to a branch platform and cross the bridge to the tower. The world uses cel shading, rim light, depth silhouettes, and height-aware haze. A twenty-minute day/night cycle starts at 08:24; the HUD shows world time, and quickload restores it. Powered lamps and your ranger's lumen accents stay luminous after dusk (emissive surfaces, without local light casting or bloom).
+
 ## Run
 
 Python 3.10+ is the only bootstrap prerequisite. From this directory:
@@ -52,13 +54,14 @@ python3 tools/zig.py build run -Dseed=42
 python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/zig.py build -Doptimize=ReleaseFast
 python3 tools/benchmark.py            # fixed fly-through route, writes .tools/streaming-benchmark.json
+python3 tools/benchmark.py --canopy   # Arbor at close range and 1 km, writes .tools/canopy-benchmark.json
 ```
 
 Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.
 
-`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, pressing the door button, and driving the rover. It never writes the save file. Use at least 16 frames to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
+`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, and rendering a full day/night cycle. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
 
-The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
+The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. The `--canopy` route stays aimed at the Arbor, verifies both mesh detail levels and a render CPU P99 under 16.667 ms, and crosses at least 12 chunk boundaries. These measurements do not measure GPU execution time. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
 
 ## Pinned foundation
 

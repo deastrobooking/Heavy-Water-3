@@ -26,7 +26,7 @@ pub fn build(profile: Profile, pose: Pose, block: Catalog.MeshHandle, out: []Wor
     const outfit = Profile.outfit_colors[profile.outfit];
     const accent = Profile.accent_colors[profile.accent];
     // Accent colors glow: brighter than lit surfaces.
-    const lumen = shade(accent, 1.6);
+    const lumen = @import("../render/Material.zig").emissive(shade(accent, 1.6), 1);
     const swing = @sin(pose.walk_phase) * 0.6 * pose.walk_amount;
     var n: usize = 0;
     const Emit = struct {
@@ -90,7 +90,8 @@ test "avatar parts follow profile proportions, style, and facing" {
     // Facing +X: the visor sits on the +X side of the head.
     const visor = parts[7].transform.position;
     try std.testing.expect(visor[0] > 5.1 and @abs(visor[2] - 5) < 0.01);
-    // Lumen accents glow brighter than their palette color.
+    // Lumen accents carry both their palette and the opaque shader emission channel.
+    try std.testing.expectEqual(@as(f32, 2), parts[5].tint[3]);
     try std.testing.expect(parts[5].tint[0] > Profile.accent_colors[0][0] or parts[5].tint[2] > Profile.accent_colors[0][2]);
     // Walking swings legs in opposite directions.
     _ = build(p, .{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_phase = std.math.pi / 2.0, .walk_amount = 1 }, block, &parts);

@@ -3,6 +3,7 @@ const mach = @import("mach");
 const options = @import("options");
 const Engine = @import("engine/Engine.zig");
 const Time = @import("engine/Time.zig");
+const Sky = @import("engine/Sky.zig");
 const World = @import("world/World.zig");
 const Renderer = @import("render/Renderer.zig");
 const Overlay = @import("render/Overlay.zig");
@@ -213,7 +214,7 @@ fn quickload(self: *App) void {
 }
 
 fn exerciseSmoke(self: *App) void {
-    const stage = @min(4, self.rendered_frames_seen * 5 / options.smoke_frames);
+    const stage = @min(5, self.rendered_frames_seen * 6 / options.smoke_frames);
     if (stage == self.smoke_stage) return;
     self.smoke_stage = stage;
     const camera = &self.engine.camera;
@@ -256,6 +257,9 @@ fn exerciseSmoke(self: *App) void {
             std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machineCount(), bytes.len });
             // Build a powered lamp circuit directly through the tool APIs, then drive.
             self.smokeBuild();
+        },
+        5 => {
+            if (self.sandbox.workshop) |w| std.log.info("Smoke lamp: lit={d:.0}", .{self.sandbox.machines[w].machine.outputs[3][2]});
             if (self.smoke_rover_start == null) self.smoke_rover_start = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
             // Press the door button, then take the rover for the rest of the run.
             self.sandbox.press = self.sandbox.findDevice(0, "button");
@@ -308,6 +312,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.rendered_frames_seen = renderer.frames;
     renderer.camera = self.engine.camera;
     renderer.tick = self.engine.time.tick;
+    renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
     renderer.show_metrics = self.show_metrics;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
@@ -318,7 +323,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     }
     const sandbox = &self.sandbox;
     renderer.crosshair = sandbox.seated == null and !sandbox.creator.open and (self.captured or sandbox.player.mode == .walk);
-    renderer.hud_lines[0].set("{s}  {s}  TOOL {s}  SALVAGED {d}  1 2 3 TOOLS", .{ sandbox.profile.name(), if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", @tagName(sandbox.tools.tool), sandbox.modifications.len });
+    const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
+    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  TOOL {s}  SALVAGED {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .walk) "WALK" else "FLY", @tagName(sandbox.tools.tool), sandbox.modifications.len });
     if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;

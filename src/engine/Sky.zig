@@ -2,7 +2,13 @@
 //! sets in the west; at night a cool, dim moon light comes from the opposite side. Colors are
 //! chosen for the painterly direction: warm key, cool fill, golden low sun, violet dusk.
 const std = @import("std");
-const Sky = @This();
+/// A day lasts twenty minutes of 60 Hz simulation. Derive it from the persisted world tick,
+/// reducing the integer first so long-running saves never lose sub-day precision.
+pub const day_ticks: u64 = 20 * 60 * 60;
+pub fn timeOfDay(tick: u64) f32 {
+    const morning: u64 = day_ticks * 35 / 100;
+    return @as(f32, @floatFromInt((tick % day_ticks + morning) % day_ticks)) / @as(f32, @floatFromInt(day_ticks));
+}
 
 pub const Light = struct {
     /// Direction toward the light (sun by day, moon by night).
@@ -44,8 +50,14 @@ pub fn at(time: f32) Light {
     const low = 1 - smoothstep(0.05, 0.5, elevation);
     const sun_color = mix(.{ 1.0, 0.95, 0.84 }, .{ 1.0, 0.62, 0.36 }, low);
     const moon: [3]f32 = .{ 0.30, 0.38, 0.62 };
-    const direction = if (elevation > -0.05) sun else normalize(.{ -sun[0], -sun[1], -sun[2] });
-    const color = mix(.{ moon[0] * 0.35, moon[1] * 0.35, moon[2] * 0.35 }, .{ sun_color[0] * 1.05, sun_color[1] * 1.05, sun_color[2] * 1.05 }, day);
+    // Fade each key to zero at the horizon before switching direction; otherwise the
+    // single-light model abruptly flips illuminated faces during twilight.
+    const sunlight = elevation > 0;
+    const direction = if (sunlight) sun else .{ -sun[0], -sun[1], -sun[2] };
+    const strength = smoothstep(0, 0.18, @abs(elevation));
+    const key = if (sunlight) sun_color else moon;
+    const intensity = strength * @as(f32, if (sunlight) 1.05 else 0.35);
+    const color: [3]f32 = .{ key[0] * intensity, key[1] * intensity, key[2] * intensity };
     const dusk = low * day;
     return .{
         .direction = direction,
@@ -78,4 +90,23 @@ test "sun rises east, peaks at noon, sets west; night is dark and cool with lume
     try std.testing.expect(low.color[0] / low.color[2] > noon.color[0] / noon.color[2]);
     // Light always points above the horizon.
     for (0..48) |i| try std.testing.expect(at(@as(f32, @floatFromInt(i)) / 48).direction[1] > -0.06);
+}
+
+test "saved world ticks give a periodic clock without losing precision in long sessions" {
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), timeOfDay(0), 0.00001);
+    try std.testing.expectEqual(timeOfDay(1234), timeOfDay(day_ticks * 1000000 + 1234));
+    try std.testing.expectEqual(@as(f32, 0), timeOfDay(day_ticks * 65 / 100));
+    try std.testing.expect(timeOfDay(std.math.maxInt(u64)) >= 0 and timeOfDay(std.math.maxInt(u64)) < 1);
+    try std.testing.expect(at(timeOfDay(day_ticks / 2)).night > 0.99);
+}
+
+test "twilight key lighting fades continuously when the sun and moon exchange directions" {
+    for ([_]f32{ 0.25, 0.75 }) |time| {
+        const before = at(time - 0.00001);
+        const after = at(time + 0.00001);
+        for (before.color, after.color) |a, b| {
+            try std.testing.expect(a < 0.00001 and b < 0.00001);
+        }
+        for (before.ambient_sky, after.ambient_sky) |a, b| try std.testing.expectApproxEqAbs(a, b, 0.001);
+    }
 }

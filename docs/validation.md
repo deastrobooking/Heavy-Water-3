@@ -93,6 +93,16 @@ Not yet verified by hand: how the avatar and palettes look on screen, and the cr
 
 Not yet verified by hand: how the tree reads on screen and at distance, and haze tuning.
 
+## Canopy lighting and review (2026-09-30)
+
+- Review found the renderer's time of day was never published, lamps and avatar accents never set the shader's emission channel, the twilight key changed direction while still bright, and the smoke circuit button press was overwritten by the door press. Those connections are fixed. The renderer now retains Mach's GPU error callback (which exits unsuccessfully), replacing a log-only override that could hide a failed render in successful smoke/benchmark exit codes.
+- ReleaseSafe: **77/77 tests pass**, application compile passes. Added clock periodicity/large-tick/wrap checks, twilight continuity, and the canopy route. Extended existing integration tests to verify that save/load restores world time, a wired lamp publishes emission when powered and loses it after disconnection, and avatar lumen carries emission.
+- `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=300`: all 300 frames complete, 383 simulation ticks, no Metal validation errors, exit 0. The smoke sweeps a complete lighting cycle, creates SORA, grabs a crate, round-trips a save, builds/wires/copies the workshop, confirms `Smoke lamp: lit=1`, and drives the rover 2.4 m.
+- `python3 tools/benchmark.py --canopy --frames 300 --output .tools/canopy-benchmark.json`: all checks pass on Apple M3 Pro / Metal, ReleaseFast, default seed. 60 warm-up frames then 300 measured frames; 128 detailed-Arbor and 172 proxy-Arbor frames, 16 chunk crossings, 105 uploads, 80 evictions, no underfilled active-ring frames. Render CPU P50/P95/P99: **0.572 / 0.858 / 0.926 ms**. Presentation interval P50/P95/P99: **20.851 / 20.944 / 21.074 ms**. Peak upload 284,204 B within 327,680 B; peak 25 GPU terrain chunks; fixed pools remain at 2 CPU and 50 GPU allocations.
+- Formatting and diff whitespace checks pass. Benchmark CLI help works with the new canopy option and separate default report path.
+
+The benchmark measures render CPU submission cost and presentation intervals, not GPU execution time. Pixel-level appearance, outline thickness, color tuning, and manual day/night play remain unverified; no screenshot review was performed. The single test Arbor stays resident at both detail levels. Multi-Arbor residency, local lights, and bloom are not implemented by this change.
+
 ## Upstream programmatic resize issue
 
 A ReleaseSafe smoke run with Metal API validation reproduced a hang after setting `Core.windows.width/height` from the application thread. Sampling showed the main thread in `macOS.tick → NSWindow.setFrame_display_animate → windowDidResize → handleResize → windows.lock`. `tick` already owns that non-reentrant lock. The renderer and application then wait on the same collection lock. This is in the pinned Mach source, not a GPU validation error.

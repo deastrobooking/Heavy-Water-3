@@ -77,16 +77,16 @@ A customizable, nameable ranger-engineer: the creator on a new game (F4 any time
 
 The game's direction is set in [world and systems](world.md): Arbors 300–600 m tall, a canopy city of grafted towers and bridge roads, painterly cel shading, and three braided play styles (explore, engineer, grow) over a procedural city the player extends. The phases below build it. Each is a runnable slice with headless acceptance tests, native Zig throughout.
 
-## 6. Canopy foundations — next
+## 6. Canopy foundations — implemented for the single-Arbor test world
 
 Make the engine able to hold a vertical world and look like one.
 
 1. Done: static triangle-mesh colliders with a BVH, and oriented boxes built from them. The character climbs a 15° mesh ramp, is stopped by an 80° wall, and stands on and climbs a 5° deck; crates rest on mesh floors; rigid bodies settle on tilted mesh decks; wheels, picking, and placement see meshes.
 2. Level of detail for tall placed content is done: a `Prop` may carry a `lod` mesh handle and `lod_distance`; beyond that distance the renderer substitutes a coarse proxy instead of the full mesh (`World.Prop.effectiveMesh`, exercised by `StreamingScene.gatherProps`). The test Arbor swaps to an 8-segment, ring-only trunk silhouette beyond 450 m, with a headless test confirming the proxy is under a tenth the vertex count and spans the same height. Still open: streaming (residency eviction) for tall content once more than one Arbor exists — today the single test Arbor is always resident, only its detail level changes.
-3. Painterly cel-shading pass: toon ramp, rim light, silhouette outlines, aerial haze, day/night with emissive lumen.
+3. Done: toon ramp, rim light, depth silhouette outlines, aerial haze, and warm/cool day/night lighting. A twenty-minute cycle derives from the saved world tick and appears on the HUD; powered lamps (including vehicle-mounted lamps) and ranger accents publish emissive material values. Direct lighting fades through twilight without a face-lighting flip. Emission is surface brightness, not local light casting or bloom.
 4. Done: a hand-authored test Arbor (`procedural/TestArbor.zig`) 80 m from the spawn, with a 320 m tapered trunk, a 2.5-turn spiral ramp with a curb, a branch platform at 40 m, a 14 m bridge road descending 5.7° to a tower top at 36 m, and render mesh and colliders from one description. The walk acceptance passes headlessly: up the ramp without dropping below its surface, onto the platform (±0.3 m), and down the bridge to the tower top (±0.1 m). Rendering switched to reversed, infinite-far depth with a height-aware haze so the tree is visible above the ground haze.
 
-Acceptance: walk up a trunk ramp onto a branch platform and across an angled bridge, and render the test Arbor within frame budget at 1 km and up close.
+Acceptance: the headless full-ramp/platform/bridge walk passes. The `--canopy` benchmark renders up close and at 1 km, exercises both LODs, and passes the 16.667 ms render CPU P99 budget (0.926 ms on the recorded Apple M3 Pro run). Presentation interval P99 was 21.074 ms; GPU execution time and visual art-direction approval remain unmeasured. Multiple-Arbor residency remains deferred as described above.
 
 ## 7. Arbor genome
 

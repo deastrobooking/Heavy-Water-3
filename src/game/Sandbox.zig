@@ -667,11 +667,8 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
             if (n == out.len) return n;
             const targeted = self.target == .device and self.target.device.machine == m and self.target.device.device == d;
             const selected = if (self.tools.wire_from) |w| w.machine == m and w.device == d else false;
-            var glow: f32 = if (selected) 1.6 else if (targeted) 1.3 else structure_glow;
-            // Unpowered generators and actuators render dim; lamps glow when lit.
-            if ((def.kind == .generator and placed.machine.outputs[d][0] == 0) or (def.kind == .actuator and placed.machine.satisfaction(d) == 0)) glow *= 0.45;
-            if (def.kind == .lamp) glow *= if (placed.machine.outputs[d][2] > 0) 1.8 else 0.35;
-            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = self.devicePosition(.{ .machine = @intCast(m), .device = @intCast(d) }) }, .tint = .{ def.color[0] * glow, def.color[1] * glow, def.color[2] * glow, 1 }, .size = def.size, .rotation = rotation };
+            const glow: f32 = if (selected) 1.6 else if (targeted) 1.3 else structure_glow;
+            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = self.devicePosition(.{ .machine = @intCast(m), .device = @intCast(d) }) }, .tint = deviceTint(&placed.machine, d, glow), .size = def.size, .rotation = rotation };
             n += 1;
         }
     }
@@ -679,6 +676,16 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         n += Avatar.build(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, self.catalog.content.block, out[n..]);
     }
     return Build.publish(self, out, n);
+}
+
+/// Static and vehicle-mounted lamps share the same power-driven emissive material.
+fn deviceTint(machine: *const Machine, d: usize, highlight: f32) [4]f32 {
+    const def = machine.blueprint.devices[d];
+    var glow = highlight;
+    if ((def.kind == .generator and machine.outputs[d][0] == 0) or (def.kind == .actuator and machine.satisfaction(d) == 0)) glow *= 0.45;
+    const emission: f32 = if (def.kind == .lamp) machine.outputs[d][2] else 0;
+    if (def.kind == .lamp and emission == 0) glow *= 0.35;
+    return @import("../render/Material.zig").emissive(.{ def.color[0] * glow, def.color[1] * glow, def.color[2] * glow, 1 }, emission);
 }
 
 /// Chassis parts and devices follow the rigid pose; wheels follow the suspension and spin.
@@ -701,7 +708,7 @@ fn publishVehicle(self: *const Sandbox, placed: *const Placed, vehicle: Vehicle,
     for (bp.devices[0..bp.device_count], 0..) |def, d| {
         if (!def.visible()) continue;
         if (n == out.len) return n;
-        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = frame.devicePosition(d) }, .tint = def.color, .size = def.size, .rotation = pose.orientation };
+        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = frame.devicePosition(d) }, .tint = deviceTint(&placed.machine, d, glow), .size = def.size, .rotation = pose.orientation };
         n += 1;
     }
     for (0..vehicle.wheel_count) |i| {
@@ -883,11 +890,14 @@ test "walk to a crate, carry it, drop it, save, disturb, and reload the modifica
     const bytes = try sandbox.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
 
+    const saved_sky = @import("../engine/Sky.zig").timeOfDay(sandbox.tick);
+    sandbox.tick += @import("../engine/Sky.zig").day_ticks / 2;
     // Disturb the world, then reload the saved state.
     sandbox.physics.setTransform(sandbox.crates[picked], .{ 50, 40, 50 }, .{ 0, 0, 0 });
     _ = try sandbox.modifications.remove(.{ .x = 0, .z = 0, .id = 7 });
     sandbox.player.feet = .{ 100, 100, 100 };
     try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(saved_sky, @import("../engine/Sky.zig").timeOfDay(sandbox.tick));
     try std.testing.expectEqualDeep(dropped, sandbox.cratePosition(picked));
     try std.testing.expect(!sandbox.modifications.contains(.{ .x = 0, .z = 0, .id = 7 }));
     try std.testing.expectApproxEqAbs(@as(f32, std.math.pi), camera.yaw, 0.0001);

@@ -597,6 +597,14 @@ test "build a workshop circuit from the palette, wire it in the world, light it,
     try tick(&sb, &camera, .{ .interact = true });
     for (0..5) |_| try tick(&sb, &camera, .{});
     try std.testing.expectEqual(@as(f32, 1), sb.machines[w].machine.outputs[3][2]);
+    var rendered: [256]@import("../world/World.zig").Prop = undefined;
+    const lit_count = sb.publishProps(&rendered);
+    var lit_found = false;
+    for (rendered[0..lit_count]) |prop| if (std.meta.eql(prop.transform.position, lamp_position)) {
+        try std.testing.expectEqual(@as(f32, 2), prop.tint[3]);
+        lit_found = true;
+    };
+    try std.testing.expect(lit_found);
 
     // The whole placed circuit, its wires, and the latch state survive a reload.
     const bytes = try sb.save(std.testing.allocator, camera);
@@ -620,6 +628,13 @@ test "build a workshop circuit from the palette, wire it in the world, light it,
     try std.testing.expectEqual(@as(usize, 1), sb.machines[w].blueprint.wire_count);
     for (0..3) |_| try tick(&sb, &camera, .{});
     try std.testing.expectEqual(@as(f32, 0), sb.machines[w].machine.outputs[2][2]);
+    const dark_count = sb.publishProps(&rendered);
+    var dark_found = false;
+    for (rendered[0..dark_count]) |prop| if (std.meta.eql(prop.transform.position, lamp_position)) {
+        try std.testing.expectEqual(@as(f32, 1), prop.tint[3]);
+        dark_found = true;
+    };
+    try std.testing.expect(dark_found);
     // Re-tagged bodies still pick the right device.
     try aimDevice(&sb, &camera, .{ .machine = w, .device = 2 });
 }

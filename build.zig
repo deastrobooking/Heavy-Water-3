@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u64, "seed", b.option(u64, "seed", "World seed") orelse 0x4845415659);
     options.addOption(u32, "smoke_frames", b.option(u32, "smoke-frames", "Exit after N rendered frames (0 = interactive)") orelse 0);
     options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run the streaming route for N measured frames, after 60 warm-up frames") orelse 0);
+    options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its

@@ -64,21 +64,17 @@ timer: mach.time.Timer = undefined,
 frames: u64 = 0,
 frame_ms: f32 = 0,
 underfilled_frames: u64 = 0,
+arbor_detail_frames: u64 = 0,
+arbor_proxy_frames: u64 = 0,
 
 pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .scene = try Scene.init(allocator, io, world.seed, &world.catalog) };
 }
 
-/// Async validation errors from the device driver; the WebGPU-style API otherwise reports
-/// success even when a descriptor is rejected, so this is the only observable failure path.
-fn onDeviceError(_: void, typ: gpu.ErrorType, message: [*:0]const u8) callconv(.@"inline") void {
-    std.log.err("GPU device error ({s}): {s}", .{ @tagName(typ), message });
-}
-
 fn setup(self: *Renderer, core: *mach.Core) !void {
     const window = core.windows.getValue(core.window);
     const device = window.device;
-    device.setUncapturedErrorCallback({}, onDeviceError);
+    // Keep Mach's fail-fast GPU callback: validation errors must fail smoke/benchmark runs.
     // Every field below is nulled by its errdefer so a failure partway leaves deinit() safe to
     // release only what was actually created; render() turns a setup failure into a clean exit
     // instead of letting it reach Mach's panic-on-error callback dispatch.
@@ -93,15 +89,30 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{layout} }));
     defer pipeline_layout.release();
     self.uniform = device.createBuffer(&.{ .label = "camera", .size = @sizeOf(Frame), .usage = .{ .uniform = true, .copy_dst = true } });
-    errdefer { self.uniform.?.release(); self.uniform = null; }
+    errdefer {
+        self.uniform.?.release();
+        self.uniform = null;
+    }
     self.instance_buffer = device.createBuffer(&.{ .label = "instances", .size = Scene.max_instances * @sizeOf(Instance), .usage = .{ .vertex = true, .copy_dst = true } });
-    errdefer { self.instance_buffer.?.release(); self.instance_buffer = null; }
+    errdefer {
+        self.instance_buffer.?.release();
+        self.instance_buffer = null;
+    }
     self.texture = device.createTexture(&.{ .label = "surface checker", .size = .{ .width = 2, .height = 2 }, .format = .rgba8_unorm, .usage = .{ .texture_binding = true, .copy_dst = true } });
-    errdefer { self.texture.?.release(); self.texture = null; }
+    errdefer {
+        self.texture.?.release();
+        self.texture = null;
+    }
     self.texture_view = self.texture.?.createView(&.{});
-    errdefer { self.texture_view.?.release(); self.texture_view = null; }
+    errdefer {
+        self.texture_view.?.release();
+        self.texture_view = null;
+    }
     self.sampler = device.createSampler(&.{ .address_mode_u = .repeat, .address_mode_v = .repeat, .mag_filter = .nearest, .min_filter = .nearest });
-    errdefer { self.sampler.?.release(); self.sampler = null; }
+    errdefer {
+        self.sampler.?.release();
+        self.sampler = null;
+    }
     const pixels = [_]u8{ 240, 240, 240, 255, 190, 200, 205, 255, 190, 200, 205, 255, 240, 240, 240, 255 };
     window.queue.writeTexture(&.{ .texture = self.texture.? }, &.{ .bytes_per_row = 8, .rows_per_image = 2 }, &.{ .width = 2, .height = 2 }, &pixels);
     self.bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = layout, .entries = &.{
@@ -109,7 +120,10 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         gpu.BindGroup.Entry.initTextureView(1, self.texture_view.?),
         gpu.BindGroup.Entry.initSampler(2, self.sampler.?),
     } }));
-    errdefer { self.bind_group.?.release(); self.bind_group = null; }
+    errdefer {
+        self.bind_group.?.release();
+        self.bind_group = null;
+    }
     const buffers = [_]gpu.VertexBufferLayout{
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Mesh.Vertex), .attributes = &.{
             .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
@@ -133,7 +147,10 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         .primitive = .{ .cull_mode = .none },
         .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .greater },
     });
-    errdefer { self.pipeline.?.release(); self.pipeline = null; }
+    errdefer {
+        self.pipeline.?.release();
+        self.pipeline = null;
+    }
     self.scene.setup(device, window.queue);
 
     // Silhouette outlines: a fullscreen pass sampling scene depth, blended over the frame.
@@ -166,9 +183,15 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         } })} }),
         .fragment = &hud_fragment,
     });
-    errdefer { self.overlay_pipeline.?.release(); self.overlay_pipeline = null; }
+    errdefer {
+        self.overlay_pipeline.?.release();
+        self.overlay_pipeline = null;
+    }
     self.overlay_buffer = device.createBuffer(&.{ .label = "debug overlay", .size = Overlay.capacity * @sizeOf(Overlay.Vertex), .usage = .{ .vertex = true, .copy_dst = true } });
-    errdefer { self.overlay_buffer.?.release(); self.overlay_buffer = null; }
+    errdefer {
+        self.overlay_buffer.?.release();
+        self.overlay_buffer = null;
+    }
     std.log.info("Heavy Water: seed={d}, generator={d}, streaming pool=49 chunks, GPU pool=25 chunks, upload budget={d}", .{ self.seed, Seed.generator_version, options.upload_budget });
     self.timer.reset();
 }
@@ -197,7 +220,16 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         return;
     };
     var cpu_timer = mach.time.Timer.start(self.timer.io);
-    if (options.benchmark_frames > 0) self.camera = Flythrough.camera(self.frames -| Flythrough.warmup_frames, options.benchmark_frames);
+    if (options.benchmark_frames > 0) {
+        const frame = self.frames -| Flythrough.warmup_frames;
+        self.camera = Flythrough.camera(frame, options.benchmark_frames);
+        if (options.benchmark_canopy) for (self.props[0..self.prop_count]) |prop| {
+            if (prop.mesh.eql(self.scene.catalog.content.test_arbor)) {
+                self.camera = Flythrough.canopyCamera(frame, options.benchmark_frames, prop.transform.position);
+                break;
+            }
+        };
+    }
     const window = core.windows.getValue(core.window);
     if (window.framebuffer_width == 0 or window.framebuffer_height == 0) return;
     const back = window.swap_chain.getCurrentTextureView() orelse return;
@@ -206,7 +238,12 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const elapsed = self.timer.lap();
     self.frame_ms = if (self.frames == 0) elapsed * 1000 else self.frame_ms * 0.95 + elapsed * 50;
     const vp = self.camera.viewProjection(@as(f32, @floatFromInt(self.width)) / @as(f32, @floatFromInt(self.height)));
-    const light = Sky.at(self.time_of_day);
+    // Unattended smoke covers a complete lighting cycle, independent of presentation speed.
+    const sky_time = if (options.smoke_frames > 0 and options.benchmark_frames == 0)
+        @as(f32, @floatFromInt(self.frames)) / @as(f32, @floatFromInt(options.smoke_frames))
+    else
+        self.time_of_day;
+    const light = Sky.at(sky_time);
     const frame = Frame{
         .vp = vp,
         .eye = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z(), 1 },
@@ -257,6 +294,11 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         self.intervals.record(elapsed * 1000);
         self.cpu_times.record(cpu_timer.read() * 1000);
         if (self.scene.active_missing > 0) self.underfilled_frames += 1;
+        const eye: [3]f32 = .{ self.camera.position.x(), self.camera.position.y(), self.camera.position.z() };
+        for (self.props[0..self.prop_count]) |prop| {
+            if (!prop.mesh.eql(self.scene.catalog.content.test_arbor)) continue;
+            if (prop.effectiveMesh(eye).eql(prop.mesh)) self.arbor_detail_frames += 1 else self.arbor_proxy_frames += 1;
+        }
     }
     if (self.frames % 30 == 0) self.percentiles = self.intervals.summary();
     self.frames += 1;
@@ -319,10 +361,10 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32) void {
 fn reportBenchmark(self: *Renderer) void {
     const interval = self.intervals.summary();
     const cpu = self.cpu_times.summary();
-    std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d}}}", .{
+    std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d},\"arbor_detail_frames\":{d},\"arbor_proxy_frames\":{d}}}", .{
         self.seed,                         Seed.generator_version,          self.intervals.total,           interval.p50,            interval.p95,              interval.p99,                 cpu.p50,               cpu.p95,                    cpu.p99,
         self.scene.stats.generated,        self.scene.stats.canceled,       self.scene.uploads,             self.scene.evictions,    self.scene.center_changes, self.scene.peak_upload_bytes, options.upload_budget, self.scene.stats.cpu_bytes, Scene.gpu_pool_bytes,
-        self.scene.stats.pool_allocations, self.scene.gpu_pool_allocations, self.scene.peak_resident_count, self.underfilled_frames,
+        self.scene.stats.pool_allocations, self.scene.gpu_pool_allocations, self.scene.peak_resident_count, self.underfilled_frames, self.arbor_detail_frames,  self.arbor_proxy_frames,
     });
 }
 
