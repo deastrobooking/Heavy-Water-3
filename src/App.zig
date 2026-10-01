@@ -15,6 +15,7 @@ const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
 const Gamepads = @import("engine/Gamepads.zig");
+const Loader = @import("asset/Loader.zig");
 const Profile = @import("game/Profile.zig");
 const Life = @import("city/Life.zig");
 const Market = @import("city/Market.zig");
@@ -51,6 +52,19 @@ status_until: u64 = 0,
 published_revision: ?u64 = null,
 inspecting: bool = false,
 pads: Gamepads = .{},
+/// Background asset loading: deferred catalog meshes are built here and installed in `publish`.
+loader: ?*Loader = null,
+deferred: [8]?Loader.Ticket = @splat(null),
+deferred_handles: [8]@import("asset/Catalog.zig").MeshHandle = undefined,
+catalog: *@import("asset/Catalog.zig") = undefined,
+started: std.Io.Timestamp = undefined,
+/// `-Dpack-stress`: a generated pack loaded during the measured benchmark frames.
+stress_pack: ?u8 = null,
+stress_tickets: [64]?Loader.Ticket = @splat(null),
+stress_handles: [64]@import("asset/Catalog.zig").MeshHandle = undefined,
+stress_bytes: u64 = 0,
+stress_installed: u32 = 0,
+stress_requested: bool = false,
 /// Guests joined from a controller leave when it disconnects; F6 and smoke guests stay.
 pad_guests: [Sandbox.max_players - 1]bool = @splat(false),
 
@@ -60,6 +74,14 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
     try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
+    self.catalog = &world.catalog;
+    self.started = std.Io.Timestamp.now(io, .awake);
+    self.loader = try Loader.create(allocator, io);
+    for (world.catalog.pending[0..world.catalog.pending_count], 0..) |p, i| {
+        self.deferred[i] = try self.loader.?.request(.{ .generate = p.generator }, 0);
+        self.deferred_handles[i] = p.handle;
+    }
+    if (options.pack_stress > 0) try self.writeStressPack(&world.catalog);
     self.sandbox.enableLife();
     self.importPrefabs();
     self.loadMods();
@@ -544,7 +566,94 @@ fn capture(self: *App, core: *mach.Core, enabled: bool) void {
     if (!enabled) self.captured = false;
 }
 
+/// Installs finished background builds into the catalog. Runs inside the render mutex, so the
+/// render thread never sees a catalog entry change mid-frame.
+/// Writes `zig-out/stress.hwpk`: N meshes from 1K to 128K vertices (log-spaced), and reserves a
+/// catalog handle for each.
+fn writeStressPack(self: *App, catalog: *@import("asset/Catalog.zig")) !void {
+    const Mesh = @import("render/Mesh.zig");
+    const Model = @import("asset/Model.zig");
+    const Pack = @import("asset/Pack.zig");
+    const n: usize = @min(options.pack_stress, self.stress_tickets.len);
+    var inputs: [64]Pack.Input = undefined;
+    var blobs: [64][]u8 = undefined;
+    defer for (blobs[0..n]) |b| self.allocator.free(b);
+    for (0..n) |i| {
+        const t = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(@max(n - 1, 1)));
+        const vertices: usize = @intFromFloat(1024 * std.math.pow(f32, 128, t));
+        const verts = try self.allocator.alloc(Mesh.Vertex, vertices);
+        const indices = try self.allocator.alloc(u32, vertices / 3 * 3);
+        for (verts, 0..) |*v, k| v.* = .{ .position = .{ @floatFromInt(k % 256), @floatFromInt(k / 256), @floatFromInt(i) }, .normal = .{ 0, 0, 1 }, .uv = .{ 0, 0 } };
+        for (indices, 0..) |*x, k| x.* = @intCast(k);
+        const model = try Model.fromMesh(self.allocator, .{ .vertices = verts, .indices = indices }, .named("stress", .{ 1, 1, 1, 1 }));
+        defer model.deinit(self.allocator);
+        blobs[i] = try model.encode(self.allocator);
+        inputs[i] = .{ .guid = @import("asset/Guid.zig").derived(std.fmt.allocPrint(self.allocator, "stress:{d}", .{i}) catch unreachable), .kind = .model, .data = blobs[i] };
+        self.stress_handles[i] = try catalog.reserve();
+    }
+    const bytes = try Pack.write(self.allocator, inputs[0..n]);
+    defer self.allocator.free(bytes);
+    self.stress_bytes = bytes.len;
+    std.Io.Dir.cwd().createDirPath(self.io, "zig-out") catch {};
+    try std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = "zig-out/stress.hwpk", .data = bytes });
+    self.stress_pack = try self.loader.?.openPack(std.Io.Dir.cwd(), "zig-out/stress.hwpk");
+    std.log.info("Pack stress: {d} meshes, {d} MiB written to zig-out/stress.hwpk", .{ n, bytes.len >> 20 });
+}
+
+fn pumpStressPack(self: *App, renderer: *Renderer) void {
+    const pack = self.stress_pack orelse return;
+    const loader = self.loader.?;
+    const n: usize = @min(options.pack_stress, self.stress_tickets.len);
+    if (!self.stress_requested and renderer.frames >= @import("engine/Flythrough.zig").warmup_frames) {
+        self.stress_requested = true;
+        renderer.pack_requested_frame = @intCast(renderer.frames);
+        for (0..n) |i| {
+            var name: [32]u8 = undefined;
+            const guid = @import("asset/Guid.zig").derived(std.fmt.bufPrint(&name, "stress:{d}", .{i}) catch unreachable);
+            self.stress_tickets[i] = loader.request(.{ .pack = .{ .pack = pack, .guid = guid } }, 1) catch null;
+        }
+    }
+    for (&self.stress_tickets, 0..) |*slot, i| {
+        const ticket = slot.* orelse continue;
+        if (loader.take(ticket)) |model| {
+            if (self.catalog.install(self.allocator, self.stress_handles[i], model)) {
+                self.stress_installed += 1;
+            } else |err| std.log.err("stress install: {s}", .{@errorName(err)});
+        } else if (loader.failure(ticket)) |err| {
+            std.log.err("stress load: {s}", .{@errorName(err)});
+        } else continue;
+        loader.release(ticket);
+        slot.* = null;
+    }
+    renderer.pack_installed = self.stress_installed;
+    renderer.pack_bytes = self.stress_bytes;
+    if (self.stress_installed == n and renderer.pack_ready_frame < 0) renderer.pack_ready_frame = @intCast(renderer.frames);
+}
+
+fn installDeferred(self: *App) void {
+    const loader = self.loader orelse return;
+    var remaining: usize = 0;
+    for (&self.deferred, self.deferred_handles) |*slot, handle| {
+        const ticket = slot.* orelse continue;
+        if (loader.take(ticket)) |model| {
+            self.catalog.install(self.allocator, handle, model) catch |err| std.log.err("asset install: {s}", .{@errorName(err)});
+        } else if (loader.failure(ticket)) |err| {
+            std.log.err("asset build failed: {s}", .{@errorName(err)});
+        } else {
+            remaining += 1;
+            continue;
+        }
+        loader.release(ticket);
+        slot.* = null;
+        if (remaining == 0 and for (self.deferred) |d| {
+            if (d != null) break false;
+        } else true) std.log.info("Deferred meshes ready {d:.0} ms after start (worst build {d:.0} ms)", .{ @as(f64, @floatFromInt(self.started.untilNow(self.io, .awake).nanoseconds)) / 1e6, loader.stats.worst_job_ms });
+    }
+}
+
 pub fn publish(self: *App, renderer: *Renderer) void {
+    self.installDeferred();
+    self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
     renderer.views[0].camera = self.engine.camera;
     renderer.tick = self.engine.time.tick;
@@ -654,6 +763,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
 
 pub fn stop(self: *App) void {
     self.thread.join();
+    if (self.loader) |l| l.destroy();
     defer self.sandbox.deinit();
     // The app thread has exited, so the sandbox can be read safely.
     if (self.smoke_rover_start) |origin| {

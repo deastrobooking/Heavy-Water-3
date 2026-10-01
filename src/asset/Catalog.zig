@@ -13,8 +13,8 @@ pub const Ref = @import("Registry.zig").Ref;
 pub const arbor_count = 2;
 pub const ArborAsset = struct { tree: Arbor.Tree, mesh: MeshHandle, lod: MeshHandle };
 
-pub const mesh_capacity = 16;
-pub const material_capacity = 64;
+pub const mesh_capacity = 128;
+pub const material_capacity = 256;
 const MeshTag = struct {};
 const MaterialTag = struct {};
 pub const MeshHandle = Handle.Handle(MeshTag);
@@ -26,6 +26,9 @@ pub const content_version: u32 = 7;
 pub const max_blueprints = 12;
 
 pub const Entry = struct {
+    /// False while a deferred mesh is still being built or loaded; the handle is valid but
+    /// draws nothing until `install`.
+    ready: bool = true,
     model: Model,
     /// Material handle for each submesh, in submesh order.
     materials: [Model.max_submeshes]MaterialHandle = @splat(.none),
@@ -61,6 +64,9 @@ blueprints: [max_blueprints]Blueprint = undefined,
 blueprint_count: usize = 0,
 arbors: [arbor_count]ArborAsset = undefined,
 district: District.Layout = undefined,
+/// Meshes reserved by `loadSeededDeferred`, to be built by the asset loader and installed.
+pending: [arbor_count * 2 + 1]Pending = undefined,
+pending_count: usize = 0,
 /// GUID → content for everything above: the build manifest's compiled assets plus
 /// engine-generated meshes under GUIDs derived from "generated:<name>".
 registry: Registry = .{},
@@ -71,7 +77,59 @@ pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
     return self.loadSeeded(allocator, 0x4845415659);
 }
 
+pub const Pending = struct { handle: MeshHandle, generator: @import("Loader.zig").Generator };
+
+/// Loads everything now (tests and tools).
 pub fn loadSeeded(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void {
+    try self.loadSeededDeferred(allocator, seed);
+    errdefer self.deinit(allocator);
+    for (self.pending[0..self.pending_count]) |p| try self.install(allocator, p.handle, try p.generator.build(p.generator.context, allocator));
+    self.pending_count = 0;
+}
+
+const Build = struct {
+    fn arborFull(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
+        const tree: *const Arbor.Tree = @ptrCast(@alignCast(context));
+        return Model.fromMesh(allocator, try Arbor.mesh(allocator, tree, .full), .named("arbor", .{ 1, 1, 1, 1 }));
+    }
+    fn arborProxy(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
+        const tree: *const Arbor.Tree = @ptrCast(@alignCast(context));
+        return Model.fromMesh(allocator, try Arbor.mesh(allocator, tree, .proxy), .named("arbor proxy", .{ 1, 1, 1, 1 }));
+    }
+    fn district(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
+        const layout: *const District.Layout = @ptrCast(@alignCast(context));
+        const city = try District.geometry(layout);
+        return Model.fromMesh(allocator, try District.mesh(allocator, city.slice(), false), .named("canopy district", .{ 1, 1, 1, 1 }));
+    }
+};
+
+/// Takes a handle for content that will be installed later.
+pub fn reserve(self: *Catalog) !MeshHandle {
+    return self.meshes.add(.{ .ready = false, .model = .{ .mesh = .{ .vertices = &.{}, .indices = &.{} }, .submeshes = &.{}, .materials = &.{}, .bounds_min = @splat(0), .bounds_max = @splat(0) } });
+}
+
+/// Fills a reserved handle (takes ownership of `model`). Call only where no other thread reads
+/// the catalog: the application installs inside the render mutex, between frames.
+pub fn install(self: *Catalog, allocator: std.mem.Allocator, handle: MeshHandle, model: Model) !void {
+    errdefer model.deinit(allocator);
+    const entry = self.meshes.get(handle) orelse return error.UnknownHandle;
+    if (entry.ready) return error.AlreadyInstalled;
+    var materials: [Model.max_submeshes]MaterialHandle = @splat(.none);
+    var added: usize = 0;
+    errdefer for (materials[0..added]) |m| {
+        _ = self.materials.remove(m);
+    };
+    for (model.submeshes, 0..) |submesh, i| {
+        materials[i] = try self.materials.add(model.materials[submesh.material]);
+        added += 1;
+    }
+    entry.* = .{ .ready = true, .model = model, .materials = materials };
+}
+
+/// Loads everything the simulation needs now, and reserves handles for the big procedural render
+/// meshes (the generated Arbors and the district) for the asset loader to build in the
+/// background; see `pending`.
+pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void {
     self.* = .{};
     errdefer self.deinit(allocator);
     self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.cube(allocator), .named("relic", .{ 1, 1, 1, 1 })));
@@ -87,12 +145,16 @@ pub fn loadSeeded(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void
         else
             .{ .height = 340, .apical_dominance = 0.1, .gravitropism = 0.55, .platform_tendency = 0.9, .vascular_capacity = 300, .bark = .{ 0.42, 0.28, 0.18 }, .lumen = .{ 1, 0.65, 0.15 } };
         asset.tree = try Arbor.grow(Seed.mix(seed ^ (0x4152424f52 + @as(u64, @intCast(i)))), genome);
-        asset.mesh = try self.register(allocator, try Model.fromMesh(allocator, try Arbor.mesh(allocator, &asset.tree, .full), .named("arbor", .{ 1, 1, 1, 1 })));
-        asset.lod = try self.register(allocator, try Model.fromMesh(allocator, try Arbor.mesh(allocator, &asset.tree, .proxy), .named("arbor proxy", .{ 1, 1, 1, 1 })));
+        asset.mesh = try self.reserve();
+        self.pending[self.pending_count] = .{ .handle = asset.mesh, .generator = .{ .context = &asset.tree, .build = Build.arborFull } };
+        asset.lod = try self.reserve();
+        self.pending[self.pending_count + 1] = .{ .handle = asset.lod, .generator = .{ .context = &asset.tree, .build = Build.arborProxy } };
+        self.pending_count += 2;
     }
     self.district = try District.generate(seed);
-    const city = try District.geometry(&self.district);
-    self.content.district = try self.register(allocator, try Model.fromMesh(allocator, try District.mesh(allocator, city.slice(), false), .named("canopy district", .{ 1, 1, 1, 1 })));
+    self.content.district = try self.reserve();
+    self.pending[self.pending_count] = .{ .handle = self.content.district, .generator = .{ .context = &self.district, .build = Build.district } };
+    self.pending_count += 1;
     // Generated meshes have no sidecar: their GUIDs derive from fixed names.
     const generated = [_]struct { name: []const u8, handle: MeshHandle }{
         .{ .name = "relic", .handle = self.content.relic },           .{ .name = "plant", .handle = self.content.plant },
@@ -165,7 +227,7 @@ pub fn material(self: *const Catalog, handle: MaterialHandle) ?*const Model.Mate
 
 pub fn deinit(self: *Catalog, allocator: std.mem.Allocator) void {
     var live = self.meshes.live.iterator(.{});
-    while (live.next()) |i| self.meshes.items[i].model.deinit(allocator);
+    while (live.next()) |i| if (self.meshes.items[i].ready) self.meshes.items[i].model.deinit(allocator);
     self.* = .{};
 }
 
@@ -210,4 +272,25 @@ fn loadProbe(allocator: std.mem.Allocator) !void {
 
 test "catalog load cleans up on allocation failure" {
     try std.testing.checkAllAllocationFailures(std.testing.allocator, loadProbe, .{});
+}
+
+test "deferred meshes reserve handles at load and install once, later" {
+    var catalog: Catalog = undefined;
+    try catalog.loadSeededDeferred(std.testing.allocator, 42);
+    defer catalog.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 5), catalog.pending_count);
+    // Reserved handles are valid but not ready: renderers draw nothing for them yet.
+    const district = catalog.mesh(catalog.content.district).?;
+    try std.testing.expect(!district.ready);
+    for (catalog.pending[0..catalog.pending_count]) |p| {
+        try catalog.install(std.testing.allocator, p.handle, try p.generator.build(p.generator.context, std.testing.allocator));
+    }
+    try std.testing.expect(catalog.mesh(catalog.content.district).?.ready);
+    try std.testing.expect(catalog.mesh(catalog.content.district).?.model.mesh.vertices.len > 1000);
+    try std.testing.expect(catalog.material(catalog.mesh(catalog.arbors[0].mesh).?.materials[0]) != null);
+    // A second install, or one into an unknown handle, is refused (and frees the model).
+    const extra = try Model.fromMesh(std.testing.allocator, try Mesh.block(std.testing.allocator), .named("x", .{ 1, 1, 1, 1 }));
+    try std.testing.expectError(error.AlreadyInstalled, catalog.install(std.testing.allocator, catalog.content.district, extra));
+    const other = try Model.fromMesh(std.testing.allocator, try Mesh.block(std.testing.allocator), .named("y", .{ 1, 1, 1, 1 }));
+    try std.testing.expectError(error.UnknownHandle, catalog.install(std.testing.allocator, .{ .index = 120, .generation = 9 }, other));
 }

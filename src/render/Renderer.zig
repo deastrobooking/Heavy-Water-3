@@ -100,6 +100,15 @@ field_resident_frame: ?u64 = null,
 field_peak_cpu_bytes: usize = 0,
 field_last: Field.Plan = .{},
 peak_footprint: u64 = 0,
+/// Late catalog uploads (deferred builds, packs): worst frame and totals.
+peak_late_upload: usize = 0,
+largest_late_mesh: usize = 0,
+total_late_uploads: u32 = 0,
+/// Pack stress benchmark, published by the application.
+pack_requested_frame: i64 = -1,
+pack_installed: u32 = 0,
+pack_ready_frame: i64 = -1,
+pack_bytes: u64 = 0,
 /// `-Dcapture-frame`: offscreen target, compute copy, and a readback buffer mapped after the
 /// GPU finishes.
 capture_pipeline: ?*gpu.ComputePipeline = null,
@@ -327,6 +336,14 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const light = Sky.at(sky_time);
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
     defer encoder.release();
+    // Catalog meshes installed after startup (deferred builds, reloads) upload under a budget.
+    const late = self.scene.uploadMeshes(window.device, window.queue, options.asset_upload);
+    if (options.benchmark_frames == 0 or self.frames >= Flythrough.warmup_frames) {
+        self.peak_late_upload = @max(self.peak_late_upload, late);
+        self.total_late_uploads += self.scene.late_uploads;
+        if (self.scene.late_uploads == 1) self.largest_late_mesh = @max(self.largest_late_mesh, late);
+    }
+    self.scene.late_uploads = 0;
     const count = @max(1, @min(self.view_count, max_views));
     var scenes: [max_views]*Scene = undefined;
     var pixels: [max_views][4]u32 = undefined;
@@ -576,7 +593,7 @@ fn reportBenchmark(self: *Renderer) void {
     const runs = self.field_runs.summary();
     const cells = self.field_cells.summary();
     if (Memory.footprint()) |bytes| self.peak_footprint = @max(self.peak_footprint, bytes);
-    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"gpu_time\":\"unavailable\"}}", .{
+    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"asset_upload_budget_bytes\":{d},\"peak_late_upload_bytes\":{d},\"largest_single_late_upload_bytes\":{d},\"late_uploads\":{d},\"pack_assets\":{d},\"pack_bytes\":{d},\"pack_requested_frame\":{d},\"pack_installed\":{d},\"pack_ready_frame\":{d},\"gpu_time\":\"unavailable\"}}", .{
         options.scale_objects,
         if (self.field) |f| f.generation_ms else 0,
         if (self.field) |f| f.gpuBytes() else 0,
@@ -592,6 +609,15 @@ fn reportBenchmark(self: *Renderer) void {
         cells.p50,
         cells.p99,
         self.peak_footprint,
+        options.asset_upload,
+        self.peak_late_upload,
+        self.largest_late_mesh,
+        self.total_late_uploads,
+        options.pack_stress,
+        self.pack_bytes,
+        self.pack_requested_frame,
+        self.pack_installed,
+        self.pack_ready_frame,
     });
     std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d},\"arbor_detail_frames\":{d},\"arbor_proxy_frames\":{d}}}", .{
         self.seed,                         Seed.generator_version,          self.intervals.total,           interval.p50,            interval.p95,              interval.p99,                 cpu.p50,               cpu.p95,                    cpu.p99,

@@ -67,7 +67,18 @@ Each source file `X` gets a sidecar `X.meta` next to it:
    - **Saves:** saves already embed full blueprint documents and never refer to built-in content by path, so moving them to GUIDs was unnecessary. They will adopt references when scenes (phase 15) and networking (phase 16) need them.
    - **Shaders:** stay embedded source, not assets, until hot reload needs them.
    - **Missing sidecars:** a missing sidecar is reported by the Zig build cache as `file_hash FileNotFound` before the compiler can print its own instruction. A stale sidecar gets the full message.
-2. **Packs and the async loader.** Pack writer and reader, the loader thread, load states and groups, and budgeted GPU upload. The Arbor meshes and district mesh move behind the loader, built in a worker at load time.
+2. **Packs and the async loader — implemented (2026-10-01).** Implemented:
+   - **Packs:** `Pack` (the `HWPK` v1 format: a GUID table with offsets, sizes, and Blake3 hashes, plus 16-byte-aligned blobs). The table is validated on open, and each blob is verified on load.
+   - **Loader:** `Loader`, a worker thread for pack entries, embedded bytes, and generator functions, with tickets, states, groups, progress, and stats.
+   - **Catalog:** `Catalog.reserve` and `install` (handles valid before content arrives; installed under the render mutex).
+   - **Renderer:** `StreamingScene.uploadMeshes` uploads under the `-Dasset-upload-kib` budget (default 4 MiB). One oversized mesh may go alone, so none starves, and split-screen views share the primary's GPU meshes.
+   - **Deferred meshes:** the generated Arbor full and proxy meshes and the district mesh are now built by the loader. They are ready about 100–150 ms after start.
+
+   Measured, and changes from the original plan:
+   - **Deferral saves little today:** those builds take about 1 ms each in release, so moving them saves little startup time. The mechanism is what packs and hot reload use.
+   - **Stress benchmark:** the planned 64 meshes of 10K–1M vertices would make a pack of roughly 600 MB per run, so the benchmark (`tools/benchmark.py --pack 64`) uses 1K–128K vertices (an 80 MiB pack).
+   - **No shipped pack yet:** today's only compiled model (the crate) is core content and stays embedded. A content pack ships when there is content beyond the core set.
+   - **Material pool:** the catalog's material pool (one per installed submesh) was raised from 64 to 256 after the stress run hit `PoolFull`.
 3. **Hot reload.** The source watcher, reimport, and generation-bumped swaps for models, blueprints, and mod scripts.
 
 ## Acceptance

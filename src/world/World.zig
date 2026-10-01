@@ -53,7 +53,9 @@ pub fn init(world: *@This(), allocator: std.mem.Allocator) !void {
     // Collection storage is initialized by Mach before module systems run.
     world.seed = 0;
     world.allocator = allocator;
-    try world.catalog.loadSeeded(allocator, @import("options").seed);
+    // The big procedural render meshes are built by the application's asset loader in the
+    // background; everything the simulation needs is loaded here.
+    try world.catalog.loadSeededDeferred(allocator, @import("options").seed);
 }
 
 /// Runs after the renderer has released its GPU copies.

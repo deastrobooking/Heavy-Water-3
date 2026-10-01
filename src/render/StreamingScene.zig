@@ -29,6 +29,13 @@ stream: *Streamer,
 catalog: *const Catalog,
 /// GPU copies of catalog meshes, indexed by handle slot; validated against the catalog on use.
 meshes: [Catalog.mesh_capacity]?GpuMesh = @splat(null),
+/// Handle generation each GPU copy was made from; a replaced catalog entry re-uploads.
+mesh_generation: [Catalog.mesh_capacity]u16 = @splat(0),
+/// Split-screen views draw the primary scene's catalog meshes.
+shared: ?*const Scene = null,
+/// Catalog meshes uploaded after setup (deferred or replaced), and their bytes this frame.
+late_uploads: u32 = 0,
+late_upload_bytes: usize = 0,
 draws: [max_draws]Draw = undefined,
 draw_count: usize = 0,
 prop_count: u32 = 0,
@@ -67,8 +74,8 @@ pub fn setup(self: *Scene, device: *gpu.Device, queue: *gpu.Queue) void {
         self.gpu_pool_allocations += 2;
     }
     self.initialized = true;
-    var live = self.catalog.meshes.live.iterator(.{});
-    while (live.next()) |i| self.meshes[i] = GpuMesh.upload(device, queue, self.catalog.meshes.items[i].model.mesh);
+    _ = self.uploadMeshes(device, queue, std.math.maxInt(usize));
+    self.late_uploads = 0;
 }
 
 /// Another view of the same world: its own streamer and terrain pool, shared catalog meshes.
@@ -78,13 +85,37 @@ pub fn setupShared(self: *Scene, device: *gpu.Device, primary: *const Scene) voi
         self.gpu_pool_allocations += 2;
     }
     self.initialized = true;
-    self.meshes = primary.meshes;
+    self.shared = primary;
     self.owns_meshes = false;
 }
 
 pub fn gpuMesh(self: *const Scene, handle: Catalog.MeshHandle) ?*const GpuMesh {
-    if (self.catalog.mesh(handle) == null) return null;
-    return if (self.meshes[handle.index]) |*mesh| mesh else null;
+    const owner = self.shared orelse self;
+    const entry = self.catalog.mesh(handle) orelse return null;
+    if (!entry.ready or owner.mesh_generation[handle.index] != handle.generation) return null;
+    return if (owner.meshes[handle.index]) |*mesh| mesh else null;
+}
+
+/// Uploads ready catalog meshes that have no current GPU copy, within `budget` bytes; one mesh
+/// larger than the budget still goes when nothing else has this frame, so none starves.
+/// Returns the bytes uploaded. Primary scene only.
+pub fn uploadMeshes(self: *Scene, device: *gpu.Device, queue: *gpu.Queue, budget: usize) usize {
+    var bytes: usize = 0;
+    var live = self.catalog.meshes.live.iterator(.{});
+    while (live.next()) |i| {
+        const entry = &self.catalog.meshes.items[i];
+        const generation = self.catalog.meshes.idAt(i).generation;
+        if (!entry.ready or (self.meshes[i] != null and self.mesh_generation[i] == generation)) continue;
+        const size = entry.model.mesh.vertices.len * @sizeOf(Mesh.Vertex) + entry.model.mesh.indices.len * 4;
+        if (bytes > 0 and bytes + size > budget) break;
+        if (self.meshes[i]) |old| old.deinit();
+        self.meshes[i] = GpuMesh.upload(device, queue, entry.model.mesh);
+        self.mesh_generation[i] = generation;
+        bytes += size;
+        self.late_uploads += 1;
+    }
+    self.late_upload_bytes = bytes;
+    return bytes;
 }
 
 /// Material base color of a single-material catalog mesh (relics, vegetation).

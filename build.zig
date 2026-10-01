@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(u32, "capture_frame", b.option(u32, "capture-frame", "Write rendered frame N to zig-out/capture.bmp, then exit (0 = off)") orelse 0);
     options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk") orelse 0);
     options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
+    options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
+    options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);
     options.addOption(usize, "field_upload", (b.option(usize, "field-upload-kib", "Scale workload instance upload budget per frame in KiB") orelse 2048) * 1024);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });

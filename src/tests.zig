@@ -17,6 +17,8 @@ test {
     _ = @import("asset/Guid.zig");
     _ = @import("asset/Meta.zig");
     _ = @import("asset/Registry.zig");
+    _ = @import("asset/Pack.zig");
+    _ = @import("asset/Loader.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");

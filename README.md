@@ -32,6 +32,7 @@ python3 tools/zig.py build import     # after adding or changing a source asset:
 python3 tools/zig.py build mods       # build the example WebAssembly mod
 python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/benchmark.py --canopy
+python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 meshes during measurement
 ```
 
 `run` needs a graphical desktop and GPU; headless tests do not open a window. More benchmark and showcase commands are in [Scale Tests](docs/scale.md).

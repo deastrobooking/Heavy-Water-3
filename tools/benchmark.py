@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--canopy", action="store_true", help="View an Arbor up close, at 1 km, and back; check both LODs and render CPU budget")
     parser.add_argument("--arbor", type=int, choices=(0, 1, 2), default=0, help="Arbor on canopy route: 0 test, 1 narrow, 2 spreading (nonzero enables canopy)")
     parser.add_argument("--scale", type=int, default=0, help="Scale workload: N field objects on the streaming route (10000, 100000, 1000000)")
+    parser.add_argument("--pack", type=int, default=0, help="Pack stress: write N (<=64) meshes of 1K-128K vertices and load them during measurement")
+    parser.add_argument("--asset-upload-kib", type=int, default=4096, help="Late catalog mesh upload budget per frame")
     parser.add_argument("--field-upload-kib", type=int, default=2048, help="Scale workload instance upload budget per frame")
     parser.add_argument("--seed", type=int, default=310399555161)
     parser.add_argument("--upload-budget-kib", type=int, default=320)
@@ -27,9 +29,11 @@ def main():
     args = parser.parse_args()
     args.canopy = args.canopy or args.arbor != 0
     if args.output is None:
-        args.output = ROOT / ".tools" / (f"scale-{args.scale}-benchmark.json" if args.scale else f"canopy-{args.arbor}-benchmark.json" if args.canopy and args.arbor else "canopy-benchmark.json" if args.canopy else "streaming-benchmark.json")
+        args.output = ROOT / ".tools" / (f"pack-{args.pack}-benchmark.json" if args.pack else f"scale-{args.scale}-benchmark.json" if args.scale else f"canopy-{args.arbor}-benchmark.json" if args.canopy and args.arbor else "canopy-benchmark.json" if args.canopy else "streaming-benchmark.json")
     if args.scale and args.canopy:
         parser.error("--scale runs on the streaming route; do not combine it with --canopy or --arbor")
+    if not 0 <= args.pack <= 64:
+        parser.error("--pack must be 0..64")
     if not 0 <= args.scale <= 4_000_000:
         parser.error("--scale must be 0..4000000")
     if not 120 <= args.frames <= 4096:
@@ -37,7 +41,7 @@ def main():
     if args.upload_budget_kib < 278:
         parser.error("--upload-budget-kib must be at least 278")
     command = [sys.executable, str(ROOT / "tools/zig.py"), "build", "run", "-Doptimize=ReleaseFast",
-               f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}"]
+               f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}", f"-Dpack-stress={args.pack}", f"-Dasset-upload-kib={args.asset_upload_kib}"]
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, start_new_session=os.name != "nt")
     try:
@@ -79,6 +83,13 @@ def main():
     }
     if args.canopy:
         checks["arbor_lods_exercised"] = result["arbor_detail_frames"] > 0 and result["arbor_proxy_frames"] > 0
+        checks["render_cpu_budget"] = result["cpu_p99_ms"] < 16.667
+    if args.pack:
+        # Every pack mesh loads, installs, and uploads during measurement without a frame going
+        # over the render budget; a frame uploads at most the budget, or one oversized mesh alone.
+        checks["pack_loaded_during_measurement"] = result["pack_requested_frame"] >= 60 and result["pack_installed"] == args.pack and result["pack_ready_frame"] >= result["pack_requested_frame"]
+        checks["pack_uploaded"] = result["late_uploads"] >= args.pack
+        checks["late_upload_budget"] = result["peak_late_upload_bytes"] <= max(result["asset_upload_budget_bytes"], result["largest_single_late_upload_bytes"])
         checks["render_cpu_budget"] = result["cpu_p99_ms"] < 16.667
     if args.scale:
         # The whole field must be resident before measuring starts, objects must draw, and the

@@ -49,6 +49,13 @@ The fixed-step clock limits catch-up to eight steps and accounts for discarded t
 
 `asset/Registry.zig` loads the manifest all or nothing, binds each entry to the loaded handle or blueprint, and resolves typed references (`Ref(.model)`, `Ref(.blueprint)`, which serialize as the GUID string) only to their own kind. Engine-generated meshes (block, wheel, Arbors, district, and the rest) are registered under GUIDs derived from `generated:<name>`, so they are identical in every build. Catalog load fails if any manifest entry is left unbound.
 
+**Packs and background loading (phase 13, slice 2).**
+
+- **Packs:** `asset/Pack.zig` defines `HWPK` v1, a table of GUID, kind, offset, size, and Blake3 hash, followed by aligned blobs. `open` rejects bad magic or version, truncation, out-of-order or overlapping entries, and duplicate GUIDs; `verify` checks a blob's hash.
+- **Loader:** `asset/Loader.zig` runs one worker thread with fixed capacity (256 tickets, 16 groups, 4 open packs). It reads pack entries with positional reads, verifies and decodes them, decodes embedded bytes, or runs generator functions, and never holds its lock while working. Callers poll `state`, `progress(group)`, and `take`.
+- **Catalog:** `Catalog.reserve` hands out a valid handle whose entry is not ready, and `install` fills it. The application installs in `publish`, inside Core's render mutex, so the render thread never sees an entry change mid-frame.
+- **Renderer:** `StreamingScene.uploadMeshes` uploads ready entries without a current GPU copy, tracked by handle generation, within `-Dasset-upload-kib` per frame. `World.init` uses `loadSeededDeferred`, so the generated Arbor and district render meshes are built by the loader (the simulation's trees and layout load synchronously). Tests use `loadSeeded`, which builds everything at once.
+
 `asset/Catalog.zig` registers the built-in relic and plant meshes and each compiled model, assigning one material handle per submesh, and exposes named content handles. It is immutable after `World.init`, so both threads read it without locks. `StreamingScene` uploads each catalog mesh once and resolves handles per draw; props are drawn once per submesh with instance tint × material base color.
 
 ## Physics and interaction

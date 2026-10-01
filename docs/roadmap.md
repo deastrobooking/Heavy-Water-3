@@ -232,7 +232,7 @@ Acceptance evidence:
 
 The next phases close the gaps to a production engine, in this order. [Engine alignment](plans/alignment.md) records how each outside suggestion was weighed against the codebase. Native Zig is kept: C-library physics, audio, and animation were declined on 2026-10-01.
 
-### 13. Asset pipeline — slice 1 implemented (identity, sidecars, manifest, registry)
+### 13. Asset pipeline — slices 1–2 implemented (identity, sidecars, manifest, registry; packs, background loader, budgeted uploads)
 
 - **Identity:** stable GUID asset references (`AssetRef`) with `.meta` sidecars holding the GUID, source hash, importer version, and typed import settings.
 - **Build output:** a manifest with dependencies, and content packs.

@@ -135,6 +135,20 @@ The experiment was terminated and the programmatic size change removed from the 
 - Whole-process memory instrumentation: Mach's stock entrypoint currently omits module-container teardown.
 - Deterministic screenshot regression tests and CPU/GPU percentile benchmarks.
 
+## Packs and background loading (phase 13, slice 2) — 2026-10-01
+
+- Debug suite: **159/159 tests pass**. The new tests cover:
+  - **Packs:** round trip, blob verification, and five kinds of damaged table rejected.
+  - **Loader:** 64 pack models load in the background with group progress reaching 1. A corrupted blob fails only its own asset with `HashMismatch`; a missing GUID fails with `UnknownAsset`; a generator job works; a bad pack header is refused on open.
+  - **Catalog:** reserve and install, with double installs and unknown handles refused.
+- The existing allocation-failure test caught a leak when a deferred build failed inside `loadSeeded`; fixed.
+- `tools/benchmark.py --pack 64` (ReleaseFast, 600 measured frames): **all checks pass**.
+  - The 80 MiB pack of 64 meshes was requested at frame 60, and all were decoded and installed by frame 64 and uploaded.
+  - Render CPU P50/P95/P99 was 0.903/1.474/1.777 ms, presentation interval P99 21.297 ms, with zero underfilled frames.
+  - The peak frame upload was 6.29 MB: the largest mesh going up alone, the allowed oversize case; every other frame stayed within the 4 MiB budget.
+  - The first run failed `pack_uploaded`: 13 installs hit the 64-material pool limit. The stress code had also counted failed installs as installed. Both are fixed: the material pool is now 256, and only successful installs are counted.
+- Smoke (`MTL_DEBUG_LAYER=1`, ReleaseSafe, 200 frames, including four split-screen views): no validation errors. Deferred meshes were ready 145 ms after start. The overview capture shows the Arbors and district drawn from deferred builds.
+
 ## Asset identity (phase 13, slice 1) — 2026-10-01
 
 - Debug suite: **149/149 tests pass**. The new tests cover:
