@@ -333,7 +333,7 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
             if (!sb.closeBridge(i)) return sb.say("bridge closed: removed once traffic clears", .{});
             sb.say("removed bridge", .{});
         },
-        .relic, .stall, .none => sb.say("nothing to remove", .{}),
+        .relic, .stall, .walker, .none => sb.say("nothing to remove", .{}),
     }
 }
 

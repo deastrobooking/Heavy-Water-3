@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(u32, "capture_frame", b.option(u32, "capture-frame", "Write rendered frame N to zig-out/capture.bmp, then exit (0 = off)") orelse 0);
-    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk, 16 armor lineup, 17 hardsuit close-up") orelse 0);
+    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk, 16 armor lineup, 17 hardsuit close-up, 18-26 GUI screens (title, talk, upgrades, shop, wardrobe, customize, pause, settings, HUD)") orelse 0);
     options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
     options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);

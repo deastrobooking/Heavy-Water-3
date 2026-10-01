@@ -3,8 +3,8 @@ const Input = @import("Input.zig");
 const Gamepads = @This();
 pub const Sample = extern struct { lx: f32 = 0, ly: f32 = 0, rx: f32 = 0, ry: f32 = 0, buttons: u32 = 0, connected: u32 = 0 };
 /// `join` (Menu) adds or removes the pad's player; `respawn` (Options) returns it beside P1.
-/// `up` / `down` are D-pad edges (menus such as a market stall).
-pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false };
+/// `up` / `down` / `left` / `right` are D-pad edges (menus, panels, market stalls).
+pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false };
 extern fn hw_gamepads(out: [*]Sample) void;
 previous: [4]u32 = @splat(0),
 commands: [4]Command = @splat(.{}),
@@ -46,6 +46,8 @@ pub fn sample(self: *Gamepads, samples: [4]Sample) void {
         cmd.respawn = cmd.respawn or edges & (1 << 9) != 0;
         cmd.up = cmd.up or edges & (1 << 12) != 0;
         cmd.down = cmd.down or edges & (1 << 13) != 0;
+        cmd.left = cmd.left or edges & (1 << 14) != 0;
+        cmd.right = cmd.right or edges & (1 << 15) != 0;
         cmd.connected = s.connected != 0;
         if (s.connected == 0) cmd.* = .{};
     }
@@ -59,6 +61,8 @@ pub fn consume(self: *Gamepads) void {
         c.respawn = false;
         c.up = false;
         c.down = false;
+        c.left = false;
+        c.right = false;
     }
 }
 /// Three guests first; a fourth controller operates P1 alongside the keyboard.

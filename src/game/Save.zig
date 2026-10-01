@@ -60,6 +60,8 @@ pub const Document = struct {
     machines: []const MachineState,
     prefabs: []const Blueprint.Doc,
     wallet: Market.Wallet,
+    /// Suit upgrades, owned armor and story flags; absent in older saves (a fresh start).
+    progress: @import("Progress.zig").Doc = .{},
     market_day: u64,
     market_stock: []const [Market.ware_count]u8,
     /// Mods installed when saved (name and "major.minor.patch").

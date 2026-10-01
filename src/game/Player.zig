@@ -16,6 +16,15 @@ pub const walk_speed: f32 = 5;
 pub const sprint_speed: f32 = 9;
 pub const jump_speed: f32 = 7.5;
 pub const Water = struct { min: V, max: V };
+/// Suit tuning from purchased upgrades (see `Progress`); the defaults are the base suit.
+pub const Suit = struct {
+    fuel_max: f32 = 100,
+    /// Multiplies every fuel cost (jets, glide, dashes, boards).
+    burn: f32 = 1,
+    sprint: f32 = sprint_speed,
+    stamina_regen: f32 = 20,
+    grapple_range: f32 = 96,
+};
 pub const Environment = struct { water: []const Water = &.{} };
 pub const Grapple = struct {
     mode: enum { ready, windup, zip, swing, cooldown } = .ready,
@@ -57,6 +66,7 @@ boost_timer: f32 = 0,
 boost_cooldown: f32 = 0,
 landing: f32 = 0,
 grapple: Grapple = .{},
+suit: Suit = .{},
 
 pub fn eye(self: Player) math.Vec3 {
     return math.vec3(self.feet[0], self.feet[1] + @min(eye_height, self.shape.height - 0.12), self.feet[2]);
@@ -67,7 +77,7 @@ pub fn cancelTraversal(self: *Player) void {
     const stamina = self.stamina;
     const fuel = self.fuel;
     const energy = self.climb_energy;
-    self.* = .{ .feet = self.feet, .mode = self.mode, .traversal = selected, .hover_enabled = hover, .stamina = stamina, .fuel = fuel, .climb_energy = energy };
+    self.* = .{ .feet = self.feet, .mode = self.mode, .traversal = selected, .hover_enabled = hover, .stamina = stamina, .fuel = fuel, .climb_energy = energy, .suit = self.suit };
 }
 pub fn setMode(self: *Player, mode: Mode, camera: Camera) void {
     self.cancelTraversal();
@@ -171,11 +181,11 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     if (self.grounded) {
         self.coyote = 0.16;
         self.wall_charges = 2;
-        self.fuel = @min(100, self.fuel + 12 * dt);
+        self.fuel = @min(self.suit.fuel_max, self.fuel + 12 * dt);
         self.climb_energy = @min(100, self.climb_energy + 13 * dt);
     }
     const sprinting = input.fast and strength > 0.82 and self.stamina > 0;
-    self.stamina = std.math.clamp(self.stamina + (if (sprinting and self.grounded) @as(f32, -15) else 20) * dt, 0, 100);
+    self.stamina = std.math.clamp(self.stamina + (if (sprinting and self.grounded) @as(f32, -15) else self.suit.stamina_regen) * dt, 0, 100);
     // Optional authored water volumes use the same collision controller as dry traversal.
     for (env.water) |water| {
         if (self.feet[0] < water.min[0] or self.feet[0] > water.max[0] or self.feet[2] < water.min[2] or self.feet[2] > water.max[2] or self.feet[1] < water.min[1] or self.feet[1] > water.max[1] - 0.3) continue;
@@ -282,7 +292,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.velocity[1] = -22;
             self.releaseGrapple();
         }
-        var target = R.scale(wish, (if (sprinting) sprint_speed else walk_speed) * strength * (if (board) @as(f32, 1.65) else 1) * (if (self.boost_timer > 0) @as(f32, 2.35) else 1));
+        var target = R.scale(wish, (if (sprinting) self.suit.sprint else walk_speed) * strength * (if (board) @as(f32, 1.65) else 1) * (if (self.boost_timer > 0) @as(f32, 2.35) else 1));
         var acceleration: f32 = if (self.grounded) (if (strength > 0.05) @as(f32, 45) else 55) else (if (strength > 0.05) @as(f32, 12) else 2);
         if (self.wall_lock > 0 or self.grab_cooldown > 0) acceleration *= 0.22;
         if (self.roll_timer > 0) {
@@ -317,14 +327,14 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             switch (self.traversal) {
                 .grapple, .hover_jet => {
                     self.velocity[1] = if (self.hover_enabled) self.velocity[1] * @exp(-7.5 * dt) else @min(7, self.velocity[1] + 26 * dt);
-                    self.fuel = @max(0, self.fuel - 2.5 * dt);
+                    self.fuel = @max(0, self.fuel - 2.5 * self.suit.burn * dt);
                     self.motion = if (self.hover_enabled) .hover else .jet;
                 },
                 .flight => {
-                    if (input.dodge and self.dash_cooldown == 0 and self.fuel >= 8) {
+                    if (input.dodge and self.dash_cooldown == 0 and self.fuel >= 8 * self.suit.burn) {
                         self.dash_timer = 0.18;
                         self.dash_cooldown = 0.55;
-                        self.fuel -= 8;
+                        self.fuel -= 8 * self.suit.burn;
                     }
                     if (self.hover_enabled) {
                         self.velocity[1] *= @exp(-8.5 * dt);
@@ -336,11 +346,11 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                         self.velocity[1] = @max(-3.5, self.velocity[1]);
                         self.motion = .glide;
                     }
-                    self.fuel = @max(0, self.fuel - (if (input.fast) @as(f32, 2.5) else 1) * dt);
+                    self.fuel = @max(0, self.fuel - (if (input.fast) @as(f32, 2.5) else 1) * self.suit.burn * dt);
                 },
                 .hoverboard => {
                     self.velocity = R.add(R.scale(if (strength > 0.1) wish else forward, if (input.fast) 20 else 14), .{ 0, @min(6, self.velocity[1] + 23 * dt), 0 });
-                    self.fuel = @max(0, self.fuel - 2 * dt);
+                    self.fuel = @max(0, self.fuel - 2 * self.suit.burn * dt);
                     self.motion = .board;
                 },
             }
@@ -357,7 +367,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         if (self.grapple.mode == .zip or self.grapple.mode == .swing or self.grapple.mode == .windup) self.releaseGrapple() else if (self.grapple.mode == .ready and self.grapple.heat <= 86) {
             const f = camera.forward();
             const eyes = self.eye();
-            if (physics.raycast(.{ eyes.x(), eyes.y(), eyes.z() }, .{ f.x(), f.y(), f.z() }, 96, .none)) |hit| {
+            if (physics.raycast(.{ eyes.x(), eyes.y(), eyes.z() }, .{ f.x(), f.y(), f.z() }, self.suit.grapple_range, .none)) |hit| {
                 // Static anchors only: a removed bridge is detected again before applying force.
                 if (hit.rigid.eql(.none) and hit.body.eql(.none) and hit.distance > 3) {
                     self.grapple.point = hit.point;

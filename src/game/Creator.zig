@@ -20,9 +20,11 @@ field: Profile.Field = .name,
 draft: Profile = .{},
 /// Set once a profile has been confirmed; a new game starts with the creator open.
 confirmed: bool = false,
+/// Clothing the player owns, one bit per `Profile.Clothing`; others are skipped when cycling.
+owned: u8 = 0xff,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
@@ -32,8 +34,8 @@ pub fn key(self: *Creator, k: Key) Result {
     switch (k) {
         .up => self.field = @enumFromInt((@intFromEnum(self.field) + fields.len - 1) % fields.len),
         .down => self.field = @enumFromInt((@intFromEnum(self.field) + 1) % fields.len),
-        .left => self.draft.adjust(self.field, -1),
-        .right => self.draft.adjust(self.field, 1),
+        .left => self.adjust(-1),
+        .right => self.adjust(1),
         .backspace => if (self.field == .name) self.draft.backspace(),
         .char => |c| if (self.field == .name) self.draft.typeChar(c),
         .escape => {
@@ -52,7 +54,17 @@ pub fn key(self: *Creator, k: Key) Result {
     return .editing;
 }
 
-fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u8 {
+/// Changes the selected field; clothing skips types not yet owned.
+pub fn adjust(self: *Creator, delta: i32) void {
+    self.draft.adjust(self.field, delta);
+    if (self.field != .clothing) return;
+    for (0..@typeInfo(Profile.Clothing).@"enum".fields.len) |_| {
+        if (self.owned & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.clothing))) != 0) return;
+        self.draft.adjust(.clothing, delta);
+    }
+}
+
+pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u8 {
     const p = self.draft;
     return switch (field) {
         .name => std.fmt.bufPrint(buffer, "{s}_", .{p.name()}) catch buffer,
@@ -120,4 +132,17 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     const count = c.lines(&panel);
     try std.testing.expectEqual(@as(usize, 14), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
+}
+
+test "clothing cycles only through owned types" {
+    var c: Creator = .{ .owned = 0b00011 };
+    c.begin(.{ .clothing = .undersuit });
+    c.field = .clothing;
+    _ = c.key(.right);
+    try std.testing.expectEqual(Profile.Clothing.field_jacket, c.draft.clothing);
+    _ = c.key(.right);
+    try std.testing.expectEqual(Profile.Clothing.undersuit, c.draft.clothing);
+    _ = c.key(.left);
+    try std.testing.expectEqual(Profile.Clothing.field_jacket, c.draft.clothing);
+    try std.testing.expectEqual(@as(u8, 0b00011), c.owned);
 }

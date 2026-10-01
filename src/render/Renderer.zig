@@ -9,6 +9,7 @@ const Seed = @import("../procedural/Seed.zig");
 const FrameStats = @import("../engine/FrameStats.zig");
 const Flythrough = @import("../engine/Flythrough.zig");
 const Overlay = @import("Overlay.zig");
+const Canvas = @import("../ui/Canvas.zig");
 const Modifications = @import("../world/Modifications.zig");
 const options = @import("options");
 const Renderer = @This();
@@ -60,6 +61,8 @@ hud_lines: [3]Overlay.Line = @splat(.{}),
 /// Machine inspection text (right side), drawn even with metrics hidden.
 panel: [panel_capacity]Overlay.Line = @splat(.{}),
 panel_count: usize = 0,
+/// The GUI for this frame (menus, HUD, panels), built by the application in canvas units.
+ui: Canvas = .{},
 scene: Scene = undefined,
 characters: Characters = .{},
 /// Views 2–4 stream their own terrain; created when first shown, kept until exit so pools
@@ -225,7 +228,8 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
 
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
     defer hud_shader.release();
-    const hud_fragment = gpu.FragmentState.init(.{ .module = hud_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format }} });
+    // Menus use translucent panels over the scene.
+    const hud_fragment = gpu.FragmentState.init(.{ .module = hud_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format, .blend = &blend }} });
     self.overlay_pipeline = device.createRenderPipeline(&.{
         .vertex = gpu.VertexState.init(.{ .module = hud_shader, .entry_point = "vertex_main", .buffers = &.{gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Overlay.Vertex), .attributes = &.{
             .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
@@ -503,11 +507,9 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
     self.overlay.height = @floatFromInt(@max(height, 1));
     const ink: [4]f32 = .{ 0.70, 0.84, 0.86, 1 };
     const cyan: [4]f32 = .{ 0.24, 0.88, 0.82, 1 };
-    var p1: Rect = undefined;
     for (self.views[0..views], 0..) |view, i| {
         const f = viewRect(i, views);
         const r: Rect = .{ .x = f.x * self.overlay.width, .y = f.y * self.overlay.height, .w = f.w * self.overlay.width, .h = f.h * self.overlay.height };
-        if (i == 0) p1 = r;
         if (view.crosshair) {
             const cx = r.x + r.w / 2;
             const cy = r.y + r.h / 2;
@@ -521,40 +523,33 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
         if (f.y > 0) self.overlay.rect(r.x, r.y - 1, r.w, 2, .{ 0.02, 0.035, 0.05, 1 });
         if (f.x > 0) self.overlay.rect(r.x - 1, r.y, 2, r.h, .{ 0.02, 0.035, 0.05, 1 });
     }
-    // Interaction status stays visible with metrics hidden.
-    const status_y = p1.y + p1.h - 76;
-    for (self.hud_lines, 0..) |line, i| if (line.len > 0) {
-        self.overlay.text(p1.x + 30, status_y + @as(f32, @floatFromInt(i)) * 18, line.slice(), if (i == 0) cyan else ink);
-    };
-    if (self.panel_count > 0) {
-        const x = p1.x + p1.w - 16 - 520;
-        const h = @as(f32, @floatFromInt(self.panel_count)) * 18 + 22;
-        self.overlay.rect(x, 16, 520, h, .{ 0.02, 0.035, 0.05, 1 });
-        self.overlay.rect(x, 16, 3, h, cyan);
-        for (self.panel[0..self.panel_count], 0..) |line, i| {
-            self.overlay.text(x + 14, 28 + @as(f32, @floatFromInt(i)) * 18, line.slice(), if (i == 0) cyan else ink);
-        }
+    if (self.show_metrics) {
+        self.overlay.rect(16, 16, 448, 196, .{ 0.02, 0.035, 0.05, 0.85 });
+        self.overlay.rect(16, 16, 3, 196, cyan);
+        self.overlay.text(30, 30, "HEAVY WATER / PROCEDURAL FRONTIER", cyan);
+        var buffer: [128]u8 = undefined;
+        self.overlay.text(30, 51, std.fmt.bufPrint(&buffer, "FPS {d:.0}  FRAME {d:.2} MS", .{ 1000 / @max(self.frame_ms, 0.001), self.frame_ms }) catch unreachable, ink);
+        self.overlay.text(30, 69, std.fmt.bufPrint(&buffer, "P50 {d:.1}  P95 {d:.1}  P99 {d:.1} MS", .{ self.percentiles.p50, self.percentiles.p95, self.percentiles.p99 }) catch unreachable, ink);
+        self.overlay.text(30, 87, std.fmt.bufPrint(&buffer, "CHUNKS GPU {d}/25  CACHE {d}/49  ACTIVE {d}", .{ self.scene.resident_count, self.scene.stats.ready, self.scene.stats.active }) catch unreachable, ink);
+        self.overlay.text(30, 105, std.fmt.bufPrint(&buffer, "QUEUED {d}  GENERATED {d}  CANCEL {d}", .{ self.scene.stats.queued, self.scene.stats.generated, self.scene.stats.canceled }) catch unreachable, ink);
+        self.overlay.text(30, 123, std.fmt.bufPrint(&buffer, "UPLOAD {d} KIB  CPU POOL {d} KIB", .{ self.scene.upload_bytes / 1024, self.scene.stats.cpu_bytes / 1024 }) catch unreachable, ink);
+        self.overlay.text(30, 141, std.fmt.bufPrint(&buffer, "OBJECTS {d}  TERRAIN DRAWS {d}", .{ count, self.scene.terrain_draws }) catch unreachable, ink);
+        if (self.field) |f| {
+            self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "FIELD {d}K  DRAWN {d}K  RUNS {d}  CELLS {d}", .{ f.count / 1000, (self.field_last.instances[0] + self.field_last.instances[1]) / 1000, self.field_last.run_count, self.field_last.visible_cells }) catch unreachable, cyan);
+        } else self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "SEED {d}  GEN {d}", .{ self.seed, Seed.generator_version }) catch unreachable, ink);
+        self.overlay.text(30, 185, if (self.culling) "F1 HIDE  C CULLING ON  ESC MENU" else "F1 HIDE  C CULLING OFF  ESC MENU", cyan);
     }
-    if (!self.show_metrics) return;
-    self.overlay.rect(16, 16, 448, 296, .{ 0.02, 0.035, 0.05, 1 });
-    self.overlay.rect(16, 16, 3, 296, cyan);
-    self.overlay.text(30, 30, "HEAVY WATER / PROCEDURAL FRONTIER", cyan);
-    var buffer: [128]u8 = undefined;
-    self.overlay.text(30, 51, std.fmt.bufPrint(&buffer, "FPS {d:.0}  FRAME {d:.2} MS", .{ 1000 / @max(self.frame_ms, 0.001), self.frame_ms }) catch unreachable, ink);
-    self.overlay.text(30, 69, std.fmt.bufPrint(&buffer, "P50 {d:.1}  P95 {d:.1}  P99 {d:.1} MS", .{ self.percentiles.p50, self.percentiles.p95, self.percentiles.p99 }) catch unreachable, ink);
-    self.overlay.text(30, 87, std.fmt.bufPrint(&buffer, "CHUNKS GPU {d}/25  CACHE {d}/49  ACTIVE {d}", .{ self.scene.resident_count, self.scene.stats.ready, self.scene.stats.active }) catch unreachable, ink);
-    self.overlay.text(30, 105, std.fmt.bufPrint(&buffer, "QUEUED {d}  GENERATED {d}  CANCEL {d}", .{ self.scene.stats.queued, self.scene.stats.generated, self.scene.stats.canceled }) catch unreachable, ink);
-    self.overlay.text(30, 123, std.fmt.bufPrint(&buffer, "UPLOAD {d} KIB  CPU POOL {d} KIB", .{ self.scene.upload_bytes / 1024, self.scene.stats.cpu_bytes / 1024 }) catch unreachable, ink);
-    self.overlay.text(30, 141, std.fmt.bufPrint(&buffer, "OBJECTS {d}  TERRAIN DRAWS {d}", .{ count, self.scene.terrain_draws }) catch unreachable, ink);
-    if (self.field) |f| {
-        self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "FIELD {d}K  DRAWN {d}K  RUNS {d}  CELLS {d}", .{ f.count / 1000, (self.field_last.instances[0] + self.field_last.instances[1]) / 1000, self.field_last.run_count, self.field_last.visible_cells }) catch unreachable, cyan);
-    } else self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "SEED {d}  GEN {d}", .{ self.seed, Seed.generator_version }) catch unreachable, ink);
-    self.overlay.text(30, 185, "WASD MOVE  SPACE JUMP/JET  SHIFT SPRINT", ink);
-    self.overlay.text(30, 203, "CTRL ROLL  X STOMP  G GRAPPLE  B TRAVERSAL", ink);
-    self.overlay.text(30, 221, "F MANTLE  V WALK/FLY  R RESET  ESC", ink);
-    self.overlay.text(30, 239, "CLICK LOOK/GRAB  RMB SALVAGE  F2 VIEW", ink);
-    self.overlay.text(30, 257, "F4 CHARACTER  F5 SAVE  F9 LOAD  F6 GUEST", ink);
-    self.overlay.text(30, 275, if (self.culling) "F1 HUD  C CULLING ON  PAD MENU JOINS" else "F1 HUD  C CULLING OFF  PAD MENU JOINS", cyan);
+    self.drawUi();
+}
+
+/// Replays the application's GUI canvas, scaled from canvas units to pixels. Positions and
+/// glyph cells snap to whole pixels so text stays crisp.
+fn drawUi(self: *Renderer) void {
+    const s = self.overlay.height / @max(self.ui.height, 1);
+    for (self.ui.commands[0..self.ui.len]) |cmd| switch (cmd.kind) {
+        .rect => self.overlay.rect(@round(cmd.x * s), @round(cmd.y * s), @max(1, @round(cmd.w * s)), @max(1, @round(cmd.h * s)), cmd.color),
+        .text => self.overlay.textScaled(@round(cmd.x * s), @round(cmd.y * s), cmd.text[0..cmd.len], cmd.color, @max(1, @round(cmd.cell * s))),
+    };
 }
 
 fn prepareCapture(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Format) void {

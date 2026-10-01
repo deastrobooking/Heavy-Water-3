@@ -33,6 +33,8 @@ const Life = @import("../city/Life.zig");
 const Market = @import("../city/Market.zig");
 const Routes = @import("../city/Routes.zig");
 const Sky = @import("../engine/Sky.zig");
+const Progress = @import("Progress.zig");
+const Dialogue = @import("Dialogue.zig");
 /// `closing`: removed from the road graph, standing until the traffic on it has crossed.
 pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
@@ -69,7 +71,13 @@ pub const Target = union(enum) {
     bridge: u8,
     /// A market stall, by `Market` stall index.
     stall: u8,
+    /// A pedestrian, by `Life` walker index.
+    walker: u8,
 };
+/// Panels the tinker opens from a conversation: suit upgrades or the armor wardrobe.
+pub const Shop = struct { kind: enum { upgrades, wardrobe }, row: u8 = 0 };
+pub const ShopKey = enum { up, down, confirm, close };
+pub const wardrobe_rows = @typeInfo(Profile.Clothing).@"enum".fields.len;
 /// Keys the trade panel understands while a stall is open.
 pub const TradeKey = enum { up, down, confirm, close };
 /// Trade panel rows: sell parts, then one row per ware.
@@ -209,6 +217,13 @@ mod_count: usize = 0,
 mod_warnings: usize = 0,
 market: Market = .{},
 wallet: Market.Wallet = .{},
+/// Suit upgrades, owned armor and story flags (saved).
+progress: Progress = .{},
+/// Conversation data (embedded and validated at init) and the open conversation.
+dialogue: Dialogue = undefined,
+talk: ?Dialogue.Session = null,
+/// Open tinker panel.
+shop: ?Shop = null,
 /// Stall whose trade panel is open (P1 only), and the selected row.
 trading: ?u8 = null,
 trade_row: u8 = 0,
@@ -249,6 +264,8 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined, .scripts = .init(allocator) };
     self.physics = .init(.{ .context = &self.seed, .sample = groundSample });
     errdefer self.physics.deinit();
+    self.dialogue = try Dialogue.load(allocator, Dialogue.builtin);
+    errdefer self.dialogue.deinit();
     try self.placeArbor(spawn[0] + arbor_offset[0], spawn[2] + arbor_offset[1]);
     self.test_arbor_sap = .{ .seed = seed, .genome = .{ .height = TestArbor.height, .base_radius = TestArbor.base_radius }, .count = 2 };
     self.test_arbor_sap.nodes[0] = .{ .position = .{ 0, -TestArbor.bury, 0 }, .radius = TestArbor.base_radius, .parent = Arbor.none, .depth = 0 };
@@ -467,6 +484,7 @@ fn checkShrines(self: *Sandbox) void {
         const sealed = machine.blueprint.findDevice("sealed") orelse continue;
         if (machine.outputs[sealed][1] < 0.5) continue;
         shrine.completed = true;
+        self.progress.setFlag("shrine_complete");
         const reward = self.catalog.content.rewards[k];
         _ = self.addPrefab(reward.*) catch return self.say("seed vault opened: palette full", .{});
         self.say("seed vault opened: {s} added to your palette", .{reward.name()});
@@ -475,6 +493,7 @@ fn checkShrines(self: *Sandbox) void {
 
 /// Frees mesh colliders. Bodies and machines own no heap memory.
 pub fn deinit(self: *Sandbox) void {
+    self.dialogue.deinit();
     self.scripts.deinit();
     self.physics.deinit();
 }
@@ -687,9 +706,14 @@ fn aimCamera(self: *const Sandbox, camera: Camera) Camera {
     return aim;
 }
 
-/// The avatar is drawn in third person and in the creator, on foot only.
+/// The avatar is drawn in third person, the creator, conversations and the wardrobe, on foot only.
 pub fn bodyShown(self: *const Sandbox) bool {
-    return self.seated == null and self.player.mode == .walk and (self.view == .third or self.creator.open);
+    return self.seated == null and self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen());
+}
+
+/// The wardrobe shows the character from the front, like the creator.
+pub fn wardrobeOpen(self: *const Sandbox) bool {
+    return if (self.shop) |shop| shop.kind == .wardrobe else false;
 }
 
 /// Guest `index` (0 = P2) joins beside P1 with a distinct accent and outfit.
@@ -771,11 +795,16 @@ fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
 pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Actions, dt: f32) !void {
     if (raw_actions.open_creator and self.seated == null and !self.creator.open) self.creator.begin(self.profile);
     if (raw_actions.toggle_view) self.view = if (self.view == .first) .third else .first;
-    // The creator freezes the character and every tool.
-    const frozen = self.creator.open;
+    // The creator, conversations and tinker panels freeze the character and every tool.
+    self.creator.owned = self.progress.suits;
+    const frozen = self.creator.open or self.talk != null or self.shop != null;
+    const suit = self.progress.suit();
+    self.player.suit = suit;
+    for (&self.guests) |*g| g.player.suit = suit;
+    if (self.talk) |*session| Dialogue.advance(session, dt);
     const input: Input = if (frozen) .{} else raw_input;
     const actions: Actions = if (frozen) .{} else raw_actions;
-    if (frozen) camera.yaw = self.body_yaw;
+    if (self.creator.open) camera.yaw = self.body_yaw;
     if (actions.reset) self.resetPlayer(camera);
     if (actions.toggle_mode and self.seated == null) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
     if (actions.select_tool != 0 and self.seated == null) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
@@ -833,10 +862,8 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
             if (primary) {
                 if (self.held != null) self.release() else switch (self.target) {
                     .prop => |i| self.hold(i),
-                    .stall => |i| {
-                        self.trading = i;
-                        self.trade_row = 0;
-                    },
+                    .stall => |i| self.startTalk(.{ .keeper = i }),
+                    .walker => |i| self.startTalk(.{ .walker = i }),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);
@@ -852,8 +879,9 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
             if (actions.secondary) switch (self.target) {
                 .relic => |relic| {
                     _ = try self.modifications.remove(relic.ref);
-                    // Salvage yields a part a market will buy.
-                    self.wallet.parts += 1;
+                    // Salvage yields parts a market will buy (more with the salvage kit upgrade).
+                    self.wallet.parts += self.progress.partsPerSalvage();
+                    self.progress.setFlag("salvaged");
                 },
                 else => {},
             };
@@ -867,7 +895,20 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
 fn placeCamera(self: *const Sandbox, camera: *Camera) void {
     if (self.player.mode != .walk) return;
     const eye = self.player.eye();
-    if (self.creator.open) {
+    // In conversation the camera frames the partner over the player's right shoulder.
+    if (self.talk) |session| {
+        const head = R.add(self.partnerPosition(session.partner), .{ 0, 1.5, 0 });
+        const to = R.sub(head, .{ eye.x(), eye.y(), eye.z() });
+        const flat = R.normalize(.{ to[0], 0, to[2] });
+        const right: Physics.Vec3 = .{ flat[2], 0, -flat[0] };
+        const from = R.add(.{ eye.x(), eye.y() + 0.15, eye.z() }, R.add(R.scale(flat, -1.6), R.scale(right, -0.75)));
+        const d = R.sub(head, from);
+        camera.position = math.vec3(from[0], from[1], from[2]);
+        camera.yaw = std.math.atan2(d[0], d[2]);
+        camera.pitch = std.math.atan2(d[1], @sqrt(d[0] * d[0] + d[2] * d[2]));
+        return;
+    }
+    if (self.creator.open or self.wardrobeOpen()) {
         const front = R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 0, 0, 2.8 });
         camera.position = math.vec3(self.player.feet[0] + front[0], self.player.feet[1] + 1.35, self.player.feet[2] + front[2]);
         camera.yaw = self.body_yaw + std.math.pi;
@@ -1110,6 +1151,101 @@ pub fn tradeLines(self: *const Sandbox, out: []TradeLine) usize {
     return 2 + trade_rows;
 }
 
+/// Feet of the keeper behind stall `i`'s counter.
+pub fn keeperPosition(self: *const Sandbox, i: usize) Physics.Vec3 {
+    const stall = self.stallPosition(i);
+    const toward = R.sub(self.catalog.district.nodes[Market.stall_plazas[i]].position, stall);
+    return R.sub(stall, R.scale(R.normalize(.{ toward[0], 0, toward[2] }), 1.2));
+}
+
+pub fn partnerPosition(self: *const Sandbox, partner: Dialogue.Partner) Physics.Vec3 {
+    return switch (partner) {
+        .keeper => |i| self.keeperPosition(i),
+        .walker => |i| self.life.walkers[i].player.feet,
+    };
+}
+
+/// Opens a conversation with a keeper or pedestrian (P1). The pedestrian stops and turns.
+pub fn startTalk(self: *Sandbox, partner: Dialogue.Partner) void {
+    var buffer: [16]u8 = undefined;
+    const index = switch (partner) {
+        .keeper => |i| self.dialogue.find(std.fmt.bufPrint(&buffer, "keeper_{d}", .{i}) catch unreachable),
+        .walker => |i| self.dialogue.walker(i),
+    } orelse return;
+    self.talk = self.dialogue.begin(index, partner, &self.progress) orelse return;
+    self.trading = null;
+    self.shop = null;
+    const there = self.partnerPosition(partner);
+    const d = R.sub(there, self.player.feet);
+    self.body_yaw = std.math.atan2(d[0], d[2]);
+    if (partner == .walker) {
+        self.life.chatting = partner.walker;
+        self.life.walkers[partner.walker].camera.yaw = std.math.atan2(-d[0], -d[2]);
+    }
+}
+
+fn endTalk(self: *Sandbox) void {
+    self.talk = null;
+    self.life.chatting = null;
+}
+
+/// Conversation input. A choice with an action ends the conversation and opens its panel.
+pub fn talkKey(self: *Sandbox, key: Dialogue.Key) void {
+    const session = if (self.talk) |*t| t else return;
+    const scrap = self.wallet.scrap;
+    const outcome = self.dialogue.key(session, key, &self.progress, &self.wallet);
+    if (self.wallet.scrap > scrap) self.say("received {d} scrap", .{self.wallet.scrap - scrap});
+    switch (outcome) {
+        .talking => {},
+        .ended => self.endTalk(),
+        .action => |action| {
+            const partner = session.partner;
+            self.endTalk();
+            switch (action) {
+                .none => {},
+                .trade => if (partner == .keeper) {
+                    self.trading = partner.keeper;
+                    self.trade_row = 0;
+                },
+                .upgrades => self.shop = .{ .kind = .upgrades },
+                .wardrobe => self.shop = .{ .kind = .wardrobe },
+            }
+        },
+    }
+}
+
+pub fn shopRows(self: *const Sandbox) u8 {
+    const shop = self.shop orelse return 0;
+    return switch (shop.kind) {
+        .upgrades => Progress.upgrade_count,
+        .wardrobe => wardrobe_rows,
+    };
+}
+
+/// Tinker panel input: buy the selected upgrade level, or buy (when not owned) and wear a suit.
+pub fn shopKey(self: *Sandbox, key: ShopKey) void {
+    const shop = if (self.shop) |*s| s else return;
+    const rows = self.shopRows();
+    switch (key) {
+        .up => shop.row = (shop.row + rows - 1) % rows,
+        .down => shop.row = (shop.row + 1) % rows,
+        .close => self.shop = null,
+        .confirm => switch (shop.kind) {
+            .upgrades => {
+                const u: Progress.Upgrade = @enumFromInt(shop.row);
+                self.progress.buy(u, &self.wallet) catch |err| return self.say("cannot upgrade: {s}", .{@errorName(err)});
+                self.say("{s} now level {d}", .{ Progress.info[shop.row].name, self.progress.level(u) });
+            },
+            .wardrobe => {
+                const c: Profile.Clothing = @enumFromInt(shop.row);
+                if (!self.progress.owns(c)) self.progress.buySuit(c, &self.wallet) catch |err| return self.say("cannot buy: {s}", .{@errorName(err)});
+                self.profile.clothing = c;
+                self.say("wearing the {s}", .{@tagName(c)});
+            },
+        },
+    }
+}
+
 fn stepLife(self: *Sandbox, dt: f32) void {
     if (!self.life.active) return;
     var others: [16]Physics.Vec3 = undefined;
@@ -1152,6 +1288,7 @@ pub fn addBridge(self: *Sandbox, edge: District.Edge) !u8 {
     // A failed allocation leaves the graph and existing geometry untouched.
     self.bridges[slot] = try self.prepareBridge(edge, slot);
     self.road_revision += 1;
+    self.progress.setFlag("bridge_built");
     return @intCast(slot);
 }
 
@@ -1256,6 +1393,13 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distan
         const machine: u8 = @intCast((hit.user >> 8) & 0xFF);
         best = if (hit.user & bridge_flag != 0) .{ .bridge = @intCast(hit.user & 0xff) } else if (hit.user & world_flag != 0) .none else if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .{ .structure = machine } else .{ .device = .{ .machine = machine, .device = @intCast(hit.user & 0xFF) } };
     }
+    // Pedestrians, as a body-sized box (hands only).
+    if (stalls and self.life.active) for (self.life.walkers, 0..) |w, i| {
+        const hit = Physics.rayBox(origin, dir, R.add(w.player.feet, .{ 0, 0.9, 0 }), .{ 0.4, 0.9, 0.4 }) orelse continue;
+        if (hit.distance >= best_distance and hit.distance > 0) continue;
+        best = .{ .walker = @intCast(i) };
+        best_distance = hit.distance;
+    };
     // Market stalls: the space under each canopy (hands only).
     if (stalls) for (0..Market.stall_count) |i| {
         const hit = Physics.rayBox(origin, dir, R.add(self.stallPosition(i), .{ 0, 1.75, 0 }), .{ 2.4, 1.75, 2 }) orelse continue;
@@ -1422,7 +1566,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         const keeper: Profile = .{ .outfit = @intCast((i * 3 + 1) % Profile.outfit_colors.len), .accent = @intCast((i + 1) % Profile.accent_colors.len), .hair_style = @enumFromInt(i % 5), .skin = @intCast((i * 3) % Profile.skin_tones.len) };
         const toward = R.sub(plaza, stall);
         const keeper_index = n;
-        n += Avatar.build(keeper, .{ .feet = R.sub(stall, R.scale(R.normalize(.{ toward[0], 0, toward[2] }), 1.2)), .yaw = std.math.atan2(toward[0], toward[2]) }, self.catalog.content.block, out[n..]);
+        n += Avatar.build(keeper, .{ .feet = self.keeperPosition(i), .yaw = std.math.atan2(toward[0], toward[2]) }, self.catalog.content.block, out[n..]);
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
@@ -1527,6 +1671,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .collected = self.modifications.slice(),
         .machines = machines[0..machine_count],
         .wallet = self.wallet,
+        .progress = try self.progress.toDoc(arena),
         .mods = mods: {
             const refs = try arena.alloc(Save.ModState, self.mod_count);
             for (refs, self.mods[0..self.mod_count]) |*out, *m| out.* = .{ .name = try arena.dupe(u8, m.name()), .version = try std.fmt.allocPrint(arena, "{d}.{d}.{d}", .{ m.version.major, m.version.minor, m.version.patch }) };
@@ -1554,6 +1699,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     defer parsed.deinit();
     const doc = parsed.value;
     const profile = try Profile.fromDoc(doc.profile);
+    const progress = Progress.fromDoc(doc.progress) catch return error.InvalidSave;
     const blueprints = try allocator.alloc(Blueprint, doc.machines.len);
     defer allocator.free(blueprints);
     var bodies: usize = doc.props.len;
@@ -1633,6 +1779,9 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     }
     self.market = market;
     self.wallet = doc.wallet;
+    self.progress = progress;
+    self.endTalk();
+    self.shop = null;
     self.trading = null;
     self.target = .none;
     // Saves remember which mods they were made with; a missing or different mod is reported, not
@@ -1656,7 +1805,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.tap_links = @splat(@splat(null));
 }
 
-fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {
+pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {
     try catalog.load(std.testing.allocator);
     errdefer catalog.deinit(std.testing.allocator);
     try sandbox.init(std.testing.allocator, 310399555161, catalog, camera);
@@ -2427,7 +2576,15 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
     aimAt(&camera, R.add(stall, .{ 0, 1, 0 }));
     try run(&sb, &camera, .{}, .{}, 1);
     try std.testing.expect(sb.target == .stall and sb.target.stall == 0);
+    // Clicking the stall greets its keeper; "show me your stall" opens the trade panel.
     try run(&sb, &camera, .{}, .{ .interact = true }, 1);
+    try std.testing.expect(sb.talk != null and sb.talk.?.partner.keeper == 0);
+    try std.testing.expect(sb.progress.hasFlag("met_maro") and sb.progress.hasFlag("salvaged"));
+    sb.talkKey(.confirm);
+    sb.talkKey(.down);
+    sb.talkKey(.down);
+    sb.talkKey(.confirm);
+    try std.testing.expect(sb.talk == null);
     try std.testing.expectEqual(@as(?u8, 0), sb.trading);
     var lines: [trade_rows + 2]TradeLine = undefined;
     try std.testing.expectEqual(@as(usize, trade_rows + 2), sb.tradeLines(&lines));

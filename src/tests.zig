@@ -55,6 +55,13 @@ test {
     _ = @import("game/Player.zig");
     _ = @import("engine/Gamepads.zig");
     _ = @import("game/Creator.zig");
+    _ = @import("game/Progress.zig");
+    _ = @import("game/Dialogue.zig");
+    _ = @import("ui/Canvas.zig");
+    _ = @import("ui/Menu.zig");
+    _ = @import("ui/Screens.zig");
+    _ = @import("game/Settings.zig");
+    _ = @import("render/Overlay.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");
     _ = @import("machine/Machine.zig");

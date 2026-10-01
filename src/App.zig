@@ -22,6 +22,11 @@ const Loader = @import("asset/Loader.zig");
 const Profile = @import("game/Profile.zig");
 const Life = @import("city/Life.zig");
 const Market = @import("city/Market.zig");
+const Menu = @import("ui/Menu.zig");
+const Canvas = @import("ui/Canvas.zig");
+const Screens = @import("ui/Screens.zig");
+const Settings = @import("game/Settings.zig");
+const Dialogue = @import("game/Dialogue.zig");
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -76,9 +81,24 @@ stress_installed: u32 = 0,
 stress_requested: bool = false,
 /// Guests joined from a controller leave when it disconnects; F6 and smoke guests stay.
 pad_guests: [Sandbox.max_players - 1]bool = @splat(false),
+core: *mach.Core = undefined,
+/// Title, pause and settings menus (settings persist in `saves/settings.json`).
+menu: Menu = .{},
+/// A person is playing (no smoke, benchmark or showcase): the title opens and settings save.
+interactive: bool = false,
+/// Mouse position in canvas units, and the clickable areas of the last published GUI.
+pointer: [2]f32 = .{ -1, -1 },
+hits: [Canvas.hit_capacity]Canvas.Hit = undefined,
+hit_len: usize = 0,
+ui_height: f32 = 720,
+window_height: f32 = 800,
+seconds: f32 = 0,
+/// The P1 pad's Menu button was pressed (opens or closes the pause menu).
+pad_menu: bool = false,
+gui_showcase_ready: bool = false,
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
-    self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io };
+    self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
     core.on_exit = app_mod.id.deinit;
     self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
@@ -106,8 +126,172 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         self.sandbox.creator.begin(self.sandbox.profile);
         self.sandbox.player.mode = .walk;
     }
-    // A new game begins by creating the character (not in unattended smoke or benchmark runs).
-    if (options.smoke_frames == 0 and options.benchmark_frames == 0 and options.showcase == 0) self.sandbox.creator.begin(self.sandbox.profile);
+    // A person playing starts at the title screen (not in unattended smoke, benchmark, or
+    // showcase runs); "new game" then opens the character creator.
+    self.interactive = options.smoke_frames == 0 and options.benchmark_frames == 0 and options.showcase == 0 and options.character_showcase == 0;
+    if (self.interactive) {
+        self.menu.settings = Settings.load(io, allocator);
+        self.show_metrics = self.menu.settings.metrics;
+        self.menu.has_save = self.saveExists();
+        self.menu.open(.title);
+    }
+}
+
+fn saveExists(self: *App) bool {
+    std.Io.Dir.cwd().access(self.io, Save.default_path, .{}) catch return false;
+    return true;
+}
+
+/// Any GUI that takes the keyboard and frees the mouse is open.
+fn uiActive(self: *const App) bool {
+    const sb = &self.sandbox;
+    return self.menu.screen != .none or sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null;
+}
+
+/// Arrow keys, WASD, Enter/Space/E and Escape navigate every GUI.
+fn navKey(key: mach.Core.KeyButtonID) ?Menu.Key {
+    return switch (key) {
+        .up, .w => .up,
+        .down, .s => .down,
+        .left, .a => .left,
+        .right, .d => .right,
+        .enter, .kp_enter, .space, .e => .confirm,
+        .escape => .back,
+        else => null,
+    };
+}
+
+/// Routes one navigation key to whichever GUI is open (menus first, then panels).
+fn uiNav(self: *App, k: Menu.Key) void {
+    if (self.menu.screen != .none) return self.menuKey(k);
+    const sb = &self.sandbox;
+    if (sb.creator.open) return self.creatorInput(switch (k) {
+        .up => .up,
+        .down => .down,
+        .left => .left,
+        .right => .right,
+        .confirm => .enter,
+        .back => .escape,
+    });
+    if (sb.talk != null) return sb.talkKey(switch (k) {
+        .up => .up,
+        .down => .down,
+        .confirm => .confirm,
+        .back => .back,
+        else => return,
+    });
+    if (sb.shop != null) return sb.shopKey(switch (k) {
+        .up => .up,
+        .down => .down,
+        .confirm => .confirm,
+        .back => .close,
+        else => return,
+    });
+    if (sb.trading != null) return sb.tradeKey(switch (k) {
+        .up => .up,
+        .down => .down,
+        .confirm => .confirm,
+        .back => .close,
+        else => return,
+    });
+}
+
+fn menuKey(self: *App, k: Menu.Key) void {
+    switch (self.menu.key(k)) {
+        .none => {},
+        .@"resume" => {
+            self.menu.open(.none);
+            self.capture(self.core, true);
+        },
+        .new_game => self.newGame(),
+        .continue_game, .load => if (self.quickload()) self.menu.open(.none),
+        .save => {
+            self.quicksave();
+            self.menu.has_save = self.saveExists();
+        },
+        .character => {
+            self.menu.open(.none);
+            if (self.sandbox.seated != null) return self.report("LEAVE THE VEHICLE TO CUSTOMIZE", .{});
+            self.actions.open_creator = true;
+        },
+        .quit => self.core.exit(),
+        .settings_changed => {
+            self.show_metrics = self.menu.settings.metrics;
+            if (self.interactive) self.menu.settings.store(self.io, self.allocator) catch |err| self.report("SETTINGS NOT SAVED {s}", .{@errorName(err)});
+        },
+    }
+}
+
+/// From the title: a fresh ranger at the spawn point, starting in the creator.
+fn newGame(self: *App) void {
+    self.menu.open(.none);
+    self.sandbox.player.mode = .walk;
+    self.sandbox.resetPlayer(&self.engine.camera);
+    self.sandbox.view = if (self.menu.settings.third_person) .third else .first;
+    self.sandbox.creator.begin(self.sandbox.profile);
+}
+
+/// Title backdrop: a slow orbit over the city.
+fn titleCamera(self: *App) void {
+    const layout = &self.sandbox.catalog.district;
+    const center = layout.nodes[0].position;
+    const angle = self.seconds * 0.025 + 2.2;
+    const camera = &self.engine.camera;
+    self.sandbox.player.mode = .fly;
+    camera.position = mach.math.vec3(center[0] + @sin(angle) * 300, center[1] + 110, center[2] + @cos(angle) * 300);
+    const dx = center[0] + 60 - camera.position.x();
+    const dz = center[2] + 120 - camera.position.z();
+    camera.yaw = std.math.atan2(dx, dz);
+    camera.pitch = std.math.atan2(center[1] + 20 - camera.position.y(), @sqrt(dx * dx + dz * dz));
+}
+
+/// Mouse over the GUI: hovering selects, clicking also activates.
+fn pointAt(self: *App, click: bool) void {
+    var id: ?u16 = null;
+    var i = self.hit_len;
+    while (i > 0) {
+        i -= 1;
+        if (self.hits[i].rect.contains(self.pointer[0], self.pointer[1])) {
+            id = self.hits[i].id;
+            break;
+        }
+    }
+    const hit = id orelse return;
+    const row = Screens.hitRow(hit);
+    const sb = &self.sandbox;
+    switch (Screens.hitArea(hit)) {
+        .menu => {
+            self.menu.select(row);
+            if (click and self.menu.row == row) self.menuKey(.confirm);
+        },
+        .setting_left, .setting_right => {
+            self.menu.select(row);
+            if (click) self.menuKey(if (Screens.hitArea(hit) == .setting_left) .left else .right);
+        },
+        .creator_field => if (click and sb.creator.open) {
+            sb.creator.field = @enumFromInt(row);
+        },
+        .creator_left, .creator_right => if (click and sb.creator.open) {
+            sb.creator.field = @enumFromInt(row);
+            sb.creator.adjust(if (Screens.hitArea(hit) == .creator_left) -1 else 1);
+        },
+        .creator_done => if (click) self.creatorInput(.enter),
+        .trade_row => if (sb.trading != null) {
+            sb.trade_row = row;
+            if (click) sb.tradeKey(.confirm);
+        },
+        .trade_close => if (click) sb.tradeKey(.close),
+        .shop_row => if (sb.shop) |*shop| {
+            shop.row = row;
+            if (click) sb.shopKey(.confirm);
+        },
+        .shop_close => if (click) sb.shopKey(.close),
+        .choice => if (sb.talk) |*talk| {
+            talk.choice = row;
+            if (click) sb.talkKey(.confirm);
+        },
+        .talk_continue => if (click) sb.talkKey(.confirm),
+    }
 }
 
 /// While the creator is open, every key goes to it.
@@ -130,6 +314,10 @@ fn creatorKey(self: *App, key: mach.Core.KeyButtonID) void {
             return;
         },
     };
+    self.creatorInput(k);
+}
+
+fn creatorInput(self: *App, k: Creator.Key) void {
     switch (self.sandbox.creator.key(k)) {
         .editing => {},
         .confirmed => |profile| {
@@ -138,17 +326,6 @@ fn creatorKey(self: *App, key: mach.Core.KeyButtonID) void {
         },
         .canceled => {},
     }
-}
-
-/// While a market stall is open, arrows, Enter, and Escape drive its panel.
-fn tradeKey(key: mach.Core.KeyButtonID) ?Sandbox.TradeKey {
-    return switch (key) {
-        .up => .up,
-        .down => .down,
-        .enter, .kp_enter => .confirm,
-        .escape => .close,
-        else => null,
-    };
 }
 
 /// Loads every valid blueprint in the prefab directory into the palette; invalid files are
@@ -226,8 +403,23 @@ pub fn update(self: *App, core: *mach.Core) void {
     var events = core.events(.default);
     while (events.next()) |event| switch (event) {
         .close => core.exit(),
-        .key_press => |key| if (self.sandbox.creator.open) self.creatorKey(key.key) else if (self.sandbox.trading != null and tradeKey(key.key) != null) self.sandbox.tradeKey(tradeKey(key.key).?) else switch (key.key) {
-            .escape => self.capture(core, false),
+        .key_repeat => |key| if (self.uiActive()) {
+            // Held arrows scroll lists; held backspace erases the name.
+            if (self.sandbox.creator.open and self.menu.screen == .none) {
+                if (key.key == .backspace or key.key == .left or key.key == .right or key.key == .up or key.key == .down) self.creatorKey(key.key);
+            } else if (key.key == .up or key.key == .down or key.key == .left or key.key == .right) self.uiNav(navKey(key.key).?);
+        },
+        .key_press => |key| if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
+            // Number keys pick a conversation choice directly.
+            const digits = [_]mach.Core.KeyButtonID{ .one, .two, .three, .four, .five, .six };
+            if (self.menu.screen == .none) if (self.sandbox.talk) |*talk| for (digits, 0..) |d, i| if (key.key == d and self.sandbox.dialogue.revealed(talk.*)) {
+                talk.choice = @intCast(i);
+                var visible: [Dialogue.max_choices]u8 = undefined;
+                if (i < self.sandbox.dialogue.visibleChoices(talk.*, &self.sandbox.progress, &visible)) self.sandbox.talkKey(.confirm);
+            };
+            if (navKey(key.key)) |k| self.uiNav(k);
+        } else switch (key.key) {
+            .escape => self.menu.open(.pause),
             .f2 => self.actions.toggle_view = true,
             .f4 => self.actions.open_creator = true,
             .r => self.actions.reset = true,
@@ -235,7 +427,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .f1 => self.show_metrics = !self.show_metrics,
             .c => self.culling = !self.culling,
             .f5 => self.quicksave(),
-            .f9 => self.quickload(),
+            .f9 => _ = self.quickload(),
             .one => self.actions.select_tool = 1,
             .two => self.actions.select_tool = 2,
             .three => self.actions.select_tool = 3,
@@ -254,7 +446,9 @@ pub fn update(self: *App, core: *mach.Core) void {
             .f6 => self.toggleGuest(),
             else => {},
         },
-        .mouse_press => |mouse| switch (mouse.button) {
+        .mouse_press => |mouse| if (self.uiActive()) {
+            if (mouse.button == .left) self.pointAt(true);
+        } else switch (mouse.button) {
             .left => if (self.captured) {
                 self.actions.interact = true;
             } else self.capture(core, true),
@@ -269,23 +463,51 @@ pub fn update(self: *App, core: *mach.Core) void {
             self.engine.input = .{};
         },
         .mouse_motion_relative => |motion| if (self.captured) {
-            self.engine.input.look_x += @floatCast(motion.dx);
-            self.engine.input.look_y += @floatCast(motion.dy);
+            const sensitivity = self.menu.settings.sensitivity;
+            self.engine.input.look_x += @as(f32, @floatCast(motion.dx)) * sensitivity;
+            self.engine.input.look_y += @as(f32, @floatCast(motion.dy)) * sensitivity * (if (self.menu.settings.invert_y) @as(f32, -1) else 1);
+        },
+        .mouse_motion => |motion| {
+            // Window points to canvas units (the canvas is `ui_height` units tall).
+            const scale = self.ui_height / @max(self.window_height, 1);
+            self.pointer = .{ @as(f32, @floatCast(motion.pos.x)) * scale, @as(f32, @floatCast(motion.pos.y)) * scale };
+            if (self.uiActive()) self.pointAt(false);
         },
         else => {},
     };
+    core.windows.lockShared();
+    self.window_height = @floatFromInt(@max(core.windows.get(self.window, .height), 1));
+    core.windows.unlockShared();
+    // A GUI frees the mouse; leaving it does not grab the mouse again until a click.
+    if (self.uiActive() and self.captured) self.capture(core, false);
     self.engine.input.sample(core);
     self.pollPads();
+    if (self.pad_menu) {
+        self.pad_menu = false;
+        if (self.menu.screen == .none and !self.uiActive()) self.menu.open(.pause) else if (self.menu.screen == .pause) self.menuKey(.back);
+    }
+    if (self.interactive) {
+        const fov = self.menu.settings.fovRadians();
+        self.engine.camera.fov = fov;
+        for (&self.sandbox.guests) |*g| g.camera.fov = fov;
+    }
+    if (self.uiActive()) self.engine.input = .{};
+    const title = self.menu.screen != .none and self.menu.base == .title;
+    const paused = self.menu.screen != .none and self.menu.base == .pause;
+    if (title) self.titleCamera();
     if (options.smoke_frames > 0 and options.benchmark_frames == 0) {
         self.exerciseSmoke();
         // The last smoke stage drives the rover at full throttle.
         if (self.sandbox.seated != null) self.engine.input.forward = 1;
     }
     if (options.showcase > 0) self.showcase();
-    const steps = self.engine.advance(self.timer.lap());
+    const lap = self.timer.lap();
+    self.seconds += lap;
+    const steps = self.engine.advance(lap);
     for (0..steps) |_| {
         self.routePads();
-        self.sandbox.step(&self.engine.camera, self.engine.input, self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
+        // The pause menu stops the world; the title keeps it alive behind the menu.
+        if (!paused) self.sandbox.step(&self.engine.camera, if (title) .{} else self.engine.input, if (title) .{} else self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
         self.actions = .{};
         self.engine.input.clearEdges();
         self.pads.consume();
@@ -303,7 +525,9 @@ fn pollPads(self: *App) void {
     for (&self.pads.commands, 0..) |*cmd, c| {
         const p = Gamepads.playerIndex(c);
         if (p == 0) {
-            self.engine.input.merge(cmd.input);
+            if (cmd.join) self.pad_menu = true;
+            cmd.join = false;
+            if (!self.uiActive()) self.engine.input.merge(cmd.input);
             continue;
         }
         const g = p - 1;
@@ -328,12 +552,14 @@ fn routePads(self: *App) void {
         const p = Gamepads.playerIndex(c);
         if (p == 0) {
             if (!cmd.connected) continue;
-            if (self.sandbox.trading != null) {
-                // A pad driving P1 at a stall: D-pad chooses, X trades, B closes.
-                if (cmd.up) self.sandbox.tradeKey(.up);
-                if (cmd.down) self.sandbox.tradeKey(.down);
-                if (cmd.interact) self.sandbox.tradeKey(.confirm);
-                if (cmd.input.dodge) self.sandbox.tradeKey(.close);
+            if (self.uiActive()) {
+                // A pad driving P1 through any GUI: D-pad moves, X chooses, B goes back.
+                if (cmd.up) self.uiNav(.up);
+                if (cmd.down) self.uiNav(.down);
+                if (cmd.left) self.uiNav(.left);
+                if (cmd.right) self.uiNav(.right);
+                if (cmd.interact) self.uiNav(.confirm);
+                if (cmd.input.dodge) self.uiNav(.back);
                 continue;
             }
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
@@ -369,10 +595,11 @@ fn showcase(self: *App) void {
     const District = @import("procedural/District.zig");
     const layout = &self.sandbox.catalog.district;
     const camera = &self.engine.camera;
-    self.sandbox.player.mode = .fly;
-    self.show_metrics = false;
-    self.engine.input = .{};
     const v = options.showcase;
+    self.show_metrics = false;
+    if (v >= 18) return self.guiShowcase(v);
+    self.sandbox.player.mode = .fly;
+    self.engine.input = .{};
     var target: [3]f32 = undefined;
     var eye: [3]f32 = undefined;
     if ((v >= 1 and v <= 6) or (v >= 10 and v <= 15)) {
@@ -430,6 +657,53 @@ fn showcase(self: *App) void {
     camera.pitch = std.math.atan2(target[1] - eye[1], @sqrt(dx * dx + dz * dz));
 }
 
+/// `-Dshowcase=18..26`: GUI screens for review. 18 title, 19 conversation, 20 upgrades,
+/// 21 market shop, 22 wardrobe, 23 customization, 24 pause, 25 settings, 26 HUD.
+fn guiShowcase(self: *App, v: u32) void {
+    const sb = &self.sandbox;
+    self.engine.input = .{};
+    sb.tick = @import("engine/Sky.zig").day_ticks * 15 / 100;
+    if (v == 18) {
+        if (self.menu.screen == .none) self.menu.open(.title);
+        self.titleCamera();
+        return;
+    }
+    if (sb.talk) |*talk| talk.reveal = 999;
+    if (self.gui_showcase_ready) return;
+    self.gui_showcase_ready = true;
+    // Stand on the south market plaza, facing Maro's counter.
+    const stall = sb.stallPosition(0);
+    const plaza = sb.catalog.district.nodes[Market.stall_plazas[0]].position;
+    const out = @import("physics/Rotation.zig").normalize(.{ plaza[0] - stall[0], 0, plaza[2] - stall[2] });
+    sb.player.mode = .walk;
+    sb.player.feet = .{ stall[0] + out[0] * 3.4, stall[1] + 0.05, stall[2] + out[2] * 3.4 };
+    sb.player.velocity = .{ 0, 0, 0 };
+    sb.view = .third;
+    self.engine.camera.yaw = std.math.atan2(-out[0], -out[2]);
+    self.engine.camera.pitch = -0.15;
+    sb.wallet = .{ .scrap = 182, .parts = 6, .kits = .{ 1, 0, 2 } };
+    sb.progress.levels = .{ 1, 0, 2, 0, 1, 0 };
+    sb.progress.buySuit(.exo_rig, &sb.wallet) catch {};
+    sb.wallet.scrap = 182;
+    sb.profile.setName("MIRA-7") catch {};
+    switch (v) {
+        19 => sb.startTalk(.{ .keeper = 0 }),
+        20 => sb.shop = .{ .kind = .upgrades, .row = 1 },
+        21 => {
+            sb.trading = 0;
+            sb.trade_row = 1;
+        },
+        22 => sb.shop = .{ .kind = .wardrobe, .row = 3 },
+        23 => sb.creator.begin(sb.profile),
+        24 => self.menu.open(.pause),
+        25 => {
+            self.menu.open(.pause);
+            self.menu.open(.settings);
+        },
+        else => {},
+    }
+}
+
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
     self.status.set(fmt, args);
     self.status_until = self.engine.time.tick + 4 * 60;
@@ -444,13 +718,20 @@ fn quicksave(self: *App) void {
     self.report("SAVED {s}", .{Save.default_path});
 }
 
-fn quickload(self: *App) void {
-    const bytes = Save.readFile(self.io, self.allocator, Save.default_path) catch |err| return self.report("LOAD FAILED {s}", .{@errorName(err)});
+fn quickload(self: *App) bool {
+    const bytes = Save.readFile(self.io, self.allocator, Save.default_path) catch |err| {
+        self.report("LOAD FAILED {s}", .{@errorName(err)});
+        return false;
+    };
     defer self.allocator.free(bytes);
-    self.sandbox.restore(self.allocator, bytes, &self.engine.camera) catch |err| return self.report("LOAD FAILED {s}", .{@errorName(err)});
+    self.sandbox.restore(self.allocator, bytes, &self.engine.camera) catch |err| {
+        self.report("LOAD FAILED {s}", .{@errorName(err)});
+        return false;
+    };
     // Prefabs saved with the world come first; the shared library fills in the rest.
     self.importPrefabs();
     self.report("LOADED {s}", .{Save.default_path});
+    return true;
 }
 
 fn exerciseSmoke(self: *App) void {
@@ -471,6 +752,7 @@ fn exerciseSmoke(self: *App) void {
             camera.yaw = 0.4;
         },
         2 => {
+            self.smokeGui();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -562,6 +844,27 @@ fn exerciseSmoke(self: *App) void {
         else => {},
     }
     std.log.info("Smoke stage {d}: culling={any}, hud={any}, mode={s}, players={d}", .{ stage, self.culling, self.show_metrics, @tagName(self.sandbox.player.mode), 1 + self.sandbox.guestCount() });
+}
+
+/// Drives the menus, a conversation and the tinker's panel through the same navigation the
+/// keyboard and pads use. Settings are not written in unattended runs.
+fn smokeGui(self: *App) void {
+    const sb = &self.sandbox;
+    self.menu.open(.pause);
+    for ([_]Menu.Key{ .down, .down, .down, .down, .confirm, .right, .left, .back, .back }) |k| self.uiNav(k);
+    const menu_closed = self.menu.screen == .none;
+    sb.startTalk(.{ .keeper = 0 });
+    const greeting = sb.dialogue.node(sb.talk.?).id;
+    // Reveal, ask about the suit, reveal, and open the upgrades.
+    for ([_]Menu.Key{ .confirm, .confirm, .confirm, .confirm }) |k| self.uiNav(k);
+    const opened = sb.shop != null and sb.shop.?.kind == .upgrades;
+    const scrap = sb.wallet.scrap;
+    sb.wallet.scrap += 40;
+    self.uiNav(.confirm);
+    const level = sb.progress.level(.fuel_tank);
+    self.uiNav(.back);
+    sb.wallet.scrap = scrap;
+    std.log.info("Smoke GUI: pause/settings closed={any}, keeper greeting {s}, upgrades opened={any}, fuel tank level {d}, panels closed={any}", .{ menu_closed, greeting, opened, level, !self.uiActive() });
 }
 
 fn smokeSap(self: *App) void {
@@ -720,7 +1023,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = sandbox.seated == null and !sandbox.creator.open and (self.captured or sandbox.player.mode == .walk);
+    renderer.views[0].crosshair = sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk);
     renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
     renderer.view_count = 1;
     // Showcases use P1's view only, even when guests stand in the shot.
@@ -755,7 +1058,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
         .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  RMB SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
-        .stall => |i| renderer.hud_lines[1].set("MARKET STALL {d}  CLICK TRADE", .{Market.stall_plazas[i]}),
+        .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  CLICK", .{Screens.keeperName(sandbox, i)}),
+        .walker => renderer.hud_lines[1].set("CANOPY LOCAL  CLICK TALK", .{}),
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;
@@ -791,28 +1095,46 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .none => renderer.hud_lines[1] = .{},
     }
     renderer.panel_count = 0;
-    if (sandbox.trading != null) {
-        var lines: [Sandbox.trade_rows + 2]Build.PanelLine = undefined;
-        const count = sandbox.tradeLines(&lines);
-        for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});
-        renderer.panel_count = count;
-    } else if (sandbox.creator.open) {
-        var lines: [Renderer.panel_capacity]Creator.Line = undefined;
-        const count = sandbox.creator.lines(&lines);
-        for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});
-        renderer.panel_count = count;
-    } else if (self.inspecting and sandbox.seated == null) {
-        var lines: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
-        const count = Build.inspect(sandbox, &lines);
-        for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});
-        renderer.panel_count = count;
-    }
     var hint_buffer: [96]u8 = undefined;
     const hint = Build.hint(sandbox, &hint_buffer);
     if (sandbox.seated == null and hint.len > 0 and sandbox.target != .device) renderer.hud_lines[1].set("{s}", .{hint});
     if (sandbox.tools.tool == .wire and Build.pendingWire(sandbox) != null) renderer.hud_lines[1].set("{s}", .{hint});
     renderer.hud_lines[2] = if (self.engine.time.tick < self.status_until) self.status else .{};
     if (renderer.hud_lines[2].len == 0 and sandbox.noticeText().len > 0) renderer.hud_lines[2].set("{s}", .{sandbox.noticeText()});
+    self.publishGui(renderer, minutes);
+}
+
+/// Lays out this frame's GUI in canvas units (720 tall at interface size 100%) and keeps its
+/// clickable areas for the next mouse events. Art-review showcases of the city draw none.
+fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
+    const width: f32 = @floatFromInt(if (renderer.width == 0) 1280 else renderer.width);
+    const height: f32 = @floatFromInt(if (renderer.height == 0) 800 else renderer.height);
+    self.ui_height = 720 / self.menu.settings.ui_scale;
+    renderer.ui.reset(self.ui_height * width / height, self.ui_height);
+    self.hit_len = 0;
+    if (options.showcase != 0 and options.showcase < 18) return;
+    const sandbox = &self.sandbox;
+    var inspect: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
+    var inspect_slices: [Renderer.panel_capacity][]const u8 = undefined;
+    var inspect_count: usize = 0;
+    if (self.inspecting and sandbox.seated == null and !self.uiActive()) {
+        inspect_count = Build.inspect(sandbox, &inspect);
+        for (inspect[0..inspect_count], inspect_slices[0..inspect_count]) |*line, *out| out.* = line.slice();
+    }
+    var clock: [32]u8 = undefined;
+    const f = Renderer.viewRect(0, renderer.view_count);
+    const ui = &renderer.ui;
+    Screens.draw(ui, &self.menu, sandbox, .{
+        .view = .{ .x = f.x * ui.width, .y = f.y * ui.height, .w = f.w * ui.width, .h = f.h * ui.height },
+        .clock = std.fmt.bufPrint(&clock, "DAY {d}  {d:0>2}:{d:0>2}", .{ sandbox.market.day, minutes / 60, minutes % 60 }) catch "",
+        .prompt = renderer.hud_lines[1].slice(),
+        .toast = renderer.hud_lines[2].slice(),
+        .inspect = inspect_slices[0..inspect_count],
+        .time = self.seconds,
+        .seed = sandbox.seed,
+    });
+    self.hit_len = ui.hit_len;
+    @memcpy(self.hits[0..ui.hit_len], ui.hits[0..ui.hit_len]);
 }
 
 pub fn stop(self: *App) void {

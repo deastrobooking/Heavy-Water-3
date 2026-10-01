@@ -77,6 +77,8 @@ active: bool = false,
 revision: u64 = 0,
 cars: [car_count]?Car = @splat(null),
 walkers: [walker_count]Walker = undefined,
+/// Pedestrian the player is talking to; it stops walking until released.
+chatting: ?usize = null,
 /// Recoveries: flipped or fallen cars placed back on their lane, and pedestrians moved past
 /// an obstruction. Zero in a healthy district.
 resets: u32 = 0,
@@ -220,7 +222,16 @@ pub fn step(self: *Life, physics: *Physics, routes: *const Routes, revision: u64
         n += 1;
     }
     for (&self.cars, 0..) |*slot, i| if (slot.*) |*car| self.drive(car, i, physics, routes, obstacles[0..n], dt);
-    for (&self.walkers, 0..) |*w, i| self.walk(w, i, physics, routes, dt);
+    for (&self.walkers, 0..) |*w, i| {
+        // A pedestrian in conversation stands still; its stuck timer restarts.
+        if (self.chatting == i) {
+            w.walk_amount = @max(0, w.walk_amount - 4 * dt);
+            w.check_timer = 0;
+            w.check_feet = w.player.feet;
+            continue;
+        }
+        self.walk(w, i, physics, routes, dt);
+    }
 }
 
 fn drive(self: *Life, car: *Car, index: usize, physics: *Physics, routes: *const Routes, obstacles: []const V, dt: f32) void {

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Overlay = @This();
 pub const Vertex = extern struct { position: [2]f32, color: [4]f32 };
-pub const capacity = 48000;
+pub const capacity = 120000;
 /// Fixed-capacity text published from the application thread.
 pub const Line = struct {
     text: [96]u8 = undefined,
@@ -36,18 +36,35 @@ pub fn rect(self: *Overlay, x: f32, y: f32, w: f32, h: f32, color: [4]f32) void 
 }
 
 pub fn text(self: *Overlay, x: f32, y: f32, value: []const u8, color: [4]f32) void {
+    self.textScaled(x, y, value, color, 2);
+}
+
+/// Text with glyph cells `cell` pixels square (a character advances 4 cells). Lit cells in a
+/// glyph row merge into one rectangle, so long dialogue stays within the vertex budget.
+pub fn textScaled(self: *Overlay, x: f32, y: f32, value: []const u8, color: [4]f32, cell: f32) void {
     for (value, 0..) |ch, i| {
         const bits = glyph(ch);
+        const left = x + @as(f32, @floatFromInt(i)) * 4 * cell;
         for (0..5) |row| {
-            for (0..3) |col| {
+            var col: usize = 0;
+            while (col < 3) {
                 const shift: u4 = @intCast(14 - (row * 3 + col));
-                if ((bits >> shift) & 1 == 1) self.rect(x + @as(f32, @floatFromInt(i * 8 + col * 2)), y + @as(f32, @floatFromInt(row * 2)), 2, 2, color);
+                if ((bits >> shift) & 1 == 0) {
+                    col += 1;
+                    continue;
+                }
+                var end = col + 1;
+                while (end < 3 and (bits >> @as(u4, @intCast(14 - (row * 3 + end)))) & 1 == 1) end += 1;
+                self.rect(left + @as(f32, @floatFromInt(col)) * cell, y + @as(f32, @floatFromInt(row)) * cell, @as(f32, @floatFromInt(end - col)) * cell, cell, color);
+                col = end;
             }
         }
     }
 }
 
-fn glyph(ch: u8) u15 {
+fn glyph(raw: u8) u15 {
+    // The font has no lowercase glyphs; lowercase text draws as capitals.
+    const ch = std.ascii.toUpper(raw);
     return switch (ch) {
         'A' => 0b010_101_111_101_101,
         'B' => 0b110_101_110_101_110,
@@ -94,6 +111,30 @@ fn glyph(ch: u8) u15 {
         '_' => 0b000_000_000_000_111,
         ',' => 0b000_000_000_010_100,
         '=' => 0b000_111_000_111_000,
+        '!' => 0b010_010_010_000_010,
+        '?' => 0b111_001_010_000_010,
+        '\'' => 0b010_010_000_000_000,
+        '"' => 0b101_101_000_000_000,
+        '(' => 0b001_010_010_010_001,
+        ')' => 0b100_010_010_010_100,
+        '+' => 0b000_010_111_010_000,
+        '<' => 0b001_010_100_010_001,
+        '[' => 0b110_100_100_100_110,
+        ']' => 0b011_001_001_001_011,
+        ';' => 0b000_010_000_010_100,
+        '*' => 0b101_010_101_000_000,
+        '#' => 0b101_111_101_111_101,
         else => 0,
     };
+}
+
+test "scaled text merges lit runs and draws lowercase as capitals" {
+    var o: Overlay = .{ .width = 100, .height = 100 };
+    o.textScaled(0, 0, "t", .{ 1, 1, 1, 1 }, 3);
+    // T: one merged top bar plus four stem cells.
+    try std.testing.expectEqual(@as(usize, 5 * 6), o.len);
+    const upper = o.len;
+    o.len = 0;
+    o.text(0, 0, "T?", .{ 1, 1, 1, 1 });
+    try std.testing.expect(o.len > upper);
 }
