@@ -100,6 +100,16 @@ field_resident_frame: ?u64 = null,
 field_peak_cpu_bytes: usize = 0,
 field_last: Field.Plan = .{},
 peak_footprint: u64 = 0,
+/// `-Dcapture-frame`: offscreen target, compute copy, and a readback buffer mapped after the
+/// GPU finishes.
+capture_pipeline: ?*gpu.ComputePipeline = null,
+capture_layout: ?*gpu.BindGroupLayout = null,
+capture_texture: ?*gpu.Texture = null,
+capture_view: ?*gpu.TextureView = null,
+capture_buffer: ?*gpu.Buffer = null,
+capture_size: [2]u32 = .{ 0, 0 },
+capture_ready: std.atomic.Value(bool) = .init(false),
+capture_requested: bool = false,
 
 pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .allocator = allocator, .io = io, .scene = try Scene.init(allocator, io, world.seed, &world.catalog) };
@@ -300,9 +310,13 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     }
     const window = core.windows.getValue(core.window);
     if (window.framebuffer_width == 0 or window.framebuffer_height == 0) return;
-    const back = window.swap_chain.getCurrentTextureView() orelse return;
-    defer back.release();
+    const swap_view = window.swap_chain.getCurrentTextureView() orelse return;
+    defer swap_view.release();
     self.resize(window.device, window.framebuffer_width, window.framebuffer_height);
+    if (self.capture_ready.load(.acquire)) return self.finishCapture(core);
+    const capturing = options.capture_frame > 0 and self.frames == options.capture_frame and !self.capture_requested;
+    if (capturing) self.prepareCapture(window.device, window.framebuffer_format);
+    const back = if (capturing) self.capture_view.? else swap_view;
     const elapsed = self.timer.lap();
     self.frame_ms = if (self.frames == 0) elapsed * 1000 else self.frame_ms * 0.95 + elapsed * 50;
     // Unattended smoke covers a complete lighting cycle, independent of presentation speed.
@@ -407,9 +421,30 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         hud.draw(@intCast(self.overlay.len), 1, 0, 0);
         hud.end();
     }
+    if (capturing) {
+        const bind = window.device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.capture_layout.?, .entries = &.{
+            gpu.BindGroup.Entry.initTextureView(0, self.capture_view.?),
+            gpu.BindGroup.Entry.initBuffer(1, self.capture_buffer.?, 0, @as(u64, self.capture_size[0]) * self.capture_size[1] * 4, 0),
+        } }));
+        defer bind.release();
+        const compute = encoder.beginComputePass(null);
+        defer compute.release();
+        compute.setPipeline(self.capture_pipeline.?);
+        compute.setBindGroup(0, bind, null);
+        compute.dispatchWorkgroups((self.capture_size[0] + 7) / 8, (self.capture_size[1] + 7) / 8, 1);
+        compute.end();
+    }
     const command = encoder.finish(&.{});
     defer command.release();
     window.queue.submit(&.{command});
+    if (capturing) {
+        self.capture_requested = true;
+        self.capture_buffer.?.mapAsync(.{ .read = true }, 0, @as(usize, self.capture_size[0]) * self.capture_size[1] * 4, self, struct {
+            inline fn done(r: *Renderer, status: gpu.Buffer.MapAsyncStatus) void {
+                if (status == .success) r.capture_ready.store(true, .release);
+            }
+        }.done);
+    }
     if (options.benchmark_frames == 0 or self.frames >= Flythrough.warmup_frames) {
         self.intervals.record(elapsed * 1000);
         self.cpu_times.record(cpu_timer.read() * 1000);
@@ -501,6 +536,37 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
     self.overlay.text(30, 275, if (self.culling) "F1 HUD  C CULLING ON  PAD MENU JOINS" else "F1 HUD  C CULLING OFF  PAD MENU JOINS", cyan);
 }
 
+fn prepareCapture(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Format) void {
+    self.capture_size = .{ self.width, self.height };
+    self.capture_texture = device.createTexture(&.{ .label = "capture", .size = .{ .width = self.width, .height = self.height }, .format = format, .usage = .{ .render_attachment = true, .texture_binding = true } });
+    self.capture_view = self.capture_texture.?.createView(&.{});
+    self.capture_buffer = device.createBuffer(&.{ .label = "capture readback", .size = @as(u64, self.width) * self.height * 4, .usage = .{ .storage = true, .map_read = true } });
+    const shader = device.createShaderModuleWGSL("capture.wgsl", @embedFile("capture.wgsl"));
+    defer shader.release();
+    self.capture_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
+        gpu.BindGroupLayout.Entry.initTexture(0, .{ .compute = true }, .float, .dimension_2d, false),
+        gpu.BindGroupLayout.Entry.initBuffer(1, .{ .compute = true }, .storage, false, 0),
+    } }));
+    const layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{self.capture_layout.?} }));
+    defer layout.release();
+    self.capture_pipeline = device.createComputePipeline(&.{ .label = "capture", .layout = layout, .compute = .{ .module = shader, .entry_point = "main" } });
+}
+
+fn finishCapture(self: *Renderer, core: *mach.Core) void {
+    self.capture_ready.store(false, .release);
+    const n = @as(usize, self.capture_size[0]) * self.capture_size[1];
+    const pixels = self.capture_buffer.?.getConstMappedRange(u32, 0, n) orelse {
+        std.log.err("capture: buffer not mapped", .{});
+        return core.exit();
+    };
+    const bmp = @import("Capture.zig").encodeBmp(self.allocator, self.capture_size[0], self.capture_size[1], pixels) catch return core.exit();
+    defer self.allocator.free(bmp);
+    std.Io.Dir.cwd().createDirPath(self.io, "zig-out") catch {};
+    std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = "zig-out/capture.bmp", .data = bmp }) catch |err| std.log.err("capture: {s}", .{@errorName(err)});
+    std.log.info("Captured frame {d} ({d}x{d}) to zig-out/capture.bmp", .{ options.capture_frame, self.capture_size[0], self.capture_size[1] });
+    core.exit();
+}
+
 fn reportBenchmark(self: *Renderer) void {
     const interval = self.intervals.summary();
     const cpu = self.cpu_times.summary();
@@ -545,6 +611,11 @@ pub fn deinit(self: *Renderer) void {
     if (self.pipeline) |p| p.release();
     if (self.overlay_pipeline) |p| p.release();
     if (self.field_buffer) |p| p.release();
+    if (self.capture_pipeline) |p| p.release();
+    if (self.capture_layout) |p| p.release();
+    if (self.capture_view) |p| p.release();
+    if (self.capture_texture) |p| p.release();
+    if (self.capture_buffer) |p| p.release();
     if (self.field) |*f| f.deinit();
     self.scene.destroy();
     for (self.extra_scenes) |maybe| if (maybe) |scene| {

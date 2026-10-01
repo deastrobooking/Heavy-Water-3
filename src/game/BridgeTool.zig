@@ -32,7 +32,23 @@ pub fn aimedAnchor(sb: *const Sandbox, camera: Camera) ?u8 {
 }
 
 pub fn candidate(sb: *const Sandbox) ?District.Edge {
-    return .{ .a = sb.tools.bridge_from orelse return null, .b = sb.tools.bridge_hover orelse return null };
+    return .{ .a = sb.tools.bridge_from orelse return null, .b = sb.tools.bridge_hover orelse return null, .style = sb.tools.bridge_style };
+}
+
+/// Styles a player can build (the organic vine style is reserved for trunk spurs).
+pub const buildable = [_]District.Style{ .suspension, .cable_stayed, .arch, .truss, .girder };
+
+pub fn cycleStyle(sb: *Sandbox) void {
+    const i = std.mem.indexOfScalar(District.Style, &buildable, sb.tools.bridge_style) orelse 0;
+    sb.tools.bridge_style = buildable[(i + 1) % buildable.len];
+    sb.say("bridge style: {s}", .{styleName(sb.tools.bridge_style)});
+}
+
+pub fn styleName(style: District.Style) []const u8 {
+    return switch (style) {
+        .cable_stayed => "cable-stayed",
+        else => @tagName(style),
+    };
 }
 
 pub fn update(sb: *Sandbox, camera: Camera, primary: bool, secondary: bool) !void {
@@ -63,6 +79,7 @@ fn reason(err: anyerror) []const u8 {
         error.DuplicateBridge => "ROAD ALREADY EXISTS",
         error.BridgeTooSteep => "ROAD TOO STEEP: MAX 6%",
         error.TreeClearance => "TRUNK BLOCKS THIS ROUTE",
+        error.BuildingClearance => "A SKYSCRAPER BLOCKS THIS ROUTE",
         error.PlazaClearance => "ANOTHER PLAZA BLOCKS THIS ROUTE",
         error.MarketClearance => "MARKET BAY BLOCKS THIS APPROACH",
         error.JunctionClearance => "ROAD APPROACHES TOO CLOSE TOGETHER",
@@ -80,12 +97,12 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     if (sb.tools.bridge_from) |from| {
         if (sb.tools.bridge_hover) |to| {
             sb.validateBridge(.{ .a = from, .b = to }) catch |err| return reason(err);
-            return std.fmt.bufPrint(buffer, "BRIDGE {d} > {d}  CLICK BUILD  RMB CANCEL", .{ from, to }) catch buffer;
+            return std.fmt.bufPrint(buffer, "{s} BRIDGE {d} > {d}  CLICK BUILD  TAB STYLE  RMB CANCEL", .{ styleName(sb.tools.bridge_style), from, to }) catch buffer;
         }
-        return std.fmt.bufPrint(buffer, "FROM PLAZA {d}  AIM AT DESTINATION  RMB CANCEL", .{from}) catch buffer;
+        return std.fmt.bufPrint(buffer, "FROM PLAZA {d}  AIM AT DESTINATION  TAB STYLE  RMB CANCEL", .{from}) catch buffer;
     }
-    if (sb.tools.bridge_hover) |node| return std.fmt.bufPrint(buffer, "PLAZA {d}  CLICK START BRIDGE", .{node}) catch buffer;
-    return "BRIDGE: CLICK TWO PLAZA MARKERS  RMB REMOVE YOUR SPAN";
+    if (sb.tools.bridge_hover) |node| return std.fmt.bufPrint(buffer, "PLAZA {d}  CLICK START {s} BRIDGE  TAB STYLE", .{ node, styleName(sb.tools.bridge_style) }) catch buffer;
+    return std.fmt.bufPrint(buffer, "BRIDGE ({s}): CLICK TWO PLAZA MARKERS  TAB STYLE  RMB REMOVE", .{styleName(sb.tools.bridge_style)}) catch buffer;
 }
 
 pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
@@ -100,8 +117,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         if (edge.a == edge.b) return n;
         const valid = if (sb.validateBridge(edge)) |_| true else |_| false;
         const tint: [4]f32 = if (valid) .{ 0.3, 0.95, 0.4, 1 } else .{ 1, 0.25, 0.2, 1 };
-        const parts = District.bridgeParts(District.span(&sb.catalog.district, edge)) catch return n;
-        // Outline the road with the deck and rails; do not obscure the world with cable previews.
+        const parts = District.bridgeParts(&sb.catalog.district, District.span(&sb.catalog.district, edge), edge.style) catch return n;
+        // Preview the structure's solid members in the validity color; cables stay hidden.
         for (parts.slice()) |p| {
             if (!p.solid) continue;
             if (n == out.len) return n;

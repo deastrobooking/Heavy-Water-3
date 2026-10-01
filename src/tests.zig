@@ -11,6 +11,9 @@ test {
     _ = @import("mod/Mod.zig");
     _ = @import("render/Field.zig");
     _ = @import("engine/Memory.zig");
+    _ = @import("procedural/Bridges.zig");
+    _ = @import("procedural/Skyline.zig");
+    _ = @import("render/Capture.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");
@@ -48,4 +51,8 @@ test {
     _ = @import("physics/Rotation.zig");
     _ = @import("physics/Vehicle.zig");
     _ = @import("physics/TriangleMesh.zig");
+    _ = @import("combat/CombatSystem.zig");
+    _ = @import("game/SuperMobility.zig");
+    _ = @import("game/Companion.zig");
+    _ = @import("ai/Hive.zig");
 }

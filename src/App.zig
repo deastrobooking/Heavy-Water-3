@@ -64,7 +64,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.importPrefabs();
     self.loadMods();
     // A new game begins by creating the character (not in unattended smoke or benchmark runs).
-    if (options.smoke_frames == 0 and options.benchmark_frames == 0) self.sandbox.creator.begin(self.sandbox.profile);
+    if (options.smoke_frames == 0 and options.benchmark_frames == 0 and options.showcase == 0) self.sandbox.creator.begin(self.sandbox.profile);
 }
 
 /// While the creator is open, every key goes to it.
@@ -237,6 +237,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         // The last smoke stage drives the rover at full throttle.
         if (self.sandbox.seated != null) self.engine.input.forward = 1;
     }
+    if (options.showcase > 0) self.showcase();
     const steps = self.engine.advance(self.timer.lap());
     for (0..steps) |_| {
         self.routePads();
@@ -317,6 +318,48 @@ fn toggleGuest(self: *App) void {
         self.sandbox.leaveGuest(i - 1);
         return self.report("P{d} LEFT", .{i + 1});
     };
+}
+
+/// `-Dshowcase=N`: a fixed viewpoint on the city for screenshots and art review.
+fn showcase(self: *App) void {
+    const District = @import("procedural/District.zig");
+    const layout = &self.sandbox.catalog.district;
+    const camera = &self.engine.camera;
+    self.sandbox.player.mode = .fly;
+    self.show_metrics = false;
+    self.engine.input = .{};
+    const v = options.showcase;
+    var target: [3]f32 = undefined;
+    var eye: [3]f32 = undefined;
+    if ((v >= 1 and v <= 6) or (v >= 10 and v <= 15)) {
+        const s = District.span(layout, layout.edges[if (v >= 10) v - 10 else v - 1]);
+        const d = @import("physics/Rotation.zig").sub(s.b, s.a);
+        const side = @import("physics/Rotation.zig").normalize(.{ d[2], 0, -d[0] });
+        target = s.point(0.5);
+        const back = s.horizontal() * 0.62;
+        eye = .{ target[0] + side[0] * back, target[1] + 18, target[2] + side[2] * back };
+        // Look from the other side if a tower stands where the camera would be.
+        for (layout.buildings[0..layout.building_count]) |b| if (@abs(eye[0] - b.base[0]) < b.half[0] + 4 and @abs(eye[2] - b.base[2]) < b.half[1] + 4) {
+            eye = .{ target[0] - side[0] * back, target[1] + 18, target[2] - side[2] * back };
+        };
+    } else if (v == 9) {
+        const s = District.span(layout, layout.edges[0]);
+        target = s.point(0.6);
+        eye = s.point(0.1);
+        eye[1] += 2;
+        target[1] += 2;
+    } else {
+        target = .{ -40, layout.nodes[0].position[1], 140 };
+        eye = .{ 260, target[1] + 160, -420 };
+    }
+    // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
+    const dusk = v == 8 or v >= 10;
+    self.sandbox.tick = if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
+    camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
+    const dx = target[0] - eye[0];
+    const dz = target[2] - eye[2];
+    camera.yaw = std.math.atan2(dx, dz);
+    camera.pitch = std.math.atan2(target[1] - eye[1], @sqrt(dx * dx + dz * dz));
 }
 
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {

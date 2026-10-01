@@ -16,9 +16,10 @@ const Market = @import("../city/Market.zig");
 /// name and appearance; v7 constructed bridge edges and the district generator version; v8 adds
 /// the market wallet (scrap, salvaged parts) and each stall's stock with the day it was stocked;
 /// v9 tags Rootdeep shrine machines (their doors, latches, and sealed vault persist as machine
-/// state; the solver-verified layout is regenerated from the seed); v10 records installed mods.
+/// state; the solver-verified layout is regenerated from the seed); v10 records installed mods;
+/// v11 records each player bridge's structural style.
 /// Older saves are rejected, not migrated.
-pub const format_version: u32 = 10;
+pub const format_version: u32 = 11;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -157,7 +158,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 10", "\"format\": 9");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 11", "\"format\": 10");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
 }

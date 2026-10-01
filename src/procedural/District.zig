@@ -8,7 +8,13 @@ const Seed = @import("Seed.zig");
 const Terrain = @import("Terrain.zig");
 const TestArbor = @import("TestArbor.zig");
 const V = R.Vec3;
-pub const generator_version: u32 = 1;
+/// v2: styled steel bridges on braced piers, plaza braces, and the skyscraper skyline.
+pub const generator_version: u32 = 2;
+const Bridges = @import("Bridges.zig");
+const Skyline = @import("Skyline.zig");
+pub const Building = Skyline.Building;
+/// What holds a road up (see `Bridges.zig`).
+pub const Style = enum { vine, girder, truss, arch, cable_stayed, suspension };
 pub const node_count = 6;
 pub const base_edge_count = 6;
 pub const max_bridges = 4;
@@ -17,13 +23,15 @@ pub const max_grade: f32 = 0.06;
 pub const plaza_radius: f32 = 20;
 pub const headroom: f32 = 6;
 pub const Node = struct { position: V, kind: enum { arbor, tower }, tree: ?u8 = null };
-pub const Edge = struct { a: u8, b: u8 };
+pub const Edge = struct { a: u8, b: u8, style: Style = .girder };
 pub const Obstacle = struct { position: V, radius: f32 };
 pub const Layout = struct {
     seed: u64,
     nodes: [node_count]Node,
     edges: [base_edge_count]Edge,
     trees: [3]Obstacle,
+    buildings: [Skyline.max_buildings]Building = @splat(.{}),
+    building_count: usize = 0,
 };
 pub const Piece = struct { center: V, size: V, rotation: R.Quat = R.identity, color: V, solid: bool = true };
 pub fn Pieces(comptime capacity: usize) type {
@@ -40,8 +48,8 @@ pub fn Pieces(comptime capacity: usize) type {
         }
     };
 }
-pub const CityParts = Pieces(768);
-pub const BridgeParts = Pieces(64);
+pub const CityParts = Pieces(4096);
+pub const BridgeParts = Pieces(320);
 pub const Span = struct {
     a: V,
     b: V,
@@ -90,7 +98,24 @@ pub fn generate(seed: u64) !Layout {
         },
     };
     try validate(&layout, &.{});
-    return layout;
+    var styled = layout;
+    assignStyles(&styled);
+    Skyline.generate(&styled);
+    try validate(&styled, &.{});
+    return styled;
+}
+
+/// Longest roads get the grandest structures, so every style appears in one district.
+fn assignStyles(layout: *Layout) void {
+    var order: [base_edge_count]usize = .{ 0, 1, 2, 3, 4, 5 };
+    const Length = struct {
+        fn less(l: *const Layout, a: usize, b: usize) bool {
+            return span(l, l.edges[a]).horizontal() > span(l, l.edges[b]).horizontal();
+        }
+    };
+    std.mem.sort(usize, &order, @as(*const Layout, layout), Length.less);
+    const grand = [_]Style{ .suspension, .cable_stayed, .arch, .truss, .girder };
+    for (order, 0..) |e, rank| layout.edges[e].style = if (rank < grand.len) grand[rank] else if (Seed.unit(Seed.mix(layout.seed ^ 0x5354594c)) < 0.5) .truss else .arch;
 }
 
 pub fn span(layout: *const Layout, edge: Edge) Span {
@@ -125,6 +150,7 @@ pub fn validateEdge(layout: *const Layout, edge: Edge, others: []const Edge) !vo
     if (s.horizontal() < 20 or s.horizontal() > 650) return error.InvalidSpan;
     if (@abs(s.b[1] - s.a[1]) / s.horizontal() > max_grade) return error.BridgeTooSteep;
     for (layout.trees) |tree| if (planarDistance(tree.position, s.a, s.b) < tree.radius + width / 2 + 2) return error.TreeClearance;
+    for (layout.buildings[0..layout.building_count]) |b| if (planarDistance(b.base, s.a, s.b) < b.radius() + width / 2 + 3) return error.BuildingClearance;
     for (layout.nodes, 0..) |node, i| {
         if (i == edge.a or i == edge.b) continue;
         if (planarDistance(node.position, s.a, s.b) < plaza_radius + width / 2 + 2) return error.PlazaClearance;
@@ -206,39 +232,16 @@ fn validateConnectivity(edges: []const Edge) !void {
     for (reached) |r| if (!r) return error.DisconnectedDistrict;
 }
 
-const deck: V = .{ 0.30, 0.34, 0.38 };
 const vine: V = .{ 0.24, 0.46, 0.29 };
-fn beam(out: anytype, a: V, b: V, thickness: f32, color: V, solid: bool) !void {
-    const s: Span = .{ .a = a, .b = b };
-    try out.add(.{ .center = s.point(0.5), .size = .{ thickness, thickness, s.length() }, .rotation = s.rotation(), .color = color, .solid = solid });
-}
 
-pub fn bridgeParts(s: Span) !BridgeParts {
+/// A road deck and its structure in the given style.
+pub fn bridgeParts(layout: *const Layout, s: Span, style: Style) !BridgeParts {
     var out: BridgeParts = .{};
-    const q = s.rotation();
-    const center = s.point(0.5);
-    const length = s.length();
-    try out.add(.{ .center = R.add(center, R.rotate(q, .{ 0, -0.4, 0 })), .size = .{ width, 0.8, length }, .rotation = q, .color = deck });
-    // Two 3.5 m lanes, two 3 m walkways and two 0.5 m rail strips total 14 m.
-    for ([_]f32{ -5, 5 }) |x| try out.add(.{ .center = R.add(center, R.rotate(q, .{ x, 0.012, 0 })), .size = .{ 3, 0.024, length }, .rotation = q, .color = .{ 0.55, 0.49, 0.37 }, .solid = false });
-    try out.add(.{ .center = R.add(center, R.rotate(q, .{ 0, 0.015, 0 })), .size = .{ 0.15, 0.03, length }, .rotation = q, .color = .{ 0.91, 0.75, 0.32 }, .solid = false });
-    for ([_]f32{ -6.75, 6.75 }) |x| {
-        try out.add(.{ .center = R.add(center, R.rotate(q, .{ x, 0.55, 0 })), .size = .{ 0.5, 1.1, length }, .rotation = q, .color = vine });
-        var previous: V = undefined;
-        for (0..9) |i| {
-            const t = @as(f32, @floatFromInt(i)) / 8;
-            const sag = 3 + 9 * (2 * t - 1) * (2 * t - 1);
-            const foot = R.add(s.point(t), R.rotate(q, .{ x, 0, 0 }));
-            const top = R.add(foot, .{ 0, sag, 0 });
-            if (i > 0) try beam(&out, previous, top, 0.35, vine, false);
-            try beam(&out, R.add(foot, .{ 0, 1.1, 0 }), top, if (i == 0 or i == 8) 0.6 else 0.12, vine, i == 0 or i == 8);
-            previous = top;
-        }
-    }
+    try Bridges.parts(layout, s, style, &out);
     return out;
 }
 
-fn trunkSpur(layout: *const Layout, i: usize) Span {
+pub fn trunkSpur(layout: *const Layout, i: usize) Span {
     const node = layout.nodes[i];
     const tree = layout.trees[node.tree.?];
     const radial = R.normalize(.{ node.position[0] - tree.position[0], 0, node.position[2] - tree.position[2] });
@@ -279,9 +282,10 @@ pub fn marketPosition(layout: *const Layout, i: usize) V {
 pub fn geometry(layout: *const Layout) !CityParts {
     var out: CityParts = .{};
     for (layout.edges) |edge| {
-        const parts = try bridgeParts(span(layout, edge));
+        const parts = try bridgeParts(layout, span(layout, edge), edge.style);
         for (parts.slice()) |p| try out.add(p);
     }
+    for (layout.buildings[0..layout.building_count]) |b| try Skyline.geometry(layout, b, &out);
     for (layout.nodes, 0..) |node, i| {
         try plaza(&out, node.position);
         if (node.kind == .tower) {
@@ -305,8 +309,9 @@ pub fn geometry(layout: *const Layout) !CityParts {
                 const a = @as(f32, @floatFromInt(j)) * 2 * std.math.pi / 16;
                 try out.add(.{ .center = .{ tree.position[0] + @sin(a) * radius, node.position[1] - 0.5, tree.position[2] + @cos(a) * radius }, .size = .{ 2 * radius * @tan(@as(f32, std.math.pi / 16.0)) + 0.1, 1, 14 }, .rotation = R.axisAngle(.{ 0, 1, 0 }, a), .color = .{ 0.42, 0.47, 0.28 } });
             }
-            const parts = try bridgeParts(trunkSpur(layout, i));
+            const parts = try bridgeParts(layout, trunkSpur(layout, i), .vine);
             for (parts.slice()) |p| try out.add(p);
+            try Skyline.plazaBraces(layout, node.position, &out);
         }
     }
     return out;

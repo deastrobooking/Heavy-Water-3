@@ -135,6 +135,18 @@ The experiment was terminated and the programmatic size change removed from the 
 - Whole-process memory instrumentation: Mach's stock entrypoint currently omits module-container teardown.
 - Deterministic screenshot regression tests and CPU/GPU percentile benchmarks.
 
+## Sky city — 2026-09-30
+
+- Debug suite: **133/133 tests pass**. The new tests cover:
+  - **Bridges:** the clear envelope for six styles on six roads plus 0 → 3 across three seeds, grounded supports clear of plazas, and light-string geometry.
+  - **Skyline:** at least 12 towers per seed for four seeds, every tower clear of corridors, plazas, trunks and spawn, deterministic placement, and 0 → 3 still buildable.
+  - **In the world:** every buildable style built at 0 → 3 and stood on at 12 lane and walkway points each, with styles kept through save/load.
+  - **Capture:** BMP encoding.
+  - **Regressions:** the existing walk and drive district loops, Arbor walks, bridge tool, traffic, and shrine tests all pass with the new geometry.
+- Visual review from captured frames (`-Dshowcase`, `-Dcapture-frame`), an overview plus every road by day and at dusk. Two problems found this way were fixed: a showcase camera inside a skyscraper, and a skyline that went dark at night (window columns and road lighting added). The cable-stayed pylon was also thickened. Art-direction approval remains yours.
+- Smoke, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 300 frames: no validation errors, clean exit, 1,173 objects submitted.
+- Benchmarks during this session ran with the window throttled by macOS, so only `presentation_unthrottled` failed. Render CPU P99 was 1.429 ms (canopy) and 1.527 ms (streaming), against 1.40 ms on the previous throttled run, with zero underfilled frames. Presentation numbers need a run with the window visible.
+
 ## Scale workloads — 2026-09-30
 
 - Debug suite: **127/127 tests pass**. The new tests cover field determinism and cell sorting, bounds containment, budgeted streaming (20 frames at 64 KiB for 20K objects, with the CPU copy freed), frustum and distance culling, LOD selection, run merging and coverage, normalized frustum planes against the sphere test on 500 random spheres, and the process footprint.

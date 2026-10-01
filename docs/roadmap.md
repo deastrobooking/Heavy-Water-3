@@ -209,6 +209,25 @@ Blocked by the pinned Mach, pending a decision to update or fork it:
 - indirect submission (indirect draws panic `unimplemented`);
 - GPU timing (no timestamp queries on Metal).
 
+## Sky city — content pass
+
+The district is rebuilt as a sky city held up by steel:
+
+- **Bridges:** five steel bridge styles plus the vine spurs. The six roads are assigned styles by span length, and players choose a style with Tab.
+- **Supports:** braced pole piers under every non-suspension road, and braced legs under the free-standing plazas.
+- **Skyline:** seeded, validated skyscrapers, with a sky-lobby tower beside each tower plaza.
+- **Night lighting:** window columns, spire beacons, lit rails, and cable light strings.
+- **Saves:** district generator 2 and save format 11 (bridge styles).
+
+Acceptance evidence:
+
+- The clear deck envelope holds for every style on every road and on 0 → 3, across seeds.
+- Towers and piers reach the ground, outside plazas.
+- The skyline is plentiful and clear of every road, buildable route, plaza, trunk, and the spawn area.
+- A player stands on every style's lanes and walkways, and styles survive save/load.
+- The complete walk and drive loops cross all styles.
+- Frames were captured from fixed viewpoints and reviewed by eye, by day and at dusk (see [city](city.md#the-sky-city)).
+
 ## Next
 
 All twelve phases have a runnable slice. Open decisions and follow-ups:

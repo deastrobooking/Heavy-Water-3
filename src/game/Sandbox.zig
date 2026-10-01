@@ -353,6 +353,7 @@ fn shrineSite(self: *const Sandbox, k: usize, bp: Blueprint) [2]f32 {
         for (0..sap_tree_count) |t| clear = clear and planar(center, self.treeOrigin(t)) > 70;
         for (self.catalog.district.nodes) |node| clear = clear and planar(center, node.position) > 50;
         for (self.shrines[0..k]) |other| clear = clear and planar(center, other.origin) > 90;
+        for (self.catalog.district.buildings[0..self.catalog.district.building_count]) |b| clear = clear and planar(center, b.base) > b.radius() + 45;
         if (!clear) continue;
         var lo = std.math.inf(f32);
         var hi = -std.math.inf(f32);
@@ -1093,7 +1094,7 @@ pub fn validateBridge(self: *const Sandbox, edge: District.Edge) !void {
 }
 
 fn prepareBridge(self: *Sandbox, edge: District.Edge, slot: usize) !PlacedBridge {
-    const parts = try District.bridgeParts(District.span(&self.catalog.district, edge));
+    const parts = try District.bridgeParts(&self.catalog.district, District.span(&self.catalog.district, edge), edge.style);
     return .{ .edge = edge, .parts = parts, .collider = try District.collider(self.allocator, &self.physics, parts.slice(), bridge_flag | @as(u32, @intCast(slot))) };
 }
 
@@ -1319,7 +1320,55 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     if (self.seated == null and self.player.mode == .walk and n < out.len) {
         n = avatar(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, 1, self.catalog.content.block, out, n);
     }
-    n = self.life.publish(&self.physics, self.catalog, Sky.at(Sky.timeOfDay(self.tick)).night, out, n);
+    const night = Sky.at(Sky.timeOfDay(self.tick)).night;
+    n = self.life.publish(&self.physics, self.catalog, night, out, n);
+    // The skyline at night: warning beacons on the spires, and columns of lit windows on each
+    // facade of the main tier that read as glass by day and glow warm after dusk.
+    const Material = @import("../render/Material.zig");
+    // Lit rails outline every road after dusk, district and player-built alike.
+    var all_edges: [District.base_edge_count + District.max_bridges]District.Edge = undefined;
+    @memcpy(all_edges[0..District.base_edge_count], &self.catalog.district.edges);
+    var edge_count: usize = District.base_edge_count;
+    for (self.bridges) |maybe| if (maybe) |bridge| {
+        all_edges[edge_count] = bridge.edge;
+        edge_count += 1;
+    };
+    for (all_edges[0..edge_count]) |edge| {
+        const s = District.span(&self.catalog.district, edge);
+        var strings: [@import("../procedural/Bridges.zig").max_lights]@import("../procedural/Bridges.zig").Light = undefined;
+        for (@import("../procedural/Bridges.zig").lights(&self.catalog.district, s, edge.style, &strings)) |l| {
+            if (n == out.len) break;
+            const seg: District.Span = .{ .a = l.a, .b = l.b };
+            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = seg.point(0.5) }, .size = .{ 0.3, 0.3, seg.length() }, .rotation = seg.rotation(), .tint = Material.emissive(.{ 1.0, 0.88, 0.62, 1 }, night) };
+            n += 1;
+        }
+        const q = s.rotation();
+        for ([_]f32{ -6.75, 6.75 }) |x| {
+            if (n == out.len) break;
+            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = R.add(s.point(0.5), R.rotate(q, .{ x, 1.15, 0 })) }, .size = .{ 0.22, 0.12, s.length() }, .rotation = q, .tint = Material.emissive(.{ 0.35 + 0.4 * night, 0.85, 0.95, 1 }, 0.15 + 0.85 * night) };
+            n += 1;
+        }
+    }
+    for (self.catalog.district.buildings[0..self.catalog.district.building_count], 0..) |b, k| {
+        if (n == out.len) break;
+        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = b.beacon() }, .size = .{ 1.4, 1.4, 1.4 }, .tint = Material.emissive(.{ 1, 0.25, 0.18, 1 }, 0.35 + 0.65 * night) };
+        n += 1;
+        const top = b.base[1] + (b.roof - b.base[1]) * (if (b.tiers > 1) @as(f32, 0.5) else 0.92);
+        const bottom = b.base[1] + 6;
+        const lit = night * (0.55 + 0.45 * @as(f32, @floatFromInt((k * 7) % 5)) / 4);
+        const glass: [4]f32 = .{ 0.55 + 0.45 * night, 0.62 + 0.25 * night, 0.66 - 0.16 * night, 1 };
+        for ([_][2]f32{ .{ 1, 0 }, .{ -1, 0 }, .{ 0, 1 }, .{ 0, -1 } }) |face| for ([_]f32{ -0.45, 0.2 }) |along| {
+            if (n == out.len) break;
+            const across = if (face[0] != 0) b.half[1] else b.half[0];
+            const center: Physics.Vec3 = if (face[0] != 0)
+                .{ b.base[0] + face[0] * (b.half[0] + 0.08), (top + bottom) / 2, b.base[2] + along * across }
+            else
+                .{ b.base[0] + along * across, (top + bottom) / 2, b.base[2] + face[1] * (b.half[1] + 0.08) };
+            const size: [3]f32 = if (face[0] != 0) .{ 0.2, top - bottom, across * 0.4 } else .{ across * 0.4, top - bottom, 0.2 };
+            out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = center }, .size = size, .tint = Material.emissive(glass, lit) };
+            n += 1;
+        };
+    }
     // A keeper behind each stall's counter, facing its plaza.
     for (0..Market.stall_count) |i| if (n < out.len) {
         const stall = self.stallPosition(i);
@@ -2793,4 +2842,43 @@ test "a mod's blueprint and WebAssembly script run a machine, saves record the m
     try std.testing.expectEqual(@as(usize, 1), bare.prefab_count);
     try run(&bare, &bare_camera, .{}, .{}, 5);
     try std.testing.expect(bare.machines[m].machine.outputs[glow][2] > 0.05);
+}
+
+test "every bridge style is built, stood on along lanes and walkways, and keeps its style through a save" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    // The district's own roads show every buildable style.
+    for (@import("BridgeTool.zig").buildable) |style| {
+        const present = for (catalog.district.edges) |e| {
+            if (e.style == style) break true;
+        } else false;
+        try std.testing.expect(present);
+    }
+    try std.testing.expect(catalog.district.building_count >= 12);
+    for (@import("BridgeTool.zig").buildable) |style| {
+        const edge: District.Edge = .{ .a = 0, .b = 3, .style = style };
+        const slot = try sb.addBridge(edge);
+        const s = District.span(&catalog.district, edge);
+        const d = R.sub(s.b, s.a);
+        const right = R.normalize(.{ d[2], 0, -d[0] });
+        for ([_]f32{ 0.2, 0.5, 0.8 }) |t| for ([_]f32{ -5, -1.75, 1.75, 5 }) |x| {
+            const deck = R.add(s.point(t), R.scale(right, x));
+            sb.player = .{ .feet = R.add(deck, .{ 0, 0.3, 0 }) };
+            camera.position = sb.player.eye();
+            try run(&sb, &camera, .{}, .{}, 20);
+            try std.testing.expect(sb.player.grounded);
+            try std.testing.expectApproxEqAbs(deck[1], sb.player.feet[1], 0.1);
+            try std.testing.expect(R.length(R.sub(.{ sb.player.feet[0], 0, sb.player.feet[2] }, .{ deck[0], 0, deck[2] })) < 0.1);
+        };
+        const bytes = try sb.save(std.testing.allocator, camera);
+        defer std.testing.allocator.free(bytes);
+        sb.removeBridge(slot);
+        try sb.restore(std.testing.allocator, bytes, &camera);
+        try std.testing.expectEqual(style, sb.bridges[slot].?.edge.style);
+        sb.removeBridge(slot);
+    }
 }

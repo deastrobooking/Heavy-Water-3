@@ -7,9 +7,40 @@ The first city is a bounded lower-canopy district around the three resident Arbo
 1. From spawn, climb the test Arbor's spiral ramp and cross its original bridge to the tower. This is **plaza 0**, the entrance to the new road loop. You can also press **V** and fly up to a plaza, then switch back to walking.
 2. Follow the loop through plazas **1 → 2 → 3 → 4 → 5 → 0**. Plazas 2 and 4 have short spurs to walkways around the narrow and spreading Arbors.
 3. Press **2**, use **Tab** to select the rover, and aim at open plaza deck within 14 m. A green preview confirms support and clearance; left-click places it. Press **1**, aim at the rover, and click to enter. WASD drives, Space brakes, and click exits onto the deck.
-4. Press **4** for bridges. Cyan markers appear at the six plaza centers. Aim at a visible marker and click to select the source; aim at another marker to preview a span. Green is valid, red is rejected. Click to build. **0 → 3** is a valid shortcut in the default district; duplicate roads and obstructed routes are rejected with a reason on the HUD.
+4. Press **4** for bridges. Cyan markers appear at the six plaza centers. **Tab** chooses the structure: suspension, cable-stayed, arch, truss, or girder. Aim at a visible marker and click to select the source; aim at another marker to preview a span with its structure. Green is valid, red is rejected. Click to build. **0 → 3** is a valid shortcut in the default district; duplicate roads and obstructed routes are rejected with a reason on the HUD.
 5. Right-click cancels a pending bridge. With no source selected, aim at one of your completed bridges nearby and right-click to remove it. The original district roads remain permanent.
 6. **F5 / F9** saves and restores construction, machines, sap taps, and the player. Bridge endpoints persist as plaza IDs; collision and rendering are rebuilt from the same generator.
+
+## The sky city
+
+The district is a city in the sky, held up by steel. Every road is a styled steel bridge, assigned by span length so that one district shows every style, longest first:
+
+| Style | Structure | Colour |
+| --- | --- | --- |
+| Suspension | Twin towers rising from the forest floor with three crossbeams, parabolic main cables from anchorages over the tower saddles, hangers every ~9 m, and a stiffening girder | International orange |
+| Cable-stayed | An H pylon at midspan with two fans of ten stays per side, on braced end piers | White |
+| Arch | A steel arch rising 16–42 m over the deck, hangers every ~8 m, top struts, and braced abutment piers | Copper-teal |
+| Truss | Warren truss side walls 8 m tall, overhead lateral bracing, on braced piers every ~60 m | Dark steel blue |
+| Girder | A deep box girder on braced steel pole piers every ~48 m | Steel grey |
+
+Roads without towers stand on **braced pole piers**: twin steel columns from concrete footings on the forest floor, X-braced in one or two stories, under a cap beam. Piers never stand inside a plaza or near a trunk. The free-standing Arbor junction plazas stand on four braced legs. Trunk spurs keep the original organic vine cables.
+
+The skyline has **skyscrapers**, about twenty per district. Some stand alone on the forest floor, up to about 270 m to the spire. Each tower plaza also has a skyscraper beside it, joined by a walkable **sky lobby** deck at plaza level.
+
+Towers have setback tiers, floor bands, corner fins, a crown, and a spire. Four palettes (glass teal, bronze, white with cyan fins, and dark steel with copper fins) keep the skyline varied.
+
+Placement is seeded and validated. A tower keeps clear of every road and trunk spur, every plaza-to-plaza route a player could still bridge, plazas, trunks, the spawn area, and other towers. A player bridge through a tower is rejected with "A SKYSCRAPER BLOCKS THIS ROUTE".
+
+At dusk the city lights up:
+
+- warm window columns glow on every facade;
+- red warning beacons light the spires;
+- cyan light strips run along every road's rails;
+- light strings follow suspension cables and arch ribs.
+
+By day the window columns read as glass. Glow is surface emission; the renderer has no bloom.
+
+Every structure keeps the same 14 m deck and a clear envelope above it: nothing solid within 6.5 m of the centre line, up to 6 m above the deck. Lanes, walkways, traffic, pedestrians, and players use every style the same way. Tests check the envelope for every style on every road and on the 0 → 3 span, check that towers and piers reach the ground, and check that a player stands on each style's lanes and walkways. The full walk and drive loops cross all of them.
 
 ## Traffic, pedestrians, and markets
 
@@ -47,7 +78,7 @@ The standard 14 m deck contains two 3.5 m traffic lanes, two 3 m walkways, and t
 
 Validation checks graph reachability, endpoint IDs, finite bounded positions, span length, grades of at most **6%**, trunk and plaza envelopes, road crossings, junction approach angles, trunk spurs, and reserved market bays. Terrain clearance is sampled every 4 m at the road center and both edges, requiring 6 m beneath the deck. The fixed legacy test-Arbor entrance still has its original 10% descending bridge and spiral ramp; it is outside the new district road rules.
 
-The generated district uses one resident mesh and one static collider. Player bridges use existing block instances and their own mesh colliders. Save loading validates the graph and stages allocating collision work before replacing live state; a failed allocation preserves the current session. The format is **9**, content version **7**, district generator **1**. Older saves are rejected rather than migrated.
+The generated district uses one resident mesh and one static collider. Player bridges use existing block instances and their own mesh colliders. Save loading validates the graph and stages allocating collision work before replacing live state; a failed allocation preserves the current session. The format is **11**, content version **7**, district generator **2** (generator 2 added styled bridges, piers, braces, and the skyline; earlier district saves are rejected). Older saves are rejected rather than migrated.
 
 ## Current limits
 

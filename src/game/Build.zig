@@ -37,6 +37,8 @@ pub const State = struct {
     prefab_serial: u32 = 0,
     bridge_from: ?u8 = null,
     bridge_hover: ?u8 = null,
+    /// Structure for the next player bridge (Tab cycles it with the bridge tool).
+    bridge_style: @import("../procedural/District.zig").Style = .suspension,
 };
 
 pub fn paletteLen(sb: *const Sandbox) usize {
@@ -152,7 +154,10 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
     const st = &sb.tools;
     switch (st.tool) {
         .hands => {},
-        .bridge => try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary),
+        .bridge => {
+            if (actions.next_item) @import("BridgeTool.zig").cycleStyle(sb);
+            try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary);
+        },
         .build => {
             if (actions.next_item) {
                 st.slot = (st.slot + 1) % paletteLen(sb);
@@ -1018,7 +1023,8 @@ test "bridge tool selects two visible plaza anchors, builds, cancels, and remove
         aim(&camera, point);
         try Bridge.update(&sb, camera, true, false);
     }
-    try std.testing.expectEqualDeep(@import("../procedural/District.zig").Edge{ .a = 0, .b = 3 }, sb.bridges[0].?.edge);
+    // The tool builds its selected style (suspension unless Tab changed it).
+    try std.testing.expectEqualDeep(@import("../procedural/District.zig").Edge{ .a = 0, .b = 3, .style = .suspension }, sb.bridges[0].?.edge);
     try std.testing.expect(sb.tools.bridge_from == null);
     try Bridge.update(&sb, camera, true, false);
     try std.testing.expectEqual(@as(?u8, 3), sb.tools.bridge_from);

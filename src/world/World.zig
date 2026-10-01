@@ -5,7 +5,7 @@ const Catalog = @import("../asset/Catalog.zig");
 pub const mach_module = .world;
 pub const mach_systems = .{ .init, .deinit };
 pub const Renderable = struct { transform: Transform, tint: [4]f32 };
-pub const max_props = 768;
+pub const max_props = 2048;
 /// A dynamic catalog-backed object, published to the renderer each simulation tick.
 /// `size` scales the mesh per axis (before rotation) on top of the transform's uniform scale;
 /// `rotation` is a unit quaternion (x, y, z, w). `lod`, when set, replaces `mesh` beyond
