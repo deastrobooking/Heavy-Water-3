@@ -42,6 +42,8 @@ pub const Material = enum(u8) {
     cloth_outer,
     shoes,
     accent,
+    /// Hard-surface armor plates (rigidly bound, segmented).
+    armor,
 };
 
 pub const max_influences = 4;

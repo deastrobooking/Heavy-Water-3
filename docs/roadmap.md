@@ -71,7 +71,7 @@ Deferred: editing a prefab's parts and numeric parameters in place (today a pref
 
 ## Player character — implemented
 
-A customizable, nameable ranger-engineer: the creator on a new game (F4 any time), name and appearance palettes, a block-built avatar with a walk cycle and lumen accents, third-person view (F2) with eye-origin aiming, and the profile in save format v6. Acceptance evidence: headless tests freeze input in the creator, confirm a named profile, target a crate from the eyes in third person, draw the avatar, and restore the profile from a save.
+A customizable, nameable ranger-engineer: the creator on a new game (F4 any time), name and appearance palettes, a procedurally generated skinned ranger (`src/character/`: lofted body, layered clothing, sci-fi armor suits, spring-bone hair) with a procedural gait and lumen accents, third-person view (F2) with eye-origin aiming, and the profile in save format v6. Acceptance evidence: headless tests freeze input in the creator, confirm a named profile, target a crate from the eyes in third person, draw the avatar, and restore the profile from a save.
 
 ## Traversal and local co-op — implemented
 
@@ -245,7 +245,7 @@ Acceptance: renames keep identity; only changed sources reimport; invalid refere
 - **Import:** glTF skins and clips into `HWSK` and `HWAN`.
 - **Runtime:** allocation-free pose sampling and blending, GPU skinning from a 64-bone uniform palette (with a CPU fallback), and `Player.Motion` mapped to clips as data.
 - **Attachments:** sockets for attachments and per-bone hitboxes for combat.
-- **First content:** a generated rigged ranger, so no external art is needed.
+- **First content:** the generated ranger (`src/character/`) already supplies a skeleton, skin weights, rigid armor bindings and CPU skinning; this phase adds imported clips, blending, GPU skinning and sockets on top of it.
 
 Acceptance: exact import round trips, pose-math reference tests, the controller selecting the right clip for every traversal state, a carried crate held at the hand socket within 1 cm, and render CPU within budget with 20 animated characters. See [plan](plans/skeletal-animation.md).
 

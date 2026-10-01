@@ -29,6 +29,9 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Palettes chosen to suit the painterly direction: eight skin tones, eight hair colors, eight outfit colors, and five bioluminescent accents (the visor and belt glow like Arbor lumen).
 - Hair: short, ponytail, long, crest (anime), or ranger hood.
 
+- Clothing: undersuit, field jacket, or one of three sci-fi armor suits: exo rig (light limb plates), hardsuit (sealed white plate) and vanguard (dark heavy plate). Armor is rigid, segmented and domed, so it reads as hard shell rather than cloth.
+- Armor accents (none, scout, sentinel) and helmet (open, visor, sealed).
+
 Clothing, gear, and accent unlocks found while exploring are future growth for this system.
 
 ## The Arbors

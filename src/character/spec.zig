@@ -100,6 +100,23 @@ pub const Coverage = enum {
     thigh_highs,
     shoes,
     gloves,
+    // hard-surface armor presets (use with `hard = true`)
+    /// Chest and abdomen shell with a high collar; `segments` splits the abdomen into bands.
+    cuirass,
+    /// Shoulder caps over the top of the upper arm.
+    pauldrons,
+    /// Forearm plates between elbow and wrist.
+    vambraces,
+    /// Armored hands and wrist cuffs.
+    gauntlets,
+    /// Hip plates over the belt line and upper thigh.
+    faulds,
+    /// Thigh plates.
+    cuisses,
+    /// Shin plates.
+    greaves,
+    /// Armored boots.
+    sabatons,
     // skirt presets
     skirt,
 };
@@ -114,6 +131,13 @@ pub const GarmentSpec = struct {
     layer: u8 = 1,
     /// Extra standoff from the body in meters (baggy clothes).
     looseness: f32 = 0.0,
+    /// Hard-surface armor: every vertex binds rigidly to its dominant joint (plates move, they
+    /// do not stretch), plates dome outward by `bulge` toward their centers, and rims thicken.
+    hard: bool = false,
+    bulge: f32 = 0.006,
+    /// Hard garments: plate count along the limb (or abdomen bands for a cuirass), separated by
+    /// small gaps so the armor articulates; 0 or 1 = one piece.
+    segments: u8 = 0,
     /// Skirt: length below waist in body units (height / 6.3), flare (hem radius / hip radius).
     length: f32 = 1.1,
     flare: f32 = 1.75,

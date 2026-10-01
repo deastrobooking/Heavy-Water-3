@@ -22,7 +22,9 @@ pub const accent_colors = [_][4]f32{
     .{ 0.30, 0.95, 1.00, 1 }, .{ 1.00, 0.72, 0.25, 1 }, .{ 1.00, 0.40, 0.85, 1 }, .{ 0.60, 1.00, 0.35, 1 }, .{ 0.95, 0.95, 1.00, 1 },
 };
 pub const HairStyle = enum { short, ponytail, long, crest, hood };
-pub const Clothing = enum { undersuit, field_jacket };
+/// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
+/// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
+pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
 pub const Armor = enum { none, scout, sentinel };
 pub const Helmet = enum { open, visor, sealed };
 pub const Field = enum { name, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
@@ -82,7 +84,7 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .hair_style => self.hair_style = @enumFromInt(cycle(@intFromEnum(self.hair_style), delta, std.meta.fields(HairStyle).len)),
         .hair_color => self.hair_color = cycle(self.hair_color, delta, hair_colors.len),
         .outfit => self.outfit = cycle(self.outfit, delta, outfit_colors.len),
-        .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, 2)),
+        .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, @typeInfo(Clothing).@"enum".fields.len)),
         .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, 3)),
         .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, 3)),
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),

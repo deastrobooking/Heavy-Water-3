@@ -240,6 +240,22 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Character generator and sci-fi armor — 2026-10-01
+
+- The user-supplied procedural character generator (`src/character/`) replaced the block avatar for players, guests, pedestrians and stall keepers. Three new clothing types (exo rig, hardsuit, vanguard) are built from eight hard-surface armor coverages.
+- Debug suite: **195/195 tests pass**. New tests:
+  - Every armor vertex is rigidly bound to one joint.
+  - Armor vertex counts grow exo rig < hardsuit = vanguard. The vanguard cuirass stands further from the chest than the hardsuit's, and the exo rig has none.
+  - Two forearm plate vertices keep their distance within 1e-4 m through a walk pose.
+  - Segment gaps split a span continuously.
+- Fixes found while integrating:
+  - The hair-removal index compaction used an aliasing `@memcpy` and aborted under a sealed helmet. It now uses `copyForwards`.
+  - Two tests assumed block avatars, and the four-player Sandbox count also overflowed on owner-0 pedestrians. Both now count one character prop per player.
+  - A heavy-armor test compared against a sealed helmet that also removes hair. It now compares like with like, and checks that the sealed helmet leaves no hair triangles.
+- Visual review: `-Dshowcase=16/17` captures. Two jagged edges, on the faulds top and the cuirass bottom, followed body-region borders as stair steps. Both are now single continuous cuts across belly and hips. Art-direction approval remains yours.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, Debug, **300 smoke frames** with the armor lineup: no validation errors, clean exit.
+- Not measured: CPU skinning cost with many armored characters (an armored body has about 3.5K more vertices), and a manual review of the creator cycling clothing in the window.
+
 ## Development asset reload (phase 13, slice 3) — 2026-10-01
 
 - Baseline review: 159 ReleaseSafe tests and the application compile passed. Fixed index-only loader tickets that could access reused slots, checked pack indices before worker access, and replaced an unlocked telemetry read with a mutex-protected snapshot.

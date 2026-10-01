@@ -24,14 +24,8 @@ fn rgb(c: [4]f32, factor: f32) spec.Rgb {
     return .{ .r = c[0] * factor, .g = c[1] * factor, .b = c[2] * factor };
 }
 pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
-    const cloth = Profile.outfit_colors[profile.outfit];
-    var garments = [_]spec.GarmentSpec{
-        .{ .coverage = .long_sleeve, .color = rgb(cloth, 0.35), .neckline = .high },
-        .{ .coverage = .leggings, .color = rgb(cloth, 0.32) },
-        .{ .coverage = .gloves, .color = spec.Rgb.hex(0x18242c), .layer = 2, .looseness = 0.003 },
-        .{ .coverage = .shoes, .color = spec.Rgb.hex(0x202c36), .layer = 3, .looseness = 0.009 },
-        .{ .coverage = .long_sleeve, .color = rgb(cloth, 1), .layer = 3, .looseness = 0.013, .neckline = .v },
-    };
+    var garments: [16]spec.GarmentSpec = undefined;
+    const outfit_len = outfit(profile, &garments);
     var ch = try gen.Character.build(a, .{
         .body = .{ .height = 1.8 * profile.height, .head_ratio = 7.5, .femininity = 0.3, .bust = 0.12, .shoulder_width = 1.10 * profile.build, .waist_width = 1.12 * profile.build, .hip_width = profile.build, .limb_thickness = 1.1 * profile.build, .head_width = 0.78, .jaw_sharpness = 0.4 },
         .skin = rgb(Profile.skin_tones[profile.skin], 1),
@@ -42,7 +36,7 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
             .long => .long_straight,
             .hood => .bob,
         }, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = 0.7, .bang_count = 5 },
-        .outfit = garments[0..if (profile.clothing == .field_jacket) 5 else 4],
+        .outfit = garments[0..outfit_len],
         .detail = 0.7,
     });
     errdefer ch.deinit(a);
@@ -106,6 +100,52 @@ pub fn update(self: *Ranger, state: Pose) void {
     }
 }
 
+fn mix(a: [4]f32, b: spec.Rgb, t: f32) spec.Rgb {
+    return .{ .r = a[0] + (b.r - a[0]) * t, .g = a[1] + (b.g - a[1]) * t, .b = a[2] + (b.b - a[2]) * t };
+}
+
+/// The garment list for a profile: an undersuit, then a jacket or a hard-surface armor suit.
+/// Armor plates are rigid, domed, segmented shells from the character generator (see
+/// `clothing.zig`), layered outside the suit so nothing clips.
+pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
+    const cloth = Profile.outfit_colors[profile.outfit];
+    const dark = spec.Rgb.hex(0x18242c);
+    var n: usize = 0;
+    const Add = struct {
+        fn one(list: *[16]spec.GarmentSpec, count: *usize, g: spec.GarmentSpec) void {
+            list[count.*] = g;
+            count.* += 1;
+        }
+    };
+    Add.one(out, &n, .{ .coverage = .long_sleeve, .color = rgb(cloth, 0.35), .neckline = .high });
+    Add.one(out, &n, .{ .coverage = .leggings, .color = rgb(cloth, 0.32) });
+    switch (profile.clothing) {
+        .undersuit, .field_jacket => {
+            Add.one(out, &n, .{ .coverage = .gloves, .color = dark, .layer = 2, .looseness = 0.003 });
+            Add.one(out, &n, .{ .coverage = .shoes, .color = spec.Rgb.hex(0x202c36), .layer = 3, .looseness = 0.009 });
+            if (profile.clothing == .field_jacket) Add.one(out, &n, .{ .coverage = .long_sleeve, .color = rgb(cloth, 1), .layer = 3, .looseness = 0.013, .neckline = .v });
+        },
+        .exo_rig, .hardsuit, .vanguard => {
+            const heavy = profile.clothing == .vanguard;
+            const steel = if (heavy) mix(cloth, spec.Rgb.hex(0x3b4650), 0.6) else mix(cloth, spec.Rgb.hex(0xc3ccd1), 0.55);
+            const trim = mix(cloth, spec.Rgb.hex(0x22303a), 0.7);
+            const bulge: f32 = if (heavy) 0.011 else 0.006;
+            const lift: f32 = if (heavy) 0.006 else 0.002;
+            Add.one(out, &n, .{ .coverage = .gauntlets, .color = trim, .layer = 2, .looseness = 0.004, .hard = true, .bulge = 0.003 });
+            Add.one(out, &n, .{ .coverage = .sabatons, .color = trim, .layer = 3, .looseness = 0.010, .hard = true, .bulge = 0.004 });
+            Add.one(out, &n, .{ .coverage = .vambraces, .color = steel, .layer = 3, .looseness = 0.004 + lift, .hard = true, .bulge = bulge, .segments = 2 });
+            Add.one(out, &n, .{ .coverage = .greaves, .color = steel, .layer = 4, .looseness = 0.005 + lift, .hard = true, .bulge = bulge, .segments = 2 });
+            Add.one(out, &n, .{ .coverage = .pauldrons, .color = steel, .layer = 4, .looseness = (if (profile.clothing == .exo_rig) @as(f32, 0.006) else 0.012) + lift, .hard = true, .bulge = bulge * 1.4, .segments = if (profile.clothing == .exo_rig) 1 else 2 });
+            if (profile.clothing != .exo_rig) {
+                Add.one(out, &n, .{ .coverage = .cuirass, .color = steel, .layer = 4, .looseness = 0.008 + lift, .hard = true, .bulge = bulge, .segments = 3, .neckline = .high });
+                Add.one(out, &n, .{ .coverage = .faulds, .color = trim, .layer = 3, .looseness = 0.010 + lift, .hard = true, .bulge = bulge * 0.7, .segments = 2 });
+                Add.one(out, &n, .{ .coverage = .cuisses, .color = steel, .layer = 3, .looseness = 0.004 + lift, .hard = true, .bulge = bulge, .segments = 2 });
+            }
+        },
+    }
+    return n;
+}
+
 /// Smooth, closed ellipsoidal armor pieces, attached rigidly to a joint. Flexible fabric keeps
 /// blended body weights underneath; panels do not stretch across elbows or knees.
 fn plate(a: std.mem.Allocator, ch: *gen.Character, joint: sk.Joint, center: V, radii: V, color: spec.Rgb) !void {
@@ -140,7 +180,14 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     }
     // Belt, boot cuffs and wrist seals bridge fabric transitions.
     try plate(a, ch, .hips, V.init(0, lm.waist_y - 0.08 * h, 0), V.init(lm.waist_half_width + 0.035, 0.035 * h, lm.waist_half_depth + 0.028), dark);
-    if (p.armor != .none) {
+    // A full armor suit already plates the limbs and torso; only its chest lights are added.
+    const suited = p.clothing == .hardsuit or p.clothing == .vanguard;
+    if (p.armor != .none and suited) {
+        const chest = s.worldPos(.chest);
+        try plate(a, ch, .chest, chest.add(V.init(0, 0.06 * h, -0.185 * h)), V.init(0.038 * h, 0.10 * h, 0.012 * h), accent);
+        try plate(a, ch, .chest, chest.add(V.init(0, 0.045 * h, 0.17 * h)), V.init(0.027 * h, 0.058 * h, 0.009 * h), accent);
+    }
+    if (p.armor != .none and !suited) {
         const bulk: f32 = if (p.armor == .sentinel) 1.15 else 1;
         const chest = s.worldPos(.chest);
         for ([_]f32{ -1, 1 }) |side| try plate(a, ch, .chest, chest.add(V.init(side * 0.09 * w, 0.005 * h, 0.075 * h)), V.init(0.105 * w, 0.16 * h, 0.09 * bulk * h), metal);
@@ -165,7 +212,8 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         while (i < ch.mesh.indices.items.len) : (i += 3) {
             const tri = ch.mesh.indices.items[i..][0..3];
             if (ch.mesh.vertices.items[tri[0]].material == .hair) continue;
-            @memcpy(ch.mesh.indices.items[write..][0..3], tri);
+            // In-place compaction: source and destination overlap until the first removal.
+            std.mem.copyForwards(u32, ch.mesh.indices.items[write..][0..3], tri);
             write += 3;
         }
         ch.mesh.indices.shrinkRetainingCapacity(write);
@@ -198,7 +246,61 @@ test "ranger meshes are smooth, layered, weighted and animate without allocation
     var light = try init(a, .{ .armor = .none, .helmet = .open, .clothing = .undersuit });
     defer light.deinit(a);
     try std.testing.expect(light.mesh.indices.len < ranger.mesh.indices.len);
-    var heavy = try init(a, .{ .armor = .sentinel, .helmet = .sealed });
+    // Heavier armor adds plates for the same helmet; sealing the helmet replaces the hair.
+    var heavy = try init(a, .{ .armor = .sentinel });
     defer heavy.deinit(a);
     try std.testing.expect(heavy.mesh.indices.len > ranger.mesh.indices.len);
+    var sealed = try init(a, .{ .armor = .sentinel, .helmet = .sealed });
+    defer sealed.deinit(a);
+    for (sealed.character.mesh.indices.items) |i| try std.testing.expect(sealed.character.mesh.vertices.items[i].material != .hair);
+}
+
+test "armor suits are rigid, segmented plates that never stretch and grow with the suit" {
+    const a = std.testing.allocator;
+    var counts: [5]usize = undefined;
+    var reach: [5]f32 = undefined;
+    for (std.enums.values(Profile.Clothing), 0..) |clothing, k| {
+        var r = try init(a, .{ .clothing = clothing, .armor = .none, .helmet = .open });
+        defer r.deinit(a);
+        var armor: usize = 0;
+        var far: f32 = 0;
+        const chest = r.character.skeleton.worldPos(.chest);
+        for (r.character.mesh.vertices.items) |v| {
+            if (v.material != .armor) continue;
+            armor += 1;
+            // Rigid: one joint at full weight.
+            try std.testing.expectEqual(@as(f32, 1), v.weights[0]);
+            try std.testing.expectEqual(@as(f32, 0), v.weights[1] + v.weights[2] + v.weights[3]);
+            // How far the chest plate stands out in front, at chest height.
+            if (@abs(v.pos.y - chest.y) < 0.04 and @abs(v.pos.x) < 0.05) far = @max(far, v.pos.z - chest.z);
+        }
+        counts[k] = armor;
+        reach[k] = far;
+        if (clothing == .hardsuit) {
+            // Walking moves the plates without changing their shape: two vertices on the same
+            // joint keep their distance exactly.
+            var first: ?usize = null;
+            var second: ?usize = null;
+            for (r.character.mesh.vertices.items, 0..) |v, i| {
+                if (v.material != .armor or v.joints[0] != sk.Joint.lower_arm_l.idx()) continue;
+                if (first == null) first = i else if (second == null and r.mesh.vertices[i].position[1] != r.mesh.vertices[first.?].position[1]) second = i;
+            }
+            const p0 = r.mesh.vertices[first.?].position;
+            const p1 = r.mesh.vertices[second.?].position;
+            const before = V.init(p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]).length();
+            r.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.3 });
+            const q0 = r.mesh.vertices[first.?].position;
+            const q1 = r.mesh.vertices[second.?].position;
+            try std.testing.expect(@abs(q0[1] - p0[1]) > 0.01); // the forearm moved
+            try std.testing.expectApproxEqAbs(before, V.init(q0[0] - q1[0], q0[1] - q1[1], q0[2] - q1[2]).length(), 1e-4);
+        }
+    }
+    // undersuit, field_jacket, exo_rig, hardsuit, vanguard
+    try std.testing.expectEqual(@as(usize, 0), counts[0] + counts[1]);
+    try std.testing.expect(counts[2] > 500 and counts[3] > counts[2]);
+    try std.testing.expect(counts[4] >= counts[3] * 9 / 10);
+    // The vanguard's heavier chest plate stands farther off the body than the hardsuit's; the
+    // exo rig has none.
+    try std.testing.expectEqual(@as(f32, 0), reach[2]);
+    try std.testing.expect(reach[4] > reach[3]);
 }

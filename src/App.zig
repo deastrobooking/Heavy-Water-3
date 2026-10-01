@@ -386,6 +386,30 @@ fn showcase(self: *App) void {
         for (layout.buildings[0..layout.building_count]) |b| if (@abs(eye[0] - b.base[0]) < b.half[0] + 4 and @abs(eye[2] - b.base[2]) < b.half[1] + 4) {
             eye = .{ target[0] - side[0] * back, target[1] + 18, target[2] - side[2] * back };
         };
+    } else if (v == 16 or v == 17) {
+        // Armor lineup: three guests in the exo rig, hardsuit, and vanguard face the camera.
+        const Sandbox_ = @import("game/Sandbox.zig");
+        const clothing = [_]Profile.Clothing{ .exo_rig, .hardsuit, .vanguard };
+        for (&self.sandbox.guests, 0..) |*g, i| {
+            if (!g.active) {
+                self.sandbox.joinGuest(i);
+                g.profile.clothing = clothing[i];
+                g.profile.armor = .scout;
+                g.profile.helmet = if (i == 2) .sealed else .visor;
+                g.profile.outfit = @intCast((i * 2 + 2) % Profile.outfit_colors.len);
+            }
+            const x = Sandbox_.spawn[0] + (@as(f32, @floatFromInt(i)) - 1) * 1.6;
+            const z = Sandbox_.spawn[2] + 3;
+            g.player.feet = .{ x, @import("procedural/Terrain.zig").surface(self.sandbox.seed, x, z).height, z };
+            g.player.velocity = .{ 0, 0, 0 };
+            g.camera.yaw = std.math.pi;
+            g.view = .first;
+        }
+        const ground = @import("procedural/Terrain.zig").surface(self.sandbox.seed, Sandbox_.spawn[0], Sandbox_.spawn[2] + 3).height;
+        target = .{ Sandbox_.spawn[0], ground + 1.0, Sandbox_.spawn[2] + 3 };
+        eye = .{ Sandbox_.spawn[0] + 0.6, ground + 1.5, Sandbox_.spawn[2] - 1.6 };
+        // 17: a three-quarter close-up of the hardsuit.
+        if (v == 17) eye = .{ Sandbox_.spawn[0] + 0.9, ground + 1.35, Sandbox_.spawn[2] + 1.35 };
     } else if (v == 9) {
         const s = District.span(layout, layout.edges[0]);
         target = s.point(0.6);
@@ -397,7 +421,7 @@ fn showcase(self: *App) void {
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
-    const dusk = v == 8 or v >= 10;
+    const dusk = v == 8 or (v >= 10 and v <= 15);
     self.sandbox.tick = if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
@@ -699,7 +723,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.views[0].crosshair = sandbox.seated == null and !sandbox.creator.open and (self.captured or sandbox.player.mode == .walk);
     renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
     renderer.view_count = 1;
-    for (&sandbox.guests, 0..) |*g, i| if (g.active) {
+    // Showcases use P1's view only, even when guests stand in the shot.
+    if (options.showcase == 0) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
         const view = &renderer.views[renderer.view_count];
         view.* = .{ .camera = g.camera, .hide_owner = if (g.view == .first) @intCast(i + 2) else 0, .crosshair = true, .accent = Profile.accent_colors[g.profile.accent] };
         view.lines[0].set("{s}  {s}  {s}  FUEL {d:.0}", .{ g.profile.name(), @tagName(g.player.motion), @tagName(g.player.traversal), g.player.fuel });

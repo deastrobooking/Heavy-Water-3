@@ -87,10 +87,60 @@ pub fn coverage(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
             .lower_arm_l, .lower_arm_r => t - 0.88,
             else => no,
         },
+        // Armor: limb plates stop short of the joints so elbows and knees stay free.
+        // One continuous lower edge just below the waist across belly and hips, with the
+        // abdomen bands spaced over the whole span so no band ends at a region border.
+        .cuirass => switch (v.region) {
+            .chest => yes,
+            .belly, .hips => @min(y - (lm.waist_y - 0.04 * B), segment(g.segments, (lm.shoulder_y - y) / (lm.shoulder_y - lm.waist_y + 0.04 * B))),
+            else => no,
+        },
+        .pauldrons => switch (v.region) {
+            .upper_arm_l, .upper_arm_r => @min(0.34 - t, segment(g.segments, t / 0.34)),
+            else => no,
+        },
+        .vambraces => switch (v.region) {
+            .lower_arm_l, .lower_arm_r => @min(@min(t - 0.10, 0.90 - t), segment(g.segments, (t - 0.10) / 0.80)),
+            else => no,
+        },
+        .gauntlets => switch (v.region) {
+            .hand_l, .hand_r => yes,
+            .lower_arm_l, .lower_arm_r => t - 0.84,
+            else => no,
+        },
+        // A continuous cut just above the waist (not the region border) keeps the top edge smooth.
+        .faulds => switch (v.region) {
+            .belly, .hips => @min(lm.waist_y + 0.03 * B - y, segment(g.segments, (lm.waist_y + 0.03 * B - y) / (0.30 * B))),
+            .thigh_l, .thigh_r => 0.16 - t,
+            else => no,
+        },
+        .cuisses => switch (v.region) {
+            .thigh_l, .thigh_r => @min(@min(t - 0.20, 0.86 - t), segment(g.segments, (t - 0.20) / 0.66)),
+            else => no,
+        },
+        .greaves => switch (v.region) {
+            .shin_l, .shin_r => @min(@min(t - 0.08, 0.90 - t), segment(g.segments, (t - 0.08) / 0.82)),
+            else => no,
+        },
+        .sabatons => switch (v.region) {
+            .foot_l, .foot_r => yes,
+            .shin_l, .shin_r => t - 0.90,
+            else => no,
+        },
         .skirt => no,
     };
     if (v.region == .chest and val > 0) return @min(val, neckline(g.neckline, v.pos, lm));
     return val;
+}
+
+/// Splits a 0..1 span into `n` plates with gaps between them: > 0 on a plate, < 0 in a gap.
+/// Continuous, so `buildShell` clips plate edges as smooth curves like any hem.
+fn segment(n: u8, s: f32) f32 {
+    if (n <= 1) return 1;
+    const gap: f32 = 0.035;
+    const f = @as(f32, @floatFromInt(n)) * std.math.clamp(s, 0, 0.9999);
+    const local = f - @floor(f);
+    return @min(local - gap, 1 - gap - local) / @as(f32, @floatFromInt(n));
 }
 
 pub fn covers(g: GarmentSpec, v: Vertex, lm: body.Landmarks) bool {
@@ -125,6 +175,7 @@ fn materialFor(cov: spec_mod.Coverage) Material {
         .shorts, .leggings, .thigh_highs, .skirt => .cloth_bottom,
         .shoes => .shoes,
         .gloves => .accent,
+        .cuirass, .pauldrons, .vambraces, .gauntlets, .faulds, .cuisses, .greaves, .sabatons => .armor,
     };
 }
 
@@ -158,17 +209,31 @@ pub fn buildShell(gpa: Allocator, out: *Mesh, body_mesh: *const Mesh, g: Garment
         offset: f32,
         mat: Material,
         shoes: bool,
+        /// Hard armor: rigid binding and a domed plate profile.
+        hard: bool,
+        bulge: f32,
 
-        fn finishVertex(e: @This(), v0: Vertex) Vertex {
+        fn finishVertex(e: @This(), v0: Vertex, inside: f32) Vertex {
             var v = v0;
-            v.pos = v.pos.addScaled(v.normal, e.offset);
+            // Plates dome toward their centers; rims (coverage ~0) sit at the base offset.
+            const dome = if (e.hard) e.bulge * m.smoothstep(0, 0.12, inside) else 0;
+            v.pos = v.pos.addScaled(v.normal, e.offset + dome);
+            if (e.hard) {
+                // Bind to the single most influential joint so the plate never stretches.
+                var best: usize = 0;
+                for (v.weights, 0..) |w, k| if (w > v.weights[best]) {
+                    best = k;
+                };
+                v.joints = .{ v.joints[best], 0, 0, 0 };
+                v.weights = .{ 1, 0, 0, 0 };
+            }
             if (e.shoes) v.pos.y = @max(v.pos.y, 0.0); // flat sole
             v.region = .garment;
             v.material = e.mat;
             return v;
         }
         fn corner(e: @This(), vi: u32) !u32 {
-            if (e.remap[vi] == std.math.maxInt(u32)) e.remap[vi] = try e.out.addVertex(e.gpa, e.finishVertex(e.bv[vi]));
+            if (e.remap[vi] == std.math.maxInt(u32)) e.remap[vi] = try e.out.addVertex(e.gpa, e.finishVertex(e.bv[vi], e.cov[vi]));
             return e.remap[vi];
         }
         /// Vertex where coverage crosses zero on edge (inside, outside).
@@ -185,11 +250,11 @@ pub fn buildShell(gpa: Allocator, out: *Mesh, body_mesh: *const Mesh, g: Garment
             v.pos = a.pos.lerp(b.pos, t);
             v.normal = a.normal.lerp(b.normal, t).normalize();
             v.uv = .{ .x = m.lerp(a.uv.x, b.uv.x, t), .y = m.lerp(a.uv.y, b.uv.y, t) };
-            gop.value_ptr.* = try e.out.addVertex(e.gpa, e.finishVertex(v));
+            gop.value_ptr.* = try e.out.addVertex(e.gpa, e.finishVertex(v, 0));
             return gop.value_ptr.*;
         }
     };
-    const e: Emit = .{ .gpa = gpa, .out = out, .bv = bv, .cov = cov, .remap = remap, .cuts = &cuts, .offset = offset, .mat = mat, .shoes = g.coverage == .shoes };
+    const e: Emit = .{ .gpa = gpa, .out = out, .bv = bv, .cov = cov, .remap = remap, .cuts = &cuts, .offset = offset, .mat = mat, .shoes = g.coverage == .shoes or g.coverage == .sabatons, .hard = g.hard, .bulge = g.bulge };
 
     var i: usize = 0;
     const idx = body_mesh.indices.items;
@@ -223,7 +288,7 @@ pub fn buildShell(gpa: Allocator, out: *Mesh, body_mesh: *const Mesh, g: Garment
             try out.addTri(gpa, ab, try e.corner(c), ac);
         }
     }
-    try thickenHems(gpa, out, base, layer_step * 0.45);
+    try thickenHems(gpa, out, base, layer_step * (if (g.hard) @as(f32, 0.9) else 0.45));
     computeNormalsRange(out, base);
 }
 
@@ -549,5 +614,21 @@ test "shell inherits weights and sits outside the body" {
         var s: f32 = 0;
         for (v.weights) |w| s += w;
         try std.testing.expectApproxEqAbs(@as(f32, 1), s, 1e-4);
+    }
+}
+
+test "armor segments split a span into plates with gaps, continuously" {
+    // One piece: always covered.
+    try std.testing.expect(segment(0, 0.5) > 0 and segment(1, 0.99) > 0);
+    // Two plates: covered mid-plate, uncovered at the seam and the ends.
+    try std.testing.expect(segment(2, 0.25) > 0 and segment(2, 0.75) > 0);
+    try std.testing.expect(segment(2, 0.5) < 0 and segment(2, 0.0) < 0);
+    // Continuous across the seam (no jumps), so plate edges clip as smooth curves.
+    var previous = segment(3, 0);
+    var s: f32 = 0.001;
+    while (s < 1) : (s += 0.001) {
+        const v = segment(3, s);
+        try std.testing.expect(@abs(v - previous) < 0.01);
+        previous = v;
     }
 }

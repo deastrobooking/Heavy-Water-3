@@ -107,7 +107,22 @@ Wires between different machines are rejected; signals cross machines through tr
 
 ## Player character
 
-`game/Profile.zig` holds the name (validated, stored uppercase for the bitmap font) and appearance: proportions plus indices into fixed palettes. `game/Creator.zig` edits a draft through abstract keys (testable without a window). A name is required, and Escape only works after a first confirmation. The application maps window keys onto those abstract keys while the creator is open, and the creator's lines render in the right-hand panel. `game/Avatar.zig` builds the visible body from scaled, rotated blocks, with limbs swinging from hip and shoulder pivots by a walk phase that advances with ground speed; the visor and belt use the glowing accent.
+`game/Profile.zig` holds the name (validated, stored uppercase for the bitmap font) and appearance: proportions plus indices into fixed palettes. `game/Creator.zig` edits a draft through abstract keys (testable without a window). A name is required, and Escape only works after a first confirmation. The application maps window keys onto those abstract keys while the creator is open, and the creator's lines render in the right-hand panel. `game/Avatar.zig` publishes one character descriptor per body (a `World.Prop` carrying `character: Ranger.Draw`), and `render/Characters.zig` keeps one CPU-skinned vertex buffer per character, shared by every local view.
+
+The body comes from the procedural generator in `src/character/`: spec → skeleton → lofted body → garment shells, skirts and hair → skinned mesh, with spring bones and toon shading. `character/Ranger.zig` adapts it to the game. It maps the profile (proportions, palettes, hair, helmet) onto a `CharacterSpec`, builds the outfit, adds accent lights, and poses a procedural gait from the walk phase and `Player.Motion`. Pedestrians and stall keepers use the same path.
+
+Garments are offset shells over body regions. A signed, continuous coverage function cuts each edge cleanly, layers stand off by `layer × step + looseness`, and hems are rolled. Clothing (`Profile.Clothing`) always starts with the undersuit:
+- **undersuit:** gloves and shoes added.
+- **field_jacket:** adds an open outer jacket.
+- **exo_rig, hardsuit, vanguard:** sci-fi armor, light to heavy. The exo rig is limb plates and shoulder caps only. The hardsuit adds a cuirass, hip faulds and thigh plates. The vanguard is the same set in a darker, thicker, bulkier steel.
+
+Armor pieces are *hard* garments (`GarmentSpec.hard`; coverages `cuirass`, `pauldrons`, `vambraces`, `gauntlets`, `faulds`, `cuisses`, `greaves`, `sabatons`):
+- each vertex binds rigidly to its dominant joint, so plates move without stretching;
+- surfaces dome outward by `bulge`, fading in from the edges;
+- `segments` splits a span into separate plates with small gaps, so elbows, knees and the abdomen articulate;
+- hard garments use the `armor` material.
+
+With a hardsuit or vanguard, the old ellipsoid `armor` plates (scout and sentinel) give way to the suit, and only their chest accent lights remain.
 
 The avatar appears in your own view in third person (F2) and in the creator, on foot only. It is always published for the other split-screen views (see local co-op below). The third-person camera sits 4 m behind and 0.3 m above the eyes, kept above the terrain. Aiming, picking, holding, and building still start at the eyes, so the same target is chosen in either view. While the creator is open, input and tools are frozen and the camera faces the character.
 
@@ -179,7 +194,7 @@ The Sandbox places two shrines at init on seeded flat sites, tags their machines
 
 The Sandbox publishes the night lighting as emissive props each tick: window columns, spire beacons, rail strips, and cable strings.
 
-`render/Capture.zig` and `capture.wgsl` write a frame to `zig-out/capture.bmp` (`-Dcapture-frame=N`). Mach's Metal backend cannot copy a texture to a buffer, so the frame renders offscreen and a compute shader copies it into a mapped storage buffer. `-Dshowcase=N` holds the camera on a fixed city viewpoint for art review.
+`render/Capture.zig` and `capture.wgsl` write a frame to `zig-out/capture.bmp` (`-Dcapture-frame=N`). Mach's Metal backend cannot copy a texture to a buffer, so the frame renders offscreen and a compute shader copies it into a mapped storage buffer. `-Dshowcase=N` holds the camera on a fixed city viewpoint for art review. Views 16 and 17 line up the three armor suits (exo rig, hardsuit, vanguard) in daylight, at full length and close up.
 
 ## Saves
 

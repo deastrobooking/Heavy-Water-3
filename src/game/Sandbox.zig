@@ -2285,12 +2285,16 @@ test "four local players: guests join beside P1, move and look independently, pr
     // Guests default to third person: each camera sits behind its own eyes.
     for (sandbox.guests) |g| try std.testing.expect(g.camera.position.sub(&g.player.eye()).len() > 3);
 
-    // Every body is published and tagged with its owner, P1's included while in first person.
+    // Every body is published as one skinned character tagged with its owner (P1's included
+    // while in first person), each in its own renderer slot.
     var parts: [World.max_props]World.Prop = undefined;
     const drawn = sandbox.publishProps(&parts);
     var owned: [5]usize = @splat(0);
-    for (parts[0..drawn]) |part| owned[part.owner] += 1;
-    for (owned[1..]) |count| try std.testing.expect(count >= 9);
+    for (parts[0..drawn]) |part| if (part.character) |c| if (part.owner != 0) {
+        owned[part.owner] += 1;
+        try std.testing.expectEqual(part.owner - 1, c.id);
+    };
+    for (owned[1..]) |count| try std.testing.expectEqual(@as(usize, 1), count);
 
     // P3 walks up to the powered door's button and presses it; the door opens for everyone.
     for (&sandbox.guests) |*g| g.input = .{};
@@ -2313,7 +2317,9 @@ test "four local players: guests join beside P1, move and look independently, pr
     sandbox.leaveGuest(2);
     try std.testing.expectEqual(@as(usize, 2), sandbox.guestCount());
     owned = @splat(0);
-    for (parts[0..sandbox.publishProps(&parts)]) |part| owned[part.owner] += 1;
+    for (parts[0..sandbox.publishProps(&parts)]) |part| if (part.character != null and part.owner != 0) {
+        owned[part.owner] += 1;
+    };
     try std.testing.expectEqual(@as(usize, 0), owned[4]);
     const bytes = try sandbox.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
