@@ -8,6 +8,8 @@
 
 - Explore the Rootdeep, climbable Arbors, shrines, towers, and a generated canopy district.
 - Build and wire machines, drive a powered rover, add bridges, trade at markets, and save your world.
+- Talk with stall keepers and locals in branching conversations; buy suit upgrades and armor suits from the south-market tinker; customize your ranger.
+- Title, pause, settings (saved to `saves/settings.json`) and controls screens, driven by keyboard, mouse, or controller.
 - Use grapple, hover, flight, wall jumps, dashes, and other traversal kits; play local split-screen with up to four players.
 - Grow procedural trees and connect machines through sap power and Rootsong networks.
 - Run on a native Zig engine using Mach for platform and GPU foundations.

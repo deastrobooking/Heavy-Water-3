@@ -61,6 +61,7 @@ test {
     _ = @import("ui/Menu.zig");
     _ = @import("ui/Screens.zig");
     _ = @import("game/Settings.zig");
+    _ = @import("game/Bindings.zig");
     _ = @import("render/Overlay.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");

@@ -240,6 +240,48 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Guest HUD and rebindable controls — 2026-10-01
+
+- Debug suite: **212/212 tests pass**. New tests:
+  - Bindings swap conflicting keys, refuse reserved keys, and round-trip by name, ignoring unknown names.
+  - The controls screen captures a key, swaps conflicts, cancels with Escape, and resets.
+  - Settings round-trip with a rebound key.
+  - The screen layout test now also draws a four-player split screen with a guest trading.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames**, including four players with the new guest HUD: no validation errors, clean exit.
+- Visual review: `-Dshowcase=27` (four players, P3 at Maro's stall) and `-Dshowcase=28` (controls while rebinding). Two fixes came from it:
+  - Ware names showed underscores in the guest stall panel.
+  - The interaction prompt showed through behind the pause menu.
+- Not measured: rebinding by hand in the window, and controller play.
+
+## Menus, GUI and conversations — 2026-10-01
+
+- Debug suite: **210/210 tests pass**. New coverage:
+  - Canvas wrapping, hits and measurement.
+  - Scaled overlay text.
+  - Menu navigation: disabled CONTINUE and LOAD are skipped, sub-screens return to their entry, quit is confirmed.
+  - Settings clamping, round trip, and per-field clamping of a wild value.
+  - Dialogue: the built-in file validates, branches follow flags, a gift is given once, panels end the conversation, and malformed data is rejected with a reason.
+  - Purchases: upgrades and suits change nothing on failure, and progress round-trips, including shorter level lists from older saves.
+  - Creator skips clothing that is not owned.
+  - The Sandbox stall test now greets Maro and opens trade from his reply.
+  - Every screen and every conversation node lays out inside a 1280×720 canvas.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames**: no validation errors, clean exit. `Smoke GUI` drives pause → settings → resume (closed), Maro's first greeting into the upgrades panel, buys fuel tank level 1, and closes every panel.
+- Visual review from `-Dshowcase=18..26` captures:
+  - The clock overlapped the scrap count: the wallet panel is wider.
+  - The vitals panel overlapped the dialogue box: vitals hide under panels.
+  - The player blocked the keeper: the conversation camera is now over the shoulder.
+  - The wardrobe panel covered the character: it moved to the left and narrowed.
+- A code review then found eight hardening items, all fixed:
+  - Clicks are limited to the top layer.
+  - Load failures show on the title screen.
+  - Settings are written once on leaving their screen.
+  - Upgrade levels are saved as a list, so adding an upgrade keeps old saves loading.
+  - A wild settings value clamps instead of resetting every setting.
+  - Purchase errors are worded for players.
+  - Number keys only pick existing replies.
+  - Fixed limits now follow the content: the clothing mask, the reply line buffer, and pedestrian conversations picked in file order.
+- Not measured: manual play with a physical controller, split-screen GUI for guests (P1 only), and art-direction approval of the screens.
+
 ## Character generator and sci-fi armor — 2026-10-01
 
 - The user-supplied procedural character generator (`src/character/`) replaced the block avatar for players, guests, pedestrians and stall keepers. Three new clothing types (exo rig, hardsuit, vanguard) are built from eight hard-surface armor coverages.

@@ -15,14 +15,15 @@ cycle_mode: bool = false,
 look_x: f32 = 0,
 look_y: f32 = 0,
 
-pub fn sample(self: *Input, core: *mach.Core) void {
-    self.forward = axis(core, .w, .s);
-    self.right = axis(core, .d, .a);
-    self.up = axis(core, .e, .q);
-    self.fast = core.keyPressed(.left_shift) or core.keyPressed(.right_shift);
-    self.jump = core.keyPressed(.space);
-    self.dodge_held = core.keyPressed(.left_control);
-    self.mantle = core.keyPressed(.f);
+/// Held keys, through the player's bindings (edges arrive as key events in the application).
+pub fn sample(self: *Input, core: *mach.Core, keys: @import("../game/Bindings.zig")) void {
+    self.forward = axis(core, keys.key(.forward), keys.key(.back));
+    self.right = axis(core, keys.key(.right), keys.key(.left));
+    self.up = axis(core, keys.key(.ascend), keys.key(.descend));
+    self.fast = core.keyPressed(keys.key(.sprint));
+    self.jump = core.keyPressed(keys.key(.jump));
+    self.dodge_held = core.keyPressed(keys.key(.roll));
+    self.mantle = core.keyPressed(keys.key(.mantle));
 }
 
 fn axis(core: *mach.Core, positive: mach.Core.KeyButtonID, negative: mach.Core.KeyButtonID) f32 {

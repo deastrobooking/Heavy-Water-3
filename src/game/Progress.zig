@@ -123,7 +123,8 @@ pub fn flag(self: *const Progress, i: usize) []const u8 {
 
 /// JSON shape stored in saves; older saves without it load as a fresh start.
 pub const Doc = struct {
-    levels: [upgrade_count]u8 = @splat(0),
+    /// One level per upgrade, in `Upgrade` order; a save from before an upgrade existed is shorter.
+    levels: []const u8 = &.{},
     suits: []const Profile.Clothing = &.{},
     flags: []const []const u8 = &.{},
 };
@@ -133,13 +134,14 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     inline for (@typeInfo(Profile.Clothing).@"enum".fields) |f| if (self.owns(@enumFromInt(f.value))) try suits.append(arena, @enumFromInt(f.value));
     const flags = try arena.alloc([]const u8, self.flag_count);
     for (flags, 0..) |*out, i| out.* = try arena.dupe(u8, self.flag(i));
-    return .{ .levels = self.levels, .suits = suits.items, .flags = flags };
+    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     var result: Progress = .{};
+    if (doc.levels.len > upgrade_count) return error.InvalidProgress;
     for (doc.levels) |l| if (l > max_level) return error.InvalidProgress;
-    result.levels = doc.levels;
+    @memcpy(result.levels[0..doc.levels.len], doc.levels);
     for (doc.suits) |c| result.suits |= bit(c);
     if (doc.flags.len > max_flags) return error.InvalidProgress;
     for (doc.flags) |name| {
@@ -192,7 +194,10 @@ test "suits are bought once, and progress round-trips through its save shape" {
     const parsed = try std.json.parseFromSliceLeaky(Doc, arena.allocator(), json, .{});
     const back = try fromDoc(parsed);
     try std.testing.expect(back.owns(.exo_rig) and back.hasFlag("met_maro") and back.level(.grapple_reel) == 2);
-    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = .{ 0, 0, 9, 0, 0, 0 } }));
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &(.{0} ** (upgrade_count + 1)) }));
+    // Saves made before later upgrades existed list fewer levels; the rest start at 0.
+    try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));
     // A save without progress starts fresh with the free suits.
     try std.testing.expectEqual(free_suits, (try fromDoc(.{})).suits);
 }

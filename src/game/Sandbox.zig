@@ -1123,7 +1123,7 @@ fn trade(self: *Sandbox, stall: u8, row: *u8, key: TradeKey) bool {
         } else {
             const ware: Market.Ware = @enumFromInt(row.* - 1);
             self.market.buy(stall, ware, &self.wallet) catch |err| {
-                self.say("cannot buy: {s}", .{@errorName(err)});
+                self.say("cannot buy: {s}", .{reason(err)});
                 return false;
             };
             self.say("bought a {s} kit: place it with the build tool", .{@tagName(ware)});
@@ -1214,6 +1214,19 @@ pub fn talkKey(self: *Sandbox, key: Dialogue.Key) void {
     }
 }
 
+/// Player-facing wording for a failed purchase.
+fn reason(err: anyerror) []const u8 {
+    return switch (err) {
+        error.NotEnoughScrap => "not enough scrap",
+        error.NotEnoughParts => "not enough parts",
+        error.MaxLevel => "already fully tuned",
+        error.AlreadyOwned => "already owned",
+        error.SoldOut => "sold out until dawn",
+        error.NoParts => "no parts to sell",
+        else => "the stall cannot do that",
+    };
+}
+
 pub fn shopRows(self: *const Sandbox) u8 {
     const shop = self.shop orelse return 0;
     return switch (shop.kind) {
@@ -1233,12 +1246,12 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
         .confirm => switch (shop.kind) {
             .upgrades => {
                 const u: Progress.Upgrade = @enumFromInt(shop.row);
-                self.progress.buy(u, &self.wallet) catch |err| return self.say("cannot upgrade: {s}", .{@errorName(err)});
+                self.progress.buy(u, &self.wallet) catch |err| return self.say("cannot upgrade: {s}", .{reason(err)});
                 self.say("{s} now level {d}", .{ Progress.info[shop.row].name, self.progress.level(u) });
             },
             .wardrobe => {
                 const c: Profile.Clothing = @enumFromInt(shop.row);
-                if (!self.progress.owns(c)) self.progress.buySuit(c, &self.wallet) catch |err| return self.say("cannot buy: {s}", .{@errorName(err)});
+                if (!self.progress.owns(c)) self.progress.buySuit(c, &self.wallet) catch |err| return self.say("cannot buy: {s}", .{reason(err)});
                 self.profile.clothing = c;
                 self.say("wearing the {s}", .{@tagName(c)});
             },

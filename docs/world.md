@@ -32,6 +32,9 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Clothing: undersuit, field jacket, exo rig, hardsuit, or vanguard. The field jacket has modeled utility pockets; the armor silhouettes use rigid plates rather than cloth shells.
 - Armor style: none, scout, sentinel, rootweave (bark-green plates with lumen tracery), or skyguard (streamlined blue-green plates and light strips). Helmet: open, visor, or sealed; the visor is a curved wraparound shield with an inset lumen slit.
 
+- Suit upgrades from the south-market tinker: fuel tank, jet efficiency, sprint servos, stamina weave, grapple reel and salvage kit, three levels each, shared by the party. The armor suits (exo rig, hardsuit, vanguard) are bought from him too; the undersuit and field jacket are free.
+- Conversations: keepers and locals talk in branching dialogue, remember what you have done (salvage, shrines, bridges), and hint at the Rootdeep's waking machines.
+
 Clothing, gear, and accent unlocks found while exploring are future growth for this system.
 
 ## The Arbors

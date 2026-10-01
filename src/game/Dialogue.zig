@@ -105,15 +105,20 @@ pub fn find(self: *const Dialogue, id: []const u8) ?u16 {
     return null;
 }
 
-/// Pedestrian `index`'s conversation, cycling through the `walker_` conversations.
+/// Pedestrian `index`'s conversation, cycling through the `walker_` conversations in file
+/// order (their numbering need not be contiguous).
 pub fn walker(self: *const Dialogue, index: usize) ?u16 {
     var count: usize = 0;
     for (self.parsed.value.conversations) |c| {
         if (std.mem.startsWith(u8, c.id, "walker_")) count += 1;
     }
     if (count == 0) return null;
-    var buffer: [24]u8 = undefined;
-    return self.find(std.fmt.bufPrint(&buffer, "walker_{d}", .{index % count}) catch return null);
+    var n = index % count;
+    for (self.parsed.value.conversations, 0..) |c, i| if (std.mem.startsWith(u8, c.id, "walker_")) {
+        if (n == 0) return @intCast(i);
+        n -= 1;
+    };
+    unreachable;
 }
 
 fn passes(progress: *const Progress, requires: []const u8, unless: []const u8) bool {

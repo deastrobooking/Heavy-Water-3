@@ -2,6 +2,7 @@
 //! range; a missing or damaged file falls back to the defaults.
 const std = @import("std");
 const Settings = @This();
+const Bindings = @import("Bindings.zig");
 
 pub const path = "saves/settings.json";
 pub const Field = enum { sensitivity, invert_y, fov, ui_scale, third_person, metrics };
@@ -18,6 +19,8 @@ ui_scale: f32 = 1,
 third_person: bool = false,
 /// Performance overlay (F1).
 metrics: bool = false,
+/// Keyboard bindings (rebound on the controls screen).
+bindings: Bindings = .{},
 
 pub fn adjust(self: *Settings, field: Field, delta: i32) void {
     const d: f32 = @floatFromInt(delta);
@@ -57,16 +60,40 @@ pub fn fovRadians(self: Settings) f32 {
     return @as(f32, @floatFromInt(self.fov)) * std.math.pi / 180;
 }
 
+/// The file's shape, with wide number types so an out-of-range value (such as a field of view
+/// of 400) clamps instead of failing the whole file.
+const Raw = struct {
+    sensitivity: f64 = 1,
+    invert_y: bool = false,
+    fov: i64 = 60,
+    ui_scale: f64 = 1,
+    third_person: bool = false,
+    metrics: bool = false,
+    bindings: []const Bindings.Entry = &.{},
+};
+
 /// Parses settings, clamping every field into range; unknown fields are ignored.
 pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSettings}!Settings {
-    const parsed = std.json.parseFromSlice(Settings, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSettings;
+    const parsed = std.json.parseFromSlice(Raw, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSettings;
     defer parsed.deinit();
-    var s = parsed.value;
-    if (!std.math.isFinite(s.sensitivity) or !std.math.isFinite(s.ui_scale)) return error.InvalidSettings;
-    s.sensitivity = std.math.clamp(s.sensitivity, 0.25, 3);
-    s.ui_scale = std.math.clamp(s.ui_scale, 0.75, 1.5);
-    s.fov = std.math.clamp(s.fov, 50, 100);
-    return s;
+    const r = parsed.value;
+    const defaults: Settings = .{};
+    return .{
+        .sensitivity = if (std.math.isFinite(r.sensitivity)) @floatCast(std.math.clamp(r.sensitivity, 0.25, 3)) else defaults.sensitivity,
+        .invert_y = r.invert_y,
+        .fov = @intCast(std.math.clamp(r.fov, 50, 100)),
+        .ui_scale = if (std.math.isFinite(r.ui_scale)) @floatCast(std.math.clamp(r.ui_scale, 0.75, 1.5)) else defaults.ui_scale,
+        .third_person = r.third_person,
+        .metrics = r.metrics,
+        .bindings = Bindings.fromEntries(r.bindings),
+    };
+}
+
+/// The settings file's JSON (bindings by action and key name).
+pub fn toJson(self: Settings, allocator: std.mem.Allocator) ![]u8 {
+    var entries: [Bindings.count]Bindings.Entry = undefined;
+    const doc: Raw = .{ .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .metrics = self.metrics, .bindings = self.bindings.toEntries(&entries) };
+    return std.json.Stringify.valueAlloc(allocator, doc, .{ .whitespace = .indent_2 });
 }
 
 pub fn load(io: std.Io, allocator: std.mem.Allocator) Settings {
@@ -79,7 +106,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator) Settings {
 }
 
 pub fn store(self: Settings, io: std.Io, allocator: std.mem.Allocator) !void {
-    const json = try std.json.Stringify.valueAlloc(allocator, self, .{ .whitespace = .indent_2 });
+    const json = try self.toJson(allocator);
     defer allocator.free(json);
     try @import("Save.zig").writeFile(io, path, json);
 }
@@ -91,10 +118,14 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     for (0..20) |_| s.adjust(.fov, -1);
     try std.testing.expectEqual(@as(u8, 50), s.fov);
     s.adjust(.invert_y, 1);
-    const json = try std.json.Stringify.valueAlloc(std.testing.allocator, s, .{});
+    _ = try s.bindings.bind(.stomp, .z);
+    const json = try s.toJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     const back = try parse(std.testing.allocator, json);
     try std.testing.expectEqual(s, back);
     try std.testing.expectEqual(@as(u8, 100), (try parse(std.testing.allocator, "{\"fov\":200}")).fov);
+    // One wild value clamps; the other settings survive.
+    const wild = try parse(std.testing.allocator, "{\"fov\":400,\"invert_y\":true}");
+    try std.testing.expect(wild.fov == 100 and wild.invert_y);
     try std.testing.expectError(error.InvalidSettings, parse(std.testing.allocator, "{\"fov\":"));
 }

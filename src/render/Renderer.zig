@@ -35,7 +35,7 @@ pub const View = struct {
     /// Avatar owner hidden in this view (its own body in first person), or 0.
     hide_owner: u8 = 0,
     crosshair: bool = false,
-    /// Guest status and hint lines, drawn in `accent`.
+    /// Guest prompt text (`lines[1]`), drawn by the application's GUI; crosshair in `accent`.
     lines: [2]Overlay.Line = @splat(.{}),
     accent: [4]f32 = .{ 0.24, 0.88, 0.82, 1 },
 };
@@ -516,9 +516,6 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
             self.overlay.rect(cx - 7, cy - 1, 14, 2, if (i == 0) cyan else view.accent);
             self.overlay.rect(cx - 1, cy - 7, 2, 14, if (i == 0) cyan else view.accent);
         }
-        if (i > 0) for (view.lines, 0..) |line, k| if (line.len > 0) {
-            self.overlay.text(r.x + 30, r.y + r.h - 58 + @as(f32, @floatFromInt(k)) * 18, line.slice(), if (k == 0) view.accent else ink);
-        };
         // Dividers along the top and left edges of views that do not touch the window edge.
         if (f.y > 0) self.overlay.rect(r.x, r.y - 1, r.w, 2, .{ 0.02, 0.035, 0.05, 1 });
         if (f.x > 0) self.overlay.rect(r.x - 1, r.y, 2, r.h, .{ 0.02, 0.035, 0.05, 1 });

@@ -96,6 +96,7 @@ seconds: f32 = 0,
 /// The P1 pad's Menu button was pressed (opens or closes the pause menu).
 pad_menu: bool = false,
 gui_showcase_ready: bool = false,
+settings_dirty: bool = false,
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
@@ -149,14 +150,24 @@ fn uiActive(self: *const App) bool {
 }
 
 /// Arrow keys, WASD, Enter/Space/E and Escape navigate every GUI.
-fn navKey(key: mach.Core.KeyButtonID) ?Menu.Key {
-    return switch (key) {
-        .up, .w => .up,
-        .down, .s => .down,
-        .left, .a => .left,
-        .right, .d => .right,
-        .enter, .kp_enter, .space, .e => .confirm,
-        .escape => .back,
+/// Arrows, Enter and Escape always navigate; so do the bound move keys and the jump key.
+fn navKey(self: *const App, key: mach.Core.KeyButtonID) ?Menu.Key {
+    switch (key) {
+        .up => return .up,
+        .down => return .down,
+        .left => return .left,
+        .right => return .right,
+        .enter, .kp_enter => return .confirm,
+        .escape => return .back,
+        else => {},
+    }
+    const action = self.menu.settings.bindings.action(key) orelse return null;
+    return switch (action) {
+        .forward => .up,
+        .back => .down,
+        .left => .left,
+        .right => .right,
+        .jump => .confirm,
         else => null,
     };
 }
@@ -197,7 +208,11 @@ fn uiNav(self: *App, k: Menu.Key) void {
 }
 
 fn menuKey(self: *App, k: Menu.Key) void {
-    switch (self.menu.key(k)) {
+    self.runCommand(self.menu.key(k));
+}
+
+fn runCommand(self: *App, command: Menu.Command) void {
+    switch (command) {
         .none => {},
         .@"resume" => {
             self.menu.open(.none);
@@ -217,8 +232,13 @@ fn menuKey(self: *App, k: Menu.Key) void {
         .quit => self.core.exit(),
         .settings_changed => {
             self.show_metrics = self.menu.settings.metrics;
-            if (self.interactive) self.menu.settings.store(self.io, self.allocator) catch |err| self.report("SETTINGS NOT SAVED {s}", .{@errorName(err)});
+            self.settings_dirty = true;
         },
+    }
+    // Settings are written once on leaving their screen, not on every (repeating) press.
+    if (self.settings_dirty and self.menu.screen != .settings) {
+        self.settings_dirty = false;
+        if (self.interactive) self.menu.settings.store(self.io, self.allocator) catch |err| self.report("SETTINGS NOT SAVED {s}", .{@errorName(err)});
     }
 }
 
@@ -259,6 +279,12 @@ fn pointAt(self: *App, click: bool) void {
     const hit = id orelse return;
     const row = Screens.hitRow(hit);
     const sb = &self.sandbox;
+    // Only the top layer takes the mouse: a menu over a panel blocks the panel beneath.
+    const menu_area = switch (Screens.hitArea(hit)) {
+        .menu, .setting_left, .setting_right => true,
+        else => false,
+    };
+    if (menu_area != (self.menu.screen != .none)) return;
     switch (Screens.hitArea(hit)) {
         .menu => {
             self.menu.select(row);
@@ -407,44 +433,48 @@ pub fn update(self: *App, core: *mach.Core) void {
             // Held arrows scroll lists; held backspace erases the name.
             if (self.sandbox.creator.open and self.menu.screen == .none) {
                 if (key.key == .backspace or key.key == .left or key.key == .right or key.key == .up or key.key == .down) self.creatorKey(key.key);
-            } else if (key.key == .up or key.key == .down or key.key == .left or key.key == .right) self.uiNav(navKey(key.key).?);
+            } else if (key.key == .up or key.key == .down or key.key == .left or key.key == .right) self.uiNav(self.navKey(key.key).?);
         },
-        .key_press => |key| if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
+        .key_press => |key| if (self.menu.screen == .controls and self.menu.capturing) {
+            self.runCommand(self.menu.bindKey(key.key));
+        } else if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
             // Number keys pick a conversation choice directly.
             const digits = [_]mach.Core.KeyButtonID{ .one, .two, .three, .four, .five, .six };
             if (self.menu.screen == .none) if (self.sandbox.talk) |*talk| for (digits, 0..) |d, i| if (key.key == d and self.sandbox.dialogue.revealed(talk.*)) {
-                talk.choice = @intCast(i);
                 var visible: [Dialogue.max_choices]u8 = undefined;
-                if (i < self.sandbox.dialogue.visibleChoices(talk.*, &self.sandbox.progress, &visible)) self.sandbox.talkKey(.confirm);
+                if (i < self.sandbox.dialogue.visibleChoices(talk.*, &self.sandbox.progress, &visible)) {
+                    talk.choice = @intCast(i);
+                    self.sandbox.talkKey(.confirm);
+                }
             };
-            if (navKey(key.key)) |k| self.uiNav(k);
-        } else switch (key.key) {
-            .escape => self.menu.open(.pause),
-            .f2 => self.actions.toggle_view = true,
-            .f4 => self.actions.open_creator = true,
-            .r => self.actions.reset = true,
-            .v => self.actions.toggle_mode = true,
-            .f1 => self.show_metrics = !self.show_metrics,
-            .c => self.culling = !self.culling,
-            .f5 => self.quicksave(),
-            .f9 => _ = self.quickload(),
-            .one => self.actions.select_tool = 1,
-            .two => self.actions.select_tool = 2,
-            .three => self.actions.select_tool = 3,
-            .four => self.actions.select_tool = 4,
-            .tab => self.actions.next_item = true,
-            .t => self.actions.rotate = true,
-            .p => self.actions.capture = true,
-            .left_bracket => self.actions.channel_down = true,
-            .right_bracket => self.actions.channel_up = true,
-            .i => self.inspecting = !self.inspecting,
-            .space => self.engine.input.jump_pressed = true,
-            .left_control => self.engine.input.dodge = true,
-            .x => self.engine.input.stomp = true,
-            .g => self.engine.input.grapple = true,
-            .b => self.engine.input.cycle_mode = true,
-            .f6 => self.toggleGuest(),
-            else => {},
+            if (self.navKey(key.key)) |k| self.uiNav(k);
+        } else if (key.key == .escape) self.menu.open(.pause) else if (self.menu.settings.bindings.action(key.key)) |action| switch (action) {
+            // Held movement keys are sampled each frame; these are the press edges.
+            .forward, .back, .left, .right, .sprint, .mantle, .ascend, .descend => {},
+            .camera_view => self.actions.toggle_view = true,
+            .customize => self.actions.open_creator = true,
+            .reset => self.actions.reset = true,
+            .walk_fly => self.actions.toggle_mode = true,
+            .metrics => self.show_metrics = !self.show_metrics,
+            .culling => self.culling = !self.culling,
+            .quicksave => self.quicksave(),
+            .quickload => _ = self.quickload(),
+            .tool_hands => self.actions.select_tool = 1,
+            .tool_build => self.actions.select_tool = 2,
+            .tool_wire => self.actions.select_tool = 3,
+            .tool_bridge => self.actions.select_tool = 4,
+            .next_item => self.actions.next_item = true,
+            .rotate => self.actions.rotate = true,
+            .capture_prefab => self.actions.capture = true,
+            .channel_down => self.actions.channel_down = true,
+            .channel_up => self.actions.channel_up = true,
+            .inspect => self.inspecting = !self.inspecting,
+            .jump => self.engine.input.jump_pressed = true,
+            .roll => self.engine.input.dodge = true,
+            .stomp => self.engine.input.stomp = true,
+            .grapple => self.engine.input.grapple = true,
+            .traversal => self.engine.input.cycle_mode = true,
+            .add_guest => self.toggleGuest(),
         },
         .mouse_press => |mouse| if (self.uiActive()) {
             if (mouse.button == .left) self.pointAt(true);
@@ -480,7 +510,8 @@ pub fn update(self: *App, core: *mach.Core) void {
     core.windows.unlockShared();
     // A GUI frees the mouse; leaving it does not grab the mouse again until a click.
     if (self.uiActive() and self.captured) self.capture(core, false);
-    self.engine.input.sample(core);
+    self.engine.input.sample(core, self.menu.settings.bindings);
+    self.menu.seconds = self.seconds;
     self.pollPads();
     if (self.pad_menu) {
         self.pad_menu = false;
@@ -658,7 +689,8 @@ fn showcase(self: *App) void {
 }
 
 /// `-Dshowcase=18..26`: GUI screens for review. 18 title, 19 conversation, 20 upgrades,
-/// 21 market shop, 22 wardrobe, 23 customization, 24 pause, 25 settings, 26 HUD.
+/// 21 market shop, 22 wardrobe, 23 customization, 24 pause, 25 settings, 26 HUD,
+/// 27 four-player split screen with a guest trading, 28 controls while rebinding.
 fn guiShowcase(self: *App, v: u32) void {
     const sb = &self.sandbox;
     self.engine.input = .{};
@@ -699,6 +731,18 @@ fn guiShowcase(self: *App, v: u32) void {
         25 => {
             self.menu.open(.pause);
             self.menu.open(.settings);
+        },
+        28 => {
+            self.menu.open(.pause);
+            self.menu.open(.controls);
+            _ = self.menu.settings.bindings.bind(.stomp, .z) catch {};
+            self.menu.row = @intFromEnum(@import("game/Bindings.zig").Action.grapple);
+            self.menu.capturing = true;
+        },
+        27 => {
+            for (0..3) |i| sb.joinGuest(i);
+            sb.guests[1].trading = 0;
+            sb.guests[1].trade_row = 2;
         },
         else => {},
     }
@@ -1026,19 +1070,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.views[0].crosshair = sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk);
     renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
     renderer.view_count = 1;
-    // Showcases use P1's view only, even when guests stand in the shot.
-    if (options.showcase == 0) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
+    // City showcases use P1's view only, even when guests stand in the shot.
+    if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
         const view = &renderer.views[renderer.view_count];
         view.* = .{ .camera = g.camera, .hide_owner = if (g.view == .first) @intCast(i + 2) else 0, .crosshair = true, .accent = Profile.accent_colors[g.profile.accent] };
-        view.lines[0].set("{s}  {s}  {s}  FUEL {d:.0}", .{ g.profile.name(), @tagName(g.player.motion), @tagName(g.player.traversal), g.player.fuel });
-        if (g.trading) |stall| {
-            // The party shares P1's wallet; one row at a time fits a split view.
-            view.lines[0].set("{s}  MARKET {d}  SCRAP {d}  PARTS {d}  DPAD CHOOSE  X TRADE  B CLOSE", .{ g.profile.name(), Market.stall_plazas[stall], sandbox.wallet.scrap, sandbox.wallet.parts });
-            var row: Build.PanelLine = .{};
-            sandbox.tradeRow(stall, g.trade_row, true, &row);
-            view.lines[1].set("{s}", .{row.slice()});
-        } else if (g.target == .stall) {
-            view.lines[1].set("MARKET STALL {d}  X TRADE", .{Market.stall_plazas[g.target.stall]});
+        // The GUI draws the guest's vitals and stall panel; this is its aimed prompt.
+        if (g.target == .stall) {
+            view.lines[1].set("{s}'S STALL  X TRADE", .{Screens.keeperName(sandbox, g.target.stall)});
         } else if (g.target == .device) {
             const def = sandbox.machines[g.target.device.machine].blueprint.device(g.target.device.device);
             if (def.kind == .button) view.lines[1].set("{s} BUTTON  X PRESS", .{def.name()});
@@ -1124,6 +1162,15 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
     var clock: [32]u8 = undefined;
     const f = Renderer.viewRect(0, renderer.view_count);
     const ui = &renderer.ui;
+    // Guest views follow P1 in join order, as published above.
+    var guests: [Sandbox.max_players - 1]Screens.Hud.Guest = undefined;
+    var guest_count: usize = 0;
+    if (options.showcase == 0 or options.showcase >= 18) for (sandbox.guests, 0..) |g, i| if (g.active and guest_count + 1 < renderer.view_count) {
+        const view = guest_count + 1;
+        const r = Renderer.viewRect(view, renderer.view_count);
+        guests[guest_count] = .{ .index = @intCast(i), .view = .{ .x = r.x * ui.width, .y = r.y * ui.height, .w = r.w * ui.width, .h = r.h * ui.height }, .prompt = renderer.views[view].lines[1].slice() };
+        guest_count += 1;
+    };
     Screens.draw(ui, &self.menu, sandbox, .{
         .view = .{ .x = f.x * ui.width, .y = f.y * ui.height, .w = f.w * ui.width, .h = f.h * ui.height },
         .clock = std.fmt.bufPrint(&clock, "DAY {d}  {d:0>2}:{d:0>2}", .{ sandbox.market.day, minutes / 60, minutes % 60 }) catch "",
@@ -1132,6 +1179,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         .inspect = inspect_slices[0..inspect_count],
         .time = self.seconds,
         .seed = sandbox.seed,
+        .guests = guests[0..guest_count],
     });
     self.hit_len = ui.hit_len;
     @memcpy(self.hits[0..ui.hit_len], ui.hits[0..ui.hit_len]);

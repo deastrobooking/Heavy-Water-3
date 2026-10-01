@@ -11,6 +11,7 @@ const Creator = @import("../game/Creator.zig");
 const Progress = @import("../game/Progress.zig");
 const Dialogue = @import("../game/Dialogue.zig");
 const Settings = @import("../game/Settings.zig");
+const Bindings = @import("../game/Bindings.zig");
 const Market = @import("../city/Market.zig");
 const Rect = Canvas.Rect;
 const Color = Canvas.Color;
@@ -48,6 +49,10 @@ pub const Hud = struct {
     /// Seconds since start, for blinking cursors.
     time: f32 = 0,
     seed: u64 = 0,
+    /// Active guests' split views (P2–P4), each with its aimed prompt.
+    guests: []const Guest = &.{},
+
+    pub const Guest = struct { index: u8, view: Rect, prompt: []const u8 = "" };
 };
 
 fn alpha(c: Color, a: f32) Color {
@@ -89,7 +94,8 @@ fn bar(c: *Canvas, r: Rect, fraction: f32, color: Color) void {
 /// Everything for this frame, in draw order: HUD, then panels, then menus on top.
 pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     if (menu.screen == .title or (menu.base == .title and menu.screen != .none)) return drawTitle(c, menu, hud);
-    const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null;
+    for (hud.guests) |g| drawGuest(c, sb, g);
+    const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or menu.screen != .none;
     if (!sb.creator.open) drawHud(c, sb, hud, panels);
     if (sb.creator.open) drawCreator(c, sb, hud.view) else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
         .upgrades => drawUpgrades(c, sb, shop.row, hud.view),
@@ -128,6 +134,8 @@ fn drawTitle(c: *Canvas, menu: *const Menu, hud: Hud) void {
             y += 40;
         }
     } else drawMenu(c, menu, null);
+    // Load failures and other notices still need to reach the player here.
+    if (hud.toast.len > 0) c.text(x, c.height - 70, hud.toast, 1.1, bad);
     c.text(x, c.height - 44, "ARROWS OR MOUSE  ENTER SELECT  ESC BACK", 1, dim);
     c.print(x, c.height - 26, 1, alpha(dim, 0.7), "SEED {d}  NATIVE ZIG  MACH", .{hud.seed});
 }
@@ -188,32 +196,37 @@ fn drawSettings(c: *Canvas, menu: *const Menu) void {
     c.text(r.x + 18, r.y + r.h - 22, "LEFT RIGHT CHANGE  SAVED AUTOMATICALLY", 1, dim);
 }
 
-const bindings = [_][2][]const u8{
-    .{ "WASD", "MOVE" },              .{ "MOUSE", "LOOK" },
-    .{ "SPACE", "JUMP / JET" },       .{ "SHIFT", "SPRINT / BOOST" },
-    .{ "CTRL", "ROLL / DASH" },       .{ "X", "STOMP" },
-    .{ "G", "GRAPPLE" },              .{ "B", "CYCLE TRAVERSAL" },
-    .{ "F", "MANTLE" },               .{ "V", "WALK / FLY" },
-    .{ "CLICK", "USE / TALK / GRAB" }, .{ "RIGHT CLICK", "SALVAGE / REMOVE" },
-    .{ "1-4", "TOOLS" },              .{ "TAB  T", "NEXT ITEM  ROTATE" },
-    .{ "P", "CAPTURE PREFAB" },       .{ "I", "INSPECT MACHINE" },
-    .{ "F2", "FIRST / THIRD PERSON" }, .{ "F4", "CUSTOMIZE" },
-    .{ "F5  F9", "QUICK SAVE / LOAD" }, .{ "F6", "ADD / REMOVE GUEST" },
-    .{ "ESC", "PAUSE / BACK" },       .{ "F1", "PERFORMANCE" },
-};
-
 fn drawControls(c: *Canvas, menu: *const Menu) void {
-    const r = menuRect(c, 720, 120 + bindings.len / 2 * 24);
+    const rows: f32 = @floatFromInt(Menu.controls_column);
+    const r = menuRect(c, 780, 170 + rows * 21);
     panel(c, r, "CONTROLS");
-    for (bindings, 0..) |b, i| {
-        const x = r.x + 24 + @as(f32, @floatFromInt(i % 2)) * 350;
-        const y = r.y + 58 + @as(f32, @floatFromInt(i / 2)) * 24;
-        c.text(x, y, b[0], 1, gold);
-        c.text(x + 120, y, b[1], 1, ink);
+    const b = menu.settings.bindings;
+    for (0..Bindings.count) |i| {
+        const column: f32 = @floatFromInt(i / Menu.controls_column);
+        const x = r.x + 12 + column * 380;
+        const y = r.y + 50 + @as(f32, @floatFromInt(i % Menu.controls_column)) * 21;
+        const row: Rect = .{ .x = x, .y = y, .w = 368, .h = 19 };
+        const selected = menu.row == i;
+        rowBack(c, row, selected);
+        c.hit(row, hitId(.menu, i));
+        c.text(row.x + 12, row.y + 5, Bindings.label(@enumFromInt(i)), 0.9, if (selected) accent else ink);
+        var buffer: [24]u8 = undefined;
+        const name = if (selected and menu.capturing) (if (@mod(menu.seconds, 1.0) < 0.6) "PRESS A KEY" else "") else Bindings.keyName(b.keys[i], &buffer);
+        c.text(row.x + row.w - 12 - Canvas.textWidth(name, 0.9), row.y + 5, name, 0.9, gold);
     }
-    c.text(r.x + 24, r.y + r.h - 50, "PAD: STICKS MOVE/LOOK  A JUMP  X USE  B ROLL/BACK  MENU JOINS P2-P4", 1, dim);
-    const back: Rect = .{ .x = r.x + r.w - 130, .y = r.y + r.h - 38, .w = 110, .h = 26 };
-    button(c, back, "BACK", hitId(.menu, 0), menu.row == 0);
+    var note: [96]u8 = undefined;
+    const message = if (menu.capturing)
+        "PRESS THE NEW KEY  ESC CANCELS  ENTER IS RESERVED FOR MENUS"
+    else if (menu.swapped) |a|
+        std.fmt.bufPrint(&note, "{s} TOOK THE OLD KEY", .{Bindings.label(a)}) catch ""
+    else
+        "ENTER REBIND  LEFT RIGHT COLUMN  SAVED WHEN YOU LEAVE";
+    c.text(r.x + 24, r.y + r.h - 90, message, 1, if (menu.swapped != null and !menu.capturing) gold else dim);
+    c.text(r.x + 24, r.y + r.h - 68, "PAD: STICKS MOVE/LOOK  A JUMP  X USE  B ROLL/BACK  MENU PAUSES (P1) OR JOINS", 0.9, dim);
+    const reset: Rect = .{ .x = r.x + r.w - 290, .y = r.y + r.h - 40, .w = 150, .h = 26 };
+    const back: Rect = .{ .x = r.x + r.w - 130, .y = r.y + r.h - 40, .w = 110, .h = 26 };
+    button(c, reset, "RESET KEYS", hitId(.menu, Menu.controls_reset), menu.row == Menu.controls_reset);
+    button(c, back, "BACK", hitId(.menu, Menu.controls_back), menu.row == Menu.controls_back);
 }
 
 // ---------------------------------------------------------------- HUD
@@ -221,20 +234,7 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
 fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     const v = hud.view;
     // Vitals, bottom left (hidden under conversation and shop panels).
-    if (sb.seated == null and !panels) {
-        const p = sb.player;
-        const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 92, .w = 250, .h = 72 };
-        c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
-        c.rect(.{ .x = r.x, .y = r.y, .w = 3, .h = r.h }, Profile.accent_colors[sb.profile.accent]);
-        var name_buffer: [32]u8 = undefined;
-        c.text(r.x + 14, r.y + 10, sb.profile.name(), 1.2, ink);
-        const motion = if (p.mode == .fly) "FLY" else @tagName(p.motion);
-        c.text(r.x + 14 + Canvas.textWidth(sb.profile.name(), 1.2) + 12, r.y + 12, pretty(&name_buffer, motion), 1, dim);
-        c.text(r.x + 14, r.y + 32, "FUEL", 0.9, dim);
-        bar(c, .{ .x = r.x + 66, .y = r.y + 32, .w = 166, .h = 8 }, p.fuel / p.suit.fuel_max, accent);
-        c.text(r.x + 14, r.y + 50, "STAMINA", 0.9, dim);
-        bar(c, .{ .x = r.x + 66, .y = r.y + 50, .w = 166, .h = 8 }, p.stamina / 100, good);
-    }
+    if (sb.seated == null and !panels) vitals(c, v, sb.player, sb.profile);
     // Wallet and clock, top right.
     {
         var buffer: [48]u8 = undefined;
@@ -248,15 +248,63 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     }
     if (panels) return;
     // Interaction prompt and toast, bottom centre.
+    prompt(c, v, hud.prompt, accent);
+    if (hud.toast.len > 0) c.centered(v.x + v.w / 2, v.y + v.h - 150, hud.toast, 1.2, accent);
+}
+
+/// Name, motion, fuel and stamina in the bottom-left corner of a view.
+fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profile) void {
+    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 92, .w = 250, .h = 72 };
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+    c.rect(.{ .x = r.x, .y = r.y, .w = 3, .h = r.h }, Profile.accent_colors[profile.accent]);
+    var name_buffer: [32]u8 = undefined;
+    c.text(r.x + 14, r.y + 10, profile.name(), 1.2, ink);
+    const motion = if (p.mode == .fly) "FLY" else @tagName(p.motion);
+    c.text(r.x + 14 + Canvas.textWidth(profile.name(), 1.2) + 12, r.y + 12, pretty(&name_buffer, motion), 1, dim);
+    c.text(r.x + 14, r.y + 32, "FUEL", 0.9, dim);
+    bar(c, .{ .x = r.x + 66, .y = r.y + 32, .w = 166, .h = 8 }, p.fuel / p.suit.fuel_max, accent);
+    c.text(r.x + 14, r.y + 50, "STAMINA", 0.9, dim);
+    bar(c, .{ .x = r.x + 66, .y = r.y + 50, .w = 166, .h = 8 }, p.stamina / 100, good);
+}
+
+fn prompt(c: *Canvas, v: Rect, text: []const u8, tint: Color) void {
+    if (text.len == 0) return;
     const cx = v.x + v.w / 2;
-    if (hud.prompt.len > 0) {
-        const w = Canvas.textWidth(hud.prompt, 1.1) + 36;
-        const r: Rect = .{ .x = cx - w / 2, .y = v.y + v.h - 120, .w = w, .h = 28 };
-        c.rect(r, .{ 0.02, 0.035, 0.05, 0.72 });
-        c.frame(r, 1, alpha(accent, 0.5));
-        c.centered(cx, r.y + 9, hud.prompt, 1.1, ink);
+    const w = Canvas.textWidth(text, 1.1) + 36;
+    const r: Rect = .{ .x = cx - w / 2, .y = v.y + v.h - 120, .w = w, .h = 28 };
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.72 });
+    c.frame(r, 1, alpha(tint, 0.5));
+    c.centered(cx, r.y + 9, text, 1.1, ink);
+}
+
+/// A guest's split view: vitals, the aimed prompt, and a compact stall panel while trading
+/// (the party shares P1's wallet, shown in P1's view).
+fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
+    const g = &sb.guests[guest.index];
+    const v = guest.view;
+    const tint = Profile.accent_colors[g.profile.accent];
+    vitals(c, v, g.player, g.profile);
+    const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
+    const w = @min(v.w - 40, 460);
+    const h = 84 + @as(f32, Sandbox.trade_rows) * 26;
+    const r: Rect = .{ .x = v.x + v.w - w - 20, .y = v.y + 20, .w = w, .h = h };
+    c.rect(r, panel_fill);
+    c.rect(.{ .x = r.x, .y = r.y, .w = r.w, .h = 2 }, tint);
+    var title: [48]u8 = undefined;
+    var upper: [48]u8 = undefined;
+    c.text(r.x + 14, r.y + 12, pretty(&upper, std.fmt.bufPrint(&title, "{s}'S STALL", .{keeperName(sb, stall)}) catch ""), 1.2, tint);
+    c.print(r.x + w - 200, r.y + 14, 1, gold, "{d} SCRAP  {d} PARTS", .{ sb.wallet.scrap, sb.wallet.parts });
+    var y = r.y + 38;
+    for (0..Sandbox.trade_rows) |i| {
+        const row: Rect = .{ .x = r.x + 8, .y = y, .w = r.w - 16, .h = 22 };
+        rowBack(c, row, g.trade_row == i);
+        var line: Sandbox.TradeLine = .{};
+        sb.tradeRow(stall, @intCast(i), false, &line);
+        var shown: [96]u8 = undefined;
+        c.text(row.x + 8, row.y + 7, pretty(&shown, std.mem.trimStart(u8, line.slice(), " ")), 0.9, if (g.trade_row == i) tint else ink);
+        y += 26;
     }
-    if (hud.toast.len > 0) c.centered(cx, v.y + v.h - 150, hud.toast, 1.2, accent);
+    c.text(r.x + 14, r.y + r.h - 22, "D-PAD CHOOSE  X TRADE  B CLOSE", 0.9, dim);
 }
 
 fn kits(w: Market.Wallet) u32 {
@@ -330,7 +378,9 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
         c.text(tx, row.y + 8, value, 1, ink);
         y += row_height;
     }
-    const locked = @typeInfo(Profile.Clothing).@"enum".fields.len - @popCount(cr.owned & 0x1f);
+    const clothing_count = @typeInfo(Profile.Clothing).@"enum".fields.len;
+    const all: u8 = @intCast((@as(u16, 1) << clothing_count) - 1);
+    const locked = clothing_count - @popCount(cr.owned & all);
     if (locked > 0) c.print(r.x + 18, y + 8, 0.9, gold, "{d} ARMOR SUITS LOCKED: BUY THEM FROM MARO, SOUTH MARKET", .{locked});
     const done: Rect = .{ .x = r.x + r.w - 140, .y = r.y + r.h - 40, .w = 120, .h = 28 };
     button(c, done, "DONE", hitId(.creator_done, 0), false);
@@ -353,10 +403,11 @@ fn walletLine(c: *Canvas, sb: *const Sandbox, x: f32, y: f32) void {
     c.print(x + 140, y, 1.1, ink, "{d} PARTS", .{sb.wallet.parts});
 }
 
-fn shopFrame(c: *Canvas, v: Rect, rows: usize, title: []const u8, close_id: u16) Rect {
-    const h = 150 + @as(f32, @floatFromInt(rows)) * 34;
-    const w = @min(640, v.w - 40);
-    const r: Rect = .{ .x = v.x + v.w - w - 24, .y = v.y + @max(20, (v.h - h) / 2), .w = w, .h = h };
+/// A shop panel on the right of the view, or on the left when the character is on show.
+fn shopFrame(c: *Canvas, v: Rect, rows: usize, title: []const u8, close_id: u16, left: bool) Rect {
+    const h = 150 + @as(f32, @floatFromInt(rows)) * 34 + (if (left) @as(f32, 18) else 0);
+    const w = @min(@as(f32, if (left) 470 else 640), v.w - 40);
+    const r: Rect = .{ .x = if (left) v.x + 24 else v.x + v.w - w - 24, .y = v.y + @max(20, (v.h - h) / 2), .w = w, .h = h };
     panel(c, r, title);
     button(c, .{ .x = r.x + r.w - 40, .y = r.y + 12, .w = 26, .h = 24 }, "X", close_id, false);
     return r;
@@ -366,7 +417,7 @@ fn drawShop(c: *Canvas, sb: *const Sandbox, stall: u8, v: Rect) void {
     var title_buffer: [48]u8 = undefined;
     const title = std.fmt.bufPrint(&title_buffer, "{s}'S STALL  MARKET {d}", .{ keeperName(sb, stall), Market.stall_plazas[stall] }) catch "MARKET";
     var upper: [48]u8 = undefined;
-    const r = shopFrame(c, v, Sandbox.trade_rows, pretty(&upper, title), hitId(.trade_close, 0));
+    const r = shopFrame(c, v, Sandbox.trade_rows, pretty(&upper, title), hitId(.trade_close, 0), false);
     walletLine(c, sb, r.x + 18, r.y + 46);
     c.print(r.x + r.w - 220, r.y + 46, 1, dim, "DAY {d}  RESTOCKS AT DAWN", .{sb.market.day});
     var y = r.y + 76;
@@ -422,7 +473,7 @@ fn affordable(w: Market.Wallet, cost: Progress.Cost) bool {
 }
 
 fn drawUpgrades(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
-    const r = shopFrame(c, v, Progress.upgrade_count + 1, "SUIT UPGRADES  MARO, TINKER", hitId(.shop_close, 0));
+    const r = shopFrame(c, v, Progress.upgrade_count + 1, "SUIT UPGRADES  MARO, TINKER", hitId(.shop_close, 0), false);
     walletLine(c, sb, r.x + 18, r.y + 46);
     var y = r.y + 76;
     for (0..Progress.upgrade_count) |i| {
@@ -456,7 +507,8 @@ const suit_about = [_][]const u8{
 };
 
 fn drawWardrobe(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
-    const r = shopFrame(c, v, Sandbox.wardrobe_rows, "ARMOR WARDROBE  MARO, TINKER", hitId(.shop_close, 0));
+    // On the left: the wardrobe camera faces the character, centre-right.
+    const r = shopFrame(c, v, Sandbox.wardrobe_rows, "SUIT WARDROBE  MARO, TINKER", hitId(.shop_close, 0), true);
     walletLine(c, sb, r.x + 18, r.y + 46);
     var y = r.y + 76;
     inline for (@typeInfo(Profile.Clothing).@"enum".fields, 0..) |f, i| {
@@ -477,8 +529,11 @@ fn drawWardrobe(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
         }
         y += 34;
     }
-    c.text(r.x + 18, r.y + r.h - 50, suit_about[@min(selected, suit_about.len - 1)], 1, ink);
-    c.text(r.x + 18, r.y + r.h - 28, "ENTER BUY / WEAR  ESC CLOSE  CHANGE COLORS IN CUSTOMIZE (F4)", 0.9, alpha(dim, 0.8));
+    var lines: [3][]const u8 = undefined;
+    const columns: usize = @intFromFloat((r.w - 36) / Canvas.char_width);
+    const count = Canvas.wrap(suit_about[@min(selected, suit_about.len - 1)], columns, &lines);
+    for (lines[0..count], 0..) |line, i| c.text(r.x + 18, r.y + r.h - 68 + @as(f32, @floatFromInt(i)) * 16, line, 1, ink);
+    c.text(r.x + 18, r.y + r.h - 28, "ENTER BUY / WEAR  ESC CLOSE  F4 COLORS", 0.9, alpha(dim, 0.8));
 }
 
 // ---------------------------------------------------------------- conversations
@@ -527,7 +582,7 @@ fn drawTalk(c: *Canvas, sb: *const Sandbox, session: Dialogue.Session, hud: Hud)
             const selected = session.choice == i;
             rowBack(c, row, selected);
             c.hit(row, hitId(.choice, i));
-            var buffer: [72]u8 = undefined;
+            var buffer: [96]u8 = undefined;
             const marker = switch (ch.action) {
                 .trade => "  [TRADE]",
                 .upgrades => "  [UPGRADES]",
@@ -608,6 +663,21 @@ test "every screen lays out inside the window and records hits" {
         draw(&c, &m, &sb, hud);
         try expectInside(&c);
     }
+    // Four-player split screen: three guest views, one trading.
+    sb.shop = null;
+    for (0..3) |i| sb.joinGuest(i);
+    sb.guests[1].trading = 0;
+    var guests: [3]Hud.Guest = undefined;
+    for (&guests, 0..) |*g, i| {
+        const r = @import("../render/Layout.zig").viewRect(i + 1, 4);
+        g.* = .{ .index = @intCast(i), .view = .{ .x = r.x * 1280, .y = r.y * 720, .w = r.w * 1280, .h = r.h * 720 }, .prompt = "MARO'S STALL  X TRADE" };
+    }
+    var split = hud;
+    split.view = .{ .x = 0, .y = 0, .w = 640, .h = 360 };
+    split.guests = &guests;
+    c.reset(1280, 720);
+    draw(&c, &m, &sb, split);
+    try expectInside(&c);
     const id = hitId(.choice, 3);
     try std.testing.expectEqual(Area.choice, hitArea(id));
     try std.testing.expectEqual(@as(u8, 3), hitRow(id));

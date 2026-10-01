@@ -57,6 +57,7 @@ The towers at plazas 1, 3 and 5 each have a stall under the market canopy with a
 - **Stock and restock:** each stall stocks 0–3 of each kit per day, never nothing at all, at 80–125% of the base price. Days turn over at dawn, when every stall restocks with that day's seeded stock.
 - **Using kits:** a kit places one machine from the build palette and is used up. Removing the machine returns the kit. Kit machines cannot be captured as prefabs.
 - **Saving:** scrap, parts, held kits, stall stock and the day it was stocked are saved, along with each machine's kit flag.
+- **Keepers:** clicking a stall greets its keeper: **Maro** (south, plaza 1) the tinker, **Ines** (north, plaza 3) the sap broker, and **Tavi** (west, plaza 5) the Rootdeep scout. Each conversation can open the trade panel. Maro also sells suit upgrades and armor suits. Keepers remember meeting you and react to salvage, finished shrines and bridges you build, and some replies come with a scrap gift once. Pedestrians stop to chat when clicked.
 - **Co-op:** guests trade too, sharing P1's wallet. Aim at a stall and press **X**; the D-pad chooses a row, **X** trades, and **B** closes. A trading guest stands still. P1 on a controller uses the same buttons.
 
 Approximate world positions (X, Z); the seed shifts tower positions slightly:

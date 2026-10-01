@@ -35,13 +35,14 @@ The planned Hive conflict, recruitable synthetic allies and bio-synth companions
 | B | Cycle traversal kit: grapple, hover jet, flight, hoverboard |
 | F | Hold a ledge, then mantle |
 | V | Toggle walking and free-flight modes |
-| F2 / F4 | Change camera view / open character creator |
+| F2 / F4 | Change camera view / customize your ranger |
 | 1 / 2 / 3 / 4 | Hands / build / wire / bridge tools |
 | Q / E | Descend / ascend in flight |
 | Left click, then mouse | Capture pointer and look |
 | Left click (captured), hands | Grab or drop a crate, press a machine button, enter or exit the rover |
 | Right click (captured), hands | Salvage the relic under the crosshair |
-| Left click a market stall, hands | Open its trade panel; Up / Down choose, Enter trades, Escape closes |
+| Left click a stall keeper or pedestrian, hands | Talk. Up / Down or 1–6 choose a reply, Enter says it, Escape leaves. Keeper replies open the trade, upgrade, or wardrobe panels |
+| In any menu or panel | Arrows or W / S choose, Left / Right change, Enter or Space confirm, Escape back; the mouse hovers and clicks |
 | Build tool | Tab changes palette item; T rotates; left click places; right click removes |
 | Wire tool | Click source then target; Tab cycles port pairs; right click disconnects or cancels |
 | Bridge tool | Tab selects bridge style; click two plaza markers to build; right click cancels or removes |
@@ -51,7 +52,8 @@ The planned Hive conflict, recruitable synthetic allies and bio-synth companions
 | W / S, A / D (driving) | Throttle / reverse and steer |
 | Space (driving) | Brake |
 | F5 / F9 | Quicksave / quickload |
-| R / Escape | Return to spawn / release pointer |
+| R | Return to spawn |
+| Escape | Pause menu: resume, customize, save, load, settings, controls, quit. Every key in this table except Escape and Enter can be rebound under Controls |
 | C / F1 | Toggle culling / toggle metrics |
 | Window close | Quit |
 
@@ -63,9 +65,10 @@ Up to four players share one window in split screen. On macOS, supported extende
 | --- | --- |
 | Left / right stick | Move / look |
 | A | Jump |
-| B | Roll, boost, or dash; closes a market stall |
+| B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
 | X | Press the aimed button or open a stall; hold to hang and mantle |
-| D-pad up / down | Choose a market stall row |
+| D-pad | Choose a market stall row (P1: navigate any menu or panel) |
+| Menu (P1's controller) | Open or close the pause menu |
 | Y | First- / third-person view |
 | LB / RB | Grapple / cycle traversal kit |
 | LT | Sprint |
