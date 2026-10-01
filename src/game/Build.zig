@@ -14,18 +14,20 @@ const Vec3 = Physics.Vec3;
 
 pub const Tool = enum { hands, build, wire, bridge };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
-pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon };
+pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon, root_sender, root_listener };
 pub const build_reach: f32 = 14;
 pub const grid: f32 = 0.5;
 pub const max_candidates = 16;
 
 pub const builtin_count = std.meta.fields(Item).len;
-/// A palette entry: a built-in item or a captured prefab (index into `Sandbox.prefabs`).
-pub const Entry = union(enum) { item: Item, prefab: usize };
+const Market = @import("../city/Market.zig");
+/// A palette entry: a built-in item, a market kit, or a captured prefab (index into
+/// `Sandbox.prefabs`).
+pub const Entry = union(enum) { item: Item, kit: Market.Ware, prefab: usize };
 pub const Preview = struct { entry: Entry, origin: Vec3, center: Vec3, half: Vec3, yaw: u2, valid: bool };
 pub const State = struct {
     tool: Tool = .hands,
-    /// Palette position: built-in items first, then prefabs.
+    /// Palette position: built-in items, then market kits, then prefabs.
     slot: usize = 0,
     yaw: u2 = 0,
     preview: ?Preview = null,
@@ -38,17 +40,20 @@ pub const State = struct {
 };
 
 pub fn paletteLen(sb: *const Sandbox) usize {
-    return builtin_count + sb.prefab_count;
+    return builtin_count + Market.ware_count + sb.prefab_count;
 }
 
 pub fn current(sb: *const Sandbox) Entry {
     const slot = sb.tools.slot % paletteLen(sb);
-    return if (slot < builtin_count) .{ .item = @enumFromInt(slot) } else .{ .prefab = slot - builtin_count };
+    if (slot < builtin_count) return .{ .item = @enumFromInt(slot) };
+    if (slot < builtin_count + Market.ware_count) return .{ .kit = @enumFromInt(slot - builtin_count) };
+    return .{ .prefab = slot - builtin_count - Market.ware_count };
 }
 
 pub fn entryName(sb: *const Sandbox, e: Entry) []const u8 {
     return switch (e) {
         .item => |item| itemName(item),
+        .kit => |ware| sb.catalog.content.wares[@intFromEnum(ware)].name(),
         .prefab => |i| sb.prefabs[i].name(),
     };
 }
@@ -57,6 +62,7 @@ pub fn entryName(sb: *const Sandbox, e: Entry) []const u8 {
 fn blueprintOf(sb: *const Sandbox, e: Entry) ?*const Blueprint {
     return switch (e) {
         .item => |item| prefab(sb, item),
+        .kit => |ware| sb.catalog.content.wares[@intFromEnum(ware)],
         .prefab => |i| &sb.prefabs[i],
     };
 }
@@ -67,6 +73,8 @@ pub fn itemName(item: Item) []const u8 {
         .logic_or => "logic or",
         .powered_door => "powered door",
         .sap_tap => "sap tap",
+        .root_sender => "root sender",
+        .root_listener => "root listener",
         .sap_beacon => "sap beacon",
         else => @tagName(item),
     };
@@ -113,6 +121,8 @@ pub fn kitDevice(item: Item, id: []const u8) Blueprint.DocDevice {
         .lamp => .{ .id = id, .kind = .lamp, .size = .{ 0.35, 1.2, 0.35 }, .color = .{ 1, 0.9, 0.6, 1 }, .watts = 25, .body = true },
         .transmitter => .{ .id = id, .kind = .transmitter, .size = .{ 0.3, 1.4, 0.3 }, .color = .{ 0.95, 0.45, 0.8, 1 }, .channel = 1, .body = true },
         .receiver => .{ .id = id, .kind = .receiver, .size = .{ 0.5, 0.3, 0.5 }, .color = .{ 0.45, 0.55, 0.95, 1 }, .channel = 1, .body = true },
+        .root_sender => .{ .id = id, .kind = .root_sender, .size = .{ 0.5, 0.9, 0.5 }, .color = .{ 0.55, 0.95, 0.45, 1 }, .channel = 1, .body = true },
+        .root_listener => .{ .id = id, .kind = .root_listener, .size = .{ 0.7, 0.4, 0.7 }, .color = .{ 0.35, 0.8, 0.4, 1 }, .channel = 1, .body = true },
         .crate, .powered_door, .elevator, .rover, .sap_beacon => unreachable,
     };
 }
@@ -155,8 +165,11 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
                     if (p.valid) {
                         try place(sb, p);
                     } else {
-                        const sap_item = p.entry == .item and (p.entry.item == .sap_tap or p.entry.item == .sap_beacon);
-                        if (sap_item) sb.say("blocked: tap needs clear space by wood", .{}) else sb.say("blocked", .{});
+                        const wood_item = p.entry == .item and switch (p.entry.item) {
+                            .sap_tap, .sap_beacon, .root_sender, .root_listener => true,
+                            else => false,
+                        };
+                        if (wood_item) sb.say("blocked: needs clear space within 4 m of wood", .{}) else sb.say("blocked", .{});
                     }
                 } else sb.say("aim at the ground within {d:.0} m", .{build_reach});
             }
@@ -173,6 +186,7 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
                     sb.say("wire canceled", .{});
                 } else if (sb.target == .device) {
                     const d = sb.target.device;
+                    if (sb.machines[d.machine].shrine != null) return sb.say("shrine machines cannot be rewired", .{});
                     const placed = &sb.machines[d.machine];
                     const removed = placed.blueprint.disconnectInputs(d.device);
                     placed.machine.reconfigure();
@@ -247,24 +261,33 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
         inside_player = inside_player and @abs(c - result.center[k]) < h + result.half[k];
     }
     result.valid = result.valid and !sb.physics.overlapsBox(result.center, clear) and !inside_player;
+    // Nothing is built inside a shrine: its crates and plates are the puzzle.
+    for (0..Sandbox.shrine_count) |k| if (sb.shrines[k].machine != null and sb.insideShrine(k, result.center)) {
+        result.valid = false;
+    };
     if (blueprintOf(sb, e)) |bp| {
         for (bp.devices[0..bp.device_count]) |d| {
             if (d.kind == .sap_tap and sb.sapAttachment(R.add(result.origin, R.rotate(Sandbox.yawRotation(st.yaw), d.offset))) == null) result.valid = false;
         }
-    } else if (e.item == .sap_tap and sb.sapAttachment(result.center) == null) result.valid = false;
+    } else if ((e.item == .sap_tap or e.item == .root_sender or e.item == .root_listener) and sb.sapAttachment(result.center) == null) result.valid = false;
     return result;
 }
 
 pub fn place(sb: *Sandbox, p: Preview) !void {
     if (blueprintOf(sb, p.entry)) |bp| {
-        _ = sb.spawnMachine(null, bp.*, p.origin, p.yaw, false) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)});
+        if (p.entry == .kit and sb.wallet.kits[@intFromEnum(p.entry.kit)] == 0) return sb.say("no {s} kits: buy one at a market", .{entryName(sb, p.entry)});
+        const m = sb.spawnMachine(null, bp.*, p.origin, p.yaw, false) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)});
+        if (p.entry == .kit) {
+            sb.wallet.kits[@intFromEnum(p.entry.kit)] -= 1;
+            sb.machines[m].kit = p.entry.kit;
+        }
         return sb.say("placed {s}", .{entryName(sb, p.entry)});
     }
     const item = p.entry.item;
     switch (item) {
         .crate => _ = sb.spawnCrate(p.center, .{ 0, 0, 0 }) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)}),
         .powered_door, .elevator, .rover, .sap_beacon => unreachable,
-        .generator, .sap_tap, .button, .latch, .logic_or, .lamp, .transmitter, .receiver => {
+        .generator, .sap_tap, .button, .latch, .logic_or, .lamp, .transmitter, .receiver, .root_sender, .root_listener => {
             sb.tools.kit_serial += 1;
             var id_buffer: [Blueprint.id_len]u8 = undefined;
             const tag = switch (item) {
@@ -272,6 +295,8 @@ pub fn place(sb: *Sandbox, p: Preview) !void {
                 .logic_or => "or",
                 .transmitter => "tx",
                 .receiver => "rx",
+                .root_sender => "song",
+                .root_listener => "hear",
                 else => @tagName(item),
             };
             const id = std.fmt.bufPrint(&id_buffer, "{s}{d}", .{ tag, sb.tools.kit_serial }) catch unreachable;
@@ -291,6 +316,7 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
         },
         .device => |d| {
             const placed = &sb.machines[d.machine];
+            if (placed.shrine != null) return sb.say("shrines are part of the Rootdeep", .{});
             if (placed.workshop) {
                 const name = placed.blueprint.devices[d.device].id;
                 sb.removeWorkshopDevice(d) catch |err| return sb.say("cannot remove: {s}", .{@errorName(err)});
@@ -299,17 +325,23 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
         },
         .structure => |m| removeMachine(sb, m),
         .bridge => |i| {
-            sb.removeBridge(i);
+            if (!sb.closeBridge(i)) return sb.say("bridge closed: removed once traffic clears", .{});
             sb.say("removed bridge", .{});
         },
-        .relic, .none => sb.say("nothing to remove", .{}),
+        .relic, .stall, .none => sb.say("nothing to remove", .{}),
     }
 }
 
 fn removeMachine(sb: *Sandbox, m: u8) void {
     if (sb.seated == m) return sb.say("leave the vehicle first", .{});
+    if (sb.machines[m].shrine != null) return sb.say("shrines are part of the Rootdeep", .{});
     var name: [Blueprint.name_len]u8 = sb.machines[m].blueprint.name_buffer;
+    const kit = sb.machines[m].kit;
     sb.removeMachine(m);
+    if (kit) |ware| {
+        sb.wallet.kits[@intFromEnum(ware)] +|= 1;
+        return sb.say("removed {s}: kit returned", .{std.mem.sliceTo(&name, 0)});
+    }
     sb.say("removed {s}", .{std.mem.sliceTo(&name, 0)});
 }
 
@@ -345,6 +377,7 @@ fn wireClick(sb: *Sandbox) void {
     const st = &sb.tools;
     if (sb.target != .device) return sb.say("aim at a device", .{});
     const to = sb.target.device;
+    if (sb.machines[to.machine].shrine != null) return sb.say("shrine machines cannot be rewired", .{});
     const from = st.wire_from orelse {
         st.wire_from = to;
         st.wire_choice = 0;
@@ -366,13 +399,14 @@ fn wireClick(sb: *Sandbox) void {
     st.wire_choice = 0;
 }
 
-/// Steps the aimed transmitter or receiver through channels 1..max, wrapping. The machine
+/// Steps the aimed transmitter, receiver, or Rootsong device through channels 1..max, wrapping. The machine
 /// reads the new channel on its next step.
 pub fn adjustChannel(sb: *Sandbox, delta: i32) void {
     if (sb.target != .device) return;
     const d = sb.target.device;
     const def = &sb.machines[d.machine].blueprint.devices[d.device];
-    if (def.kind != .transmitter and def.kind != .receiver) return sb.say("only transmitters and receivers have channels", .{});
+    if (sb.machines[d.machine].shrine != null) return;
+    if (def.channel == 0) return sb.say("only transmitters, receivers, and root devices have channels", .{});
     const count: i32 = Device.max_channels;
     def.channel = @intCast(@mod(@as(i32, def.channel) - 1 + delta, count) + 1);
     sb.say("{s} channel {d}", .{ def.name(), def.channel });
@@ -388,6 +422,8 @@ pub fn capture(sb: *Sandbox) void {
         else => return sb.say("aim at a machine to capture it", .{}),
     };
     const placed = &sb.machines[m];
+    if (placed.kit != null) return sb.say("market designs cannot be captured", .{});
+    if (placed.shrine != null) return sb.say("shrines cannot be captured", .{});
     var bp = placed.blueprint;
     if (placed.workshop) recenter(&bp);
     const base_full = if (placed.workshop) "circuit" else placed.blueprint.name();
@@ -408,7 +444,7 @@ pub fn capture(sb: *Sandbox) void {
     sb.exported = index;
     sb.tools.tool = .build;
     sb.tools.wire_from = null;
-    sb.tools.slot = builtin_count + index;
+    sb.tools.slot = builtin_count + Market.ware_count + index;
     sb.say("captured {s}: now in the build palette", .{sb.prefabs[index].name()});
 }
 
@@ -434,6 +470,11 @@ pub const PanelLine = struct {
 
     pub fn slice(self: *const PanelLine) []const u8 {
         return self.text[0..self.len];
+    }
+
+    pub fn set(self: *PanelLine, comptime fmt: []const u8, args: anytype) void {
+        const written: []const u8 = std.fmt.bufPrint(&self.text, fmt, args) catch &self.text;
+        self.len = written.len;
     }
 };
 
@@ -476,6 +517,10 @@ pub fn inspect(sb: *const Sandbox, lines: []PanelLine) usize {
             const text = std.fmt.bufPrint(values[used..], " ch {d}", .{d.channel}) catch "";
             used += text.len;
         }
+        if (d.kind == .root_sender or d.kind == .root_listener) {
+            const text = if (machine.root_group[i]) |g| std.fmt.bufPrint(values[used..], " root group {d}", .{g}) catch "" else std.fmt.bufPrint(values[used..], " unrooted", .{}) catch "";
+            used += text.len;
+        }
         if (d.kind == .sap_tap) {
             if (sb.tap_links[m][i]) |link| {
                 const text = std.fmt.bufPrint(values[used..], " tree {d} node {d}", .{ link.tree, link.node }) catch "";
@@ -507,7 +552,10 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     return switch (st.tool) {
         .hands => "",
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
-        .build => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE", .{entryName(sb, current(sb))}) catch buffer,
+        .build => switch (current(sb)) {
+            .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.wallet.kits[@intFromEnum(ware)] }) catch buffer,
+            else => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE", .{entryName(sb, current(sb))}) catch buffer,
+        },
         .wire => if (pendingWire(sb)) |w| blk: {
             const bp = &sb.machines[st.wire_from.?.machine].blueprint;
             const a = bp.devices[w.from.device];

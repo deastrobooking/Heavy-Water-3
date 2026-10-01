@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "name": "rootsong_hearth",
+  "parts": [{ "offset": [0, 0.1, 1], "size": [1.4, 0.2, 3], "color": [0.28, 0.36, 0.3, 1] }],
+  "devices": [
+    { "id": "tap", "kind": "sap_tap", "offset": [0, 0.7, 0], "size": [0.6, 1, 0.6], "color": [0.15, 0.8, 0.65, 1], "watts": 200 },
+    { "id": "hear", "kind": "root_listener", "offset": [0, 0.45, 1], "size": [0.7, 0.4, 0.7], "color": [0.35, 0.8, 0.4, 1], "channel": 1 },
+    { "id": "glow", "kind": "lamp", "offset": [0, 1.2, 2], "size": [0.6, 2, 0.6], "color": [0.55, 1.0, 0.6, 1], "watts": 120 }
+  ],
+  "wires": [["tap.power", "glow.power"], ["hear.out", "glow.on"]]
+}

@@ -5,6 +5,7 @@ const Modifications = @import("../world/Modifications.zig");
 const Player = @import("Player.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Profile = @import("Profile.zig");
+const Market = @import("../city/Market.zig");
 
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
 /// into a world with the same seed, generator version, and content version; old worlds must not
@@ -12,9 +13,12 @@ const Profile = @import("Profile.zig");
 /// v2 added machine state; v3 vehicle bodies; v4 made the save describe the whole world:
 /// every placed machine as a full blueprint document (so rewiring persists) with its origin
 /// and quarter-turn yaw, and every crate; v5 added the captured prefab library; v6 the player's
-/// name and appearance; v7 adds constructed bridge edges and the district generator version.
+/// name and appearance; v7 constructed bridge edges and the district generator version; v8 adds
+/// the market wallet (scrap, salvaged parts) and each stall's stock with the day it was stocked;
+/// v9 tags Rootdeep shrine machines (their doors, latches, and sealed vault persist as machine
+/// state; the solver-verified layout is regenerated from the seed).
 /// Older saves are rejected, not migrated.
-pub const format_version: u32 = 7;
+pub const format_version: u32 = 9;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -30,6 +34,10 @@ pub const MachineState = struct {
     workshop: bool = false,
     states: []const f32,
     body: ?BodyState = null,
+    /// Market ware this machine was placed from (removing it returns the kit).
+    kit: ?u8 = null,
+    /// Rootdeep shrine index, for the generated shrine machines.
+    shrine: ?u8 = null,
 };
 /// A vehicle chassis: pose and velocities.
 pub const BodyState = struct { position: [3]f32, orientation: [4]f32, linear: [3]f32, angular: [3]f32 };
@@ -49,6 +57,9 @@ pub const Document = struct {
     collected: []const Modifications.ObjectRef,
     machines: []const MachineState,
     prefabs: []const Blueprint.Doc,
+    wallet: Market.Wallet,
+    market_day: u64,
+    market_stock: []const [Market.ware_count]u8,
 };
 
 pub fn encode(allocator: std.mem.Allocator, doc: Document) ![]u8 {
@@ -78,6 +89,11 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
         if (m.slot >= machine_slots or m.yaw > 3) return error.InvalidSave;
         for (doc.machines[0..i]) |other| if (other.slot == m.slot) return error.InvalidSave;
         for (m.origin) |v| if (!finite(v)) return error.InvalidSave;
+        if (m.kit) |k| if (k >= Market.ware_count) return error.InvalidSave;
+        if (m.shrine) |k| {
+            if (k >= 2) return error.InvalidSave;
+            for (doc.machines[0..i]) |other| if (other.shrine == k) return error.InvalidSave;
+        }
     }
     for (doc.machines) |m| if (m.body) |b| {
         for (b.position ++ b.orientation ++ b.linear ++ b.angular) |v| if (!finite(v)) return error.InvalidSave;
@@ -116,7 +132,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const collected = [_]Modifications.ObjectRef{.{ .x = -3, .z = 2, .id = 17 }};
     const devices = [_]Blueprint.DocDevice{.{ .id = "lamp", .kind = .lamp, .watts = 5 }};
     const machines = [_]MachineState{.{ .slot = 3, .blueprint = .{ .format = 1, .name = "bench", .devices = &devices }, .origin = .{ 1, 2, 3 }, .yaw = 1, .states = &.{0} }};
-    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{} };
+    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{}, .wallet = .{ .scrap = 40, .parts = 2 }, .market_day = 3, .market_stock = &.{ .{ 1, 0, 2 }, .{ 0, 0, 1 }, .{ 3, 3, 3 } } };
     const bytes = try encode(allocator, doc);
     defer allocator.free(bytes);
     const back = try decode(allocator, bytes, doc.seed, 4, 8);
@@ -127,6 +143,8 @@ test "save documents round-trip and reject mismatched or malformed input" {
     try std.testing.expectEqualSlices(f32, machines[0].states, back.value.machines[0].states);
     try std.testing.expectEqualStrings("lamp", back.value.machines[0].blueprint.devices[0].id);
     try std.testing.expectEqual(@as(u8, 1), back.value.machines[0].yaw);
+    try std.testing.expectEqual(Market.Wallet{ .scrap = 40, .parts = 2 }, back.value.wallet);
+    try std.testing.expectEqualSlices([Market.ware_count]u8, doc.market_stock, back.value.market_stock);
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 4, 2));
 
     try std.testing.expectError(error.SeedMismatch, decode(allocator, bytes, 1, 4, 8));
@@ -135,7 +153,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 7", "\"format\": 6");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 9", "\"format\": 8");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
 }

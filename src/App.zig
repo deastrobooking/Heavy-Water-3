@@ -16,6 +16,8 @@ const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
 const Gamepads = @import("engine/Gamepads.zig");
 const Profile = @import("game/Profile.zig");
+const Life = @import("city/Life.zig");
+const Market = @import("city/Market.zig");
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -58,6 +60,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
     try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
+    self.sandbox.enableLife();
     self.importPrefabs();
     // A new game begins by creating the character (not in unattended smoke or benchmark runs).
     if (options.smoke_frames == 0 and options.benchmark_frames == 0) self.sandbox.creator.begin(self.sandbox.profile);
@@ -91,6 +94,17 @@ fn creatorKey(self: *App, key: mach.Core.KeyButtonID) void {
         },
         .canceled => {},
     }
+}
+
+/// While a market stall is open, arrows, Enter, and Escape drive its panel.
+fn tradeKey(key: mach.Core.KeyButtonID) ?Sandbox.TradeKey {
+    return switch (key) {
+        .up => .up,
+        .down => .down,
+        .enter, .kp_enter => .confirm,
+        .escape => .close,
+        else => null,
+    };
 }
 
 /// Loads every valid blueprint in the prefab directory into the palette; invalid files are
@@ -137,7 +151,7 @@ pub fn update(self: *App, core: *mach.Core) void {
     var events = core.events(.default);
     while (events.next()) |event| switch (event) {
         .close => core.exit(),
-        .key_press => |key| if (self.sandbox.creator.open) self.creatorKey(key.key) else switch (key.key) {
+        .key_press => |key| if (self.sandbox.creator.open) self.creatorKey(key.key) else if (self.sandbox.trading != null and tradeKey(key.key) != null) self.sandbox.tradeKey(tradeKey(key.key).?) else switch (key.key) {
             .escape => self.capture(core, false),
             .f2 => self.actions.toggle_view = true,
             .f4 => self.actions.open_creator = true,
@@ -238,6 +252,14 @@ fn routePads(self: *App) void {
         const p = Gamepads.playerIndex(c);
         if (p == 0) {
             if (!cmd.connected) continue;
+            if (self.sandbox.trading != null) {
+                // A pad driving P1 at a stall: D-pad chooses, X trades, B closes.
+                if (cmd.up) self.sandbox.tradeKey(.up);
+                if (cmd.down) self.sandbox.tradeKey(.down);
+                if (cmd.interact) self.sandbox.tradeKey(.confirm);
+                if (cmd.input.dodge) self.sandbox.tradeKey(.close);
+                continue;
+            }
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
             self.actions.interact = self.actions.interact or cmd.interact;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
@@ -248,6 +270,8 @@ fn routePads(self: *App) void {
         g.input = cmd.input;
         g.interact = g.interact or cmd.interact;
         g.toggle_view = g.toggle_view or cmd.view;
+        g.trade_up = g.trade_up or cmd.up;
+        g.trade_down = g.trade_down or cmd.down;
     }
 }
 
@@ -294,6 +318,7 @@ fn exerciseSmoke(self: *App) void {
     const camera = &self.engine.camera;
     switch (stage) {
         1 => {
+            for (self.sandbox.shrines, 0..) |shrine, k| std.log.info("Smoke shrine {d}: {d} rooms at {d:.0} {d:.0}, verified plan of {d} actions after {d} candidates", .{ k, shrine.generated.puzzle.rooms, shrine.origin[0], shrine.origin[2], shrine.generated.plan.len, shrine.generated.attempts });
             // Create a character through the same key path the window uses.
             self.sandbox.creator.begin(self.sandbox.profile);
             for ([_]mach.Core.KeyButtonID{ .backspace, .backspace, .backspace, .backspace, .backspace, .backspace, .s, .o, .r, .a, .down, .right, .down, .down, .down, .right, .enter }) |key| self.creatorKey(key);
@@ -384,6 +409,12 @@ fn exerciseSmoke(self: *App) void {
             const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE CITY SAVE {s}", .{@errorName(err)});
             defer self.allocator.free(bytes);
             self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE CITY LOAD {s}", .{@errorName(err)});
+            var trips: u32 = 0;
+            for (self.sandbox.life.cars) |slot| if (slot) |car| {
+                trips += car.trips;
+            };
+            std.log.info("Smoke traffic: {d} cars, {d} pedestrians, {d} trips, {d} recoveries, {d} deadlocks broken", .{ self.sandbox.life.rigidCount(), Life.walker_count, trips, self.sandbox.life.resets, self.sandbox.life.deadlocks });
+            std.log.info("Smoke market: day {d}, stall stock {any}, salvaged parts {d}", .{ self.sandbox.market.day, self.sandbox.market.stalls[0].stock, self.sandbox.wallet.parts });
             std.log.info("Smoke city: six plazas, bridge {d} > {d} restored with collision; save {d} bytes", .{ self.sandbox.bridges[0].?.edge.a, self.sandbox.bridges[0].?.edge.b, bytes.len });
         },
         else => {},
@@ -460,7 +491,15 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         const view = &renderer.views[renderer.view_count];
         view.* = .{ .camera = g.camera, .hide_owner = if (g.view == .first) @intCast(i + 2) else 0, .crosshair = true, .accent = Profile.accent_colors[g.profile.accent] };
         view.lines[0].set("{s}  {s}  {s}  FUEL {d:.0}", .{ g.profile.name(), @tagName(g.player.motion), @tagName(g.player.traversal), g.player.fuel });
-        if (g.target == .device) {
+        if (g.trading) |stall| {
+            // The party shares P1's wallet; one row at a time fits a split view.
+            view.lines[0].set("{s}  MARKET {d}  SCRAP {d}  PARTS {d}  DPAD CHOOSE  X TRADE  B CLOSE", .{ g.profile.name(), Market.stall_plazas[stall], sandbox.wallet.scrap, sandbox.wallet.parts });
+            var row: Build.PanelLine = .{};
+            sandbox.tradeRow(stall, g.trade_row, true, &row);
+            view.lines[1].set("{s}", .{row.slice()});
+        } else if (g.target == .stall) {
+            view.lines[1].set("MARKET STALL {d}  X TRADE", .{Market.stall_plazas[g.target.stall]});
+        } else if (g.target == .device) {
             const def = sandbox.machines[g.target.device.machine].blueprint.device(g.target.device.device);
             if (def.kind == .button) view.lines[1].set("{s} BUTTON  X PRESS", .{def.name()});
         }
@@ -468,7 +507,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     };
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
     const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "FLY" else @tagName(sandbox.player.motion);
-    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SALVAGED {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.modifications.len });
+    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.wallet.scrap, sandbox.wallet.parts });
     if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;
@@ -479,14 +518,26 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
         .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  RMB SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
+        .stall => |i| renderer.hud_lines[1].set("MARKET STALL {d}  CLICK TRADE", .{Market.stall_plazas[i]}),
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;
             const def = machine.blueprint.device(ref.device);
+            const shrine = sandbox.machines[ref.machine].shrine;
             switch (def.kind) {
-                .button => renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
+                .button => if (shrine != null and std.mem.eql(u8, def.name(), "reset"))
+                    renderer.hud_lines[1].set("SHRINE {d} RESET  CLICK: CRATES AND LATCHES RETURN", .{shrine.?})
+                else if (shrine != null and std.mem.eql(u8, def.name(), "vault"))
+                    renderer.hud_lines[1].set("SEED VAULT  CLICK OPEN", .{})
+                else
+                    renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
+                .plate => renderer.hud_lines[1].set("WEIGHT PLATE {s}  {s}", .{ def.name(), if (machine.outputs[ref.device][0] > 0.5) "PRESSED" else "NEEDS A CRATE" }),
                 .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
                 .transmitter, .receiver => renderer.hud_lines[1].set("{s} {s} CHANNEL {d}  [ ] CHANGE", .{ def.name(), @tagName(def.kind), def.channel }),
+                .root_sender, .root_listener => if (machine.root_group[ref.device]) |g|
+                    renderer.hud_lines[1].set("{s} ROOTSONG CHANNEL {d}  ROOT GROUP {d}  [ ] CHANGE", .{ def.name(), def.channel, g })
+                else
+                    renderer.hud_lines[1].set("{s} ROOTSONG UNROOTED  NEEDS WOOD WITHIN 4 M", .{def.name()}),
                 .lamp => renderer.hud_lines[1].set("{s} LAMP {s}", .{ def.name(), if (machine.outputs[ref.device][2] > 0) "LIT" else "DARK" }),
                 .sap_tap => {
                     if (sandbox.tap_links[ref.machine][ref.device]) |link| {
@@ -502,7 +553,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .none => renderer.hud_lines[1] = .{},
     }
     renderer.panel_count = 0;
-    if (sandbox.creator.open) {
+    if (sandbox.trading != null) {
+        var lines: [Sandbox.trade_rows + 2]Build.PanelLine = undefined;
+        const count = sandbox.tradeLines(&lines);
+        for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});
+        renderer.panel_count = count;
+    } else if (sandbox.creator.open) {
         var lines: [Renderer.panel_capacity]Creator.Line = undefined;
         const count = sandbox.creator.lines(&lines);
         for (lines[0..count], renderer.panel[0..count]) |*line, *out| out.set("{s}", .{line.slice()});

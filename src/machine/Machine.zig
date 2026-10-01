@@ -24,6 +24,10 @@ pub const Environment = struct {
     controls: ?Controls = null,
     /// World signal bus from the previous step, indexed by channel − 1.
     bus: ?*const Bus = null,
+    /// Weights plates can sense (crate centres).
+    weights: []const [3]f32 = &.{},
+    /// Rootsong buses from the previous step, one per root group.
+    songs: []const Bus = &.{},
 };
 pub const Bus = [Device.max_channels]f32;
 pub const Controls = struct { throttle: f32 = 0, steer: f32 = 0, brake: f32 = 0 };
@@ -46,6 +50,9 @@ networks: [max_devices]Network = @splat(.{}),
 network_count: usize = 0,
 /// Resolved by the world after prepare and before requesting sap.
 connected_taps: [max_devices]bool = @splat(false),
+/// Root group each Rootsong device is attached to (null when not by wood); set by the world
+/// before `prepare`.
+root_group: [max_devices]?u8 = @splat(null),
 
 pub fn init(blueprint: *const Blueprint, origin: [3]f32) Machine {
     var self: Machine = .{ .blueprint = blueprint, .origin = origin };
@@ -139,6 +146,13 @@ pub fn prepare(self: *Machine, env: Environment) void {
             .steering => self.outputs[d][1] = std.math.clamp(self.input(d, 0), -1, 1),
             .transmitter => {},
             .receiver => self.outputs[d][0] = if (env.bus) |bus| bus[def.channel - 1] else 0,
+            .root_sender => {},
+            .plate => {
+                var pressed = false;
+                for (env.weights) |w| pressed = pressed or self.weighs(d, w);
+                self.outputs[d][0] = if (pressed) 1 else 0;
+            },
+            .root_listener => self.outputs[d][0] = if (self.root_group[d]) |g| (if (g < env.songs.len) env.songs[g][def.channel - 1] else 0) else 0,
             .lamp => if (self.input(d, 1) > 0.5) {
                 self.networks[self.network_of[d]].demand += def.watts;
             },
@@ -205,6 +219,16 @@ pub fn finish(self: *Machine, dt: f32) void {
     }
 }
 
+/// Writes each attached root sender's input onto its root group's song (largest value wins).
+/// Call after `step`; listeners in the same group hear it on the next step.
+pub fn sing(self: *const Machine, songs: []Bus) void {
+    for (self.blueprint.devices[0..self.blueprint.device_count], 0..) |def, d| {
+        if (def.kind != .root_sender) continue;
+        const g = self.root_group[d] orelse continue;
+        if (g < songs.len) songs[g][def.channel - 1] = @max(songs[g][def.channel - 1], self.input(d, 0));
+    }
+}
+
 /// Writes each transmitter's current input onto the bus (largest value wins per channel).
 /// Call after `step`; receivers read the result on the next step.
 pub fn transmit(self: *const Machine, bus: *Bus) void {
@@ -231,6 +255,13 @@ fn senses(self: *const Machine, d: usize, point: [3]f32) bool {
     const local = R.inverseRotate(self.rotation, R.sub(point, self.worldOffset(def.offset)));
     for (0..3) |k| if (@abs(local[k]) > def.size[k] / 2) return false;
     return true;
+}
+
+/// Whether weight `point` rests on plate `d`: over its footprint, up to 1.2 m above it.
+fn weighs(self: *const Machine, d: usize, point: [3]f32) bool {
+    const def = self.blueprint.devices[d];
+    const local = R.inverseRotate(self.rotation, R.sub(point, self.worldOffset(def.offset)));
+    return @abs(local[0]) <= def.size[0] / 2 and @abs(local[2]) <= def.size[2] / 2 and local[1] >= 0 and local[1] <= 1.2;
 }
 
 pub fn worldOffset(self: *const Machine, offset: [3]f32) [3]f32 {

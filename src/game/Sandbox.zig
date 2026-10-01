@@ -24,7 +24,15 @@ const Sandbox = @This();
 const Arbor = @import("../procedural/Arbor.zig");
 const Sap = @import("../machine/Sap.zig");
 const District = @import("../procedural/District.zig");
-pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider };
+const Rootsong = @import("../machine/Rootsong.zig");
+const Shrine = @import("../procedural/Shrine.zig");
+const Seed = @import("../procedural/Seed.zig");
+const Life = @import("../city/Life.zig");
+const Market = @import("../city/Market.zig");
+const Routes = @import("../city/Routes.zig");
+const Sky = @import("../engine/Sky.zig");
+/// `closing`: removed from the road graph, standing until the traffic on it has crossed.
+pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
 pub const SapLink = struct { tree: u8, node: u16 };
 
@@ -57,7 +65,13 @@ pub const Target = union(enum) {
     /// A machine's static structure.
     structure: u8,
     bridge: u8,
+    /// A market stall, by `Market` stall index.
+    stall: u8,
 };
+/// Keys the trade panel understands while a stall is open.
+pub const TradeKey = enum { up, down, confirm, close };
+/// Trade panel rows: sell parts, then one row per ware.
+pub const trade_rows: u8 = 1 + Market.ware_count;
 pub const Actions = packed struct {
     /// Tool primary: grab/press/enter (hands), place (build), connect (wire).
     interact: bool = false,
@@ -93,6 +107,18 @@ pub const Placed = struct {
     parts: [Blueprint.max_parts]Physics.Body = @splat(.none),
     /// Vehicle blueprints: the chassis rigid body and wheels. Parts and devices ride on it.
     vehicle: ?Vehicle = null,
+    /// Placed from a market kit; removing it returns the kit, and it cannot be captured.
+    kit: ?Market.Ware = null,
+    /// A Rootdeep shrine: protected from removal, capture, rewiring, and building inside.
+    shrine: ?u8 = null,
+};
+pub const shrine_count = 2;
+/// A generated Rootdeep shrine: its verified puzzle, where it stands, and its machine slot.
+pub const PlacedShrine = struct {
+    generated: Shrine.Generated,
+    origin: Physics.Vec3,
+    machine: ?u8 = null,
+    completed: bool = false,
 };
 
 // Physics user data: crates are their slot index; machine bodies set the top bit.
@@ -125,6 +151,12 @@ pub const Guest = struct {
     input: Input = .{},
     interact: bool = false,
     toggle_view: bool = false,
+    /// Market stall this guest is trading at (the party shares P1's wallet), and its row.
+    trading: ?u8 = null,
+    trade_row: u8 = 0,
+    /// Trade-panel edges from the pad (D-pad up/down; B closes; X confirms via `interact`).
+    trade_up: bool = false,
+    trade_down: bool = false,
 };
 /// Where guests appear relative to P1's facing: left, right, and behind.
 const guest_offsets = [_]Physics.Vec3{ .{ -1.6, 0, -0.6 }, .{ 1.6, 0, -0.6 }, .{ 0, 0, -2 } };
@@ -153,12 +185,26 @@ walk_amount: f32 = 0,
 physics: Physics,
 player: Player = .{},
 guests: [max_players - 1]Guest = @splat(.{}),
+/// Traffic and pedestrians; off until `enableLife` (the application enables it).
+life: Life = .{},
+/// Bumped whenever the road graph changes, so traffic replans.
+road_revision: u64 = 0,
+shrines: [shrine_count]PlacedShrine = undefined,
+market: Market = .{},
+wallet: Market.Wallet = .{},
+/// Stall whose trade panel is open (P1 only), and the selected row.
+trading: ?u8 = null,
+trade_row: u8 = 0,
 crates: [max_crates]Physics.Body = @splat(.none),
 machines: [max_machines]Placed = @splat(.{}),
 /// Slot of the machine that holds loose devices placed from the palette.
 workshop: ?u8 = null,
 /// Button pressed during the last step; the machines see it on the next step.
 press: ?DeviceRef = null,
+/// Root group per tree ID (see `machine/Rootsong.zig`), fixed for the resident grove.
+root_groups: [sap_tree_count]u8 = undefined,
+/// Rootsong buses per root group, written last step and heard this step.
+songs: [sap_tree_count]Machine.Bus = @splat(@splat(0)),
 /// World signal bus written by transmitters last step, read by receivers this step.
 bus: Machine.Bus = @splat(0),
 /// Vehicle machine the player is driving.
@@ -195,6 +241,9 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
         origin.* = .{ point[0], Terrain.surface(seed, point[0], point[1]).height, point[1] };
         collider.* = try Arbor.createCollider(allocator, &self.physics, &asset.tree, origin.*, world_flag);
     }
+    var roots: [sap_tree_count]Rootsong.Tree = undefined;
+    for (&roots, 0..) |*r, i| r.* = .{ .origin = self.treeOrigin(i), .height = self.tree(i).genome.height };
+    self.root_groups = Rootsong.groups(sap_tree_count, roots);
     const city = try District.geometry(&catalog.district);
     self.district_collider = try District.collider(allocator, &self.physics, city.slice(), world_flag);
     const half = self.crateHalf();
@@ -214,7 +263,108 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
         const z = spawn[2] + placement.offset[1];
         _ = try self.spawnMachine(null, bp.*, self.groundOrigin(bp, x, z, 0), 0, false);
     }
+    for (&self.shrines, 0..) |*shrine, k| {
+        const generated = Shrine.generate(Seed.mix(seed ^ (0x524f4f54 + k)));
+        const bp = try Shrine.blueprint(generated.puzzle, if (k == 0) "shrine_0" else "shrine_1");
+        const site = self.shrineSite(k, bp);
+        shrine.* = .{ .generated = generated, .origin = self.groundOrigin(&bp, site[0], site[1], 0) };
+        const m = try self.spawnMachine(null, bp, shrine.origin, 0, false);
+        self.machines[m].shrine = @intCast(k);
+        shrine.machine = m;
+        try self.spawnShrineCrates(k);
+    }
+    self.market = .init(seed, 0);
     self.resetPlayer(camera);
+}
+
+/// Rootdeep: the flattest of sixteen seeded forest-floor sites 110–260 m from spawn, clear of
+/// trunks, tower bases, the spawn area, and earlier shrines.
+fn shrineSite(self: *const Sandbox, k: usize, bp: Blueprint) [2]f32 {
+    const bounds = Build.footprint(&bp, 0);
+    var best: [2]f32 = .{ spawn[0] - 150, spawn[2] + 40 * @as(f32, @floatFromInt(k)) };
+    var best_score = std.math.inf(f32);
+    for (0..16) |c| {
+        const h = Seed.mix(self.seed ^ (0x53495445 + k * 64 + c));
+        const angle = Seed.unit(h) * 2 * std.math.pi;
+        const radius = 110 + 150 * Seed.unit(h >> 20);
+        const x = spawn[0] + @sin(angle) * radius;
+        const z = spawn[2] + @cos(angle) * radius;
+        const center: [2]f32 = .{ x, z + (bounds.lo[2] + bounds.hi[2]) / 2 };
+        var clear = true;
+        for (0..sap_tree_count) |t| clear = clear and planar(center, self.treeOrigin(t)) > 70;
+        for (self.catalog.district.nodes) |node| clear = clear and planar(center, node.position) > 50;
+        for (self.shrines[0..k]) |other| clear = clear and planar(center, other.origin) > 90;
+        if (!clear) continue;
+        var lo = std.math.inf(f32);
+        var hi = -std.math.inf(f32);
+        var sx = bounds.lo[0];
+        while (sx <= bounds.hi[0]) : (sx += 2) {
+            var sz = bounds.lo[2];
+            while (sz <= bounds.hi[2]) : (sz += 2) {
+                const y = Terrain.surface(self.seed, x + sx, z + sz).height;
+                lo = @min(lo, y);
+                hi = @max(hi, y);
+            }
+        }
+        if (hi - lo < best_score) {
+            best_score = hi - lo;
+            best = .{ x, z };
+        }
+    }
+    return best;
+}
+
+fn planar(a: [2]f32, b: Physics.Vec3) f32 {
+    return @sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[2]) * (a[1] - b[2]));
+}
+
+/// World position of a point in shrine `k`'s local frame.
+pub fn shrinePoint(self: *const Sandbox, k: usize, local: [3]f32) Physics.Vec3 {
+    return R.add(self.shrines[k].origin, local);
+}
+
+/// Whether `p` is inside shrine `k`'s walls (floor to roof).
+pub fn insideShrine(self: *const Sandbox, k: usize, p: Physics.Vec3) bool {
+    const l = R.sub(p, self.shrines[k].origin);
+    return @abs(l[0]) < Shrine.width / 2 + 0.5 and l[2] > -0.5 and l[2] < Shrine.length(self.shrines[k].generated.puzzle) + 0.5 and l[1] > -1 and l[1] < Shrine.height + 0.5;
+}
+
+fn spawnShrineCrates(self: *Sandbox, k: usize) !void {
+    const p = self.shrines[k].generated.puzzle;
+    const half = self.crateHalf();
+    for (0..p.plates) |c| _ = try self.spawnCrate(R.add(self.shrinePoint(k, Shrine.crateStart(p, c)), .{ 0, half[1] + 0.02, 0 }), .{ 0, 0, 0 });
+}
+
+/// The shrine's reset button: crates inside it return to their starts, latches reopen, and
+/// doors close. Crates carried out of the shrine stay where they are.
+pub fn resetShrine(self: *Sandbox, k: usize) !void {
+    const m = self.shrines[k].machine orelse return;
+    if (self.shrines[k].completed) return self.say("this seed vault is already open", .{});
+    for (0..max_crates) |i| if (self.crateLive(i) and self.insideShrine(k, self.cratePosition(@intCast(i)))) self.removeCrate(@intCast(i));
+    const placed = &self.machines[m];
+    var states: [Blueprint.max_devices]f32 = @splat(0);
+    try placed.machine.restore(states[0..placed.machine.states().len]);
+    for (placed.blueprint.devices[0..placed.blueprint.device_count], 0..) |def, d| {
+        if (def.kind == .actuator) self.physics.setTransform(placed.devices[d], placed.machine.devicePosition(d), .{ 0, 0, 0 });
+    }
+    try self.spawnShrineCrates(k);
+    self.say("shrine reset", .{});
+}
+
+/// A shrine is complete when its vault latch is set; the first time, its reward blueprint joins
+/// the build palette (and so the saved prefab library).
+fn checkShrines(self: *Sandbox) void {
+    for (&self.shrines, 0..) |*shrine, k| {
+        if (shrine.completed) continue;
+        const m = shrine.machine orelse continue;
+        const machine = &self.machines[m].machine;
+        const sealed = machine.blueprint.findDevice("sealed") orelse continue;
+        if (machine.outputs[sealed][1] < 0.5) continue;
+        shrine.completed = true;
+        const reward = self.catalog.content.rewards[k];
+        _ = self.addPrefab(reward.*) catch return self.say("seed vault opened: palette full", .{});
+        self.say("seed vault opened: {s} added to your palette", .{reward.name()});
+    }
 }
 
 /// Frees mesh colliders. Bodies and machines own no heap memory.
@@ -477,16 +627,34 @@ fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
     defer {
         g.interact = false;
         g.toggle_view = false;
+        g.trade_up = false;
+        g.trade_down = false;
     }
     if (g.toggle_view) g.view = if (g.view == .first) .third else .first;
+    // At a stall the pad drives the trade panel and the body stands still.
+    if (g.trading) |stall| {
+        const key: ?TradeKey = if (g.input.dodge) .close else if (g.interact) .confirm else if (g.trade_up) .up else if (g.trade_down) .down else null;
+        if (key) |k| if (self.trade(stall, &g.trade_row, k)) {
+            g.trading = null;
+        };
+        const d = R.sub(self.stallPosition(stall), g.player.feet);
+        if (@sqrt(d[0] * d[0] + d[2] * d[2]) > reach + 4) g.trading = null;
+        g.player.step(&self.physics, &g.camera, .{}, dt);
+        if (g.view == .third) self.chase(g.player.eye(), &g.camera);
+        return;
+    }
     g.camera.turn(g.input.look_x, g.input.look_y, dt);
     g.player.step(&self.physics, &g.camera, g.input, dt);
     g.body_yaw = g.camera.yaw;
     stride(g.player, &g.walk_phase, &g.walk_amount, dt);
     if (g.view == .third) self.chase(g.player.eye(), &g.camera);
-    // Hands only: aim from the eyes and press buttons. Machines see it on the next step.
+    // Hands only: aim from the eyes, press buttons, and open market stalls.
     const eye = g.player.eye();
-    g.target = self.pick(eye, g.camera.forward(), reach, false);
+    g.target = self.pick(eye, g.camera.forward(), reach, false, true);
+    if (g.interact and g.target == .stall) {
+        g.trading = g.target.stall;
+        g.trade_row = 0;
+    }
     if (g.interact and g.target == .device) {
         const d = g.target.device;
         if (self.machines[d.machine].blueprint.devices[d.device].kind == .button and self.press == null) self.press = d;
@@ -514,6 +682,8 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
     for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);
     self.stepMachines(dt);
+    self.checkShrines();
+    self.stepLife(dt);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
         // Spring the held crate toward a point in front of the eye; physics still resolves contacts.
@@ -531,6 +701,11 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     }
     self.physics.step(dt);
     self.tick += 1;
+    if (self.market.update(self.tick)) self.say("markets restocked for day {d}", .{self.market.day});
+    if (self.trading) |stall| {
+        const d = R.sub(self.stallPosition(stall), self.player.feet);
+        if (self.seated != null or @sqrt(d[0] * d[0] + d[2] * d[2]) > reach + 4) self.trading = null;
+    }
     if (self.seated) |m| {
         self.followVehicle(m, camera);
         self.target = .none;
@@ -544,15 +719,23 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     self.refreshNearby(aim.position);
     // Build and wire tools reach farther and ignore relics.
     const hands = self.tools.tool == .hands;
-    self.target = self.pick(aim.position, aim.forward(), if (hands) reach else Build.build_reach, hands);
+    self.target = self.pick(aim.position, aim.forward(), if (hands) reach else Build.build_reach, hands, hands);
     if (actions.channel_down or actions.channel_up) Build.adjustChannel(self, if (actions.channel_up) 1 else -1);
     switch (self.tools.tool) {
         .hands => {
             if (primary) {
                 if (self.held != null) self.release() else switch (self.target) {
                     .prop => |i| self.hold(i),
+                    .stall => |i| {
+                        self.trading = i;
+                        self.trade_row = 0;
+                    },
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
-                        .button => self.press = d,
+                        .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
+                            try self.resetShrine(self.machines[d.machine].shrine.?);
+                        } else {
+                            self.press = d;
+                        },
                         .seat => self.enterVehicle(d.machine, camera),
                         else => {},
                     },
@@ -560,7 +743,11 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
                 }
             }
             if (actions.secondary) switch (self.target) {
-                .relic => |relic| _ = try self.modifications.remove(relic.ref),
+                .relic => |relic| {
+                    _ = try self.modifications.remove(relic.ref);
+                    // Salvage yields a part a market will buy.
+                    self.wallet.parts += 1;
+                },
                 else => {},
             };
         },
@@ -640,6 +827,15 @@ fn followVehicle(self: *Sandbox, m: u8, camera: *Camera) void {
 fn stepMachines(self: *Sandbox, dt: f32) void {
     const previous = self.bus;
     self.bus = @splat(0);
+    const heard = self.songs;
+    self.songs = @splat(@splat(0));
+    defer for (&self.machines) |*placed| if (placed.active) placed.machine.sing(&self.songs);
+    var weights: [max_crates][3]f32 = undefined;
+    var weight_count: usize = 0;
+    for (0..max_crates) |i| if (self.crateLive(i)) {
+        weights[weight_count] = self.cratePosition(@intCast(i));
+        weight_count += 1;
+    };
     var others: [max_players - 1][3]f32 = undefined;
     var other_count: usize = 0;
     for (self.guests) |g| if (g.active) {
@@ -649,7 +845,13 @@ fn stepMachines(self: *Sandbox, dt: f32) void {
     defer for (&self.machines) |*placed| if (placed.active) placed.machine.transmit(&self.bus);
     for (&self.machines, 0..) |*placed, m| {
         if (!placed.active) continue;
-        var env: Machine.Environment = .{ .player_feet = self.player.feet, .other_feet = others[0..other_count], .bus = &previous };
+        var env: Machine.Environment = .{ .player_feet = self.player.feet, .other_feet = others[0..other_count], .bus = &previous, .songs = &heard, .weights = weights[0..weight_count] };
+        // Rootsong devices are heard only while within reach of wood.
+        for (placed.blueprint.devices[0..placed.blueprint.device_count], 0..) |def, d| {
+            placed.machine.root_group[d] = null;
+            if (def.kind != .root_sender and def.kind != .root_listener) continue;
+            if (self.sapAttachment(placed.machine.devicePosition(d))) |link| placed.machine.root_group[d] = self.root_groups[link.tree];
+        }
         if (self.press) |p| if (p.machine == m) {
             env.pressed = p.device;
         };
@@ -694,6 +896,127 @@ pub fn bridgeEdges(self: *const Sandbox, out: *[District.max_bridges]District.Ed
     return out[0..n];
 }
 
+/// The current road graph: generated roads plus player bridges.
+pub fn routes(self: *const Sandbox) Routes {
+    var edges: [District.max_bridges]District.Edge = undefined;
+    return Routes.init(&self.catalog.district, self.openBridgeEdges(&edges));
+}
+
+/// Player bridges open to traffic; a closing bridge is already gone as far as routing and
+/// saves are concerned.
+pub fn openBridgeEdges(self: *const Sandbox, out: *[District.max_bridges]District.Edge) []const District.Edge {
+    var n: usize = 0;
+    for (self.bridges) |maybe| if (maybe) |bridge| if (!bridge.closing) {
+        out[n] = bridge.edge;
+        n += 1;
+    };
+    return out[0..n];
+}
+
+/// Removes player bridge `slot` now if nothing is on it; otherwise closes it to new traffic
+/// and removes it once the cars and pedestrians on it have crossed. Returns whether it is gone.
+pub fn closeBridge(self: *Sandbox, slot: usize) bool {
+    if (slot >= self.bridges.len) return true;
+    const bridge = &(self.bridges[slot] orelse return true);
+    if (!self.bridgeOccupied(slot)) {
+        self.removeBridge(slot);
+        return true;
+    }
+    if (!bridge.closing) self.road_revision += 1;
+    bridge.closing = true;
+    return false;
+}
+
+/// Starts ambient traffic and pedestrians (cars take rigid-body slots while it runs).
+pub fn enableLife(self: *Sandbox) void {
+    if (self.life.active) self.life.despawn(&self.physics);
+    const graph = self.routes();
+    self.life.spawn(&self.physics, &graph, self.seed, self.catalog.content.rover.vehicle.?, world_flag, self.road_revision);
+}
+
+/// Whether a car or pedestrian is on player bridge `slot`.
+pub fn bridgeOccupied(self: *const Sandbox, slot: usize) bool {
+    const bridge = self.bridges[slot] orelse return false;
+    const graph = self.routes();
+    return self.life.occupies(&self.physics, &graph, bridge.edge);
+}
+
+/// Floor centre of market stall `i`.
+pub fn stallPosition(self: *const Sandbox, i: usize) Physics.Vec3 {
+    return District.marketPosition(&self.catalog.district, Market.stall_plazas[i]);
+}
+
+/// Trade panel input. Confirm on the first row sells every salvaged part; on a ware row it
+/// buys one kit of that blueprint for the build palette.
+pub fn tradeKey(self: *Sandbox, key: TradeKey) void {
+    const stall = self.trading orelse return;
+    if (self.trade(stall, &self.trade_row, key)) self.trading = null;
+}
+
+/// One trade-panel key for any player at `stall`; returns true when the panel closes.
+fn trade(self: *Sandbox, stall: u8, row: *u8, key: TradeKey) bool {
+    switch (key) {
+        .up => row.* = (row.* + trade_rows - 1) % trade_rows,
+        .down => row.* = (row.* + 1) % trade_rows,
+        .close => return true,
+        .confirm => if (row.* == 0) {
+            const earned = self.market.sellParts(stall, &self.wallet) catch {
+                self.say("no salvaged parts to sell", .{});
+                return false;
+            };
+            self.say("sold parts for {d} scrap", .{earned});
+        } else {
+            const ware: Market.Ware = @enumFromInt(row.* - 1);
+            self.market.buy(stall, ware, &self.wallet) catch |err| {
+                self.say("cannot buy: {s}", .{@errorName(err)});
+                return false;
+            };
+            self.say("bought a {s} kit: place it with the build tool", .{@tagName(ware)});
+        },
+    }
+    return false;
+}
+
+/// One trade-panel row's text (row 0 sells parts; others are wares), marked when selected.
+pub fn tradeRow(self: *const Sandbox, stall: u8, row: u8, selected: bool, out: *TradeLine) void {
+    const marker = if (selected) "> " else "  ";
+    if (row == 0) return out.set("{s}SELL {d} PARTS AT {d} SCRAP EACH", .{ marker, self.wallet.parts, self.market.partPrice(stall) });
+    const w = row - 1;
+    const ware: Market.Ware = @enumFromInt(w);
+    out.set("{s}{s} KIT  {d} SCRAP  STOCK {d}  HELD {d}", .{ marker, @tagName(ware), self.market.price(stall, ware), self.market.stalls[stall].stock[w], self.wallet.kits[w] });
+}
+
+pub const TradeLine = @import("Build.zig").PanelLine;
+/// The open stall's panel: header, one line per row (the selected one marked), and help.
+pub fn tradeLines(self: *const Sandbox, out: []TradeLine) usize {
+    const stall = self.trading orelse return 0;
+    out[0].set("MARKET {d}  DAY {d}  SCRAP {d}  PARTS {d}", .{ Market.stall_plazas[stall], self.market.day, self.wallet.scrap, self.wallet.parts });
+    for (0..trade_rows) |r| self.tradeRow(stall, @intCast(r), r == self.trade_row, &out[1 + r]);
+    out[1 + trade_rows].set("UP/DOWN CHOOSE  ENTER TRADE  ESC CLOSE  RESTOCKS AT DAWN", .{});
+    return 2 + trade_rows;
+}
+
+fn stepLife(self: *Sandbox, dt: f32) void {
+    if (!self.life.active) return;
+    var others: [16]Physics.Vec3 = undefined;
+    var n: usize = 0;
+    if (self.seated == null) {
+        others[n] = self.player.feet;
+        n += 1;
+    }
+    for (self.guests) |g| if (g.active) {
+        others[n] = g.player.feet;
+        n += 1;
+    };
+    for (self.machines) |placed| if (placed.active) if (placed.vehicle) |v| if (n < others.len) {
+        others[n] = self.physics.rigidPose(v.rigid).?.position;
+        n += 1;
+    };
+    const graph = self.routes();
+    self.life.step(&self.physics, &graph, self.road_revision, others[0..n], dt);
+    for (self.bridges, 0..) |maybe, i| if (maybe) |bridge| if (bridge.closing and !self.bridgeOccupied(i)) self.removeBridge(i);
+}
+
 pub fn validateBridge(self: *const Sandbox, edge: District.Edge) !void {
     var edges: [District.max_bridges]District.Edge = undefined;
     const current = self.bridgeEdges(&edges);
@@ -714,12 +1037,16 @@ pub fn addBridge(self: *Sandbox, edge: District.Edge) !u8 {
     } else return error.TooManyBridges;
     // A failed allocation leaves the graph and existing geometry untouched.
     self.bridges[slot] = try self.prepareBridge(edge, slot);
+    self.road_revision += 1;
     return @intCast(slot);
 }
 
 pub fn removeBridge(self: *Sandbox, slot: usize) void {
     if (slot >= self.bridges.len) return;
-    if (self.bridges[slot]) |bridge| self.physics.destroyMesh(bridge.collider);
+    if (self.bridges[slot]) |bridge| {
+        self.physics.destroyMesh(bridge.collider);
+        self.road_revision += 1;
+    }
     self.bridges[slot] = null;
 }
 
@@ -802,7 +1129,7 @@ fn refreshNearby(self: *Sandbox, eye: math.Vec3) void {
 
 /// Nearest crate, machine device or structure, or (when `relics`) uncollected relic along
 /// the view ray within `max_distance`. Terrain and machine structure occlude what is behind.
-pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distance: f32, relics: bool) Target {
+pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distance: f32, relics: bool, stalls: bool) Target {
     const origin: Physics.Vec3 = .{ eye.x(), eye.y(), eye.z() };
     const dir: Physics.Vec3 = .{ forward.x(), forward.y(), forward.z() };
     var best: Target = .none;
@@ -815,6 +1142,13 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distan
         const machine: u8 = @intCast((hit.user >> 8) & 0xFF);
         best = if (hit.user & bridge_flag != 0) .{ .bridge = @intCast(hit.user & 0xff) } else if (hit.user & world_flag != 0) .none else if (hit.user & machine_flag == 0) .{ .prop = hit.user } else if (hit.user & part_flag != 0) .{ .structure = machine } else .{ .device = .{ .machine = machine, .device = @intCast(hit.user & 0xFF) } };
     }
+    // Market stalls: the space under each canopy (hands only).
+    if (stalls) for (0..Market.stall_count) |i| {
+        const hit = Physics.rayBox(origin, dir, R.add(self.stallPosition(i), .{ 0, 1.75, 0 }), .{ 2.4, 1.75, 2 }) orelse continue;
+        if (hit.distance >= best_distance and hit.distance > 0) continue;
+        best = .{ .stall = @intCast(i) };
+        best_distance = hit.distance;
+    };
     if (relics) for (self.nearby) |chunk| for (chunk.objects[0..chunk.count]) |object| {
         if (object.kind != .relic) continue;
         const ref = Modifications.ObjectRef.of(chunk.key, object.local_id);
@@ -918,6 +1252,15 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     if (self.seated == null and self.player.mode == .walk and n < out.len) {
         n = avatar(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, 1, self.catalog.content.block, out, n);
     }
+    n = self.life.publish(&self.physics, self.catalog, Sky.at(Sky.timeOfDay(self.tick)).night, out, n);
+    // A keeper behind each stall's counter, facing its plaza.
+    for (0..Market.stall_count) |i| if (n < out.len) {
+        const stall = self.stallPosition(i);
+        const plaza = self.catalog.district.nodes[Market.stall_plazas[i]].position;
+        const keeper: Profile = .{ .outfit = @intCast((i * 3 + 1) % Profile.outfit_colors.len), .accent = @intCast((i + 1) % Profile.accent_colors.len), .hair_style = @enumFromInt(i % 5), .skin = @intCast((i * 3) % Profile.skin_tones.len) };
+        const toward = R.sub(plaza, stall);
+        n += Avatar.build(keeper, .{ .feet = R.sub(stall, R.scale(R.normalize(.{ toward[0], 0, toward[2] }), 1.2)), .yaw = std.math.atan2(toward[0], toward[2]) }, self.catalog.content.block, out[n..]);
+    };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
         n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount }, @intCast(i + 2), self.catalog.content.block, out, n);
     };
@@ -995,6 +1338,8 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
             .yaw = placed.yaw,
             .workshop = placed.workshop,
             .states = placed.machine.states(),
+            .kit = if (placed.kit) |k| @intFromEnum(k) else null,
+            .shrine = placed.shrine,
         };
         if (placed.vehicle) |vehicle| {
             const pose = self.physics.rigidPose(vehicle.rigid).?;
@@ -1007,13 +1352,20 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
     var bridge_edges: [District.max_bridges]District.Edge = undefined;
     return Save.encode(allocator, .{
         .seed = self.seed,
-        .bridges = self.bridgeEdges(&bridge_edges),
+        .bridges = self.openBridgeEdges(&bridge_edges),
         .tick = self.tick,
         .player = .{ .feet = self.player.feet, .yaw = camera.yaw, .pitch = camera.pitch, .mode = self.player.mode },
         .profile = self.profile.toDoc(),
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
         .machines = machines[0..machine_count],
+        .wallet = self.wallet,
+        .market_day = self.market.day,
+        .market_stock = stock: {
+            const rows = try arena.alloc([Market.ware_count]u8, Market.stall_count);
+            for (rows, self.market.stalls) |*row, stall| row.* = stall.stock;
+            break :stock rows;
+        },
         .prefabs = prefabs: {
             const docs = try arena.alloc(Blueprint.Doc, self.prefab_count);
             for (docs, self.prefabs[0..self.prefab_count]) |*doc, *bp| doc.* = try bp.toDoc(arena);
@@ -1048,11 +1400,13 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
             for (bp.devices[0..bp.device_count]) |d| bodies += @intFromBool(d.hasBody());
         }
     }
-    if (bodies > Physics.max_bodies or rigids > Physics.max_rigids or workshops > 1) return error.InvalidSave;
+    if (bodies > Physics.max_bodies or rigids + self.life.rigidCount() > Physics.max_rigids or workshops > 1) return error.InvalidSave;
     if (doc.prefabs.len > max_prefabs) return error.InvalidSave;
     var prefabs: [max_prefabs]Blueprint = undefined;
     for (doc.prefabs, prefabs[0..doc.prefabs.len]) |source, *bp| bp.* = try Blueprint.fromDoc(source);
 
+    var market = self.market;
+    try market.restore(doc.market_day, doc.market_stock, doc.tick);
     try District.validate(&self.catalog.district, doc.bridges);
     // Stage all allocating bridge work before committing any saved state.
     var staged: [District.max_bridges]?PlacedBridge = @splat(null);
@@ -1070,6 +1424,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
         const m = try self.spawnMachine(state.slot, bp, state.origin, @intCast(state.yaw), state.workshop);
         const placed = &self.machines[m];
         try placed.machine.restore(state.states);
+        if (state.kit) |k| placed.kit = @enumFromInt(k);
+        if (state.shrine) |k| placed.shrine = k;
         if (state.workshop) self.workshop = m;
         if (placed.vehicle) |vehicle| {
             const body = state.body.?;
@@ -1094,9 +1450,24 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     camera.pitch = std.math.clamp(doc.player.pitch, -1.5, 1.5);
     camera.position = self.player.eye();
     self.tick = doc.tick;
+    for (&self.shrines, 0..) |*shrine, k| {
+        shrine.machine = null;
+        shrine.completed = false;
+        for (self.machines, 0..) |placed, m| if (placed.active and placed.shrine == @as(?u8, @intCast(k))) {
+            shrine.machine = @intCast(m);
+            const sealed = placed.blueprint.findDevice("sealed") orelse continue;
+            shrine.completed = placed.machine.outputs[sealed][1] > 0.5 or placed.machine.state[sealed] > 0.5;
+        };
+    }
+    self.market = market;
+    self.wallet = doc.wallet;
+    self.trading = null;
     self.target = .none;
     self.press = null;
-    // Guests are not saved; they rejoin beside the restored P1.
+    // City life and guests are not saved: traffic restarts on the restored roads, and guests
+    // rejoin beside the restored P1.
+    self.road_revision += 1;
+    if (self.life.active) self.enableLife();
     for (&self.guests, 0..) |*g, i| if (g.active) self.respawnGuest(i);
     self.sap_stats = @splat(.{});
     self.tap_links = @splat(@splat(null));
@@ -1766,4 +2137,514 @@ test "four local players: guests join beside P1, move and look independently, pr
     try std.testing.expect(std.mem.indexOf(u8, bytes, "guest") == null);
     try sandbox.restore(std.testing.allocator, bytes, &camera);
     for (sandbox.guests[0..2]) |guest| try std.testing.expect(R.length(R.sub(guest.player.feet, sandbox.player.feet)) < 3);
+}
+
+test "city traffic drives its lanes, takes a new bridge, reroutes around a removed one; pedestrians walk" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.enableLife();
+    try std.testing.expectEqual(@as(usize, Life.car_count), sb.life.rigidCount());
+    var starts: [Life.walker_count]Physics.Vec3 = undefined;
+    for (sb.life.walkers, &starts) |w, *start| start.* = w.player.feet;
+    const deck = catalog.district.nodes[0].position[1];
+
+    // Ninety seconds of free traffic: every car reaches other plazas (waiting its turn at busy
+    // plazas), stays upright on the deck, and nothing needs recovering; pedestrians walk their
+    // walkways without falling.
+    for (0..5400) |_| {
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        for (sb.life.cars) |slot| {
+            const pose = sb.physics.rigidPose(slot.?.vehicle.rigid).?;
+            try std.testing.expect(R.rotate(pose.orientation, .{ 0, 1, 0 })[1] > 0.9 and pose.position[1] > deck - 3);
+        }
+    }
+    for (sb.life.cars) |slot| try std.testing.expect(@popCount(slot.?.visited) >= 3);
+    for (sb.life.walkers, starts) |w, start| {
+        try std.testing.expect(w.player.feet[1] > deck - 2);
+        try std.testing.expect(R.length(R.sub(w.player.feet, start)) > 20);
+    }
+    try std.testing.expectEqual(@as(u32, 0), sb.life.resets);
+
+    // A new 0 → 3 bridge is a shortcut: a car bound for 3 from 0 drives across it, and the
+    // bridge counts as occupied (the build tool refuses to remove it) while it does.
+    sb.life.park(2);
+    const slot = try sb.addBridge(.{ .a = 0, .b = 3 });
+    var graph = sb.routes();
+    try sb.life.sendCar(&sb.physics, &graph, 1, 0, 3);
+    var occupied = false;
+    var steps: usize = 0;
+    while (sb.life.cars[1].?.visited & (1 << 3) == 0 and steps < 4000) : (steps += 1) {
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        occupied = occupied or sb.bridgeOccupied(slot);
+    }
+    try std.testing.expect(occupied and steps < 4000);
+    try std.testing.expectEqual(@as(u8, 0), sb.life.cars[1].?.visited & (1 << 4 | 1 << 5));
+    sb.life.park(1);
+
+    // A car bound 1 → 0 → 3 over the bridge; the bridge is removed while it is on its way to 0,
+    // so it continues around the loop instead.
+    try sb.life.sendCar(&sb.physics, &graph, 0, 1, 3);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 0, 3 }, sb.life.cars[0].?.path.slice());
+    while (graph.progress(1, 0, sb.physics.rigidPose(sb.life.cars[0].?.vehicle.rigid).?.position) < 0.5) try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+    // Pedestrians may be crossing it, so it closes to new traffic and stands until they are off.
+    _ = sb.closeBridge(slot);
+    try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 0, 5, 4, 3 }, sb.life.cars[0].?.path.slice());
+    steps = 0;
+    while (sb.life.cars[0].?.visited & (1 << 3) == 0 and steps < 12000) : (steps += 1) try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+    try std.testing.expect(steps < 12000);
+    try std.testing.expectEqual(@as(u8, 1 << 0 | 1 << 1 | 1 << 3 | 1 << 4 | 1 << 5), sb.life.cars[0].?.visited);
+    try std.testing.expectEqual(@as(u32, 0), sb.life.resets);
+    // Nobody fell: once its last pedestrian is across, the closed bridge is gone.
+    steps = 0;
+    while (sb.bridges[slot] != null and steps < 20000) : (steps += 1) try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+    try std.testing.expect(sb.bridges[slot] == null);
+    try std.testing.expectEqual(@as(u32, 0), sb.life.resets);
+}
+
+test "markets buy salvaged parts, sell kits that place and refund, sell out, persist, and restock at dawn" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+
+    // Salvaging a relic yields one part.
+    sb.player.mode = .fly;
+    var objects: [Scatter.capacity]Scatter.Object = undefined;
+    const key = Key.fromPosition(spawn[0], spawn[2]);
+    const relic = for (objects[0..Scatter.generate(sb.seed, key, &objects)]) |o| {
+        if (o.kind == .relic) break o;
+    } else return error.SkipZigTest;
+    const rp = relic.transform.position;
+    camera.position = math.vec3(rp[0], rp[1] + relic.transform.scale, rp[2] - 2 - relic.transform.scale);
+    camera.yaw = 0;
+    camera.pitch = 0;
+    try run(&sb, &camera, .{}, .{}, 1);
+    try run(&sb, &camera, .{}, .{ .secondary = true }, 1);
+    try std.testing.expectEqual(@as(u32, 1), sb.wallet.parts);
+
+    // Walk up to the stall at plaza 1, aim under its canopy, and open it.
+    sb.player.mode = .walk;
+    const stall = sb.stallPosition(0);
+    const plaza = catalog.district.nodes[Market.stall_plazas[0]].position;
+    const out = R.normalize(.{ plaza[0] - stall[0], 0, plaza[2] - stall[2] });
+    try standAt(&sb, &camera, R.add(stall, R.add(R.scale(out, 4.5), .{ 0, 0.05, 0 })));
+    aimAt(&camera, R.add(stall, .{ 0, 1, 0 }));
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(sb.target == .stall and sb.target.stall == 0);
+    try run(&sb, &camera, .{}, .{ .interact = true }, 1);
+    try std.testing.expectEqual(@as(?u8, 0), sb.trading);
+    var lines: [trade_rows + 2]TradeLine = undefined;
+    try std.testing.expectEqual(@as(usize, trade_rows + 2), sb.tradeLines(&lines));
+
+    // Sell six parts (five more from the field), then buy one ware until it sells out.
+    sb.wallet.parts += 5;
+    sb.tradeKey(.confirm);
+    try std.testing.expectEqual(Market.Wallet{ .scrap = 6 * sb.market.partPrice(0) }, sb.wallet);
+    sb.wallet.scrap += 200;
+    const w: usize = for (0..Market.ware_count) |i| {
+        if (sb.market.stalls[0].stock[i] > 0) break i;
+    } else unreachable;
+    const ware: Market.Ware = @enumFromInt(w);
+    for (0..w + 1) |_| sb.tradeKey(.down);
+    const stocked = sb.market.stalls[0].stock[w];
+    const scrap = sb.wallet.scrap;
+    for (0..stocked + 1) |_| sb.tradeKey(.confirm);
+    try std.testing.expectEqual(stocked, sb.wallet.kits[w]);
+    try std.testing.expectEqual(@as(u8, 0), sb.market.stalls[0].stock[w]);
+    try std.testing.expectEqual(scrap - stocked * sb.market.price(0, ware), sb.wallet.scrap);
+
+    // Walking away closes the stall.
+    try standAt(&sb, &camera, .{ spawn[0], Terrain.surface(sb.seed, spawn[0], spawn[2]).height, spawn[2] });
+    try std.testing.expectEqual(@as(?u8, null), sb.trading);
+
+    // A kit places one machine of its design and is used up; that machine cannot be captured,
+    // and removing it returns the kit. With no kits left, nothing is placed.
+    const bp = catalog.content.wares[w];
+    const x = spawn[0] + 20;
+    const z = spawn[2] - 12;
+    const preview: Build.Preview = .{ .entry = .{ .kit = ware }, .origin = sb.groundOrigin(bp, x, z, 0), .center = undefined, .half = undefined, .yaw = 0, .valid = true };
+    const machines = sb.machineCount();
+    try Build.place(&sb, preview);
+    try std.testing.expectEqual(machines + 1, sb.machineCount());
+    try std.testing.expectEqual(stocked - 1, sb.wallet.kits[w]);
+    const m: u8 = for (sb.machines, 0..) |placed, i| {
+        if (placed.kit == ware) break @intCast(i);
+    } else unreachable;
+    sb.target = .{ .structure = m };
+    const prefabs = sb.prefab_count;
+    Build.capture(&sb);
+    try std.testing.expectEqual(prefabs, sb.prefab_count);
+    Build.remove(&sb, .{ .structure = m });
+    try std.testing.expectEqual(stocked, sb.wallet.kits[w]);
+    const held = sb.wallet.kits[w];
+    sb.wallet.kits[w] = 0;
+    try Build.place(&sb, preview);
+    try std.testing.expectEqual(machines, sb.machineCount());
+    sb.wallet.kits[w] = held;
+    try Build.place(&sb, preview);
+
+    // Wallet, stock, market day, and the kit machine survive a save round trip.
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    const saved_wallet = sb.wallet;
+    const saved_stalls = sb.market.stalls;
+    sb.wallet = .{};
+    sb.market = Market.init(sb.seed, 0);
+    try sb.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(saved_wallet, sb.wallet);
+    try std.testing.expectEqual(saved_stalls, sb.market.stalls);
+    try std.testing.expectEqual(ware, sb.machines[m].kit.?);
+
+    // The next dawn restocks every stall with that day's seeded stock.
+    const dawn = @import("../engine/Sky.zig").day_ticks * 9 / 10;
+    sb.tick = dawn - 2;
+    try run(&sb, &camera, .{}, .{}, 3);
+    try std.testing.expectEqual(@as(u64, 1), sb.market.day);
+    try std.testing.expectEqual(Market.init(sb.seed, dawn).stalls, sb.market.stalls);
+    try std.testing.expect(std.mem.indexOf(u8, sb.noticeText(), "restocked") != null);
+}
+
+test "Rootsong carries a channel only between Arbors that share roots, and only from rooted devices" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    // The test Arbor and the narrow Arbor overlap roots; the spreading Arbor stands alone.
+    try std.testing.expectEqual([sap_tree_count]u8{ 0, 0, 2 }, sb.root_groups);
+
+    // Sender at the test Arbor: button → latch → root sender, all loose workshop devices.
+    const o0 = sb.treeOrigin(0);
+    const r0 = sb.tree(0).genome.base_radius;
+    var refs: [3]DeviceRef = undefined;
+    for ([_]Build.Item{ .button, .latch, .root_sender }, &refs, 0..) |item, *ref, i| {
+        const x = o0[0] + r0 + 2;
+        const z = o0[2] - 3 + @as(f32, @floatFromInt(i)) * 1.5;
+        ref.* = try sb.addWorkshopDevice(Build.kitDevice(item, @tagName(item)), .{ x, Terrain.surface(sb.seed, x, z).height + 0.6, z });
+    }
+    const bp = &sb.machines[refs[0].machine].blueprint;
+    for ([_][2]usize{ .{ 0, 1 }, .{ 1, 2 } }) |pair| {
+        var buffer: [Build.max_candidates]Blueprint.Wire = undefined;
+        try std.testing.expect(Build.candidates(&sb, refs[pair[0]], refs[pair[1]], &buffer) > 0);
+        try bp.connect(buffer[0].from, buffer[0].to);
+    }
+    sb.machines[refs[0].machine].machine.reconfigure();
+
+    // Identical listener lamps: rooted at tree 1, rooted at tree 2, and far from any wood.
+    const listener = try Blueprint.parse(std.testing.allocator,
+        \\{"format":1,"name":"hearth","devices":[
+        \\ {"id":"cell","kind":"generator","offset":[0,0.5,0],"size":[0.5,1,0.5],"watts":100},
+        \\ {"id":"hear","kind":"root_listener","offset":[0,0.5,1],"size":[0.6,0.4,0.6],"channel":1},
+        \\ {"id":"lamp","kind":"lamp","offset":[0,0.8,2],"size":[0.4,1.2,0.4],"watts":20}],
+        \\ "wires":[["cell.power","lamp.power"],["hear.out","lamp.on"]]}
+    );
+    var lamps: [3]u8 = undefined;
+    for ([_]?usize{ 1, 2, null }, &lamps) |tree_id, *slot| {
+        const base: Physics.Vec3 = if (tree_id) |t| R.add(sb.treeOrigin(t), .{ sb.tree(t).genome.base_radius + 1.5, 0, -1 }) else .{ spawn[0] - 30, 0, spawn[2] };
+        slot.* = try sb.spawnMachine(null, listener, sb.groundOrigin(&listener, base[0], base[2], 0), 0, false);
+    }
+    const lamp = listener.findDevice("lamp").?;
+    const hear = listener.findDevice("hear").?;
+    try run(&sb, &camera, .{}, .{}, 2);
+    try std.testing.expectEqual(@as(?u8, 0), sb.machines[lamps[0]].machine.root_group[hear]);
+    try std.testing.expectEqual(@as(?u8, 2), sb.machines[lamps[1]].machine.root_group[hear]);
+    try std.testing.expectEqual(@as(?u8, null), sb.machines[lamps[2]].machine.root_group[hear]);
+    for (lamps) |m| try std.testing.expectEqual(@as(f32, 0), sb.machines[m].machine.outputs[lamp][2]);
+
+    // Press: only the lamp rooted in the sender's root group lights.
+    sb.press = refs[0];
+    try run(&sb, &camera, .{}, .{}, 10);
+    const lit = [3]bool{ true, false, false };
+    for (lamps, lit) |m, expected| try std.testing.expectEqual(expected, sb.machines[m].machine.outputs[lamp][2] > 0.99);
+
+    // A different channel is a different song.
+    sb.machines[lamps[0]].blueprint.devices[hear].channel = 2;
+    try run(&sb, &camera, .{}, .{}, 3);
+    try std.testing.expectEqual(@as(f32, 0), sb.machines[lamps[0]].machine.outputs[lamp][2]);
+    sb.machines[lamps[0]].blueprint.devices[hear].channel = 1;
+
+    // The song resumes after a save round trip (roots are re-resolved from positions).
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    try sb.restore(std.testing.allocator, bytes, &camera);
+    try run(&sb, &camera, .{}, .{}, 4);
+    for (lamps, lit) |m, expected| try std.testing.expectEqual(expected, sb.machines[m].machine.outputs[lamp][2] > 0.99);
+}
+
+test "cars wait at the edge of a plaza another car is inside, then go when it leaves" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.enableLife();
+    sb.life.park(2);
+    var graph = sb.routes();
+    // Car 1 stands in plaza 2; car 0 drives 1 → 2 → 3 toward it.
+    try sb.life.sendCar(&sb.physics, &graph, 1, 2, 5);
+    sb.life.park(1);
+    try sb.life.sendCar(&sb.physics, &graph, 0, 1, 3);
+    const node2 = catalog.district.nodes[2].position;
+    var waited: usize = 0;
+    for (0..2400) |_| {
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        if (sb.life.cars[0].?.waiting) waited += 1;
+        if (waited >= 120) break;
+    }
+    // Stopped at the edge for two seconds, outside the plaza.
+    try std.testing.expect(waited >= 120);
+    const p = sb.physics.rigidPose(sb.life.cars[0].?.vehicle.rigid).?.position;
+    const d = @sqrt((p[0] - node2[0]) * (p[0] - node2[0]) + (p[2] - node2[2]) * (p[2] - node2[2]));
+    try std.testing.expect(d > District.plaza_radius - 2 and d < District.plaza_radius + 8);
+    try std.testing.expect(sb.life.plaza_waits >= 1);
+    // Car 1 leaves toward plaza 5; car 0 proceeds and reaches plaza 3 with no deadlock broken.
+    sb.life.cars[1].?.parked = false;
+    var steps: usize = 0;
+    while (sb.life.cars[0].?.visited & (1 << 3) == 0 and steps < 6000) : (steps += 1) try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+    try std.testing.expect(steps < 6000);
+    try std.testing.expectEqual(@as(u32, 0), sb.life.deadlocks);
+    try std.testing.expectEqual(@as(u32, 0), sb.life.resets);
+}
+
+test "a guest trades at a stall with the party wallet while standing still, and B closes it" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.joinGuest(0);
+    const g = &sb.guests[0];
+    const stall = sb.stallPosition(1);
+    const plaza = catalog.district.nodes[Market.stall_plazas[1]].position;
+    const out = R.normalize(.{ plaza[0] - stall[0], 0, plaza[2] - stall[2] });
+    g.player = .{ .feet = R.add(stall, R.add(R.scale(out, 4.5), .{ 0, 0.05, 0 })) };
+    g.view = .first;
+    try run(&sb, &camera, .{}, .{}, 30);
+    g.camera.position = g.player.eye();
+    aimAt(&g.camera, R.add(stall, .{ 0, 1, 0 }));
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(g.target == .stall and g.target.stall == 1);
+    g.interact = true;
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expectEqual(@as(?u8, 1), g.trading);
+    try std.testing.expectEqual(@as(?u8, null), sb.trading);
+
+    // Stick input does not move a trading guest; the D-pad walks the rows.
+    const feet = g.player.feet;
+    g.input = .{ .forward = 1 };
+    try run(&sb, &camera, .{}, .{}, 30);
+    try std.testing.expect(R.length(R.sub(g.player.feet, feet)) < 0.05);
+    g.input = .{};
+    sb.wallet = .{ .parts = 3, .scrap = 200 };
+    g.interact = true; // Row 0: sell the party's parts.
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expectEqual(@as(u32, 0), sb.wallet.parts);
+    const w: u8 = for (0..Market.ware_count) |i| {
+        if (sb.market.stalls[1].stock[i] > 0) break @intCast(i);
+    } else unreachable;
+    for (0..w + 1) |_| {
+        g.trade_down = true;
+        try run(&sb, &camera, .{}, .{}, 1);
+    }
+    try std.testing.expectEqual(w + 1, g.trade_row);
+    g.interact = true;
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expectEqual(@as(u8, 1), sb.wallet.kits[w]);
+    // B closes the stall; the guest can walk again.
+    g.input = .{ .dodge = true };
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expectEqual(@as(?u8, null), g.trading);
+    g.input = .{ .forward = 1 };
+    try run(&sb, &camera, .{}, .{}, 30);
+    try std.testing.expect(R.length(R.sub(g.player.feet, feet)) > 1);
+}
+
+/// Walks P1 along the shrine walkway (x = 0) and then across to `local` in shrine `k`. While
+/// carrying, it looks up so the crate rides overhead (0.8 m ahead, 3.7 m up): clear of walls,
+/// doorways, and other crates, and above the height plates sense.
+fn shrineWalk(sb: *Sandbox, camera: *Camera, k: usize, local: [3]f32) !void {
+    const here = R.sub(sb.player.feet, sb.shrines[k].origin);
+    for ([_][2]f32{ .{ 0, here[2] }, .{ 0, local[2] }, .{ local[0], local[2] } }) |xz| {
+        const goal = sb.shrinePoint(k, .{ xz[0], 0, xz[1] });
+        var steps: usize = 0;
+        while (steps < 900) : (steps += 1) {
+            const dx = goal[0] - sb.player.feet[0];
+            const dz = goal[2] - sb.player.feet[2];
+            const d = @sqrt(dx * dx + dz * dz);
+            if (d < 0.2) break;
+            camera.yaw = std.math.atan2(dx, dz);
+            camera.pitch = if (sb.held != null) 1.2 else -0.3;
+            try sb.step(camera, .{ .forward = if (d < 1.2) 0.3 else 1 }, .{}, 1.0 / 60.0);
+        }
+        if (steps == 900) return error.ShrineWalkBlocked;
+    }
+}
+
+fn shrineDoor(sb: *const Sandbox, k: usize, door: usize) f32 {
+    const placed = &sb.machines[sb.shrines[k].machine.?];
+    var name: [4]u8 = undefined;
+    return placed.machine.state[placed.blueprint.findDevice(std.fmt.bufPrint(&name, "d{d}", .{door}) catch unreachable).?];
+}
+
+/// Faces `yaw` with the carrying pitch, lets a held crate settle, and releases it.
+fn shrineDrop(sb: *Sandbox, camera: *Camera, yaw: f32) !void {
+    camera.yaw = yaw;
+    camera.pitch = -0.3;
+    try run(sb, camera, .{}, .{}, 40);
+    try run(sb, camera, .{}, .{ .interact = true }, 90);
+    try std.testing.expectEqual(@as(?u32, null), sb.held);
+}
+
+/// Plays shrine `k`'s verified plan in the world from its entrance room: walking, aiming,
+/// pressing, carrying, and waiting on real doors, and checks after every action that each
+/// door is open exactly when the puzzle model says so.
+fn playShrine(sb: *Sandbox, camera: *Camera, k: usize) !void {
+    const shrine = &sb.shrines[k];
+    const p = shrine.generated.puzzle;
+    const m = shrine.machine.?;
+    // Crates by puzzle index: the live crate at each start position.
+    var crates: [Shrine.max_plates]u32 = undefined;
+    for (0..p.plates) |c| {
+        const start = sb.shrinePoint(k, Shrine.crateStart(p, c));
+        crates[c] = for (0..max_crates) |i| {
+            if (sb.crateLive(i) and @abs(sb.cratePosition(@intCast(i))[0] - start[0]) < 0.1 and @abs(sb.cratePosition(@intCast(i))[2] - start[2]) < 0.1) break @intCast(i);
+        } else return error.ShrineCrateMissing;
+    }
+
+    // Enter room 0 and play the verifier's plan with real walking, aiming, and carrying.
+    try standAt(sb, camera, sb.shrinePoint(k, .{ 0, 0.05, 2 }));
+    var state = Shrine.initial(p);
+    for (shrine.generated.plan.slice()) |action| {
+        const room = state.room;
+        switch (action) {
+            .press => |l| {
+                const b = Shrine.buttonPosition(p, l);
+                try shrineWalk(sb, camera, k, .{ -Shrine.width / 2 + 1.65, 0, b[2] });
+                aimAt(camera, sb.shrinePoint(k, b));
+                try run(sb, camera, .{}, .{}, 1);
+                try std.testing.expect(sb.target == .device and sb.target.device.machine == m);
+                try run(sb, camera, .{}, .{ .interact = true }, 1);
+            },
+            .pick => |c| {
+                const at = R.sub(sb.cratePosition(crates[c]), shrine.origin);
+                // Crates on the left are reached from the walkway; crates on plates from x = 0.4.
+                try shrineWalk(sb, camera, k, .{ if (at[0] < 0) 0 else 0.4, 0, at[2] });
+                aimAt(camera, sb.cratePosition(crates[c]));
+                try run(sb, camera, .{}, .{}, 1);
+                try std.testing.expect(sb.target == .prop and sb.target.prop == crates[c]);
+                try run(sb, camera, .{}, .{ .interact = true }, 1);
+                try std.testing.expectEqual(@as(?u32, crates[c]), sb.held);
+                camera.pitch = 1.2;
+                try run(sb, camera, .{}, .{}, 30);
+            },
+            .drop_plate => |plate| {
+                const pp = Shrine.platePosition(p, plate);
+                try shrineWalk(sb, camera, k, .{ pp[0] - 2.1, 0, pp[2] });
+                try shrineDrop(sb, camera, std.math.pi / 2.0);
+            },
+            .drop_floor => {
+                const c = Shrine.roomCenter(room);
+                try shrineWalk(sb, camera, k, .{ 0, 0, c[2] + 1.5 });
+                try shrineDrop(sb, camera, -std.math.pi / 2.0);
+            },
+            .move => |to| {
+                const door = @min(room, to);
+                var waited: usize = 0;
+                while (shrineDoor(sb, k, door) < 0.999 and waited < 240) : (waited += 1) try run(sb, camera, .{}, .{}, 1);
+                try std.testing.expect(waited < 240);
+                try shrineWalk(sb, camera, k, Shrine.roomCenter(to));
+            },
+            .vault => {
+                const v = Shrine.vaultPosition(p);
+                try shrineWalk(sb, camera, k, .{ 0, 0, v[2] - 2.5 });
+                aimAt(camera, sb.shrinePoint(k, v));
+                try run(sb, camera, .{}, .{}, 1);
+                try run(sb, camera, .{}, .{ .interact = true }, 10);
+            },
+        }
+        state = Shrine.apply(p, state, action).?;
+        try run(sb, camera, .{}, .{}, 90);
+        // The world agrees with the model: every door is open exactly when the model says so.
+        for (0..p.rooms - 1) |d| try std.testing.expectEqual(Shrine.doorOpen(p, state, d), shrineDoor(sb, k, d) > 0.5);
+        if (action != .vault) try std.testing.expect(sb.insideShrine(k, sb.player.feet));
+    }
+}
+
+test "Rootdeep shrines are verified before they appear, and the verifier's plan completes one in the world" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    // Both shrines stand in the Rootdeep with verified plans and their own machine slots.
+    for (sb.shrines) |shrine| {
+        try std.testing.expect(shrine.machine != null and !shrine.completed);
+        var s = Shrine.initial(shrine.generated.puzzle);
+        for (shrine.generated.plan.slice()) |a| s = Shrine.apply(shrine.generated.puzzle, s, a).?;
+        try std.testing.expect(R.length(R.sub(shrine.origin, .{ spawn[0], shrine.origin[1], spawn[2] })) > 100);
+    }
+    const k: usize = 0;
+    const shrine = &sb.shrines[k];
+    const m = shrine.machine.?;
+
+    // Protected: no removal, capture, or rewiring of the shrine machine.
+    const before = sb.machineCount();
+    Build.remove(&sb, .{ .structure = m });
+    sb.target = .{ .structure = m };
+    Build.capture(&sb);
+    try std.testing.expectEqual(before, sb.machineCount());
+    try std.testing.expectEqual(@as(usize, 0), sb.prefab_count);
+
+    try playShrine(&sb, &camera, k);
+    try std.testing.expect(shrine.completed);
+    try std.testing.expectEqual(@as(usize, 1), sb.prefab_count);
+    try std.testing.expectEqualStrings("rootsong_hearth", sb.prefabs[0].name());
+    const seed_lamp = sb.machines[m].blueprint.findDevice("seed").?;
+    try std.testing.expect(sb.machines[m].machine.outputs[seed_lamp][2] > 0.99);
+
+    // Completion and the reward survive a save round trip; shrine 1 is still sealed.
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    try sb.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expect(sb.shrines[0].completed and !sb.shrines[1].completed);
+    try std.testing.expectEqualStrings("rootsong_hearth", sb.prefabs[0].name());
+
+    // Shrine 1's reset button returns its crates and latches to the start.
+    const s1 = &sb.shrines[1];
+    const p1 = s1.generated.puzzle;
+    if (p1.plates > 0) {
+        const start = sb.shrinePoint(1, Shrine.crateStart(p1, 0));
+        const crate = for (0..max_crates) |i| {
+            if (sb.crateLive(i) and sb.insideShrine(1, sb.cratePosition(@intCast(i)))) break i;
+        } else unreachable;
+        sb.physics.setTransform(sb.crates[crate], sb.shrinePoint(1, .{ 3, 1, 4 }), .{ 0, 0, 0 });
+        try std.testing.expect(@abs(sb.cratePosition(@intCast(crate))[2] - start[2]) > 0.5 or @abs(sb.cratePosition(@intCast(crate))[0] - start[0]) > 0.5);
+    }
+    try sb.resetShrine(1);
+    try run(&sb, &camera, .{}, .{}, 30);
+    for (0..p1.plates) |c| {
+        const start = sb.shrinePoint(1, Shrine.crateStart(p1, c));
+        const found = for (0..max_crates) |i| {
+            if (!sb.crateLive(i)) continue;
+            const q = sb.cratePosition(@intCast(i));
+            if (@abs(q[0] - start[0]) < 0.2 and @abs(q[2] - start[2]) < 0.2) break true;
+        } else false;
+        try std.testing.expect(found);
+    }
+    for (0..p1.rooms - 1) |d| try std.testing.expectEqual(Shrine.doorOpen(p1, Shrine.initial(p1), d), shrineDoor(&sb, 1, d) > 0.5);
+    // After the reset, shrine 1's own verified plan completes it too.
+    try playShrine(&sb, &camera, 1);
+    try std.testing.expect(sb.shrines[1].completed);
+    try std.testing.expectEqualStrings("rootsong_call", sb.prefabs[1].name());
 }

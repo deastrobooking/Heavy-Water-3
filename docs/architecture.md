@@ -112,9 +112,32 @@ The renderer draws every view in one depth-cleared pass, each with its own viewp
 
 All views share one per-frame terrain upload budget, with a different view getting first claim each frame. The outline pass runs once over the shared depth buffer, so the seams between views draw as ink dividers. The HUD places P1's lines and panel inside P1's view, and each guest's status in its own view and accent colour.
 
+## City life and markets
+
+`city/Routes.zig` is the district as a routing graph. Plazas are nodes; generated roads plus open player bridges are edges. Routing is Dijkstra by road length over six nodes. Lanes (±1.75 m) and walkways (±5 m) are offsets to the right of travel from the road centre line, so they need no geometry of their own. `onRoad` tests deck membership outside the plazas.
+
+`city/Life.zig` owns three cars and eight pedestrians:
+
+- **Cars** are `physics/Vehicle` instances built from the rover blueprint's vehicle section. Their chassis rigids are tagged as world geometry, so they block picking but are never targets. A pure-pursuit autopilot aims 12 m ahead on the lane at 4 or 9 m/s.
+- **Yielding** stands in for rigid-rigid contact, which the backend does not have, and a deadlock breaker keeps two blocked cars from waiting forever.
+- **Pedestrians** are `game/Player` controllers driven by synthetic input.
+- **Replanning:** `Sandbox.road_revision` bumps on every bridge add, close, removal or load, and `Life` replans when it changes.
+- **Updates and cost:** the Sandbox steps city life after the machines and before physics, and cars take three of the eight rigid slots, which the save loader's capacity check accounts for.
+- **Closing bridges:** `Sandbox.closeBridge` removes a bridge at once if nothing is on it; otherwise it closes it and removes it when `Life.occupies` clears.
+
+`city/Market.zig` is pure state: seeded daily stock and prices, restock at dawn (`Market.dayOf`), and `sellParts` and `buy`, which leave everything unchanged on failure. The Sandbox owns the wallet and the single open trade panel. Stalls are picked as boxes under the market canopies, so the district geometry did not change. The build palette lists built-ins, then the three kits, then prefabs.
+
+## Rootsong and Rootdeep shrines
+
+`machine/Rootsong.zig` groups the resident Arbors by overlapping root reach (half each tree's height) with union-find. The `root_sender` and `root_listener` device kinds have channels like transmitters and receivers. Every step, before `prepare`, the Sandbox attaches each Rootsong device to the nearest wood within 4 m (`sapAttachment`) and writes that tree's group into `Machine.root_group`. Listeners read `Environment.songs[group]`, the previous step's buses, one per group, and `Machine.sing` writes senders into the next ones, largest value winning.
+
+`procedural/Shrine.zig` holds the shrine puzzle model, its breadth-first solver, the seeded generate-and-verify loop, and compilation into a validated blueprint (see [Rootdeep shrines](rootdeep.md)). The `plate` device kind senses `Environment.weights`, the live crate centres, over its footprint up to 1.2 m above it.
+
+The Sandbox places two shrines at init on seeded flat sites, tags their machines (`Placed.shrine`), and spawns their crates. After machines step, it marks a shrine complete when its `sealed` latch is set and adds the reward to the prefab library. Removing, capturing, rewiring, retuning, or building inside a shrine is refused.
+
 ## Saves
 
-`game/Save.zig` writes JSON format v7: format, seed, generator version, content version, tick, player pose and mode, every crate by slot, removed relic IDs, and every machine by slot with its full blueprint document (as edited in the world), origin, quarter-turn yaw, workshop flag, per-device state, and for vehicles the chassis pose and velocities, plus the captured prefab library as blueprint documents, the player's profile, Arbor/district generator versions, and player bridge endpoint pairs. The save therefore describes the whole built world; the default layout is only the new-game state. Older formats are rejected, not migrated. Content version 2 added the door and elevator; version 3 added the rover. Whether the player is seated is not saved: loading leaves the player standing. Writes go to a temporary file and are renamed over `saves/quicksave.json`. Loading parses and validates everything (versions, seed, slot ranges, duplicates, finite values, each blueprint through `fromDoc`, machine state restored into scratch machines, at most one workshop, and physics body and rigid capacity, and district graph validation) before tearing down and rebuilding the session. Bridge colliders are allocated into staging first, with cleanup on failure, so a rejected save changes nothing. Procedural content is never stored; it is regenerated from seed and generator version, and the saved deltas are applied on top.
+`game/Save.zig` writes JSON format v9: format, seed, generator version, content version, tick, player pose and mode, every crate by slot, removed relic IDs, and every machine by slot with its full blueprint document (as edited in the world), origin, quarter-turn yaw, workshop flag, per-device state, and for vehicles the chassis pose and velocities, plus the captured prefab library as blueprint documents, the player's profile, Arbor/district generator versions, player bridge endpoint pairs (bridges already closing are left out), the market wallet (scrap, parts, kits), each stall's stock with its market day, each machine's market-kit flag, and each Rootdeep shrine machine's shrine index. Content version 6 added the market blueprints; version 7 the shrines and Rootsong reward blueprints. The save therefore describes the whole built world; the default layout is only the new-game state. Older formats are rejected, not migrated. Content version 2 added the door and elevator; version 3 added the rover. Whether the player is seated is not saved: loading leaves the player standing. Writes go to a temporary file and are renamed over `saves/quicksave.json`. Loading parses and validates everything (versions, seed, slot ranges, duplicates, finite values, each blueprint through `fromDoc`, machine state restored into scratch machines, at most one workshop, and physics body and rigid capacity, and district graph validation) before tearing down and rebuilding the session. Bridge colliders are allocated into staging first, with cleanup on failure, so a rejected save changes nothing. Procedural content is never stored; it is regenerated from seed and generator version, and the saved deltas are applied on top.
 
 ## Coordinates and GPU layout
 
@@ -147,6 +170,7 @@ CPU culling tests chunk bounding spheres, then compacts surviving scatter instan
 | GPU meshes, uniform and instance buffers, texture, sampler, pipelines | Renderer | Created lazily on render thread; released in shutdown |
 | Split-screen views 2–4: StreamingScene, streamer thread, 49 payloads, 25 GPU chunk pairs, per-view uniform/instance buffers | Renderer, heap allocator | Created the first time that view is shown; kept (never regrown) until shutdown |
 | Guest players and controller state | App's Sandbox and Gamepads (fixed capacity) | Application; guests are session-only |
+| Traffic cars (3 rigid slots), pedestrians, market stalls, wallet | App's Sandbox (`Life`, `Market`; fixed capacity) | Application; city life respawns on load, markets and wallet are saved |
 | Depth texture and view | Renderer | Recreated on framebuffer resize; view released before texture |
 | Camera and simulation clock | App's Engine | Application |
 | Static, visible, and HUD CPU arrays | Renderer | Fixed capacity, no per-frame growth |

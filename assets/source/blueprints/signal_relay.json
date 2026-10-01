@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "name": "signal_relay",
+  "parts": [{ "offset": [0, 0.4, 0], "size": [1.2, 0.8, 0.8], "color": [0.30, 0.34, 0.40, 1] }],
+  "devices": [
+    { "id": "rx", "kind": "receiver", "offset": [-0.35, 0.95, 0], "size": [0.3, 0.3, 0.3], "color": [0.3, 0.6, 0.9, 1], "channel": 1 },
+    { "id": "tx", "kind": "transmitter", "offset": [0.35, 0.95, 0], "size": [0.3, 0.3, 0.3], "color": [0.9, 0.5, 0.3, 1], "channel": 2 },
+    { "id": "cell", "kind": "generator", "offset": [0, 0.3, -0.55], "size": [0.3, 0.3, 0.3], "color": [0.85, 0.7, 0.2, 1], "watts": 50 },
+    { "id": "light", "kind": "lamp", "offset": [0, 1.25, 0], "size": [0.3, 0.3, 0.3], "color": [0.4, 0.9, 1.0, 1], "watts": 20 }
+  ],
+  "wires": [["rx.out", "tx.in"], ["rx.out", "light.on"], ["cell.power", "light.power"]]
+}

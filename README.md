@@ -6,7 +6,7 @@ The executable is an engine field test: an unbounded-feeling seeded terrain stre
 
 The climbable test Arbor stands near spawn: follow its spiral ramp to a branch platform and cross the bridge to the tower. The world uses cel shading, rim light, depth silhouettes, and height-aware haze. A twenty-minute day/night cycle starts at 08:24; the HUD shows world time, and quickload restores it. Powered lamps and your ranger's lumen accents stay luminous after dusk (emissive surfaces, without local light casting or bloom).
 
-Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. The grove now connects through a six-plaza canopy district with towers, trunk walkways, and vine-supported roads. Press **4** to build bridges between plaza markers; machines can be placed on elevated decks. See [canopy city](docs/city.md) for the route and construction controls. Saves now use format 7 and content version 5; older saves are rejected.
+Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. The grove now connects through a six-plaza canopy district with towers, trunk walkways, and vine-supported roads. Press **4** to build bridges between plaza markers; machines can be placed on elevated decks. See [canopy city](docs/city.md) for the route and construction controls. The district is alive: three cars drive its lanes and eight pedestrians walk its walkways, both rerouting as you add and remove bridges. Market stalls at the three towers buy salvaged relic parts for scrap and sell blueprint kits that restock at dawn. Arbors that share roots also share **Rootsong** channels. Two solver-verified **Rootdeep shrines** stand on the forest floor, and each rewards a Rootsong blueprint; see [Rootdeep shrines](docs/rootdeep.md). Saves now use format 9 and content version 7; older saves are rejected.
 
 ## Run
 
@@ -38,10 +38,13 @@ If you already use the exact compiler or anyzig, ordinary `zig build run` also w
 | Left click, then mouse | Capture pointer and look |
 | 1 / 2 / 3 / 4 | Hands / build tool / wire tool / bridge tool |
 | Left click (captured), hands | Grab or drop a crate, press a machine button, or enter the rover; exit the rover while driving |
-| Right click (captured), hands | Salvage cutter: remove the relic under the crosshair |
-| Build tool | Tab next palette item, T rotate 90°, left click place (green preview), right click remove the crate, device, or machine under the crosshair |
+| Right click (captured), hands | Salvage cutter: remove the relic under the crosshair (each yields one part to sell) |
+| Left click a market stall, hands | Open its trade panel: Up / Down choose, Enter sells all parts or buys one kit, Escape closes (walking away also closes) |
+| Build tool | After the built-ins, the palette lists market kits (a kit places one machine and is used up; removing it returns the kit) and then your prefabs. Tab next palette item, T rotate 90°, left click place (green preview), right click remove the crate, device, or machine under the crosshair |
 | Wire tool | Left click a source device, then a target (Tab cycles valid port pairs), left click to connect; right click disconnects the aimed device's inputs or cancels |
 | Bridge tool | Click two visible plaza markers to preview and build; right click cancels a selection or removes your aimed bridge |
+| Root sender / root listener (palette) | Rootsong devices: place within 4 m of an Arbor's wood; channels are heard only by listeners in Arbors that share roots |
+| Shrine buttons | Red wall buttons toggle latches; the gold button opens the seed vault; the blue button by the entrance resets the shrine |
 | P (build or wire tool) | Capture the aimed machine as a prefab: added to the palette and exported to `saves/prefabs/<name>.json` |
 | I | Toggle the inspection panel for the aimed machine |
 | [ / ] | Change the aimed transmitter's or receiver's channel (1–64) |
@@ -63,15 +66,16 @@ Up to four players share one window. Each extra player gets a split-screen view:
 | Menu | Join or leave; disconnecting a pad also leaves |
 | Left / right stick | Move / look |
 | A | Jump (same traversal rules as Space) |
-| B | Roll / boost / dash |
-| X | Press the aimed button; hold to hang and mantle |
+| B | Roll / boost / dash; closes a market stall |
+| X | Press the aimed button or open a market stall (then X trades); hold to hang and mantle |
+| D-pad up / down | Choose a market stall row |
 | Y | First- / third-person view |
 | LB / RB | Grapple / cycle traversal kit |
 | LT | Sprint |
 | Left stick click | Stomp |
 | Options | Respawn beside P1 |
 
-Guests have the full traversal controller, their own camera, and hands that press machine buttons; proximity sensors see every player. Building, wiring, carrying crates, driving, salvage, and saving remain P1's. Guests are not written to saves; after a load they rejoin beside P1.
+Guests have the full traversal controller, their own camera, and hands that press machine buttons and trade at market stalls (sharing P1's wallet); proximity sensors see every player. Building, wiring, carrying crates, driving, salvage, and saving remain P1's. Guests are not written to saves; after a load they rejoin beside P1.
 
 ```sh
 python3 tools/zig.py build test

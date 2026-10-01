@@ -110,19 +110,64 @@ Limits: three fixed resident trees; conservative allocation without redistributi
 
 ## 8. Canopy city — implemented as a bounded district
 
-Implemented: a versioned six-plaza graph around the resident grove, three generated towers, 14 m bridge roads with vine cables and lane/walkway markings, trunk-ring plazas and spurs, and market canopies. Validation runs before geometry installation and checks reachability, grades at most 6%, road/terrain/trunk/plaza clearance, approaches, and market bays. Tool 4 previews, builds, and removes player spans between stable plaza IDs. Elevated prefab placement and vehicle exit use the deck beneath them. Save v7/content v5 persists bridge edges alongside existing machines and taps, staging collision allocations before replacing the live world.
+Implemented: a versioned six-plaza graph around the resident grove, three generated towers, 14 m bridge roads with vine cables and lane/walkway markings, trunk-ring plazas and spurs, and market canopies. Validation runs before geometry installation and checks reachability, grades at most 6%, road/terrain/trunk/plaza clearance, approaches, and market bays. Tool 4 previews, builds, and removes player spans between stable plaza IDs. Elevated prefab placement and vehicle exit use the deck beneath them. Save v7/content v5 (now v8/v6, see phase 9) persists bridge edges alongside existing machines and taps, staging collision allocations before replacing the live world.
 
 Acceptance: continuous walking and powered rover driving around the complete loop; elevated rover placement and exit; two-click bridge creation/removal; traversal and save/load of an added bridge; invalid graph and allocation-failure rejection without mutation. See [canopy city](city.md) and [validation](validation.md).
 
 Limits: fixed topology with seeded variation, one resident district, at most four added spans, decorative suspension and markets. Runtime woody grafting/growth remains deferred from phase 7; generated trunk walkways are static. The legacy test-Arbor approach retains its original steeper grade outside the new road solver.
 
-## 9. Living city
+## 9. Living city — implemented as a bounded district
 
-Traffic on bridge lane graphs (reusing the vehicle), pedestrians on walkway graphs, shops that trade parts and blueprints, bioluminescent day/night, and Rootsong (the machine signal bus limited to trees that share roots). Acceptance: traffic reroutes around a removed bridge and shops restock over a day.
+Implemented:
 
-## 10. Rootdeep and shrines
+- **Routing:** the district is a routing graph (plazas and roads, including player bridges) with shortest routes, right-hand lanes and walkways.
+- **Traffic:** three cars reuse the rover's vehicle physics, with an autopilot that yields in its lane and breaks deadlocks. Their headlamps brighten at night.
+- **Pedestrians:** eight use the character controller on the walkways.
+- **Closing bridges:** removing an occupied bridge closes it to new traffic and removes it once empty.
+- **Markets:** stalls at the three towers buy salvaged parts for scrap and sell kits of three new market blueprints. Kits place, use up and refund, and stock sells out and restocks at dawn.
+- **Saves:** format 8 and content 6 save the wallet, stall stock, market day and kit machines.
 
-The wild forest floor under the city, and shrines: seed-vault facilities built from the machine kit and verified solvable by a solver before they appear. Acceptance: every generated shrine is solvable by the verifier, and completing one yields a blueprint or genome fragment usable in the other loops.
+Acceptance evidence, all with the real Sandbox:
+
+- A minute of free traffic in which every car reaches at least three plazas and nothing needs recovering.
+- A car crosses a new 0 → 3 bridge while the bridge reports occupied.
+- A car bound 1 → 0 → 3 has the bridge closed mid-trip, reroutes 0 → 5 → 4 → 3 and arrives, and the closed bridge disappears once its pedestrians have crossed, with zero recoveries.
+- A market run salvages a part, opens a stall, sells, buys a kit to sell-out, places, refuses capture, refunds, closes when walking away, round-trips a save, and restocks at the next dawn.
+
+See [canopy city](city.md) and [validation](validation.md).
+
+Also implemented:
+
+- **Rootsong:** the signal bus limited to trees that share roots. Root groups come from overlapping root reach, and root sender and listener devices must be within 4 m of wood.
+- **Plaza priority:** first come, first served, with the deadlock breaker as a backstop.
+- **Guest trading:** guests trade with the shared wallet.
+
+Further acceptance evidence:
+
+- **Rootsong:** a song from the test Arbor lights a lamp at the root-sharing narrow Arbor but not at the separate spreading Arbor or away from wood, and it survives save/load.
+- **Plaza priority:** a car waits two seconds at the edge of a plaza another car is inside, then continues to its goal with no deadlock broken.
+- **Guest trading:** a guest sells parts and buys a kit at a stall while its movement is frozen, and B closes the stall.
+
+Remaining polish, not blocking: bioluminescent city lighting beyond lamps and headlamps, and traffic lights.
+
+## 10. Rootdeep and shrines — implemented as two verified shrines
+
+Implemented:
+
+- **Generation:** two shrines on seeded flat sites on the forest floor. Each is a chain of rooms whose doors open on logic over button latches and crate plates (the new `plate` device kind).
+- **Verification:** a seeded generate-and-verify loop accepts only candidates that a breadth-first solver proves solvable and non-trivial, then keeps the one with the longest shortest solution of six.
+- **Compilation:** each shrine compiles into an ordinary validated blueprint plus world crates.
+- **World rules:** shrines are protected from editing, have a reset button, and save completion in format 9.
+- **Reward:** opening the seed vault adds a Rootsong blueprint to the palette, which feeds the engineering and Rootsong loops.
+
+Acceptance evidence:
+
+- 300 seeds all verified solvable with legal plan replays and valid blueprints; the median shortest solution is 8 actions and the maximum 16.
+- A headless test plays each placed shrine's own plan in the real Sandbox by walking, aiming, pressing buttons, and carrying crates onto plates through real doors. After every action, each door's actual state must match the puzzle model. Both shrines complete, grant their rewards, and keep completion through save/load; reset restores crates, latches, and doors.
+
+See [Rootdeep shrines](rootdeep.md).
+
+Limits: two straight room chains, crate-only plates, blueprint rewards (no genome fragments yet), no Rootdeep streaming or special terrain, and free flight can bypass walls.
 
 ## 11–12. Mods and scale — later
 

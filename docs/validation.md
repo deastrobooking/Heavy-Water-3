@@ -135,6 +135,30 @@ The experiment was terminated and the programmatic size change removed from the 
 - Whole-process memory instrumentation: Mach's stock entrypoint currently omits module-container teardown.
 - Deterministic screenshot regression tests and CPU/GPU percentile benchmarks.
 
+## Rootsong, plaza priority, guest trading, Rootdeep shrines — 2026-09-30
+
+- Debug suite: **115/115 tests pass**. The new tests cover:
+  - **Rootsong:** root grouping, and a world test with a sender at the test Arbor and listeners at the narrow Arbor, the spreading Arbor, and away from wood.
+  - **Traffic and trading:** plaza priority, and guest trading.
+  - **Shrine generation:** 300 seeds verified with plan replay and blueprint validation, plus unsolvable, trivial and carry-versus-drop solver cases.
+  - **Shrine playthrough:** both placed shrines played in the world from their verifier plans, with door states matched to the model after every action, then rewards, protections, reset and save/load.
+- Shrine generation over 300 seeds: fallback shrine for about 1%. The median shortest solution is 8 actions (longest 16), and 187 of 300 need 8 or more. Keeping the longest of six verified candidates raised the median from 6.
+- Two bugs were found by the in-world playthrough and fixed in the test's play method, not the game. Carrying a crate at eye height wedged it against the next divider wall; backing up swung it through the player. The test now carries crates overhead, clear of walls and above plate sensing height.
+- ReleaseSafe step cost with city life and shrines, measured headlessly at spawn: full Sandbox step **0.130 ms** (physics 0.091, city life 0.043, machines 0.008).
+- The free-traffic acceptance phase was lengthened from 60 s to 90 s, because plaza waits legitimately delay a car's third plaza on a long route.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 600 smoke frames: no validation errors, clean exit, both shrines logged with their verified plans.
+- **Not representative:** during these final runs, the window was being throttled by macOS (presentation interval p95 about 1 s). The committed build behaved identically on the same run: 4,301 against 4,292 simulation ticks over 200 frames. The canopy benchmark therefore failed only its `presentation_unthrottled` check. Render CPU P50/P95/P99 was **1.021/1.232/1.399 ms**, with zero underfilled frames, 25 peak resident chunks, and unchanged pools. Presentation measurements need re-running with the window visible.
+- Not measured: a controller-driven guest trading session in the window, and manual play of a shrine in the window.
+
+## Living city: traffic, pedestrians, markets — 2026-09-30
+
+- Debug suite: **108/108 tests pass**. New tests cover route choice with and without a bridge, replanning, lane and walkway offsets, and market stock, sell-out, dawn restock, prices and save validation. They also include the Sandbox traffic and market acceptance tests described in the [roadmap](roadmap.md), plus a save round trip for the v8 wallet and stock fields.
+- Traffic acceptance: 3,600 free steps with every car upright on the deck and reaching at least three plazas, and pedestrians each moving more than 20 m without falling. Then a 0 → 3 bridge crossing (the bridge reported occupied), and a bridge closed mid-trip: the car reroutes 1 → 0 → 5 → 4 → 3 and reaches plaza 3. The closed bridge is removed after its last pedestrian crosses, with **zero recoveries** throughout.
+- A first draft refused to remove occupied bridges. The test showed that a pedestrian can hold a 320 m bridge for over three minutes, so removal now closes the bridge and removes it once clear.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 600 smoke frames with city life enabled: no validation errors, clean exit. There were 3 cars and 8 pedestrians with 0 recoveries and 0 deadlocks broken, and 814 objects submitted at completion. The market logged day 0 stock.
+- Canopy benchmark (narrow Arbor), ReleaseSafe, 900 measured frames with city life running: render CPU P50/P95/P99 **0.814/0.992/1.103 ms**, interval P99 20.994 ms. There were zero underfilled frames, peak residency was 25 chunks, and pools stayed at 2 CPU / 50 GPU allocations.
+- Not measured: simulation cost per step for city life (the benchmark measures render CPU), a long soak for rare traffic deadlocks, and manual play of the trade panel in the window.
+
 ## Traversal and local co-op — 2026-09-30
 
 - Debug suite: **103/103 tests pass**. New tests cover the controller (buffered versus dropped early jump, stomp bounce, roll collider height, climb gate and mantle onto a 3 m block, grapple zip to a static anchor, glide, triple-tap hover). They also cover co-op proximity sensing, split-screen tiling, and the four-player Sandbox acceptance. In that acceptance, three guests join, P1 stays put within 0.05 m while P2 walks, P3 strafes and P4 turns 2.8 rad, all four bodies are published with owner tags, and P3 presses the powered-door button and the door opens. A guest then leaves, and the save contains no guest data but loads with guests beside P1.

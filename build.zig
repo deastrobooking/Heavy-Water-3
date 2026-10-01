@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
     // Blueprints are validated by the same tool; an invalid machine fails the build.
-    const blueprint_names = [_][]const u8{ "powered_door", "elevator", "rover", "sap_beacon" };
+    const blueprint_names = [_][]const u8{ "powered_door", "elevator", "rover", "sap_beacon", "proximity_gate", "street_lamp", "signal_relay", "rootsong_hearth", "rootsong_call" };
     var blueprints: [blueprint_names.len]std.Build.LazyPath = undefined;
     for (blueprint_names, &blueprints) |name, *output| {
         const check_blueprint = b.addRunArtifact(compiler);

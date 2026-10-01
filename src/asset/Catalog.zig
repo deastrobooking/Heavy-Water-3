@@ -17,8 +17,10 @@ const MaterialTag = struct {};
 pub const MeshHandle = Handle.Handle(MeshTag);
 pub const MaterialHandle = Handle.Handle(MaterialTag);
 /// Bumped whenever shipped content changes meaning (IDs, dimensions); persisted in saves.
-pub const content_version: u32 = 5;
-pub const max_blueprints = 8;
+/// v6 adds the market blueprints (proximity gate, street lamp, signal relay); v7 the Rootdeep
+/// shrines and their Rootsong reward blueprints.
+pub const content_version: u32 = 7;
+pub const max_blueprints = 12;
 
 pub const Entry = struct {
     model: Model,
@@ -42,6 +44,10 @@ pub const Content = struct {
     elevator: *const Blueprint,
     rover: *const Blueprint,
     sap_beacon: *const Blueprint,
+    /// Sold at district markets, in `Market.Ware` order.
+    wares: [3]*const Blueprint,
+    /// Shrine rewards, by shrine index.
+    rewards: [2]*const Blueprint,
     district: MeshHandle,
 };
 
@@ -86,6 +92,15 @@ pub fn loadSeeded(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void
     self.content.elevator = try self.addBlueprint(allocator, @embedFile("elevator.blueprint"));
     self.content.rover = try self.addBlueprint(allocator, @embedFile("rover.blueprint"));
     self.content.sap_beacon = try self.addBlueprint(allocator, @embedFile("sap_beacon.blueprint"));
+    self.content.wares = .{
+        try self.addBlueprint(allocator, @embedFile("proximity_gate.blueprint")),
+        try self.addBlueprint(allocator, @embedFile("street_lamp.blueprint")),
+        try self.addBlueprint(allocator, @embedFile("signal_relay.blueprint")),
+    };
+    self.content.rewards = .{
+        try self.addBlueprint(allocator, @embedFile("rootsong_hearth.blueprint")),
+        try self.addBlueprint(allocator, @embedFile("rootsong_call.blueprint")),
+    };
 }
 
 fn addBlueprint(self: *Catalog, allocator: std.mem.Allocator, json: []const u8) !*const Blueprint {

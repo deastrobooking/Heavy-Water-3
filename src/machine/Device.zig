@@ -2,8 +2,10 @@ const std = @import("std");
 
 /// Device kinds shared by every machine. Sensors produce signals, controllers transform them,
 /// actuators consume power and signals, and generators feed power networks.
-/// `seat`, `motor`, and `steering` exist only in vehicle blueprints.
-pub const Kind = enum { generator, sap_tap, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver };
+/// `seat`, `motor`, and `steering` exist only in vehicle blueprints. `root_sender` and
+/// `root_listener` are Rootsong devices: channels like transmitters and receivers, but heard
+/// only among devices rooted (within reach of wood) in Arbors that share roots.
+pub const Kind = enum { generator, sap_tap, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver, root_sender, root_listener, plate };
 /// Channels of the world signal bus shared by transmitters and receivers on any machine.
 pub const max_channels = 64;
 pub const PortKind = enum { power, signal };
@@ -26,6 +28,8 @@ pub fn ports(kind: Kind) []const Port {
         },
         .button => &.{.{ .name = "pressed", .kind = .signal, .direction = .output }},
         .proximity => &.{.{ .name = "present", .kind = .signal, .direction = .output }},
+        // Pressed while a weight (a crate, not a person) rests on it.
+        .plate => &.{.{ .name = "pressed", .kind = .signal, .direction = .output }},
         .latch => &.{
             .{ .name = "toggle", .kind = .signal, .direction = .input },
             .{ .name = "state", .kind = .signal, .direction = .output },
@@ -62,8 +66,8 @@ pub fn ports(kind: Kind) []const Port {
             .{ .name = "lit", .kind = .signal, .direction = .output },
         },
         // Publishes its input on its channel; receivers anywhere read it one step later.
-        .transmitter => &.{.{ .name = "in", .kind = .signal, .direction = .input }},
-        .receiver => &.{.{ .name = "out", .kind = .signal, .direction = .output }},
+        .transmitter, .root_sender => &.{.{ .name = "in", .kind = .signal, .direction = .input }},
+        .receiver, .root_listener => &.{.{ .name = "out", .kind = .signal, .direction = .output }},
         // Clamps the steering command to −1..1; the vehicle reads `angle`.
         .steering => &.{
             .{ .name = "command", .kind = .signal, .direction = .input },

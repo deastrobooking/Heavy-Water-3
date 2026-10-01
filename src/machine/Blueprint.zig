@@ -53,7 +53,7 @@ pub const DeviceDef = struct {
     node_count: u16,
     /// Explicit `"body": true` gives any device a pickable static body (workshop kits).
     body: bool = false,
-    /// Bus channel (1..max_channels) for transmitters and receivers; 0 otherwise.
+    /// Bus channel (1..max_channels) for transmitters, receivers, and Rootsong devices; 0 otherwise.
     channel: u16 = 0,
 
     pub fn name(self: *const DeviceDef) []const u8 {
@@ -64,7 +64,7 @@ pub const DeviceDef = struct {
     /// controllers only when the blueprint asks.
     pub fn hasBody(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
-            .generator, .sap_tap, .button, .actuator, .lamp, .transmitter, .receiver => true,
+            .generator, .sap_tap, .button, .actuator, .lamp, .transmitter, .receiver, .root_sender, .root_listener, .plate => true,
             .proximity, .latch, .logic, .seat, .motor, .steering => false,
         };
     }
@@ -72,7 +72,7 @@ pub const DeviceDef = struct {
     /// Rendered as a block at its offset.
     pub fn visible(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
-            .generator, .sap_tap, .button, .actuator, .seat, .motor, .lamp, .transmitter, .receiver => true,
+            .generator, .sap_tap, .button, .actuator, .seat, .motor, .lamp, .transmitter, .receiver, .root_sender, .root_listener, .plate => true,
             .proximity, .latch, .logic, .steering => false,
         };
     }
@@ -220,10 +220,13 @@ fn addDeviceChecked(self: *Blueprint, d: DocDevice, vehicle: bool) Error!u8 {
     }
     switch (d.kind) {
         .seat, .motor, .steering => if (!vehicle) return error.InvalidVehicle,
-        .actuator, .button, .proximity => if (vehicle) return error.InvalidVehicle,
+        .actuator, .button, .proximity, .plate => if (vehicle) return error.InvalidVehicle,
         else => {},
     }
-    const bus = d.kind == .transmitter or d.kind == .receiver;
+    const bus = switch (d.kind) {
+        .transmitter, .receiver, .root_sender, .root_listener => true,
+        else => false,
+    };
     if (if (bus) d.channel == 0 or d.channel > Device.max_channels else d.channel != 0) return error.InvalidDeviceParameters;
     if ((d.kind == .logic) != (d.nodes.len > 0)) return error.InvalidLogic;
     if (self.node_count + d.nodes.len > max_nodes) return error.TooManyNodes;

@@ -254,7 +254,8 @@ fn plaza(out: *CityParts, position: V) !void {
 }
 
 // Reserve market bays using the same footprint in validation and mesh generation.
-fn marketPosition(layout: *const Layout, i: usize) V {
+/// Centre of plaza `i`'s market bay floor (tower plazas only).
+pub fn marketPosition(layout: *const Layout, i: usize) V {
     const node = layout.nodes[i];
     var best: f32 = -2;
     var offset: V = undefined;

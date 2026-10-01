@@ -2,6 +2,10 @@ test {
     _ = @import("engine/Time.zig");
     _ = @import("world/Camera.zig");
     _ = @import("render/Layout.zig");
+    _ = @import("city/Routes.zig");
+    _ = @import("city/Market.zig");
+    _ = @import("machine/Rootsong.zig");
+    _ = @import("procedural/Shrine.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");

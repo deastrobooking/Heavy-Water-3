@@ -20,6 +20,17 @@ Use **V** to fly toward the new crowns; **Q/E** changes altitude and **Shift** s
 
 The **sap tap** palette item is the loose 200 W-rated source for custom workshop circuits. Wire `power` to a lamp, motor, or actuator; `enable` is on unless wired to a signal. Separate machines tapping the same Arbor share its budget. Taps on branches also share the narrower upstream branch limits. Detached, disabled, and idle taps draw no sap. A network uses regular generator supply before asking for sap. Lamps expose partial power as partial brightness; tree lumen dims under load beyond available flow.
 
+## Rootsong
+
+Arbors whose roots overlap form a **root group**. A tree's roots reach half its height from its trunk, so two trees share roots when they are closer than half the sum of their heights. In the current grove, the test Arbor (320 m) and the narrow Arbor (420 m, about 240 m away) share one root group; the spreading Arbor stands alone.
+
+- **Devices:** the palette's **root sender** and **root listener** carry a signal on a channel (1–64, `[` / `]` to retune) like transmitters and receivers. They only work within 4 m of wood, like a sap tap. A signal reaches only listeners rooted in the **same root group**, one step later, with the largest value winning per channel.
+- **Unrooted devices** are silent, and listeners on another root group hear nothing.
+- **Inspecting:** aim at a root device to see its channel and root group (or "unrooted"). The inspection panel shows the same.
+- **Shrine rewards:** the Rootdeep shrines reward two Rootsong designs. **rootsong_hearth** is a sap-powered lamp that lights when it hears channel 1; **rootsong_call** is a button and latch driving a root sender. See [Rootdeep shrines](rootdeep.md).
+
+Groups are computed once for the resident grove with union-find (`machine/Rootsong.zig`). Devices re-attach from their physical positions every step, so loading a save re-roots them. The acceptance test lights a listener lamp at the narrow Arbor from a sender at the test Arbor, while identical lamps at the spreading Arbor and far from wood stay dark. Retuning silences it, and the song survives save/load.
+
 ## Generation and limits
 
 `procedural/Arbor.zig` defines genome version 1 and Arbor generator version 1. Genes control height, trunk radius, crown spread, phyllotaxis, apical dominance, phototropism, gravitropism, platform tendency, vascular capacity, bark/ridging, and lumen color. Named presets live in `asset/Catalog.zig`; they are grown with separate stable seeds derived from the world seed.
