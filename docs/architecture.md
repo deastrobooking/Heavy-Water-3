@@ -36,6 +36,19 @@ The fixed-step clock limits catch-up to eight steps and accounts for discarded t
 
 `asset_compiler` is a host executable in the build graph. It imports glTF with `asset/Gltf.zig`, bakes node transforms, merges primitives into submeshes by material, and writes `asset/Model.zig`'s `HWMS` format v1: a header, materials (base color, name), submesh ranges, 44-byte vertices, and `u32` indices, little-endian. The app embeds the output. `Model.decode` validates magic, version, vertex layout, exact length, index and submesh ranges, and finite floats before allocating anything visible. A layout change bumps `format_version`; the decoder never guesses.
 
+**Asset identity (phase 13, slice 1).** Every source under `assets/source` has a sidecar `<file>.meta` (`asset/Meta.zig`) holding:
+
+- a 128-bit GUID (`asset/Guid.zig`, 32 hex characters, assigned once);
+- the Blake3 hash of the source it was imported from;
+- the importer and its version;
+- typed import settings: models take `scale`, blueprints take none, and unknown settings are rejected.
+
+`zig build import` creates missing sidecars with fresh GUIDs and refreshes hashes, keeping existing GUIDs and settings. It is idempotent.
+
+`asset-compiler compile <source> <meta> <output>` refuses a missing, stale (changed source), wrong-kind, old-importer, or badly configured sidecar, so a changed asset fails the build with "run `zig build import`" until it is deliberately re-imported. `asset-compiler manifest` writes `assets.manifest` (GUID, kind, name, output) from all sidecars, rejecting duplicate GUIDs, and the app embeds it.
+
+`asset/Registry.zig` loads the manifest all or nothing, binds each entry to the loaded handle or blueprint, and resolves typed references (`Ref(.model)`, `Ref(.blueprint)`, which serialize as the GUID string) only to their own kind. Engine-generated meshes (block, wheel, Arbors, district, and the rest) are registered under GUIDs derived from `generated:<name>`, so they are identical in every build. Catalog load fails if any manifest entry is left unbound.
+
 `asset/Catalog.zig` registers the built-in relic and plant meshes and each compiled model, assigning one material handle per submesh, and exposes named content handles. It is immutable after `World.init`, so both threads read it without locks. `StreamingScene` uploads each catalog mesh once and resolves handles per draw; props are drawn once per submesh with instance tint × material base color.
 
 ## Physics and interaction

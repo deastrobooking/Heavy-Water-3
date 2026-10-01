@@ -20,9 +20,26 @@ pub fn build(b: *std.Build) void {
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
     // output is embedded, so the app never parses glTF at runtime.
     const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
+    // Every source has a `.meta` sidecar (GUID, source hash, importer, settings); compiling checks
+    // it, and `zig build import` creates or refreshes sidecars deliberately.
+    const import = b.addRunArtifact(compiler);
+    import.addArgs(&.{ "import", "assets/source" });
+    import.has_side_effects = true;
+    b.step("import", "Create missing asset sidecars (new GUIDs) and refresh source hashes").dependOn(&import.step);
+    const heightmap_import = b.addRunArtifact(compiler);
+    heightmap_import.addArg("heightmap");
+    if (b.args) |args| heightmap_import.addArgs(args);
+    b.step("heightmap", "Import a PGM heightmap to the versioned HWMH terrain format").dependOn(&heightmap_import.step);
+    const manifest = b.addRunArtifact(compiler);
+    manifest.addArg("manifest");
+    const manifest_file = manifest.addOutputFileArg("assets.manifest");
     const compile_crate = b.addRunArtifact(compiler);
+    compile_crate.addArg("compile");
     compile_crate.addFileArg(b.path("assets/source/crate.gltf"));
+    compile_crate.addFileArg(b.path("assets/source/crate.gltf.meta"));
     const crate = compile_crate.addOutputFileArg("crate.hwmesh");
+    manifest.addFileArg(b.path("assets/source/crate.gltf.meta"));
+    manifest.addArgs(&.{ "crate", "crate.hwmesh" });
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
     // Blueprints are validated by the same tool; an invalid machine fails the build.
@@ -30,10 +47,15 @@ pub fn build(b: *std.Build) void {
     var blueprints: [blueprint_names.len]std.Build.LazyPath = undefined;
     for (blueprint_names, &blueprints) |name, *output| {
         const check_blueprint = b.addRunArtifact(compiler);
+        check_blueprint.addArg("compile");
         check_blueprint.addFileArg(b.path(b.fmt("assets/source/blueprints/{s}.json", .{name})));
+        check_blueprint.addFileArg(b.path(b.fmt("assets/source/blueprints/{s}.json.meta", .{name})));
         output.* = check_blueprint.addOutputFileArg(b.fmt("{s}.json", .{name}));
+        manifest.addFileArg(b.path(b.fmt("assets/source/blueprints/{s}.json.meta", .{name})));
+        manifest.addArgs(&.{ name, b.fmt("blueprints/{s}.json", .{name}) });
         assets.dependOn(&b.addInstallFileWithDir(output.*, .{ .custom = "assets/blueprints" }, b.fmt("{s}.json", .{name})).step);
     }
+    assets.dependOn(&b.addInstallFileWithDir(manifest_file, .{ .custom = "assets" }, "assets.manifest").step);
 
     // The example mod's scripts compile to WebAssembly and are written next to its manifest, where
     // the game loads mods from (`mods/<name>/`).
@@ -49,6 +71,7 @@ pub fn build(b: *std.Build) void {
     app.addImport("mach", mach.module("mach"));
     app.addOptions("options", options);
     app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
+    app.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });
     for (blueprint_names, blueprints) |name, output| app.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     const exe = @import("mach").addExecutable(mach.builder, .{ .name = "heavy-water", .app = app, .target = target, .optimize = optimize });
     if (target.result.os.tag == .macos) {
@@ -69,6 +92,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("mach", mach.module("mach"));
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
     tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
+    tests.root_module.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });
     for (blueprint_names, blueprints) |name, output| tests.root_module.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     tests.root_module.addAnonymousImport("glowworks.wasm", .{ .root_source_file = glowworks.getEmittedBin() });
     tests.root_module.addAnonymousImport("glowworks.mod", .{ .root_source_file = b.path("mods/glowworks/mod.json") });

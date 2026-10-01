@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "guid": "6457362d7c4bb688b42f12d462f8dbc6",
+  "kind": "model",
+  "source_hash": "blake3:479716e14c5eda7ae7f0f29d8f3a777c65052be699235de2833f514caf5793c7",
+  "importer": {
+    "name": "gltf",
+    "version": 1
+  },
+  "settings": {
+    "scale": 1
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "guid": "4b04572020082de1ef2e9795aee720c7",
+  "kind": "blueprint",
+  "source_hash": "blake3:b6866bd4af231224aba727e4c412f17bf9bb7f748cd3cfa3c2205db87c82f73a",
+  "importer": {
+    "name": "blueprint",
+    "version": 1
+  }
+}

@@ -228,11 +228,64 @@ Acceptance evidence:
 - The complete walk and drive loops cross all styles.
 - Frames were captured from fixed viewpoints and reviewed by eye, by day and at dusk (see [city](city.md#the-sky-city)).
 
+## Next level — phases 13–16
+
+The next phases close the gaps to a production engine, in this order. [Engine alignment](plans/alignment.md) records how each outside suggestion was weighed against the codebase. Native Zig is kept: C-library physics, audio, and animation were declined on 2026-10-01.
+
+### 13. Asset pipeline — slice 1 implemented (identity, sidecars, manifest, registry)
+
+- **Identity:** stable GUID asset references (`AssetRef`) with `.meta` sidecars holding the GUID, source hash, importer version, and typed import settings.
+- **Build output:** a manifest with dependencies, and content packs.
+- **Runtime:** a registry, async loading with progress and per-frame GPU budgets, and hot reload by GUID with generation-bumped handles.
+
+Acceptance: renames keep identity; only changed sources reimport; invalid references are rejected without mutation; a 64-asset pack loads within the frame budget; a model edited on disk swaps in a running session. See [plan](plans/asset-pipeline.md).
+
+### 14. Skeletal animation — planned
+
+- **Import:** glTF skins and clips into `HWSK` and `HWAN`.
+- **Runtime:** allocation-free pose sampling and blending, GPU skinning from a 64-bone uniform palette (with a CPU fallback), and `Player.Motion` mapped to clips as data.
+- **Attachments:** sockets for attachments and per-bone hitboxes for combat.
+- **First content:** a generated rigged ranger, so no external art is needed.
+
+Acceptance: exact import round trips, pose-math reference tests, the controller selecting the right clip for every traversal state, a carried crate held at the hand socket within 1 cm, and render CPU within budget with 20 animated characters. See [plan](plans/skeletal-animation.md).
+
+### 15. Scene graph and JSON scenes — planned
+
+- **Nodes:** fixed-size, trivially copyable nodes in parent-before-child order, with typed component arrays.
+- **Format:** JSON scenes whose `_ref` fields resolve through the registry, with staged hydration.
+- **Placement:** anchors to plazas, shrines, and Arbors; prefabs with overrides; hot reload by node ID.
+- **Spawn content:** the hard-coded spawn content moves into `scenes/spawn.json`.
+
+Acceptance: byte-identical round trips, rejection without mutation, every existing spawn test passing on the spawn scene, and live edits applying in a running session. See [plan](plans/scenes.md).
+
+### 16. UDP networking — planned
+
+- **Topology and transport:** a listen server with up to three remote guests, over native `std.Io` UDP with reliable and unreliable channels.
+- **Join and snapshots:** joining through the save format, and delta-compressed snapshots at 30 Hz.
+- **Responsiveness:** prediction and reconciliation for the local player, and interpolation for everything else.
+- **Authority:** server validation of every action, and a deterministic simulated link for tests.
+
+Acceptance:
+
+- Exactly-once reliable delivery at 150 ms, 5% loss, and 20 ms jitter.
+- Under 64 kbit/s per client.
+- Predicted positions within 5 cm of the server 99% of the time.
+- Invalid client actions refused.
+- A two-process loopback session that opens the powered door on both sides.
+
+See [plan](plans/networking.md).
+
+## Landscape authoring — foundation implemented
+
+The first heightmap authoring slice is in place: the asset compiler imports ASCII/binary 8- or 16-bit PGM into validated `HWMH` v1 assets, and the procedural layer provides biome classification, bounded terrain stamps, deterministic temple pads, and cave route plans. This is not yet connected to the active terrain sampler or renderer, and temples/caves do not yet have in-world geometry or collision. Keep the current world as the default until an opt-in landscape scene proves mesh/physics agreement and chunk seams.
+
+Next: add heightmap sidecars/GUID manifest registration; pass an immutable landscape context to both streamed mesh generation and `Terrain.surface`; then build a playable biome/temple/cave slice using the existing blueprint validator and shrine solver. See [Heightmapped Landscapes](plans/landscapes.md).
+
 ## Next
 
-All twelve phases have a runnable slice. Open decisions and follow-ups:
+All twelve phases have a runnable slice; phases 13–16 above are next. Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
 
-- **Mach:** update or fork it for indirect draws, shader atomics, and timestamp queries (phase 12).
+- **Mach:** update or fork it for indirect draws, shader atomics, timestamp queries, and texture-to-buffer copies (phase 12). The plan is to evaluate the current Mach `main` on a branch before phase 14 ([alignment](plans/alignment.md#mach-tracking)).
 - **Economy:** whether building should cost resources (phase 9 markets are additive today).
 - **Mod API 2:** host imports, mod-defined genomes, shrines and wares, and saved script state (phase 11).
 - **Content and design:** the level and character design pass deferred earlier, and art-direction review.

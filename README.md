@@ -1,114 +1,64 @@
 # Heavy Water
 
-A native Zig engine (on Mach) for a science-fiction exploration and engineering game: *The Legend of Zelda* meets sci-fi anime, in a city that grows through genetically engineered trees 300–600 m tall. See [world and systems](docs/world.md).
+**A native Zig exploration, engineering, and world-building game for a wild, technological future Earth.** Built on Mach, Heavy Water brings together procedural Arbors, a living canopy city, hands-on machine building, and traversal across a vast vertical landscape.
 
-The executable is an engine field test: an unbounded-feeling seeded terrain streamed in 128 m chunks by a background worker, continuous biome masks, slope-aware relic and vegetation scatter with stable chunk-local IDs, a free camera, depth testing, a checker texture, directional lighting, distance fog, CPU frustum culling, and an in-window metrics overlay. Create and name your ranger, then start on foot: walk the streamed terrain, pick up and carry physical supply crates (imported from glTF), remove relics with the salvage cutter, operate a generator-powered sliding door and an elevator, drive a battery-powered rover on raycast suspension, all built from data-driven machine blueprints. With the build tool you place crates, those machines, and loose devices (generators, buttons, latches, logic, lamps, radio transmitters and receivers) on a snapping grid; with the wire tool you connect their ports in the world. Capture any machine or circuit as a prefab to place copies, and inspect a machine's power networks, device outputs, and wires. Quicksave/quickload stores the whole world, including what you built, rewired, and captured. Every engine system is native Zig; Mach provides the platform and GPU layer.
+> **Project status:** playable systems prototype in active development. The current build focuses on exploration, construction, machines, vehicles, local co-op, and a bounded procedural district. The Hive war and full combat campaign are still in development; see [the gameplay overview](docs/project-overview.md#what-you-can-do) for status.
 
-The climbable test Arbor stands near spawn: follow its spiral ramp to a branch platform and cross the bridge to the tower. The world uses cel shading, rim light, depth silhouettes, and height-aware haze. A twenty-minute day/night cycle starts at 08:24; the HUD shows world time, and quickload restores it. Powered lamps and your ranger's lumen accents stay luminous after dusk (emissive surfaces, without local light casting or bloom).
+## In the Current Build
 
-Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. The grove now connects through a six-plaza canopy district with towers, trunk walkways, and vine-supported roads. Press **4** to build bridges between plaza markers; machines can be placed on elevated decks. See [canopy city](docs/city.md) for the route and construction controls. The district is alive: three cars drive its lanes and eight pedestrians walk its walkways, both rerouting as you add and remove bridges. Market stalls at the three towers buy salvaged relic parts for scrap and sell blueprint kits that restock at dawn. Arbors that share roots also share **Rootsong** channels. Two solver-verified **Rootdeep shrines** stand on the forest floor, and each rewards a Rootsong blueprint; see [Rootdeep shrines](docs/rootdeep.md). Mods in `mods/` can add blueprints and WebAssembly scripts that run inside machines; the example `glowworks` mod adds a breathing lamp. See [mods](docs/mods.md). The district is now a sky city held up by steel: suspension, cable-stayed, arch, truss, and girder bridges on braced pole piers, and a skyline of skyscrapers that lights up at dusk (see [canopy city](docs/city.md#the-sky-city)). Saves now use format 11, content version 7, and district generator 2; older saves are rejected.
+- Explore the Rootdeep, climbable Arbors, shrines, towers, and a generated canopy district.
+- Build and wire machines, drive a powered rover, add bridges, trade at markets, and save your world.
+- Use grapple, hover, flight, wall jumps, dashes, and other traversal kits; play local split-screen with up to four players.
+- Grow procedural trees and connect machines through sap power and Rootsong networks.
+- Run on a native Zig engine using Mach for platform and GPU foundations.
 
-## Run
+The full gameplay guide, controls, and technical overview are in [Project Overview](docs/project-overview.md).
 
-Python 3.10+ is the only bootstrap prerequisite. From this directory:
+## Quick Start
+
+Python 3.10+ is the only bootstrap prerequisite. From the repository root:
 
 ```sh
 python3 tools/zig.py build run
 ```
 
-The launcher downloads a checksum-verified compiler into `.tools/` when needed. It leaves your system Zig and PATH alone. Zig fetches the pinned Mach dependencies on the first build; an internet connection is required then. Windows users can use `py tools/zig.py`.
-
-If you already use the exact compiler or anyzig, ordinary `zig build run` also works.
-
-| Control | Action |
-| --- | --- |
-| W / A / S / D | Walk (or fly) |
-| Space | Jump (buffered, with coyote time); hold in the air to use the traversal kit; three quick taps toggle hover. Jump into a wall to climb it; jump off a wall to wall-jump |
-| Shift | Sprint / fly faster |
-| Left Ctrl | Roll when running (hoverboard: boost; flight: air dash while held with Space) |
-| X | Stomp in the air; bounces on landing |
-| G | Grapple a static surface (grapple kit): zip, or swing from high anchors; again to release |
-| B | Cycle traversal kit: grapple → hover jet → flight → hoverboard |
-| F | Hold at a ledge to hang; again to mantle up |
-| F6 | Add a guest player (P2–P4) beside you, or remove the last keyboard-added guest |
-| V | Toggle walking and free flight |
-| F2 | First- / third-person view |
-| F4 | Character creator (also opens on a new game): arrows choose and change, type the name, Enter confirms, Escape cancels |
-| Q / E | Descend / ascend (flight) |
-| Left click, then mouse | Capture pointer and look |
-| 1 / 2 / 3 / 4 | Hands / build tool / wire tool / bridge tool |
-| Left click (captured), hands | Grab or drop a crate, press a machine button, or enter the rover; exit the rover while driving |
-| Right click (captured), hands | Salvage cutter: remove the relic under the crosshair (each yields one part to sell) |
-| Left click a market stall, hands | Open its trade panel: Up / Down choose, Enter sells all parts or buys one kit, Escape closes (walking away also closes) |
-| Build tool | After the built-ins, the palette lists market kits (a kit places one machine and is used up; removing it returns the kit) and then your prefabs. Tab next palette item, T rotate 90°, left click place (green preview), right click remove the crate, device, or machine under the crosshair |
-| Wire tool | Left click a source device, then a target (Tab cycles valid port pairs), left click to connect; right click disconnects the aimed device's inputs or cancels |
-| Bridge tool | Tab chooses the structure (suspension, cable-stayed, arch, truss, girder); click two visible plaza markers to preview and build; right click cancels a selection or removes your aimed bridge |
-| Root sender / root listener (palette) | Rootsong devices: place within 4 m of an Arbor's wood; channels are heard only by listeners in Arbors that share roots |
-| Shrine buttons | Red wall buttons toggle latches; the gold button opens the seed vault; the blue button by the entrance resets the shrine |
-| P (build or wire tool) | Capture the aimed machine as a prefab: added to the palette and exported to `saves/prefabs/<name>.json` |
-| I | Toggle the inspection panel for the aimed machine |
-| [ / ] | Change the aimed transmitter's or receiver's channel (1–64) |
-| W / S, A / D (driving) | Throttle and reverse, steer |
-| Space (driving) | Brake (an empty rover holds its parking brake) |
-| F5 / F9 | Quicksave / quickload `saves/quicksave.json` |
-| Escape | Release pointer |
-| R | Return to spawn |
-| C | Toggle CPU frustum culling (on initially) |
-| F1 | Toggle metrics |
-| Window close | Quit |
-
-### Local co-op
-
-Up to four players share one window. Each extra player gets a split-screen view: two players stack top and bottom, three put P3 across the bottom, and four use quadrants. On macOS, controllers with Apple's extended gamepad profile (Xbox, PlayStation, and MFi pads) are read through the GameController framework. The first three controllers belong to P2, P3 and P4, and a fourth controller also drives P1 alongside the keyboard.
-
-| Pad | Action |
-| --- | --- |
-| Menu | Join or leave; disconnecting a pad also leaves |
-| Left / right stick | Move / look |
-| A | Jump (same traversal rules as Space) |
-| B | Roll / boost / dash; closes a market stall |
-| X | Press the aimed button or open a market stall (then X trades); hold to hang and mantle |
-| D-pad up / down | Choose a market stall row |
-| Y | First- / third-person view |
-| LB / RB | Grapple / cycle traversal kit |
-| LT | Sprint |
-| Left stick click | Stomp |
-| Options | Respawn beside P1 |
-
-Guests have the full traversal controller, their own camera, and hands that press machine buttons and trade at market stalls (sharing P1's wallet); proximity sensors see every player. Building, wiring, carrying crates, driving, salvage, and saving remain P1's. Guests are not written to saves; after a load they rejoin beside P1.
+The launcher downloads a checksum-verified Zig compiler into `.tools/` when needed and does not alter the system Zig or `PATH`. The first build fetches pinned Mach dependencies and requires an internet connection. On Windows, use `py tools/zig.py`.
 
 ```sh
-python3 tools/zig.py build test
-python3 tools/zig.py build check
-python3 tools/zig.py build assets        # compiled models and validated blueprints in zig-out/assets
-python3 tools/zig.py build mods          # build the example mod's WebAssembly scripts into mods/
-python3 tools/zig.py build run -Doptimize=ReleaseSafe
-python3 tools/zig.py build run -Dseed=42
+python3 tools/zig.py build test       # headless tests
+python3 tools/zig.py build check      # compile the application
+python3 tools/zig.py build assets     # compile models and validate blueprints
+python3 tools/zig.py build import     # after adding or changing a source asset: create/refresh its .meta sidecar (GUID, hash)
+python3 tools/zig.py build mods       # build the example WebAssembly mod
 python3 tools/zig.py build run -Dsmoke-frames=120
-python3 tools/zig.py build -Doptimize=ReleaseFast
-python3 tools/benchmark.py            # fixed fly-through route, writes .tools/streaming-benchmark.json
-python3 tools/benchmark.py --canopy   # Test Arbor at close range and 1 km
-python3 tools/benchmark.py --arbor 1  # Seeded narrow Arbor (2 selects the spreading Arbor)
-python3 tools/zig.py build run -Dshowcase=7 -Dcapture-frame=90   # hold a city viewpoint (1-6 roads, 7 overview, 8 dusk, 9 street, 10-15 roads at dusk) and save zig-out/capture.bmp
-python3 tools/benchmark.py --scale 1000000  # 10K/100K/1M object workloads: culling, LOD, streaming, memory (docs/scale.md)
+python3 tools/benchmark.py --canopy
 ```
 
-Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.
+`run` needs a graphical desktop and GPU; headless tests do not open a window. More benchmark and showcase commands are in [Scale Tests](docs/scale.md).
 
-`build` installs `zig-out/bin/heavy-water`; `run` executes directly from Zig's build cache. Smoke mode exits after the specified number of submitted frames and exercises flight, culling (including an empty view), HUD toggling, walking, grabbing a crate, an in-memory save/restore round trip, building and wiring a four-device lamp circuit, lighting the circuit before pressing the door button, driving the rover, rendering a full day/night cycle, visiting both generated Arbors, overloading two sap beacons on one tree, previewing a city bridge, and restoring its completed geometry from an in-memory save. Three guests join partway through, which exercises four-, two- and one-view split screen. It never writes the save file. Use 120 or more frames to give the simulation time to exercise all stages. It requires a graphical desktop and GPU. Tests do not open a window.
+## Documentation
 
-The benchmark flies a frame-indexed route across 40 chunk boundaries (60 warm-up frames, then `--frames` measured frames), and fails unless uploads stay within budget, GPU residency stays at 25 chunks, pools never grow, the 3×3 active ring is always resident, and the window was not throttled. The `--canopy` route stays aimed at the Arbor, verifies both mesh detail levels and a render CPU P99 under 16.667 ms, and crosses at least 12 chunk boundaries. These measurements do not measure GPU execution time. Keep the window visible while it runs. `-Dupload-budget-kib` (minimum 278, one chunk) bounds terrain bytes written to the GPU per frame.
+| Guide | What it covers |
+| --- | --- |
+| [Project Overview](docs/project-overview.md) | Gameplay, controls, local co-op, and the technical snapshot |
+| [World and Systems](docs/world.md) | Setting, pillars, Arbors, and visual direction |
+| [Development Roadmap](docs/roadmap.md) | Implemented milestones, acceptance evidence, and next work |
+| [Architecture and Ownership](docs/architecture.md) | System boundaries, memory, threads, assets, physics, and rendering |
+| [Arbor Genomes and Sap](docs/arbors.md) | Procedural trees, Rootsong, and sap power |
+| [Canopy City](docs/city.md) | District layout, bridges, traffic, and building |
+| [Rootdeep Shrines](docs/rootdeep.md) | Generated puzzle design and verification |
+| [Hive War Gameplay Direction](docs/gameplay_and_hive_war.md) | Faction, combat, companions, and strategy-game concepts |
+| [Mods](docs/mods.md) | Mod packages and the constrained WebAssembly API |
+| [Scale Tests](docs/scale.md) | Reproducible workload and performance methodology |
+| [Validation](docs/validation.md) | Test results, platform coverage, and known limitations |
 
-## Pinned foundation
+Additional system plans live in [`docs/plans/`](docs/plans/), including scenes, the asset pipeline, animation, and engine alignment.
 
-- Mach: [`7ed0d504a9569fd4ad840ecb10ead16b90a8926e`](https://code.hexops.org/hexops/mach/src/commit/7ed0d504a9569fd4ad840ecb10ead16b90a8926e/build.zig.zon), package hash in `build.zig.zon`.
-- Mach nominated Zig: `2026.4.10-mach` = `0.16.0-dev.3142+5ccfeb926`.
-- Generator version: `2`; default seed: `310399555161`.
+## Technology
 
-The compiler matches this Mach revision's manifest. The [nomination history](https://machengine.org/docs/nominated-zig/) also lists newer compilers; upgrading the compiler and Mach must be a tested change together.
+- **Language:** Zig `0.16.0-dev.3142+5ccfeb926`, pinned for the selected Mach revision.
+- **Platform and graphics:** [Mach](https://github.com/hexops/mach) with `sysgpu`.
+- **Runtime systems:** native Zig procedural generation, physics, asset catalog, machine simulation, streaming, and mod interpreter.
+- **Validation target:** Apple Silicon with Metal. Linux/Vulkan and Windows/D3D12 runtime testing remains future work.
 
-Local validation targets Apple Silicon / Metal. Linux/Vulkan and Windows/D3D12 are future runtime validation targets, even though Mach exposes those backends. Frame timing in the HUD measures the interval between render callbacks, including presentation pacing; it is not GPU execution time or a performance benchmark.
-
-Known upstream limitation: programmatically changing window dimensions deadlocks in this Mach revision's macOS resize callback. This application does not change dimensions after startup. The renderer recreates its depth buffer when framebuffer dimensions change, but interactive drag-resize has not been validated here. See the [validation notes](docs/validation.md).
-
-Read [world and systems](docs/world.md), [architecture and ownership](docs/architecture.md), and the [milestone roadmap](docs/roadmap.md).
+Frame intervals include presentation pacing and are not GPU execution timings. The pinned Mach revision also has a known macOS programmatic-resize deadlock; see [Validation](docs/validation.md) before changing window behavior.

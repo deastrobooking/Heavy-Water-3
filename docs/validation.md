@@ -135,6 +135,19 @@ The experiment was terminated and the programmatic size change removed from the 
 - Whole-process memory instrumentation: Mach's stock entrypoint currently omits module-container teardown.
 - Deterministic screenshot regression tests and CPU/GPU percentile benchmarks.
 
+## Asset identity (phase 13, slice 1) — 2026-10-01
+
+- Debug suite: **149/149 tests pass**. The new tests cover:
+  - **GUIDs:** format, parse rejection, derived and random generation, JSON form.
+  - **Sidecars:** identity and settings kept across re-import, stale-source and old-importer detection, invalid and unknown settings rejected, kind by source type.
+  - **Registry:** atomic manifest load, duplicate GUIDs refused with no change, typed resolution with kind mismatch and unbound errors, reference JSON.
+  - **Catalog:** every compiled and generated asset resolves by GUID, and every blueprint is reachable by GUID.
+- The existing allocation-failure test of catalog load caught `loadManifest` turning out-of-memory into "invalid manifest"; fixed.
+- Build behaviour, checked by hand:
+  - The build fails without sidecars, and `zig build import` created all 10 (crate plus nine blueprints).
+  - A second import changed nothing.
+  - Editing `rover.json` without re-importing failed the build with "StaleMeta; run `zig build import`". Re-import refreshed the hash and kept GUID `275f5eab…`, and the source was then restored.
+
 ## Sky city — 2026-09-30
 
 - Debug suite: **133/133 tests pass**. The new tests cover:

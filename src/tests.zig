@@ -14,6 +14,9 @@ test {
     _ = @import("procedural/Bridges.zig");
     _ = @import("procedural/Skyline.zig");
     _ = @import("render/Capture.zig");
+    _ = @import("asset/Guid.zig");
+    _ = @import("asset/Meta.zig");
+    _ = @import("asset/Registry.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");
@@ -27,6 +30,8 @@ test {
     _ = @import("engine/Handle.zig");
     _ = @import("engine/Sky.zig");
     _ = @import("procedural/Terrain.zig");
+    _ = @import("procedural/Heightmap.zig");
+    _ = @import("procedural/Landscape.zig");
     _ = @import("procedural/TestArbor.zig");
     _ = @import("procedural/Arbor.zig");
     _ = @import("procedural/District.zig");
