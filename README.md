@@ -9,7 +9,8 @@
 - Explore the Rootdeep, climbable Arbors, shrines, towers, and a generated canopy district.
 - Build and wire machines, drive a powered rover, add bridges, trade at markets, and save your world.
 - Talk with stall keepers and locals in branching conversations; buy suit upgrades and armor suits from the south-market tinker; customize your ranger.
-- Title, pause, settings (saved to `saves/settings.json`) and controls screens, driven by keyboard, mouse, or controller.
+- Title, pause, settings (saved to `saves/settings.json`) and controls screens, driven by keyboard, mouse, or controller; every key can be rebound.
+- Procedural sound: synthesized footsteps, jets, wind, a canopy ambience, interface and dialogue sounds, mixed in native Zig, with volume controls.
 - Use grapple, hover, flight, wall jumps, dashes, and other traversal kits; play local split-screen with up to four players.
 - Grow procedural trees and connect machines through sap power and Rootsong networks.
 - Run on a native Zig engine using Mach for platform and GPU foundations.
@@ -32,6 +33,8 @@ python3 tools/zig.py build check      # compile the application
 python3 tools/zig.py build assets     # compile models and validate blueprints
 python3 tools/zig.py build import     # after adding or changing a source asset: create/refresh its .meta sidecar (GUID, hash)
 python3 tools/zig.py build mods       # build the example WebAssembly mod
+python3 tools/zig.py build sounds     # write the synthesized sounds to zig-out/sounds/*.wav
+python3 tools/zig.py build run -Daudio=false  # run without opening an audio device
 python3 tools/zig.py build run -Dsmoke-frames=120
 python3 tools/zig.py build run -Dhot-reload=true  # watch models, built-in blueprints and mod Wasm
 python3 tools/zig.py build run -Dreload-smoke=true -Dsmoke-frames=600 -Doptimize=ReleaseSafe

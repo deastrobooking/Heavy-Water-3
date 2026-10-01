@@ -21,7 +21,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);
     options.addOption(usize, "field_upload", (b.option(usize, "field-upload-kib", "Scale workload instance upload budget per frame in KiB") orelse 2048) * 1024);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
-    const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });
+    options.addOption(bool, "audio", b.option(bool, "audio", "Open the system audio device (default true; false runs silent)") orelse true);
+    const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true, .sysaudio = true });
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
     // output is embedded, so the app never parses glTF at runtime.
     const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
@@ -35,6 +36,10 @@ pub fn build(b: *std.Build) void {
     heightmap_import.addArg("heightmap");
     if (b.args) |args| heightmap_import.addArgs(args);
     b.step("heightmap", "Import a PGM heightmap to the versioned HWMH terrain format").dependOn(&heightmap_import.step);
+    const sounds = b.addRunArtifact(compiler);
+    sounds.addArgs(&.{ "sounds", "zig-out/sounds" });
+    sounds.has_side_effects = true;
+    b.step("sounds", "Write every synthesized sound to zig-out/sounds/*.wav for listening").dependOn(&sounds.step);
     const manifest = b.addRunArtifact(compiler);
     manifest.addArg("manifest");
     const manifest_file = manifest.addOutputFileArg("assets.manifest");

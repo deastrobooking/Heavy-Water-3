@@ -62,6 +62,9 @@ test {
     _ = @import("ui/Screens.zig");
     _ = @import("game/Settings.zig");
     _ = @import("game/Bindings.zig");
+    _ = @import("audio/Synth.zig");
+    _ = @import("audio/Mixer.zig");
+    _ = @import("audio/Director.zig");
     _ = @import("render/Overlay.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");

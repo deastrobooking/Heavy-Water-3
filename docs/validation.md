@@ -240,6 +240,18 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Audio — 2026-10-01
+
+- Debug and ReleaseSafe suites: **216/216 tests pass**. New tests:
+  - Synthesis: every sound is finite, audible and peak-limited, generation is deterministic, and loops join without a jump.
+  - Mixer: one-shots end, pan, respect muted buses, and steal voices oldest-first; loops fade smoothly; a full ring drops commands.
+  - Director: each event sounds once, the first frame only starts loops, guests are attenuated and panned, dialogue blips, and a paused world stays quiet.
+  - Volume settings clamp and round-trip.
+- A ReleaseSafe smoke crashed with an integer overflow on the CoreAudio thread on its first callback. The cause was `@min(chunk, frames - done)`: with a comptime bound of 256, Zig narrows the result to `u9`, so `n * 2` overflowed at 512. The fix widens it to `usize`. Debug had not tripped it in the runs tried; the mixer's own ReleaseSafe tests passed because they never went through the device path.
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames** with audio on: CoreAudio at 48 kHz stereo f32, no validation errors, clean exit, every stage including four players and the GUI pass.
+- Levels from `zig build sounds`: interface sounds around −10 to −16 dBFS RMS, effects around −13 to −17, loops around −13 to −19 before their gains. In the mix, the canopy pad sits near −26 dBFS under footsteps near −20.
+- Not measured: listening (nobody has heard it yet; the WAVs are for that), latency, behaviour when the output device changes mid-session, and CPU cost on the audio thread.
+
 ## Guest HUD and rebindable controls — 2026-10-01
 
 - Debug suite: **212/212 tests pass**. New tests:

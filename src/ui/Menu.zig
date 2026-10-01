@@ -206,7 +206,7 @@ test "title skips continue without a save, and sub-screens return to their entry
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.settings, m.screen);
     try std.testing.expectEqual(Command.settings_changed, m.key(.right));
-    try std.testing.expectEqual(@as(f32, 1.25), m.settings.sensitivity);
+    try std.testing.expectEqual(@as(u8, 90), m.settings.master_volume);
     _ = m.key(.back);
     try std.testing.expectEqual(Screen.title, m.screen);
     try std.testing.expectEqual(@as(u8, 2), m.row);

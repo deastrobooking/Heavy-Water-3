@@ -27,6 +27,7 @@ const Canvas = @import("ui/Canvas.zig");
 const Screens = @import("ui/Screens.zig");
 const Settings = @import("game/Settings.zig");
 const Dialogue = @import("game/Dialogue.zig");
+const Audio = @import("audio/Audio.zig");
 const App = @This();
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
@@ -97,6 +98,10 @@ seconds: f32 = 0,
 pad_menu: bool = false,
 gui_showcase_ready: bool = false,
 settings_dirty: bool = false,
+/// Sound output; null when disabled (`-Daudio=false`), benchmarking, or without a device.
+audio: ?*Audio = null,
+/// The GUI control under the mouse last frame (hover sounds play on change).
+hovered: ?u16 = null,
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
@@ -130,12 +135,23 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     // A person playing starts at the title screen (not in unattended smoke, benchmark, or
     // showcase runs); "new game" then opens the character creator.
     self.interactive = options.smoke_frames == 0 and options.benchmark_frames == 0 and options.showcase == 0 and options.character_showcase == 0;
+    if (options.audio and options.benchmark_frames == 0) {
+        self.audio = Audio.create(allocator) catch |err| blk: {
+            std.log.warn("Audio unavailable ({s}); running silent", .{@errorName(err)});
+            break :blk null;
+        };
+    }
     if (self.interactive) {
         self.menu.settings = Settings.load(io, allocator);
         self.show_metrics = self.menu.settings.metrics;
         self.menu.has_save = self.saveExists();
         self.menu.open(.title);
     }
+    if (self.audio) |a| a.setVolumes(self.menu.settings);
+}
+
+fn uiSound(self: *App, event: Audio.Director.Ui) void {
+    if (self.audio) |a| Audio.Director.ui(a, event);
 }
 
 fn saveExists(self: *App) bool {
@@ -174,6 +190,11 @@ fn navKey(self: *const App, key: mach.Core.KeyButtonID) ?Menu.Key {
 
 /// Routes one navigation key to whichever GUI is open (menus first, then panels).
 fn uiNav(self: *App, k: Menu.Key) void {
+    self.uiSound(switch (k) {
+        .confirm => .confirm,
+        .back => .back,
+        else => .move,
+    });
     if (self.menu.screen != .none) return self.menuKey(k);
     const sb = &self.sandbox;
     if (sb.creator.open) return self.creatorInput(switch (k) {
@@ -233,6 +254,7 @@ fn runCommand(self: *App, command: Menu.Command) void {
         .settings_changed => {
             self.show_metrics = self.menu.settings.metrics;
             self.settings_dirty = true;
+            if (self.audio) |a| a.setVolumes(self.menu.settings);
         },
     }
     // Settings are written once on leaving their screen, not on every (repeating) press.
@@ -276,7 +298,10 @@ fn pointAt(self: *App, click: bool) void {
             break;
         }
     }
+    if (id != self.hovered and id != null and !click) self.uiSound(.move);
+    self.hovered = id;
     const hit = id orelse return;
+    if (click) self.uiSound(.confirm);
     const row = Screens.hitRow(hit);
     const sb = &self.sandbox;
     // Only the top layer takes the mouse: a menu over a panel blocks the panel beneath.
@@ -344,6 +369,12 @@ fn creatorKey(self: *App, key: mach.Core.KeyButtonID) void {
 }
 
 fn creatorInput(self: *App, k: Creator.Key) void {
+    switch (k) {
+        .up, .down, .left, .right => self.uiSound(.move),
+        .enter => self.uiSound(.confirm),
+        .escape => self.uiSound(.back),
+        else => {},
+    }
     switch (self.sandbox.creator.key(k)) {
         .editing => {},
         .confirmed => |profile| {
@@ -543,6 +574,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         self.engine.input.clearEdges();
         self.pads.consume();
     }
+    if (self.audio) |a| a.director.update(a, Audio.Director.snapshot(&self.sandbox, self.engine.camera, paused));
     if (self.sandbox.exported) |index| {
         self.sandbox.exported = null;
         self.exportPrefab(index);
@@ -1187,6 +1219,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
 
 pub fn stop(self: *App) void {
     self.thread.join();
+    if (self.audio) |a| a.destroy();
     if (self.loader) |l| l.destroy();
     if (self.reload) |r| r.destroy();
     if (options.reload_smoke and !self.reload_smoke_passed) @panic("Reload smoke did not reach GPU acceptance");

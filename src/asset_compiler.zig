@@ -6,6 +6,7 @@ const Meta = @import("asset/Meta.zig");
 const Guid = @import("asset/Guid.zig");
 const Registry = @import("asset/Registry.zig");
 const Heightmap = @import("procedural/Heightmap.zig");
+const Synth = @import("audio/Synth.zig");
 
 /// Build-time tool:
 ///   asset-compiler compile <source> <source.meta> <output>
@@ -16,6 +17,8 @@ const Heightmap = @import("procedural/Heightmap.zig");
 ///   asset-compiler import <directory>
 ///       create missing sidecars (new GUIDs) and refresh hashes for every source under a
 ///       directory; existing GUIDs and settings are kept
+///   asset-compiler sounds <directory>
+///       write every synthesized game sound as a 16-bit mono WAV, for listening
 ///   asset-compiler heightmap <source.pgm> <output.hwmh> [world-width world-depth elevation base-height]
 ///       import ASCII or binary grayscale PGM data to the runtime heightmap format
 pub fn main(init: std.process.Init) !void {
@@ -24,9 +27,38 @@ pub fn main(init: std.process.Init) !void {
     if (args.len >= 2 and std.mem.eql(u8, args[1], "compile") and args.len == 5) return compile(init.gpa, io, args[2], args[3], args[4]);
     if (args.len >= 3 and std.mem.eql(u8, args[1], "manifest") and (args.len - 3) % 3 == 0) return manifest(init.gpa, io, args[2], args[3..]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "import")) return import(init.gpa, io, args[2]);
+    if (args.len == 3 and std.mem.eql(u8, args[1], "sounds")) return writeSounds(init.gpa, io, args[2]);
     if (args.len == 4 or args.len == 8) if (std.mem.eql(u8, args[1], "heightmap")) return compileHeightmap(init.gpa, io, args[2], args[3], args[4..]);
     std.log.err("usage: asset-compiler compile <source> <meta> <output> | manifest <output> (<meta> <name> <output-name>)... | import <dir> | heightmap <source.pgm> <output.hwmh> [world-width world-depth elevation base-height]", .{});
     return error.InvalidArguments;
+}
+
+fn writeSounds(gpa: std.mem.Allocator, io: std.Io, directory: []const u8) !void {
+    try std.Io.Dir.cwd().createDirPath(io, directory);
+    for (0..Synth.sound_count) |i| {
+        const sound: Synth.Sound = @enumFromInt(i);
+        const samples = try Synth.generate(gpa, sound);
+        defer gpa.free(samples);
+        const bytes = try gpa.alloc(u8, 44 + samples.len * 2);
+        defer gpa.free(bytes);
+        // RIFF/WAVE header: PCM, mono, 16-bit.
+        @memcpy(bytes[0..4], "RIFF");
+        std.mem.writeInt(u32, bytes[4..8], @intCast(bytes.len - 8), .little);
+        @memcpy(bytes[8..16], "WAVEfmt ");
+        std.mem.writeInt(u32, bytes[16..20], 16, .little);
+        std.mem.writeInt(u16, bytes[20..22], 1, .little);
+        std.mem.writeInt(u16, bytes[22..24], 1, .little);
+        std.mem.writeInt(u32, bytes[24..28], Synth.rate, .little);
+        std.mem.writeInt(u32, bytes[28..32], Synth.rate * 2, .little);
+        std.mem.writeInt(u16, bytes[32..34], 2, .little);
+        std.mem.writeInt(u16, bytes[34..36], 16, .little);
+        @memcpy(bytes[36..40], "data");
+        std.mem.writeInt(u32, bytes[40..44], @intCast(samples.len * 2), .little);
+        for (samples, 0..) |s, k| std.mem.writeInt(i16, bytes[44 + k * 2 ..][0..2], @intFromFloat(std.math.clamp(s, -1, 1) * 32767), .little);
+        var name: [64]u8 = undefined;
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.bufPrint(&name, "{s}/{s}.wav", .{ directory, @tagName(sound) }), .data = bytes });
+    }
+    std.log.info("sounds: {d} WAV files in {s}", .{ Synth.sound_count, directory });
 }
 
 fn readFile(gpa: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {
