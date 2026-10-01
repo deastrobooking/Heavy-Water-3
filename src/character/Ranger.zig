@@ -149,6 +149,10 @@ pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
 /// Smooth, closed ellipsoidal armor pieces, attached rigidly to a joint. Flexible fabric keeps
 /// blended body weights underneath; panels do not stretch across elbows or knees.
 fn plate(a: std.mem.Allocator, ch: *gen.Character, joint: sk.Joint, center: V, radii: V, color: spec.Rgb) !void {
+    try plateWithMaterial(a, ch, joint, center, radii, color, .cloth_outer);
+}
+
+fn plateWithMaterial(a: std.mem.Allocator, ch: *gen.Character, joint: sk.Joint, center: V, radii: V, color: spec.Rgb, material: cm.Material) !void {
     const rows = 10;
     const cols = 20;
     const base = ch.mesh.vertexCount();
@@ -158,18 +162,53 @@ fn plate(a: std.mem.Allocator, ch: *gen.Character, joint: sk.Joint, center: V, r
         const latitude = m.pi * @as(f32, @floatFromInt(r)) / rows;
         const angle = m.tau * @as(f32, @floatFromInt(c)) / cols;
         const n = V.init(@sin(latitude) * @cos(angle), @cos(latitude), @sin(latitude) * @sin(angle));
-        _ = try ch.mesh.addVertex(a, .{ .pos = center.add(V.init(n.x * radii.x, n.y * radii.y, n.z * radii.z)), .normal = V.init(n.x / radii.x, n.y / radii.y, n.z / radii.z).normalize(), .joints = .{ joint.idx(), 0, 0, 0 }, .material = .cloth_outer });
+        _ = try ch.mesh.addVertex(a, .{ .pos = center.add(V.init(n.x * radii.x, n.y * radii.y, n.z * radii.z)), .normal = V.init(n.x / radii.x, n.y / radii.y, n.z / radii.z).normalize(), .joints = .{ joint.idx(), 0, 0, 0 }, .material = material });
         try ch.color_index.append(a, palette);
     };
     try ch.mesh.stitchRings(a, base, rows + 1, cols, true, false);
 }
+
+/// Curved face shield with a camera-facing normal, narrower upper/lower corners, and a wrap at
+/// the temples. Its separate palette entry lets the inset light slit read cleanly over the lens.
+fn visorSurface(a: std.mem.Allocator, ch: *gen.Character, center: V, half_width: f32, half_height: f32, depth: f32, color: spec.Rgb, rows: u32, cols: u32) !void {
+    const base = ch.mesh.vertexCount();
+    const joint = sk.Joint.head.idx();
+    const palette: u8 = @intCast(ch.palette.items.len);
+    try ch.palette.append(a, color);
+    for (0..rows + 1) |row| for (0..cols + 1) |column| {
+        const v = @as(f32, @floatFromInt(row)) / @as(f32, @floatFromInt(rows)) * 2 - 1;
+        const u = @as(f32, @floatFromInt(column)) / @as(f32, @floatFromInt(cols)) * 2 - 1;
+        const width_scale = 1 - 0.10 * v * v;
+        const x = u * half_width * width_scale;
+        const y = center.y + v * half_height;
+        const z = center.z + depth * (1 - u * u);
+        const normal = V.init(2 * depth * u / (half_width * width_scale), 0.18 * v, 1).normalize();
+        _ = try ch.mesh.addVertex(a, .{ .pos = .{ .x = x, .y = y, .z = z }, .normal = normal, .joints = .{ joint, 0, 0, 0 }, .material = .armor });
+        try ch.color_index.append(a, palette);
+    };
+    const stride = cols + 1;
+    for (0..rows) |row| for (0..cols) |column| {
+        const a0: u32 = base + @as(u32, @intCast(row)) * stride + @as(u32, @intCast(column));
+        const b0 = a0 + 1;
+        const d0 = a0 + stride;
+        const c0 = d0 + 1;
+        try ch.mesh.addTri(a, a0, b0, c0);
+        try ch.mesh.addTri(a, a0, c0, d0);
+    };
+}
+
 fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     const lm = ch.landmarks;
     const s = &ch.skeleton;
     const h = p.height;
     const w = p.build;
     const dark = spec.Rgb.hex(0x17242f);
-    const metal = if (p.armor == .sentinel) spec.Rgb.hex(0xc1cbd0) else spec.Rgb.hex(0x71868e);
+    const metal = switch (p.armor) {
+        .sentinel => spec.Rgb.hex(0xc1cbd0),
+        .rootweave => spec.Rgb.hex(0x66815a),
+        .skyguard => spec.Rgb.hex(0x477b88),
+        else => spec.Rgb.hex(0x71868e),
+    };
     const accent = rgb(Profile.accent_colors[p.accent], 1.2);
     // Face details have actual geometry, including eye whites, irises and brows.
     for ([_]f32{ -1, 1 }) |side| {
@@ -180,6 +219,14 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     }
     // Belt, boot cuffs and wrist seals bridge fabric transitions.
     try plate(a, ch, .hips, V.init(0, lm.waist_y - 0.08 * h, 0), V.init(lm.waist_half_width + 0.035, 0.035 * h, lm.waist_half_depth + 0.028), dark);
+    if (p.clothing == .field_jacket) {
+        const chest = s.worldPos(.chest);
+        const pocket = mix(Profile.outfit_colors[p.outfit], spec.Rgb.hex(0x1b2a32), 0.52);
+        for ([_]f32{ -1, 1 }) |side| {
+            try plate(a, ch, .chest, chest.add(V.init(side * 0.105 * h, -0.105 * h, 0.145 * h)), V.init(0.040 * h, 0.052 * h, 0.018 * h), pocket);
+            try plate(a, ch, .chest, chest.add(V.init(side * 0.105 * h, -0.066 * h, 0.160 * h)), V.init(0.027 * h, 0.004 * h, 0.006 * h), accent);
+        }
+    }
     // A full armor suit already plates the limbs and torso; only its chest lights are added.
     const suited = p.clothing == .hardsuit or p.clothing == .vanguard;
     if (p.armor != .none and suited) {
@@ -205,6 +252,28 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
             }
         }
     }
+    switch (p.armor) {
+        .rootweave => {
+            const chest = s.worldPos(.chest);
+            for ([_]f32{ -1, 1 }) |side| {
+                try plateWithMaterial(a, ch, if (side > 0) .shoulder_l else .shoulder_r, s.worldPos(if (side > 0) .shoulder_l else .shoulder_r).add(V.init(side * 0.025 * h, 0, 0.035 * h)), V.init(0.13 * w, 0.075 * h, 0.105 * h), metal, .armor);
+                try plateWithMaterial(a, ch, if (side > 0) .lower_arm_l else .lower_arm_r, s.worldPos(if (side > 0) .lower_arm_l else .lower_arm_r).add(V.init(side * 0.035 * h, 0, 0.025 * h)), V.init(0.070 * w, 0.16 * h, 0.065 * h), spec.Rgb.hex(0x425c3c), .armor);
+                try plateWithMaterial(a, ch, .chest, chest.add(V.init(side * 0.065 * h, -0.035 * h, 0.153 * h)), V.init(0.012 * h, 0.13 * h, 0.010 * h), accent, .armor);
+            }
+        },
+        .skyguard => {
+            for ([_]f32{ -1, 1 }) |side| {
+                const shoulder: sk.Joint = if (side > 0) .shoulder_l else .shoulder_r;
+                const forearm: sk.Joint = if (side > 0) .lower_arm_l else .lower_arm_r;
+                const shin: sk.Joint = if (side > 0) .shin_l else .shin_r;
+                try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.045 * h, 0.015 * h, 0)), V.init(0.15 * w, 0.055 * h, 0.080 * h), metal, .armor);
+                try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(side * 0.022 * h, -0.025 * h, 0.026 * h)), V.init(0.046 * w, 0.14 * h, 0.036 * h), spec.Rgb.hex(0x31535f), .armor);
+                try plateWithMaterial(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.025 * h, 0.045 * h)), V.init(0.055 * w, 0.12 * h, 0.040 * h), metal, .armor);
+                try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(side * 0.018 * h, 0.035 * h, 0.061 * h)), V.init(0.008 * h, 0.085 * h, 0.006 * h), accent, .armor);
+            }
+        },
+        else => {},
+    }
     if (p.helmet == .sealed or p.hair_style == .hood) {
         // Conceal hair under the helmet/hood instead of allowing it to poke through.
         var write: usize = 0;
@@ -221,8 +290,11 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     }
     if (p.helmet != .open) {
         const center = V.init(0, lm.chin_y + 0.47 * lm.H, 0.105 * h);
-        try plate(a, ch, .head, center, V.init(0.117 * h, 0.048 * h, 0.052 * h), dark);
-        try plate(a, ch, .head, center.add(V.init(0, 0.012 * h, 0.036 * h)), V.init(0.103 * h, 0.024 * h, 0.022 * h), accent);
+        try visorSurface(a, ch, center, 0.117 * h, 0.048 * h, 0.028 * h, dark, 8, 24);
+        try visorSurface(a, ch, center.add(V.init(0, 0.020 * h, 0.006 * h)), 0.086 * h, 0.0045 * h, 0.030 * h, accent, 2, 20);
+        for ([_]f32{ -1, 1 }) |side| {
+            try plate(a, ch, .head, center.add(V.init(side * 0.112 * h, -0.004 * h, -0.004 * h)), V.init(0.012 * h, 0.055 * h, 0.018 * h), metal);
+        }
     }
 }
 
@@ -303,4 +375,46 @@ test "armor suits are rigid, segmented plates that never stretch and grow with t
     // exo rig has none.
     try std.testing.expectEqual(@as(f32, 0), reach[2]);
     try std.testing.expect(reach[4] > reach[3]);
+}
+
+test "visor wraps around the face and field jacket adds modeled utility details" {
+    const a = std.testing.allocator;
+    var visor = try init(a, .{ .clothing = .field_jacket, .helmet = .visor, .armor = .none });
+    defer visor.deinit(a);
+    var open = try init(a, .{ .clothing = .field_jacket, .helmet = .open, .armor = .none });
+    defer open.deinit(a);
+    var undersuit = try init(a, .{ .clothing = .undersuit, .helmet = .open, .armor = .none });
+    defer undersuit.deinit(a);
+
+    const center_y = visor.character.landmarks.chin_y + 0.47 * visor.character.landmarks.H;
+    var center_front = -std.math.inf(f32);
+    var edge_front = -std.math.inf(f32);
+    var visor_vertices: usize = 0;
+    for (visor.character.mesh.vertices.items) |vertex| {
+        if (vertex.material != .armor or @abs(vertex.pos.y - center_y) > 0.002) continue;
+        visor_vertices += 1;
+        try std.testing.expect(vertex.normal.z > 0.8);
+        if (@abs(vertex.pos.x) < 0.015) center_front = @max(center_front, vertex.pos.z);
+        if (@abs(vertex.pos.x) > 0.18) edge_front = @max(edge_front, vertex.pos.z);
+    }
+    try std.testing.expect(visor_vertices > 10);
+    try std.testing.expect(center_front > edge_front + 0.01);
+    try std.testing.expect(visor.character.mesh.vertices.items.len > open.character.mesh.vertices.items.len + 100);
+    try std.testing.expect(visor.character.mesh.vertices.items.len > undersuit.character.mesh.vertices.items.len + 300);
+}
+
+test "rootweave and skyguard profiles generate distinct armor meshes and save values" {
+    const a = std.testing.allocator;
+    var scout = try init(a, .{ .armor = .scout, .helmet = .open, .clothing = .field_jacket });
+    defer scout.deinit(a);
+    var rootweave = try init(a, .{ .armor = .rootweave, .helmet = .open, .clothing = .field_jacket });
+    defer rootweave.deinit(a);
+    var skyguard = try init(a, .{ .armor = .skyguard, .helmet = .open, .clothing = .field_jacket });
+    defer skyguard.deinit(a);
+
+    try std.testing.expect(rootweave.mesh.vertices.len > scout.mesh.vertices.len);
+    try std.testing.expect(skyguard.mesh.vertices.len > scout.mesh.vertices.len);
+    try std.testing.expect(!Ranger.sameAppearance(rootweave.profile, skyguard.profile));
+    try std.testing.expectEqualDeep(rootweave.profile, try Profile.fromDoc(rootweave.profile.toDoc()));
+    try std.testing.expectEqualDeep(skyguard.profile, try Profile.fromDoc(skyguard.profile.toDoc()));
 }

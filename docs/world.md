@@ -29,8 +29,8 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Palettes chosen to suit the painterly direction: eight skin tones, eight hair colors, eight outfit colors, and five bioluminescent accents (the visor and belt glow like Arbor lumen).
 - Hair: short, ponytail, long, crest (anime), or ranger hood.
 
-- Clothing: undersuit, field jacket, or one of three sci-fi armor suits: exo rig (light limb plates), hardsuit (sealed white plate) and vanguard (dark heavy plate). Armor is rigid, segmented and domed, so it reads as hard shell rather than cloth.
-- Armor accents (none, scout, sentinel) and helmet (open, visor, sealed).
+- Clothing: undersuit, field jacket, exo rig, hardsuit, or vanguard. The field jacket has modeled utility pockets; the armor silhouettes use rigid plates rather than cloth shells.
+- Armor style: none, scout, sentinel, rootweave (bark-green plates with lumen tracery), or skyguard (streamlined blue-green plates and light strips). Helmet: open, visor, or sealed; the visor is a curved wraparound shield with an inset lumen slit.
 
 Clothing, gear, and accent unlocks found while exploring are future growth for this system.
 
