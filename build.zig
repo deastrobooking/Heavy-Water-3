@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) void {
     if (benchmark_arbor > 2) @panic("benchmark-arbor must be 0, 1, or 2");
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
+    options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
+    options.addOption(usize, "field_upload", (b.option(usize, "field-upload-kib", "Scale workload instance upload budget per frame in KiB") orelse 2048) * 1024);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true });
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
@@ -31,6 +33,16 @@ pub fn build(b: *std.Build) void {
         assets.dependOn(&b.addInstallFileWithDir(output.*, .{ .custom = "assets/blueprints" }, b.fmt("{s}.json", .{name})).step);
     }
 
+    // The example mod's scripts compile to WebAssembly and are written next to its manifest, where
+    // the game loads mods from (`mods/<name>/`).
+    const glowworks = b.addExecutable(.{ .name = "glowworks", .root_module = b.createModule(.{ .root_source_file = b.path("mods/glowworks/src/glowworks.zig"), .target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding }), .optimize = .ReleaseSmall }) });
+    glowworks.entry = .disabled;
+    glowworks.rdynamic = true;
+    glowworks.stack_size = 16 * 1024;
+    const mods = b.addUpdateSourceFiles();
+    mods.addCopyFileToSource(glowworks.getEmittedBin(), "mods/glowworks/glowworks.wasm");
+    b.step("mods", "Build the example mod's scripts into mods/").dependOn(&mods.step);
+
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
     app.addOptions("options", options);
@@ -48,6 +60,7 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(exe);
     const run = b.addRunArtifact(exe);
+    run.step.dependOn(&mods.step);
     if (b.args) |args| run.addArgs(args);
     b.step("run", "Explore the engine test world").dependOn(&run.step);
     const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }) });
@@ -55,6 +68,9 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
     tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     for (blueprint_names, blueprints) |name, output| tests.root_module.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
+    tests.root_module.addAnonymousImport("glowworks.wasm", .{ .root_source_file = glowworks.getEmittedBin() });
+    tests.root_module.addAnonymousImport("glowworks.mod", .{ .root_source_file = b.path("mods/glowworks/mod.json") });
+    tests.root_module.addAnonymousImport("glowworks.lamp", .{ .root_source_file = b.path("mods/glowworks/blueprints/breathing_lamp.json") });
     b.step("test", "Run deterministic engine tests (no window)").dependOn(&b.addRunArtifact(tests).step);
     b.step("check", "Compile the application").dependOn(&exe.step);
 }

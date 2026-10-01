@@ -16,6 +16,8 @@ pub const max_wires = 48;
 pub const max_nodes = 64;
 pub const name_len = 32;
 pub const id_len = 16;
+/// "mod.export" reference of a script device.
+pub const script_len = 48;
 
 pub const Part = struct { offset: [3]f32, size: [3]f32, color: [4]f32 };
 pub const PortRef = struct { device: u8, port: u8 };
@@ -55,6 +57,12 @@ pub const DeviceDef = struct {
     body: bool = false,
     /// Bus channel (1..max_channels) for transmitters, receivers, and Rootsong devices; 0 otherwise.
     channel: u16 = 0,
+    /// Script devices: "mod.export"; empty otherwise.
+    script: [script_len]u8 = @splat(0),
+
+    pub fn scriptName(self: *const DeviceDef) []const u8 {
+        return std.mem.sliceTo(&self.script, 0);
+    }
 
     pub fn name(self: *const DeviceDef) []const u8 {
         return std.mem.sliceTo(&self.id, 0);
@@ -65,7 +73,7 @@ pub const DeviceDef = struct {
     pub fn hasBody(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
             .generator, .sap_tap, .button, .actuator, .lamp, .transmitter, .receiver, .root_sender, .root_listener, .plate => true,
-            .proximity, .latch, .logic, .seat, .motor, .steering => false,
+            .proximity, .latch, .logic, .seat, .motor, .steering, .script => false,
         };
     }
 
@@ -73,7 +81,7 @@ pub const DeviceDef = struct {
     pub fn visible(self: DeviceDef) bool {
         return self.body or switch (self.kind) {
             .generator, .sap_tap, .button, .actuator, .seat, .motor, .lamp, .transmitter, .receiver, .root_sender, .root_listener, .plate => true,
-            .proximity, .latch, .logic, .steering => false,
+            .proximity, .latch, .logic, .steering, .script => false,
         };
     }
 };
@@ -119,6 +127,7 @@ pub const DocDevice = struct {
     nodes: []const Node = &.{},
     body: bool = false,
     channel: u16 = 0,
+    script: []const u8 = "",
 };
 pub const DocWheel = struct { offset: [3]f32, radius: f32, rest: f32, driven: bool = false, steered: bool = false };
 pub const DocVehicle = struct {
@@ -229,6 +238,7 @@ fn addDeviceChecked(self: *Blueprint, d: DocDevice, vehicle: bool) Error!u8 {
     };
     if (if (bus) d.channel == 0 or d.channel > Device.max_channels else d.channel != 0) return error.InvalidDeviceParameters;
     if ((d.kind == .logic) != (d.nodes.len > 0)) return error.InvalidLogic;
+    if ((d.kind == .script) != (d.script.len > 0) or (d.script.len > 0 and !validScript(d.script))) return error.InvalidDeviceParameters;
     if (self.node_count + d.nodes.len > max_nodes) return error.TooManyNodes;
     Graph.validate(d.nodes) catch return error.InvalidLogic;
     @memcpy(self.nodes[self.node_count..][0..d.nodes.len], d.nodes);
@@ -247,10 +257,20 @@ fn addDeviceChecked(self: *Blueprint, d: DocDevice, vehicle: bool) Error!u8 {
         .channel = d.channel,
     };
     @memcpy(def.id[0..d.id.len], d.id);
+    @memcpy(def.script[0..d.script.len], d.script);
     self.devices[self.device_count] = def;
     self.node_count += d.nodes.len;
     self.device_count += 1;
     return @intCast(self.device_count - 1);
+}
+
+/// "mod.export": two identifiers of lowercase letters, digits, and underscores.
+pub fn validScript(text: []const u8) bool {
+    if (text.len >= script_len) return false;
+    const dot = std.mem.indexOfScalar(u8, text, '.') orelse return false;
+    if (dot == 0 or dot + 1 == text.len) return false;
+    for (text, 0..) |c, i| if (i != dot and !(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '_')) return false;
+    return true;
 }
 
 /// Adds a wire after the same checks the file format gets: output to input, matching port
@@ -333,6 +353,7 @@ pub fn toDoc(self: *const Blueprint, arena: std.mem.Allocator) error{OutOfMemory
         .nodes = try arena.dupe(Node, self.logicNodes(d.*)),
         .body = d.body,
         .channel = d.channel,
+        .script = try arena.dupe(u8, d.scriptName()),
     };
     const wires = try arena.alloc([2][]const u8, self.wire_count);
     for (wires, self.wires[0..self.wire_count]) |*out, w| out.* = .{ try self.portName(arena, w.from), try self.portName(arena, w.to) };

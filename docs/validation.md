@@ -135,6 +135,30 @@ The experiment was terminated and the programmatic size change removed from the 
 - Whole-process memory instrumentation: Mach's stock entrypoint currently omits module-container teardown.
 - Deterministic screenshot regression tests and CPU/GPU percentile benchmarks.
 
+## Scale workloads — 2026-09-30
+
+- Debug suite: **127/127 tests pass**. The new tests cover field determinism and cell sorting, bounds containment, budgeted streaming (20 frames at 64 KiB for 20K objects, with the CPU copy freed), frustum and distance culling, LOD selection, run merging and coverage, normalized frustum planes against the sphere test on 500 random spheres, and the process footprint.
+- `tools/benchmark.py --scale` for 10K, 100K and 1M objects (ReleaseFast, 600 measured frames): **all checks pass**. See the results table in [scale](scale.md). Render CPU p99 is 1.271 / 1.213 / 1.281 ms and presentation p99 21.188 / 21.093 / 20.984 ms.
+- Memory investigation at 1M:
+  - The steady footprint was 1,006 MiB against 522 MiB without the field.
+  - Skipping only the field's draws gave 742 MB, so about 380 MB is driver geometry storage for drawn instances.
+  - The upload pattern changed the peak: 1.20 GB when uploading in one frame, 0.99 GB at 512 KiB per frame.
+  - Uploads were moved from `queue.writeBuffer` to the frame encoder to share Mach's staging page.
+- Not available: GPU execution time (Mach Metal has no timestamp queries), GPU-compacted culling and indirect draws (not implemented in the pinned Mach). Not measured: the visual result of the field at each LOD in the window.
+
+## Mods and scripting — 2026-09-30
+
+- Debug suite: **123/123 tests pass**. The new tests cover:
+  - **Interpreter:** hand-assembled modules for control flow, memory, traps, fuel, depth, float conversion and float semantics; rejected imports, bad versions, and truncated or unbalanced bodies.
+  - **Host:** the Zig-compiled `glowworks` module against native results, script-signature checks, and recovery from a starved fuel budget.
+  - **Mod loader:** the example package, plus twelve rejected manifests or packages.
+  - **World:** a breathing lamp tracks its script one step behind; duplicate installs, changed designs and missing mods are handled, and the save round-trips. The save test was also extended for v10 mods.
+- Two bugs were found by tests while building it. The interpreter's loop branch re-entered the `loop` opcode, which broke branch depths. Script devices wrote their result to port 0 while `out` is port 4, as for logic.
+- Interpreter cost (Apple M3 Pro, ReleaseFast / ReleaseSafe): `breathe` 802 / 836 ns per call (170 instructions); `majority` 374 / 408 ns (99 instructions); native `breathe` 5.6 ns. See the [scripting evaluation](scripting.md).
+- Smoke, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 200 frames: the app installed `glowworks 1.0.0` from `mods/`; no validation errors, clean exit, 261 ticks for 200 frames (unthrottled).
+- Canopy benchmark re-run with the window visible (300 measured frames, ReleaseSafe): **all checks pass**. Render CPU P50/P95/P99 0.675/1.061/1.142 ms, presentation interval P50/P99 20.842/21.1 ms, zero underfilled frames, 25 peak resident chunks, unchanged pools. This replaces the throttled presentation result recorded below.
+- Not measured: official WebAssembly spec-suite conformance, and a mod placed and used by hand in the window.
+
 ## Rootsong, plaza priority, guest trading, Rootdeep shrines — 2026-09-30
 
 - Debug suite: **115/115 tests pass**. The new tests cover:

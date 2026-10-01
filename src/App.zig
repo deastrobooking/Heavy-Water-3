@@ -62,6 +62,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
     self.sandbox.enableLife();
     self.importPrefabs();
+    self.loadMods();
     // A new game begins by creating the character (not in unattended smoke or benchmark runs).
     if (options.smoke_frames == 0 and options.benchmark_frames == 0) self.sandbox.creator.begin(self.sandbox.profile);
 }
@@ -129,6 +130,36 @@ fn importPrefabs(self: *App) void {
         loaded += 1;
     }
     if (loaded > 0) std.log.info("Imported {d} prefabs from {s}", .{ loaded, prefab_dir });
+}
+
+/// Installs every valid package in `mods/<name>/`. A rejected package is logged with its reason
+/// and leaves the world unchanged.
+fn loadMods(self: *App) void {
+    var dir = std.Io.Dir.cwd().openDir(self.io, "mods", .{ .iterate = true }) catch return;
+    defer dir.close(self.io);
+    var it = dir.iterate();
+    while (it.next(self.io) catch null) |entry| {
+        if (entry.kind != .directory) continue;
+        var sub = dir.openDir(self.io, entry.name, .{}) catch continue;
+        defer sub.close(self.io);
+        const Files = struct {
+            dir: std.Io.Dir,
+            io: std.Io,
+            pub fn read(files: @This(), allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+                return files.dir.readFileAlloc(files.io, path, allocator, .limited(@import("mod/Mod.zig").max_file_bytes));
+            }
+        };
+        var pkg = @import("mod/Mod.zig").load(self.allocator, entry.name, Files{ .dir = sub, .io = self.io }) catch |err| {
+            std.log.warn("mod {s} rejected: {s}", .{ entry.name, @errorName(err) });
+            continue;
+        };
+        defer pkg.deinit();
+        self.sandbox.installMod(&pkg) catch |err| {
+            std.log.warn("mod {s} not installed: {s}", .{ entry.name, @errorName(err) });
+            continue;
+        };
+        std.log.info("Mod {s} {d}.{d}.{d}: {d} blueprints, {d} scripts", .{ pkg.name(), pkg.version.major, pkg.version.minor, pkg.version.patch, pkg.blueprint_count, pkg.export_count });
+    }
 }
 
 /// Writes a captured prefab as a blueprint file other worlds import at startup.
@@ -531,6 +562,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
                     renderer.hud_lines[1].set("SEED VAULT  CLICK OPEN", .{})
                 else
                     renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
+                .script => renderer.hud_lines[1].set("{s} SCRIPT {s}  OUT {d:.2}{s}", .{ def.name(), def.scriptName(), machine.outputs[ref.device][4], if (sandbox.scripts.find(def.scriptName()) == null) "  MISSING" else "" }),
                 .plate => renderer.hud_lines[1].set("WEIGHT PLATE {s}  {s}", .{ def.name(), if (machine.outputs[ref.device][0] > 0.5) "PRESSED" else "NEEDS A CRATE" }),
                 .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
                 .transmitter, .receiver => renderer.hud_lines[1].set("{s} {s} CHANNEL {d}  [ ] CHANGE", .{ def.name(), @tagName(def.kind), def.channel }),

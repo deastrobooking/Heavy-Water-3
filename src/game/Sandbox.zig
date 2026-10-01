@@ -27,6 +27,8 @@ const District = @import("../procedural/District.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
+const Host = @import("../script/Host.zig");
+const Mod = @import("../mod/Mod.zig");
 const Life = @import("../city/Life.zig");
 const Market = @import("../city/Market.zig");
 const Routes = @import("../city/Routes.zig");
@@ -113,6 +115,15 @@ pub const Placed = struct {
     shrine: ?u8 = null,
 };
 pub const shrine_count = 2;
+pub const max_mods = Host.max_modules;
+pub const ModRef = struct {
+    name_buffer: [Mod.name_len]u8 = @splat(0),
+    name_length: usize = 0,
+    version: Mod.Version,
+    pub fn name(self: *const ModRef) []const u8 {
+        return self.name_buffer[0..self.name_length];
+    }
+};
 /// A generated Rootdeep shrine: its verified puzzle, where it stands, and its machine slot.
 pub const PlacedShrine = struct {
     generated: Shrine.Generated,
@@ -190,6 +201,12 @@ life: Life = .{},
 /// Bumped whenever the road graph changes, so traffic replans.
 road_revision: u64 = 0,
 shrines: [shrine_count]PlacedShrine = undefined,
+/// Mod scripts for `script` devices, and the installed mods (recorded in saves).
+scripts: Host,
+mods: [max_mods]ModRef = undefined,
+mod_count: usize = 0,
+/// Mods the last loaded save used that are missing or at another version.
+mod_warnings: usize = 0,
 market: Market = .{},
 wallet: Market.Wallet = .{},
 /// Stall whose trade panel is open (P1 only), and the selected row.
@@ -229,7 +246,7 @@ notice_until: u64 = 0,
 
 /// Initializes in place: physics keeps a pointer to `seed` for terrain queries.
 pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
-    self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined };
+    self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined, .scripts = .init(allocator) };
     self.physics = .init(.{ .context = &self.seed, .sample = groundSample });
     errdefer self.physics.deinit();
     try self.placeArbor(spawn[0] + arbor_offset[0], spawn[2] + arbor_offset[1]);
@@ -275,6 +292,48 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     }
     self.market = .init(seed, 0);
     self.resetPlayer(camera);
+}
+
+/// Installs a validated mod package: its scripts into the host and its blueprints into the
+/// build palette. Nothing changes unless its name is free and each blueprint name is either
+/// free or already holds an identical design (a save made with the mod carries its blueprints).
+pub fn installMod(self: *Sandbox, pkg: *const Mod.Package) !void {
+    for (self.mods[0..self.mod_count]) |*m| if (std.mem.eql(u8, m.name(), pkg.name())) return error.DuplicateMod;
+    if (self.mod_count == max_mods) return error.TooManyMods;
+    var added: usize = 0;
+    for (pkg.blueprints[0..pkg.blueprint_count]) |*bp| {
+        if (self.catalog.findBlueprint(bp.name()) != null) return error.NameConflict;
+        const existing = for (self.prefabs[0..self.prefab_count]) |*p| {
+            if (std.mem.eql(u8, p.name(), bp.name())) break p;
+        } else null;
+        if (existing) |p| {
+            if (!try sameDesign(self.allocator, p, bp)) return error.NameConflict;
+        } else added += 1;
+    }
+    if (self.prefab_count + added > max_prefabs) return error.TooManyPrefabs;
+    if (pkg.wasm) |wasm| {
+        var names: [Mod.max_exports][]const u8 = undefined;
+        try self.scripts.add(pkg.name(), wasm, pkg.exports(&names), pkg.fuel, pkg.memory_pages);
+    }
+    // `addPrefab` keeps an existing same-named (identical) design.
+    for (pkg.blueprints[0..pkg.blueprint_count]) |bp| _ = self.addPrefab(bp) catch unreachable;
+    var ref: ModRef = .{ .version = pkg.version, .name_length = pkg.name().len };
+    @memcpy(ref.name_buffer[0..ref.name_length], pkg.name());
+    self.mods[self.mod_count] = ref;
+    self.mod_count += 1;
+}
+
+fn sameDesign(allocator: std.mem.Allocator, a: *const Blueprint, b: *const Blueprint) !bool {
+    var arena: std.heap.ArenaAllocator = .init(allocator);
+    defer arena.deinit();
+    const x = try std.json.Stringify.valueAlloc(arena.allocator(), try a.toDoc(arena.allocator()), .{});
+    const y = try std.json.Stringify.valueAlloc(arena.allocator(), try b.toDoc(arena.allocator()), .{});
+    return std.mem.eql(u8, x, y);
+}
+
+pub fn modInstalled(self: *const Sandbox, name: []const u8) ?Mod.Version {
+    for (self.mods[0..self.mod_count]) |*m| if (std.mem.eql(u8, m.name(), name)) return m.version;
+    return null;
 }
 
 /// Rootdeep: the flattest of sixteen seeded forest-floor sites 110–260 m from spawn, clear of
@@ -369,6 +428,7 @@ fn checkShrines(self: *Sandbox) void {
 
 /// Frees mesh colliders. Bodies and machines own no heap memory.
 pub fn deinit(self: *Sandbox) void {
+    self.scripts.deinit();
     self.physics.deinit();
 }
 
@@ -846,6 +906,13 @@ fn stepMachines(self: *Sandbox, dt: f32) void {
     for (&self.machines, 0..) |*placed, m| {
         if (!placed.active) continue;
         var env: Machine.Environment = .{ .player_feet = self.player.feet, .other_feet = others[0..other_count], .bus = &previous, .songs = &heard, .weights = weights[0..weight_count] };
+        // Script devices run now on last step's signals, like logic (one step per hop).
+        const time = @as(f32, @floatFromInt(self.tick % (1 << 24))) / 60;
+        for (placed.blueprint.devices[0..placed.blueprint.device_count], 0..) |*def, d| {
+            if (def.kind != .script) continue;
+            const mc = &placed.machine;
+            mc.script_out[d] = self.scripts.call(def.scriptName(), .{ mc.inputNow(d, 0), mc.inputNow(d, 1), mc.inputNow(d, 2), mc.inputNow(d, 3) }, time);
+        }
         // Rootsong devices are heard only while within reach of wood.
         for (placed.blueprint.devices[0..placed.blueprint.device_count], 0..) |def, d| {
             placed.machine.root_group[d] = null;
@@ -1360,6 +1427,11 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .collected = self.modifications.slice(),
         .machines = machines[0..machine_count],
         .wallet = self.wallet,
+        .mods = mods: {
+            const refs = try arena.alloc(Save.ModState, self.mod_count);
+            for (refs, self.mods[0..self.mod_count]) |*out, *m| out.* = .{ .name = try arena.dupe(u8, m.name()), .version = try std.fmt.allocPrint(arena, "{d}.{d}.{d}", .{ m.version.major, m.version.minor, m.version.patch }) };
+            break :mods refs;
+        },
         .market_day = self.market.day,
         .market_stock = stock: {
             const rows = try arena.alloc([Market.ware_count]u8, Market.stall_count);
@@ -1463,6 +1535,17 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.wallet = doc.wallet;
     self.trading = null;
     self.target = .none;
+    // Saves remember which mods they were made with; a missing or different mod is reported, not
+    // fatal (its blueprints are in the save; its scripts output 0 until it is installed).
+    self.mod_warnings = 0;
+    for (doc.mods) |m| {
+        const have = self.modInstalled(m.name);
+        const want = Mod.Version.parse(m.version) catch null;
+        if (have == null or want == null or !have.?.eql(want.?)) {
+            self.mod_warnings += 1;
+            self.say("save used mod {s} {s}: {s}", .{ m.name, m.version, if (have == null) "not installed" else "different version" });
+        }
+    }
     self.press = null;
     // City life and guests are not saved: traffic restarts on the restored roads, and guests
     // rejoin beside the restored P1.
@@ -2647,4 +2730,67 @@ test "Rootdeep shrines are verified before they appear, and the verifier's plan 
     try playShrine(&sb, &camera, 1);
     try std.testing.expect(sb.shrines[1].completed);
     try std.testing.expectEqualStrings("rootsong_call", sb.prefabs[1].name());
+}
+
+test "a mod's blueprint and WebAssembly script run a machine, saves record the mod, and missing mods degrade" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    var pkg = try Mod.load(std.testing.allocator, "glowworks", Mod.glowworksFiles(@embedFile("glowworks.mod")));
+    defer pkg.deinit();
+    try sb.installMod(&pkg);
+    try std.testing.expectError(error.DuplicateMod, sb.installMod(&pkg));
+    try std.testing.expectEqual(@as(usize, 1), sb.prefab_count);
+    try std.testing.expectEqualStrings("breathing_lamp", sb.prefabs[0].name());
+
+    // Place it from the palette's blueprint and switch it on.
+    const x = spawn[0] - 14;
+    const z = spawn[2] + 4;
+    const m = try sb.spawnMachine(null, sb.prefabs[0], sb.groundOrigin(&sb.prefabs[0], x, z, 0), 0, false);
+    const bp = &sb.machines[m].blueprint;
+    const glow = bp.findDevice("glow").?;
+    const breath = bp.findDevice("breath").?;
+    try run(&sb, &camera, .{}, .{}, 5);
+    try std.testing.expectEqual(@as(f32, 0), sb.machines[m].machine.outputs[glow][2]);
+    sb.press = sb.findDevice(m, "switch").?;
+    try run(&sb, &camera, .{}, .{}, 5);
+    // For four seconds the lamp follows the script, one step behind it, breathing 0.1..1.
+    var lo: f32 = 1;
+    var hi: f32 = 0;
+    for (0..240) |_| {
+        const script_before = sb.machines[m].machine.outputs[breath][4];
+        try run(&sb, &camera, .{}, .{}, 1);
+        const lit = sb.machines[m].machine.outputs[glow][2];
+        try std.testing.expectApproxEqAbs(script_before, lit, 1e-5);
+        lo = @min(lo, lit);
+        hi = @max(hi, lit);
+    }
+    try std.testing.expect(lo < 0.15 and hi > 0.95);
+    try std.testing.expectEqual(@as(u64, 0), sb.scripts.stats.traps);
+
+    // Saves record the mod. A world without it loads the machine but reports the missing mod,
+    // and the script reads 0 (dark lamp) until the mod is installed.
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"glowworks\"") != null);
+    var bare_camera: Camera = .{};
+    var bare: Sandbox = undefined;
+    try bare.init(std.testing.allocator, sb.seed, &catalog, &bare_camera);
+    defer bare.deinit();
+    try bare.restore(std.testing.allocator, bytes, &bare_camera);
+    try std.testing.expectEqual(@as(usize, 1), bare.mod_warnings);
+    try run(&bare, &bare_camera, .{}, .{}, 5);
+    try std.testing.expectEqual(@as(f32, 0), bare.machines[m].machine.outputs[glow][2]);
+    try std.testing.expect(bare.scripts.stats.missing > 0);
+    // A different design under the mod's blueprint name is a conflict; the identical one is not.
+    bare.prefabs[0].devices[bare.prefabs[0].findDevice("glow").?].watts = 41;
+    try std.testing.expectError(error.NameConflict, bare.installMod(&pkg));
+    bare.prefabs[0].devices[bare.prefabs[0].findDevice("glow").?].watts = 40;
+    try bare.installMod(&pkg);
+    try std.testing.expectEqual(@as(usize, 1), bare.prefab_count);
+    try run(&bare, &bare_camera, .{}, .{}, 5);
+    try std.testing.expect(bare.machines[m].machine.outputs[glow][2] > 0.05);
 }

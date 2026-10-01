@@ -169,9 +169,53 @@ See [Rootdeep shrines](rootdeep.md).
 
 Limits: two straight room chains, crate-only plates, blueprint rewards (no genome fragments yet), no Rootdeep streaming or special terrain, and free flight can bypass walls.
 
-## 11–12. Mods and scale — later
+## 11. Mods — implemented as mod API 1
 
-11. Versioned mod packages and a constrained public API; evaluate a native Zig WASM runtime before selecting a scripting approach.
-12. Repeatable 10K/100K/1M workloads with GPU culling, LOD, indirect submission, streaming budgets, and CPU/GPU/memory percentile reports.
+Implemented:
+
+- **Packages:** versioned mod packages (`mods/<name>/mod.json`, format 1) with validated blueprints and an optional WebAssembly script module, installed all-or-nothing.
+- **Public API:** a constrained API (version 1) of data plus `script` devices. A script device calls a mod's pure `fn(a, b, c, d, time) f32` export with fuel, memory and depth limits and no imports.
+- **Runtime:** a native Zig WebAssembly interpreter, chosen after a written [evaluation](scripting.md) that compared logic graphs, embedded C runtimes, a custom language, native plugins, and a JIT.
+- **Supporting changes:** dimmable lamps (`on` is a 0–1 level), and saves (format 10) that record installed mods and degrade gracefully when one is missing.
+- **Example:** the `glowworks` mod, built by the build graph.
+
+Acceptance evidence:
+
+- The Zig-compiled example module runs in the interpreter and matches native results.
+- Twelve kinds of invalid package are rejected with reasons, including path traversal and foreign scripts.
+- In the world, a modded breathing lamp follows its script one step behind, like logic.
+- Duplicate mods and changed designs under a mod's name are refused.
+- A save made with the mod loads into a world without it, reports the mod, and the lamp revives when the mod is installed.
+
+See [mods](mods.md).
+
+Not in API 1: mod-defined genomes, shrines, wares, or assets; host imports; dependencies; hot reload.
+
+## 12. Scale — implemented within the pinned Mach
+
+Implemented:
+
+- **Workloads:** repeatable 10K/100K/1M workloads (`tools/benchmark.py --scale N`) on the streaming route.
+- **Culling and LOD:** per-cell CPU culling and LOD (960 cells, never per object), and per-instance frustum culling on the GPU in the vertex stage.
+- **Submission:** merged ranged instanced draws (about 29 per frame).
+- **Streaming:** instance data under its own per-frame upload budget, with the CPU copy freed once resident.
+- **Reports:** CPU and presentation percentiles, objects submitted, draws and visible-cell percentiles, generation time, GPU and CPU bytes, and peak process footprint.
+
+Acceptance evidence: all three workloads pass every check in 600 measured frames. Render CPU p99 is flat (1.27/1.21/1.28 ms) from 10K to 1M, presentation p99 is about 21 ms throughout, and the 1M field is resident by frame 30 under a 2 MiB/frame budget. Peak footprint is about 1 GiB at 1M; isolation runs attribute about 380 MB to driver geometry storage for drawn instances. See [scale](scale.md).
+
+Blocked by the pinned Mach, pending a decision to update or fork it:
+
+- GPU-compacted culling (no shader atomics);
+- indirect submission (indirect draws panic `unimplemented`);
+- GPU timing (no timestamp queries on Metal).
+
+## Next
+
+All twelve phases have a runnable slice. Open decisions and follow-ups:
+
+- **Mach:** update or fork it for indirect draws, shader atomics, and timestamp queries (phase 12).
+- **Economy:** whether building should cost resources (phase 9 markets are additive today).
+- **Mod API 2:** host imports, mod-defined genomes, shrines and wares, and saved script state (phase 11).
+- **Content and design:** the level and character design pass deferred earlier, and art-direction review.
 
 Lighting (the cel pipeline, shadows through the canopy, clustered lumen lights, postprocessing) should develop alongside measurable scenes, serving the painterly direction rather than physically based realism. Long-term research remains World Genome, civilization archaeology, Machine DNA, procedural graph compilation, and solver-verified dungeons. None is represented as implemented by this bootstrap.

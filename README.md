@@ -6,7 +6,7 @@ The executable is an engine field test: an unbounded-feeling seeded terrain stre
 
 The climbable test Arbor stands near spawn: follow its spiral ramp to a branch platform and cross the bridge to the tower. The world uses cel shading, rim light, depth silhouettes, and height-aware haze. A twenty-minute day/night cycle starts at 08:24; the HUD shows world time, and quickload restores it. Powered lamps and your ranger's lumen accents stay luminous after dusk (emissive surfaces, without local light casting or bloom).
 
-Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. The grove now connects through a six-plaza canopy district with towers, trunk walkways, and vine-supported roads. Press **4** to build bridges between plaza markers; machines can be placed on elevated decks. See [canopy city](docs/city.md) for the route and construction controls. The district is alive: three cars drive its lanes and eight pedestrians walk its walkways, both rerouting as you add and remove bridges. Market stalls at the three towers buy salvaged relic parts for scrap and sell blueprint kits that restock at dawn. Arbors that share roots also share **Rootsong** channels. Two solver-verified **Rootdeep shrines** stand on the forest floor, and each rewards a Rootsong blueprint; see [Rootdeep shrines](docs/rootdeep.md). Saves now use format 9 and content version 7; older saves are rejected.
+Two additional Arbors now grow from versioned genomes: a narrow cyan tree and a spreading amber tree. Place **sap beacons** beside a trunk to power their lamps; multiple taps share the tree's supply and brown out together. See [Arbor genomes and sap](docs/arbors.md) for locations, controls, and the current limits. The grove now connects through a six-plaza canopy district with towers, trunk walkways, and vine-supported roads. Press **4** to build bridges between plaza markers; machines can be placed on elevated decks. See [canopy city](docs/city.md) for the route and construction controls. The district is alive: three cars drive its lanes and eight pedestrians walk its walkways, both rerouting as you add and remove bridges. Market stalls at the three towers buy salvaged relic parts for scrap and sell blueprint kits that restock at dawn. Arbors that share roots also share **Rootsong** channels. Two solver-verified **Rootdeep shrines** stand on the forest floor, and each rewards a Rootsong blueprint; see [Rootdeep shrines](docs/rootdeep.md). Mods in `mods/` can add blueprints and WebAssembly scripts that run inside machines; the example `glowworks` mod adds a breathing lamp. See [mods](docs/mods.md). Saves now use format 10 and content version 7; older saves are rejected.
 
 ## Run
 
@@ -81,6 +81,7 @@ Guests have the full traversal controller, their own camera, and hands that pres
 python3 tools/zig.py build test
 python3 tools/zig.py build check
 python3 tools/zig.py build assets        # compiled models and validated blueprints in zig-out/assets
+python3 tools/zig.py build mods          # build the example mod's WebAssembly scripts into mods/
 python3 tools/zig.py build run -Doptimize=ReleaseSafe
 python3 tools/zig.py build run -Dseed=42
 python3 tools/zig.py build run -Dsmoke-frames=120
@@ -88,6 +89,7 @@ python3 tools/zig.py build -Doptimize=ReleaseFast
 python3 tools/benchmark.py            # fixed fly-through route, writes .tools/streaming-benchmark.json
 python3 tools/benchmark.py --canopy   # Test Arbor at close range and 1 km
 python3 tools/benchmark.py --arbor 1  # Seeded narrow Arbor (2 selects the spreading Arbor)
+python3 tools/benchmark.py --scale 1000000  # 10K/100K/1M object workloads: culling, LOD, streaming, memory (docs/scale.md)
 ```
 
 Prefab blueprints in `saves/prefabs/*.json` are imported at startup and after a quickload. They use the same format as `assets/source/blueprints`, and invalid files are skipped with a logged reason.

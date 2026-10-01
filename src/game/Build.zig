@@ -517,6 +517,10 @@ pub fn inspect(sb: *const Sandbox, lines: []PanelLine) usize {
             const text = std.fmt.bufPrint(values[used..], " ch {d}", .{d.channel}) catch "";
             used += text.len;
         }
+        if (d.kind == .script) {
+            const text = std.fmt.bufPrint(values[used..], " {s}{s}", .{ d.scriptName(), if (sb.scripts.find(d.scriptName()) == null) " missing" else "" }) catch "";
+            used += text.len;
+        }
         if (d.kind == .root_sender or d.kind == .root_listener) {
             const text = if (machine.root_group[i]) |g| std.fmt.bufPrint(values[used..], " root group {d}", .{g}) catch "" else std.fmt.bufPrint(values[used..], " unrooted", .{}) catch "";
             used += text.len;

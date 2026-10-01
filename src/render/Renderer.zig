@@ -22,7 +22,10 @@ comptime {
 }
 const Sky = @import("../engine/Sky.zig");
 /// Matches `Frame` in scene.wgsl.
-const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32 };
+const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32 };
+const Field = @import("Field.zig");
+const Memory = @import("../engine/Memory.zig");
+const Visibility = @import("Visibility.zig");
 pub const max_views = Layout.max_views;
 /// One split-screen view. View 0 is P1's and uses `hud_lines`, `panel`, and the metrics.
 pub const View = struct {
@@ -87,9 +90,26 @@ frame_ms: f32 = 0,
 underfilled_frames: u64 = 0,
 arbor_detail_frames: u64 = 0,
 arbor_proxy_frames: u64 = 0,
+/// Scale workload (`-Dscale-objects`), its GPU instance buffer, and per-frame measurements.
+field: ?Field = null,
+field_buffer: ?*gpu.Buffer = null,
+field_submitted: FrameStats = .{},
+field_runs: FrameStats = .{},
+field_cells: FrameStats = .{},
+field_resident_frame: ?u64 = null,
+field_peak_cpu_bytes: usize = 0,
+field_last: Field.Plan = .{},
+peak_footprint: u64 = 0,
 
 pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .allocator = allocator, .io = io, .scene = try Scene.init(allocator, io, world.seed, &world.catalog) };
+    if (options.scale_objects > 0) {
+        var timer = mach.time.Timer.start(io);
+        self.field = try Field.generate(allocator, world.seed, options.scale_objects);
+        self.field.?.generation_ms = timer.read() * 1000;
+        self.field_peak_cpu_bytes = self.field.?.cpuBytes();
+        std.log.info("Scale workload: {d} objects in {d} cells, generated in {d:.0} ms, {d} MiB of instances", .{ options.scale_objects, Field.cell_count, self.field.?.generation_ms, self.field.?.gpuBytes() >> 20 });
+    }
 }
 
 fn setup(self: *Renderer, core: *mach.Core) !void {
@@ -132,6 +152,7 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     window.queue.writeTexture(&.{ .texture = self.texture.? }, &.{ .bytes_per_row = 8, .rows_per_image = 2 }, &.{ .width = 2, .height = 2 }, &pixels);
     self.createViewResources(device, 0);
     errdefer self.releaseViewResources(0);
+    if (self.field) |f| self.field_buffer = device.createBuffer(&.{ .label = "scale field", .size = @max(f.gpuBytes(), 64), .usage = .{ .vertex = true, .copy_dst = true } });
     const buffers = [_]gpu.VertexBufferLayout{
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Mesh.Vertex), .attributes = &.{
             .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
@@ -326,6 +347,19 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             .ambient_sky = light.ambient_sky ++ [_]f32{0},
             .ambient_ground = light.ambient_ground ++ [_]f32{0},
             .horizon = light.horizon ++ [_]f32{light.night},
+            .planes = Visibility.frustumPlanes(vp),
+        };
+        if (i == 0) if (self.field) |*f| {
+            // Stream instances under their own byte budget, then plan visible cells. Uploads go
+            // through the frame's encoder, which copies into Mach's staging page immediately and
+            // shares it with terrain uploads; a separate queue write would claim another 64 MiB
+            // staging page per frame in flight, which Mach's pool keeps for the session.
+            if (f.nextUpload(options.field_upload)) |u| {
+                encoder.writeBuffer(self.field_buffer.?, @as(u64, u.first) * @sizeOf(Instance), u.data);
+                f.commit(@intCast(u.data.len));
+                if (f.resident()) self.field_resident_frame = self.frames;
+            }
+            self.field_last = f.plan(.{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z() }, vp);
         };
         scenes[i].prepare(window.queue, view.camera, vp, self.culling, budget, &self.modifications, self.props[0..self.prop_count], view.hide_owner);
         budget -= scenes[i].upload_bytes;
@@ -348,6 +382,12 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pass.setBindGroup(0, self.bind_groups[i].?, &.{});
         pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
         scenes[i].draw(pass);
+        if (i == 0) if (self.field != null) {
+            pass.setVertexBuffer(1, self.field_buffer.?, 0, self.field.?.gpuBytes());
+            const near = self.scene.gpuMesh(self.scene.catalog.content.crate);
+            const far = self.scene.gpuMesh(self.scene.catalog.content.block);
+            for (self.field_last.slice()) |run| if (if (run.lod == .near) near else far) |mesh| mesh.draw(pass, run.count, run.first);
+        };
     }
     pass.end();
     {
@@ -374,6 +414,14 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         self.intervals.record(elapsed * 1000);
         self.cpu_times.record(cpu_timer.read() * 1000);
         if (self.scene.active_missing > 0) self.underfilled_frames += 1;
+        if (self.field != null) {
+            self.field_submitted.record(@floatFromInt(self.field_last.instances[0] + self.field_last.instances[1]));
+            self.field_runs.record(@floatFromInt(self.field_last.run_count));
+            self.field_cells.record(@floatFromInt(self.field_last.visible_cells));
+        }
+        if (self.frames % 30 == 0) if (Memory.footprint()) |bytes| {
+            self.peak_footprint = @max(self.peak_footprint, bytes);
+        };
         const eye: [3]f32 = .{ self.views[0].camera.position.x(), self.views[0].camera.position.y(), self.views[0].camera.position.z() };
         for (self.props[0..self.prop_count]) |prop| {
             if (!prop.mesh.eql(self.benchmarkArborMesh())) continue;
@@ -442,7 +490,9 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
     self.overlay.text(30, 105, std.fmt.bufPrint(&buffer, "QUEUED {d}  GENERATED {d}  CANCEL {d}", .{ self.scene.stats.queued, self.scene.stats.generated, self.scene.stats.canceled }) catch unreachable, ink);
     self.overlay.text(30, 123, std.fmt.bufPrint(&buffer, "UPLOAD {d} KIB  CPU POOL {d} KIB", .{ self.scene.upload_bytes / 1024, self.scene.stats.cpu_bytes / 1024 }) catch unreachable, ink);
     self.overlay.text(30, 141, std.fmt.bufPrint(&buffer, "OBJECTS {d}  TERRAIN DRAWS {d}", .{ count, self.scene.terrain_draws }) catch unreachable, ink);
-    self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "SEED {d}  GEN {d}", .{ self.seed, Seed.generator_version }) catch unreachable, ink);
+    if (self.field) |f| {
+        self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "FIELD {d}K  DRAWN {d}K  RUNS {d}  CELLS {d}", .{ f.count / 1000, (self.field_last.instances[0] + self.field_last.instances[1]) / 1000, self.field_last.run_count, self.field_last.visible_cells }) catch unreachable, cyan);
+    } else self.overlay.text(30, 159, std.fmt.bufPrint(&buffer, "SEED {d}  GEN {d}", .{ self.seed, Seed.generator_version }) catch unreachable, ink);
     self.overlay.text(30, 185, "WASD MOVE  SPACE JUMP/JET  SHIFT SPRINT", ink);
     self.overlay.text(30, 203, "CTRL ROLL  X STOMP  G GRAPPLE  B TRAVERSAL", ink);
     self.overlay.text(30, 221, "F MANTLE  V WALK/FLY  R RESET  ESC", ink);
@@ -454,6 +504,29 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
 fn reportBenchmark(self: *Renderer) void {
     const interval = self.intervals.summary();
     const cpu = self.cpu_times.summary();
+    // Scale workload and memory. GPU execution time needs timestamp queries, which the pinned
+    // Mach Metal backend does not implement, so it is reported as unavailable, not estimated.
+    const submitted = self.field_submitted.summary();
+    const runs = self.field_runs.summary();
+    const cells = self.field_cells.summary();
+    if (Memory.footprint()) |bytes| self.peak_footprint = @max(self.peak_footprint, bytes);
+    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"gpu_time\":\"unavailable\"}}", .{
+        options.scale_objects,
+        if (self.field) |f| f.generation_ms else 0,
+        if (self.field) |f| f.gpuBytes() else 0,
+        self.field_peak_cpu_bytes,
+        if (self.field) |f| f.cpuBytes() else 0,
+        options.field_upload,
+        if (self.field_resident_frame) |f| @as(i64, @intCast(f)) else -1,
+        submitted.p50,
+        submitted.p99,
+        submitted.worst,
+        runs.p50,
+        runs.p99,
+        cells.p50,
+        cells.p99,
+        self.peak_footprint,
+    });
     std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d},\"arbor_detail_frames\":{d},\"arbor_proxy_frames\":{d}}}", .{
         self.seed,                         Seed.generator_version,          self.intervals.total,           interval.p50,            interval.p95,              interval.p99,                 cpu.p50,               cpu.p95,                    cpu.p99,
         self.scene.stats.generated,        self.scene.stats.canceled,       self.scene.uploads,             self.scene.evictions,    self.scene.center_changes, self.scene.peak_upload_bytes, options.upload_budget, self.scene.stats.cpu_bytes, Scene.gpu_pool_bytes,
@@ -471,6 +544,8 @@ pub fn deinit(self: *Renderer) void {
     if (self.scene_layout) |p| p.release();
     if (self.pipeline) |p| p.release();
     if (self.overlay_pipeline) |p| p.release();
+    if (self.field_buffer) |p| p.release();
+    if (self.field) |*f| f.deinit();
     self.scene.destroy();
     for (self.extra_scenes) |maybe| if (maybe) |scene| {
         scene.destroy();

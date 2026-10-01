@@ -50,6 +50,8 @@ networks: [max_devices]Network = @splat(.{}),
 network_count: usize = 0,
 /// Resolved by the world after prepare and before requesting sap.
 connected_taps: [max_devices]bool = @splat(false),
+/// Script device outputs for this step, computed by the world from `inputNow` before `prepare`.
+script_out: [max_devices]f32 = @splat(0),
 /// Root group each Rootsong device is attached to (null when not by wood); set by the world
 /// before `prepare`.
 root_group: [max_devices]?u8 = @splat(null),
@@ -106,6 +108,13 @@ fn find(parent: *[max_devices]u8, x: u8) u8 {
     return i;
 }
 
+/// An input as `prepare` is about to see it (last step's outputs): used to evaluate script
+/// devices outside the machine with the same one-step latency as logic.
+pub fn inputNow(self: *const Machine, device: usize, port: u8) f32 {
+    if (self.drivers[device][port]) |from| return self.outputs[from.device][from.port];
+    return Device.ports(self.blueprint.devices[device].kind)[port].default;
+}
+
 fn input(self: *const Machine, device: usize, port: u8) f32 {
     if (self.drivers[device][port]) |from| return self.previous[from.device][from.port];
     return Device.ports(self.blueprint.devices[device].kind)[port].default;
@@ -147,15 +156,15 @@ pub fn prepare(self: *Machine, env: Environment) void {
             .transmitter => {},
             .receiver => self.outputs[d][0] = if (env.bus) |bus| bus[def.channel - 1] else 0,
             .root_sender => {},
+            .script => self.outputs[d][4] = self.script_out[d],
             .plate => {
                 var pressed = false;
                 for (env.weights) |w| pressed = pressed or self.weighs(d, w);
                 self.outputs[d][0] = if (pressed) 1 else 0;
             },
             .root_listener => self.outputs[d][0] = if (self.root_group[d]) |g| (if (g < env.songs.len) env.songs[g][def.channel - 1] else 0) else 0,
-            .lamp => if (self.input(d, 1) > 0.5) {
-                self.networks[self.network_of[d]].demand += def.watts;
-            },
+            // Dimmable: `on` is a 0..1 level; demand and brightness scale with it.
+            .lamp => self.networks[self.network_of[d]].demand += def.watts * std.math.clamp(self.input(d, 1), 0, 1),
             .latch => {
                 const toggle = self.input(d, 0);
                 if (toggle > 0.5 and self.last_input[d] <= 0.5) self.state[d] = 1 - self.state[d];
@@ -209,7 +218,7 @@ pub fn finish(self: *Machine, dt: f32) void {
     // Actuators move and motors drive at rated output scaled by satisfaction (brownout).
     for (bp.devices[0..bp.device_count], 0..) |def, d| {
         if (def.kind == .motor) self.outputs[d][2] = std.math.clamp(self.input(d, 1), -1, 1) * self.satisfaction(d);
-        if (def.kind == .lamp) self.outputs[d][2] = if (self.input(d, 1) > 0.5) self.satisfaction(d) else 0;
+        if (def.kind == .lamp) self.outputs[d][2] = std.math.clamp(self.input(d, 1), 0, 1) * self.satisfaction(d);
         if (def.kind != .actuator) continue;
         const target = std.math.clamp(self.input(d, 1), 0, 1);
         const max_step = def.speed / Blueprint.length(def.travel) * dt * self.satisfaction(d);

@@ -6,6 +6,11 @@ test {
     _ = @import("city/Market.zig");
     _ = @import("machine/Rootsong.zig");
     _ = @import("procedural/Shrine.zig");
+    _ = @import("script/Wasm.zig");
+    _ = @import("script/Host.zig");
+    _ = @import("mod/Mod.zig");
+    _ = @import("render/Field.zig");
+    _ = @import("engine/Memory.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");

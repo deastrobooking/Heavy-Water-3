@@ -16,9 +16,9 @@ const Market = @import("../city/Market.zig");
 /// name and appearance; v7 constructed bridge edges and the district generator version; v8 adds
 /// the market wallet (scrap, salvaged parts) and each stall's stock with the day it was stocked;
 /// v9 tags Rootdeep shrine machines (their doors, latches, and sealed vault persist as machine
-/// state; the solver-verified layout is regenerated from the seed).
+/// state; the solver-verified layout is regenerated from the seed); v10 records installed mods.
 /// Older saves are rejected, not migrated.
-pub const format_version: u32 = 9;
+pub const format_version: u32 = 10;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -41,6 +41,7 @@ pub const MachineState = struct {
 };
 /// A vehicle chassis: pose and velocities.
 pub const BodyState = struct { position: [3]f32, orientation: [4]f32, linear: [3]f32, angular: [3]f32 };
+pub const ModState = struct { name: []const u8, version: []const u8 };
 pub const PlayerState = struct { feet: [3]f32, yaw: f32, pitch: f32, mode: Player.Mode };
 pub const Document = struct {
     format: u32 = format_version,
@@ -60,6 +61,8 @@ pub const Document = struct {
     wallet: Market.Wallet,
     market_day: u64,
     market_stock: []const [Market.ware_count]u8,
+    /// Mods installed when saved (name and "major.minor.patch").
+    mods: []const ModState = &.{},
 };
 
 pub fn encode(allocator: std.mem.Allocator, doc: Document) ![]u8 {
@@ -85,6 +88,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     for (doc.player.feet) |v| if (!finite(v)) return error.InvalidSave;
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;
     if (doc.machines.len > machine_slots) return error.InvalidSave;
+    if (doc.mods.len > 16) return error.InvalidSave;
     for (doc.machines, 0..) |m, i| {
         if (m.slot >= machine_slots or m.yaw > 3) return error.InvalidSave;
         for (doc.machines[0..i]) |other| if (other.slot == m.slot) return error.InvalidSave;
@@ -153,7 +157,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 2", "\"generator\": 1");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 9", "\"format\": 8");
+    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 10", "\"format\": 9");
     defer allocator.free(future);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
 }

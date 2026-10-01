@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "name": "breathing_lamp",
+  "parts": [{ "offset": [0, 0.1, 0.6], "size": [1.2, 0.2, 2.4], "color": [0.3, 0.32, 0.36, 1] }],
+  "devices": [
+    { "id": "cell", "kind": "generator", "offset": [0, 0.45, -0.3], "size": [0.5, 0.5, 0.5], "color": [0.85, 0.7, 0.2, 1], "watts": 60 },
+    { "id": "switch", "kind": "button", "offset": [0.45, 0.9, 0.4], "size": [0.3, 0.3, 0.3], "color": [0.9, 0.3, 0.25, 1] },
+    { "id": "hold", "kind": "latch" },
+    { "id": "breath", "kind": "script", "script": "glowworks.breathe" },
+    { "id": "glow", "kind": "lamp", "offset": [0, 1.0, 1.4], "size": [0.5, 1.4, 0.5], "color": [1.0, 0.6, 0.9, 1], "watts": 40 }
+  ],
+  "wires": [["cell.power", "glow.power"], ["switch.pressed", "hold.toggle"], ["hold.state", "breath.a"], ["breath.out", "glow.on"]]
+}

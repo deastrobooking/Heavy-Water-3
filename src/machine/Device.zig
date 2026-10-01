@@ -5,7 +5,8 @@ const std = @import("std");
 /// `seat`, `motor`, and `steering` exist only in vehicle blueprints. `root_sender` and
 /// `root_listener` are Rootsong devices: channels like transmitters and receivers, but heard
 /// only among devices rooted (within reach of wood) in Arbors that share roots.
-pub const Kind = enum { generator, sap_tap, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver, root_sender, root_listener, plate };
+/// `script` runs a mod's WebAssembly export on its four inputs (see `script/Host.zig`).
+pub const Kind = enum { generator, sap_tap, button, proximity, latch, logic, actuator, seat, motor, steering, lamp, transmitter, receiver, root_sender, root_listener, plate, script };
 /// Channels of the world signal bus shared by transmitters and receivers on any machine.
 pub const max_channels = 64;
 pub const PortKind = enum { power, signal };
@@ -34,7 +35,7 @@ pub fn ports(kind: Kind) []const Port {
             .{ .name = "toggle", .kind = .signal, .direction = .input },
             .{ .name = "state", .kind = .signal, .direction = .output },
         },
-        .logic => &.{
+        .logic, .script => &.{
             .{ .name = "a", .kind = .signal, .direction = .input },
             .{ .name = "b", .kind = .signal, .direction = .input },
             .{ .name = "c", .kind = .signal, .direction = .input },
@@ -59,7 +60,8 @@ pub fn ports(kind: Kind) []const Port {
             .{ .name = "throttle", .kind = .signal, .direction = .input },
             .{ .name = "drive", .kind = .signal, .direction = .output },
         },
-        // Draws watts while `on`; `lit` is the supplied fraction (0..1), exposing brownouts.
+        // `on` is a 0..1 level: draws watts × on, and `lit` is on × the supplied fraction, so
+        // brownouts and dimming both show.
         .lamp => &.{
             .{ .name = "power", .kind = .power, .direction = .input },
             .{ .name = "on", .kind = .signal, .direction = .input },

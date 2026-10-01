@@ -10,6 +10,13 @@ struct Frame {
     ambient_ground: vec4<f32>,
     // rgb: haze color; a: night factor (0 day, 1 night).
     horizon: vec4<f32>,
+    // Frustum planes (inward unit normal, distance) for per-instance culling.
+    plane0: vec4<f32>,
+    plane1: vec4<f32>,
+    plane2: vec4<f32>,
+    plane3: vec4<f32>,
+    plane4: vec4<f32>,
+    plane5: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var surface_texture: texture_2d<f32>;
@@ -32,6 +39,10 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
     return v + q.w * t + cross3(q.xyz, t);
 }
 
+fn outside(p: vec4<f32>, c: vec3<f32>, r: f32) -> bool {
+    return dot(p.xyz, c) + p.w < -r;
+}
+
 @vertex fn vertex_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -43,6 +54,20 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
     @location(7) rotation: vec4<f32>,
 ) -> VertexOut {
     var out: VertexOut;
+    // Instances that carry a bounding radius in stretch.w (scale workloads) are culled here, per
+    // instance: every vertex collapses to one point behind the near plane, so nothing rasterizes.
+    if (stretch.w > 0.0) {
+        let c = translation_scale.xyz;
+        let r = stretch.w * translation_scale.w;
+        if (outside(frame.plane0, c, r) || outside(frame.plane1, c, r) || outside(frame.plane2, c, r) || outside(frame.plane3, c, r) || outside(frame.plane4, c, r) || outside(frame.plane5, c, r)) {
+            out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+            out.normal = vec3<f32>(0.0, 1.0, 0.0);
+            out.uv = vec2<f32>(0.0, 0.0);
+            out.tint = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+            out.world = c;
+            return out;
+        }
+    }
     let world = rotate(rotation, position * stretch.xyz) * translation_scale.w + translation_scale.xyz;
     out.clip = frame.view_projection * vec4<f32>(world, 1.0);
     // Inverse-transpose of a diagonal scale: divide, then renormalize in the fragment stage.

@@ -82,7 +82,7 @@ pub fn setupShared(self: *Scene, device: *gpu.Device, primary: *const Scene) voi
     self.owns_meshes = false;
 }
 
-fn gpuMesh(self: *const Scene, handle: Catalog.MeshHandle) ?*const GpuMesh {
+pub fn gpuMesh(self: *const Scene, handle: Catalog.MeshHandle) ?*const GpuMesh {
     if (self.catalog.mesh(handle) == null) return null;
     return if (self.meshes[handle.index]) |*mesh| mesh else null;
 }

@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "name": "glowworks",
+  "version": "1.0.0",
+  "api": 1,
+  "description": "Script-driven lamps: a breathing lamp and a majority vote.",
+  "blueprints": ["blueprints/breathing_lamp.json"],
+  "scripts": { "module": "glowworks.wasm", "exports": ["breathe", "majority"], "fuel": 20000, "memory_pages": 4 }
+}
