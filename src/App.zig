@@ -15,6 +15,9 @@ const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
 const Gamepads = @import("engine/Gamepads.zig");
+const HotReload = @import("asset/HotReload.zig");
+const Registry = @import("asset/Registry.zig");
+const Guid = @import("asset/Guid.zig");
 const Loader = @import("asset/Loader.zig");
 const Profile = @import("game/Profile.zig");
 const Life = @import("city/Life.zig");
@@ -54,6 +57,12 @@ inspecting: bool = false,
 pads: Gamepads = .{},
 /// Background asset loading: deferred catalog meshes are built here and installed in `publish`.
 loader: ?*Loader = null,
+reload: ?*HotReload = null,
+reload_scan: std.Io.Timestamp = undefined,
+reload_smoke_edited: ?std.Io.Timestamp = null,
+reload_smoke_initial: bool = false,
+reload_smoke_passed: bool = false,
+reload_smoke_old: @import("asset/Catalog.zig").MeshHandle = .{},
 deferred: [8]?Loader.Ticket = @splat(null),
 deferred_handles: [8]@import("asset/Catalog.zig").MeshHandle = undefined,
 catalog: *@import("asset/Catalog.zig") = undefined,
@@ -82,9 +91,21 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         self.deferred_handles[i] = p.handle;
     }
     if (options.pack_stress > 0) try self.writeStressPack(&world.catalog);
+    if (options.hot_reload or options.reload_smoke) try self.setupReload();
     self.sandbox.enableLife();
     self.importPrefabs();
     self.loadMods();
+    if (options.character_showcase > 0) {
+        self.sandbox.profile.armor = switch (options.character_showcase) {
+            2 => .sentinel,
+            3 => .none,
+            else => .scout,
+        };
+        self.sandbox.profile.helmet = if (options.character_showcase == 2) .sealed else .open;
+        self.sandbox.profile.outfit = 2;
+        self.sandbox.creator.begin(self.sandbox.profile);
+        self.sandbox.player.mode = .walk;
+    }
     // A new game begins by creating the character (not in unattended smoke or benchmark runs).
     if (options.smoke_frames == 0 and options.benchmark_frames == 0 and options.showcase == 0) self.sandbox.creator.begin(self.sandbox.profile);
 }
@@ -180,6 +201,7 @@ fn loadMods(self: *App) void {
             std.log.warn("mod {s} not installed: {s}", .{ entry.name, @errorName(err) });
             continue;
         };
+        if (self.reload != null and !options.reload_smoke) self.watchMod(&pkg, entry.name) catch |err| std.log.warn("mod watch {s}: {s}", .{ entry.name, @errorName(err) });
         std.log.info("Mod {s} {d}.{d}.{d}: {d} blueprints, {d} scripts", .{ pkg.name(), pkg.version.major, pkg.version.minor, pkg.version.patch, pkg.blueprint_count, pkg.export_count });
     }
 }
@@ -647,15 +669,22 @@ fn installDeferred(self: *App) void {
         slot.* = null;
         if (remaining == 0 and for (self.deferred) |d| {
             if (d != null) break false;
-        } else true) std.log.info("Deferred meshes ready {d:.0} ms after start (worst build {d:.0} ms)", .{ @as(f64, @floatFromInt(self.started.untilNow(self.io, .awake).nanoseconds)) / 1e6, loader.stats.worst_job_ms });
+        } else true) std.log.info("Deferred meshes ready {d:.0} ms after start (worst build {d:.0} ms)", .{ @as(f64, @floatFromInt(self.started.untilNow(self.io, .awake).nanoseconds)) / 1e6, loader.snapshotStats().worst_job_ms });
     }
 }
 
 pub fn publish(self: *App, renderer: *Renderer) void {
     self.installDeferred();
+    self.pumpReload(renderer);
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
     renderer.views[0].camera = self.engine.camera;
+    if (options.character_showcase > 0) {
+        const feet = self.sandbox.player.feet;
+        renderer.views[0].camera.position = mach.math.vec3(feet[0], feet[1] + 1.12, feet[2] + 2.8);
+        renderer.views[0].camera.yaw = std.math.pi;
+        renderer.views[0].camera.pitch = -0.08;
+    }
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
     renderer.show_metrics = self.show_metrics;
@@ -764,6 +793,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
 pub fn stop(self: *App) void {
     self.thread.join();
     if (self.loader) |l| l.destroy();
+    if (self.reload) |r| r.destroy();
+    if (options.reload_smoke and !self.reload_smoke_passed) @panic("Reload smoke did not reach GPU acceptance");
     defer self.sandbox.deinit();
     // The app thread has exited, so the sandbox can be read safely.
     if (self.smoke_rover_start) |origin| {
@@ -772,4 +803,112 @@ pub fn stop(self: *App) void {
         const dz = now[2] - origin[2];
         std.log.info("Smoke drive: rover moved {d:.1} m", .{@sqrt(dx * dx + dz * dz)});
     }
+}
+
+const reload_fixture = "zig-out/reload-smoke/crate.gltf";
+fn setupReload(self: *App) !void {
+    const watcher = try HotReload.create(self.allocator, self.io);
+    errdefer watcher.destroy();
+    const manifest = try std.json.parseFromSlice(Registry.Manifest, self.allocator, @embedFile("assets.manifest"), .{});
+    defer manifest.deinit();
+    for (manifest.value.assets) |asset| {
+        const kind: HotReload.Kind = switch (asset.kind) {
+            .model => .model,
+            .blueprint => .blueprint,
+            else => continue,
+        };
+        if (asset.source.len == 0) continue;
+        if (options.reload_smoke) {
+            if (!std.mem.eql(u8, asset.name, "crate")) continue;
+            var arena: std.heap.ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const a = arena.allocator();
+            const source = try std.Io.Dir.cwd().readFileAlloc(self.io, asset.source, a, .limited(64 << 20));
+            const meta = try std.Io.Dir.cwd().readFileAlloc(self.io, try std.fmt.allocPrint(a, "{s}.meta", .{asset.source}), a, .limited(1 << 20));
+            try Save.writeFile(self.io, reload_fixture, source);
+            try Save.writeFile(self.io, reload_fixture ++ ".meta", meta);
+            try watcher.add(.{ .guid = asset.guid, .kind = kind, .path = reload_fixture });
+        } else try watcher.add(.{ .guid = asset.guid, .kind = kind, .path = asset.source });
+    }
+    self.reload = watcher;
+    self.reload_scan = std.Io.Timestamp.now(self.io, .awake);
+    watcher.scan();
+    std.log.info("Development asset reload enabled", .{});
+}
+fn watchMod(self: *App, pkg: *const @import("mod/Mod.zig").Package, directory: []const u8) !void {
+    const module = pkg.script_path orelse return;
+    var arena: std.heap.ArenaAllocator = .init(self.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const key = try std.fmt.allocPrint(a, "mod-script:{s}", .{pkg.name()});
+    const path = try std.fmt.allocPrint(a, "mods/{s}/{s}", .{ directory, module });
+    var names: [8][]const u8 = undefined;
+    try self.reload.?.add(.{ .guid = Guid.derived(key), .kind = .script, .path = path, .mod = pkg.name(), .exports = pkg.exports(&names), .fuel = pkg.fuel, .memory_pages = pkg.memory_pages });
+}
+/// Runs under the render snapshot mutex. Worker-owned results become live only here.
+fn pumpReload(self: *App, renderer: *Renderer) void {
+    const watcher = self.reload orelse return;
+    if (self.reload_scan.untilNow(self.io, .awake).nanoseconds >= std.time.ns_per_s) {
+        self.reload_scan = std.Io.Timestamp.now(self.io, .awake);
+        watcher.scan();
+    }
+    while (watcher.take()) |result| {
+        var event = result;
+        defer event.deinit(self.allocator);
+        if (event.failure) |err| {
+            std.log.warn("Reload {s} rejected: {s}; current asset retained", .{ @tagName(event.kind), @errorName(err) });
+            self.report("RELOAD FAILED {s}", .{@errorName(err)});
+            continue;
+        }
+        self.applyReload(&event) catch |err| {
+            std.log.warn("Reload {s} rejected: {s}; current asset retained", .{ @tagName(event.kind), @errorName(err) });
+            self.report("RELOAD FAILED {s}", .{@errorName(err)});
+            continue;
+        };
+        self.reload_smoke_initial = true;
+        std.log.info("Reloaded {s}", .{@tagName(event.kind)});
+        self.report("RELOADED {s}", .{@tagName(event.kind)});
+    }
+    if (options.reload_smoke) self.pumpReloadSmoke(renderer) catch |err| {
+        std.log.err("Reload smoke: {s}", .{@errorName(err)});
+        @panic("Reload smoke failed");
+    };
+}
+fn applyReload(self: *App, event: *HotReload.Event) !void {
+    switch (event.value.?) {
+        .model => |model| {
+            event.value = null; // replaceModel consumes on success and failure.
+            _ = try self.catalog.replaceModel(self.allocator, event.guid, model);
+            self.sandbox.refreshCrateGeometry();
+        },
+        .blueprint => |bp| {
+            _ = try self.sandbox.reloadBlueprint(self.catalog, event.guid, bp);
+        },
+        .script => |host| try self.sandbox.scripts.replaceFrom(host),
+    }
+}
+fn pumpReloadSmoke(self: *App, renderer: *Renderer) !void {
+    if (self.reload_smoke_passed) return;
+    if (self.reload_smoke_edited) |edited| {
+        const handle = self.catalog.content.crate;
+        if (handle.generation != self.reload_smoke_old.generation and renderer.scene.gpuMesh(handle) != null) {
+            if (self.catalog.mesh(self.reload_smoke_old) != null) return error.StaleHandleStillValid;
+            const color = self.catalog.mesh(handle).?.model.materials[0].base_color[0];
+            if (@abs(color - 0.26) > 0.001) return error.ReloadColorMismatch;
+            const milliseconds = @as(f64, @floatFromInt(edited.untilNow(self.io, .awake).nanoseconds)) / 1e6;
+            if (milliseconds > 2000) return error.ReloadTooSlow;
+            self.reload_smoke_passed = true;
+            std.log.info("Reload smoke passed: generation {d} -> {d}, source edit to GPU {d:.0} ms", .{ self.reload_smoke_old.generation, handle.generation, milliseconds });
+        }
+        return;
+    }
+    if (!self.reload_smoke_initial or renderer.frames < 90) return;
+    const source = try std.Io.Dir.cwd().readFileAlloc(self.io, reload_fixture, self.allocator, .limited(64 << 20));
+    defer self.allocator.free(source);
+    if (std.mem.indexOf(u8, source, "0.86") == null) return error.FixtureColorMissing;
+    const changed = try std.mem.replaceOwned(u8, self.allocator, source, "0.86", "0.26");
+    defer self.allocator.free(changed);
+    self.reload_smoke_old = self.catalog.content.crate;
+    try Save.writeFile(self.io, reload_fixture, changed);
+    self.reload_smoke_edited = std.Io.Timestamp.now(self.io, .awake);
 }

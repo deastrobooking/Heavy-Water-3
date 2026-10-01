@@ -116,7 +116,8 @@ fn manifest(gpa: std.mem.Allocator, io: std.Io, output: []const u8, triples: []c
     for (entries, 0..) |*e, i| {
         const bytes = try readFile(arena, io, triples[i * 3]);
         const doc = std.json.parseFromSliceLeaky(Meta.Doc, arena, bytes, .{}) catch return error.InvalidMeta;
-        e.* = .{ .guid = doc.guid, .kind = doc.kind, .name = triples[i * 3 + 1], .output = triples[i * 3 + 2] };
+        e.* = .{ .guid = doc.guid, .kind = doc.kind, .name = triples[i * 3 + 1], .output = triples[i * 3 + 2], .source = triples[i * 3] };
+        if (std.mem.endsWith(u8, e.source, ".meta")) e.source = e.source[0 .. e.source.len - 5];
         for (entries[0..i]) |other| if (other.guid.eql(e.guid)) {
             std.log.err("{s}: GUID {s} is already used by {s}", .{ triples[i * 3], &e.guid.format(), other.name });
             return error.DuplicateGuid;

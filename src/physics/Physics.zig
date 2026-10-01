@@ -133,6 +133,11 @@ pub fn setTransform(self: *Physics, body: Body, pos: Vec3, vel: Vec3) void {
     }
 }
 
+/// Updates a box after its source mesh is reimported. Its centre, velocity and handle stay.
+pub fn resizeBody(self: *Physics, body: Body, half: Vec3) void {
+    if (self.backend.bodies.get(body)) |b| b.half = half;
+}
+
 /// Re-tags a body (game code renumbers devices after edits).
 pub fn setUser(self: *Physics, body: Body, user: u32) void {
     if (self.backend.bodies.get(body)) |b| b.user = user;

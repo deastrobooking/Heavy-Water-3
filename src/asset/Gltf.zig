@@ -57,6 +57,20 @@ const BufferView = struct { buffer: u32, byteOffset: usize = 0, byteLength: usiz
 
 const Mat = [16]f32; // column-major, as glTF stores it
 
+/// External buffer dependencies, owned by the supplied arena. Uses the same URI restrictions
+/// as compilation, so watchers never read a path compilation would refuse.
+pub fn externalBuffers(arena: std.mem.Allocator, source: []const u8) ![]const []const u8 {
+    const json = if (source.len >= 12 and std.mem.eql(u8, source[0..4], "glTF")) (try splitGlb(source)).json else source;
+    const doc = try std.json.parseFromSliceLeaky(Doc, arena, json, .{ .ignore_unknown_fields = true });
+    var uris: std.ArrayList([]const u8) = .empty;
+    for (doc.buffers) |b| if (b.uri) |uri| {
+        if (std.mem.startsWith(u8, uri, "data:")) continue;
+        if (uri.len == 0 or uri[0] == '/' or std.mem.indexOf(u8, uri, "..") != null or std.mem.indexOfScalar(u8, uri, ':') != null or std.mem.indexOfScalar(u8, uri, '\\') != null) return error.UnsafeUri;
+        try uris.append(arena, uri);
+    };
+    return uris.toOwnedSlice(arena);
+}
+
 pub fn compile(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver) !Model {
     var arena_state: std.heap.ArenaAllocator = .init(allocator);
     defer arena_state.deinit();
@@ -279,7 +293,7 @@ fn loadUri(arena: std.mem.Allocator, uri: []const u8, resolver: Resolver) ![]con
     }
     const load = resolver.load orelse return error.ExternalBufferUnavailable;
     // Reject absolute and parent paths so an asset cannot read outside its directory.
-    if (uri.len == 0 or uri[0] == '/' or std.mem.indexOf(u8, uri, "..") != null or std.mem.indexOfScalar(u8, uri, ':') != null) return error.UnsafeUri;
+    if (uri.len == 0 or uri[0] == '/' or std.mem.indexOf(u8, uri, "..") != null or std.mem.indexOfScalar(u8, uri, ':') != null or std.mem.indexOfScalar(u8, uri, '\\') != null) return error.UnsafeUri;
     return load(resolver.context, arena, uri);
 }
 

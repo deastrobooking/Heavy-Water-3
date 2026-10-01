@@ -189,7 +189,7 @@ Acceptance evidence:
 
 See [mods](mods.md).
 
-Not in API 1: mod-defined genomes, shrines, wares, or assets; host imports; dependencies; hot reload.
+Not in API 1: mod-defined genomes, shrines, wares, or assets; host imports; dependencies; full package reload. Development Wasm reload is available with `-Dhot-reload=true`.
 
 ## 12. Scale — implemented within the pinned Mach
 
@@ -232,7 +232,7 @@ Acceptance evidence:
 
 The next phases close the gaps to a production engine, in this order. [Engine alignment](plans/alignment.md) records how each outside suggestion was weighed against the codebase. Native Zig is kept: C-library physics, audio, and animation were declined on 2026-10-01.
 
-### 13. Asset pipeline — slices 1–2 implemented (identity, sidecars, manifest, registry; packs, background loader, budgeted uploads)
+### 13. Asset pipeline — slices 1–3 implemented (identity, packs, background loading, development reload)
 
 - **Identity:** stable GUID asset references (`AssetRef`) with `.meta` sidecars holding the GUID, source hash, importer version, and typed import settings.
 - **Build output:** a manifest with dependencies, and content packs.
@@ -283,7 +283,7 @@ This isolated path is not yet bound through `Catalog` into the active streamer, 
 
 ## Next
 
-All twelve phases have a runnable slice; phases 13–16 above are next. Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
+Phases 1–13 have runnable slices. The next milestone is the Mach `main` evaluation before phase 14 skeletal animation (rigged ranger, pose sampling and skinning). Phases 15–16 follow with scenes and networking. Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
 
 - **Mach:** update or fork it for indirect draws, shader atomics, timestamp queries, and texture-to-buffer copies (phase 12). The plan is to evaluate the current Mach `main` on a branch before phase 14 ([alignment](plans/alignment.md#mach-tracking)).
 - **Economy:** whether building should cost resources (phase 9 markets are additive today).

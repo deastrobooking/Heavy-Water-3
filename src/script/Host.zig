@@ -146,3 +146,32 @@ test "exports must exist with the script signature, and modules need no imports"
     try std.testing.expectEqual(@as(usize, 0), host.script_count);
     for (host.modules) |m| try std.testing.expect(m == null);
 }
+
+/// Moves a validated replacement out of a staging host. Export names stay stable; function
+/// indices may change. No allocations or callbacks happen after old state is retired.
+pub fn replaceFrom(self: *Host, staged: *Host) !void {
+    const source = for (&staged.modules, 0..) |*m, i| {
+        if (m.* != null) break i;
+    } else return error.MissingModule;
+    const name = std.mem.sliceTo(&staged.modules[source].?.name, 0);
+    const destination = for (&self.modules, 0..) |*m, i| {
+        if (m.*) |*loaded| if (std.mem.eql(u8, std.mem.sliceTo(&loaded.name, 0), name)) break i;
+    } else return error.MissingModule;
+    var functions: [max_scripts]u32 = undefined;
+    var count: usize = 0;
+    for (self.scripts[0..self.script_count], 0..) |script, i| {
+        if (script.module != destination) continue;
+        const match = staged.find(std.mem.sliceTo(&script.name, 0)) orelse return error.MissingExport;
+        functions[i] = staged.scripts[match].function;
+        count += 1;
+    }
+    if (count != staged.script_count) return error.ExportSetChanged;
+    self.modules[destination].?.instance.deinit();
+    self.modules[destination].?.module.deinit();
+    self.modules[destination] = staged.modules[source];
+    staged.modules[source] = null;
+    self.modules[destination].?.instance.module = &self.modules[destination].?.module;
+    for (self.scripts[0..self.script_count], 0..) |*script, i| if (script.module == destination) {
+        script.function = functions[i];
+    };
+}

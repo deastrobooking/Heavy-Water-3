@@ -397,9 +397,11 @@ pub fn publish(self: *const Life, physics: *const Physics, catalog: *const Catal
             n += 1;
         }
     };
-    for (self.walkers) |w| {
+    for (self.walkers, 0..) |w, i| {
         if (n >= out.len) return n;
+        const character_index = n;
         n += Avatar.build(w.profile, .{ .feet = w.player.feet, .yaw = w.camera.yaw, .walk_phase = w.walk_phase, .walk_amount = w.walk_amount }, block, out[n..]);
+        if (n > character_index) out[character_index].character.?.id = @intCast(7 + i);
     }
     return n;
 }

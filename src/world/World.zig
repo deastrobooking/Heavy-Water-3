@@ -12,6 +12,7 @@ pub const max_props = 2048;
 /// `lod_distance` from the camera; this is the only distance-based simplification tall placed
 /// content gets today (roadmap phase 6, "streaming and level of detail for tall placed content").
 pub const Prop = struct {
+    character: ?@import("../character/Ranger.zig").Draw = null,
     mesh: Catalog.MeshHandle,
     transform: Transform,
     tint: [4]f32,

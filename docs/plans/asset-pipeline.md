@@ -7,7 +7,7 @@
 - **Build-time compiler:** `asset-compiler` runs in the build graph. glTF compiles to versioned `HWMS` models, and blueprints are validated. Zig's build cache already skips unchanged inputs.
 - **Embedding:** the compiled outputs are embedded in the executable with `@embedFile`, and `Catalog` registers them at startup.
 - **Lookup:** typed generational handles (`MeshHandle`, `MaterialHandle`) index the catalog. Content is found through hard-coded fields (`catalog.content.crate`) or blueprint names.
-- **Missing:** asset identity that survives renames, a runtime registry, packaged content, async loading, and hot reload.
+- **Implemented:** GUID sidecars, runtime registry, pack format, background loading and opt-in source reload. The slices below record shipped scope and deviations.
 
 ## Design
 
@@ -79,7 +79,14 @@ Each source file `X` gets a sidecar `X.meta` next to it:
    - **Stress benchmark:** the planned 64 meshes of 10K–1M vertices would make a pack of roughly 600 MB per run, so the benchmark (`tools/benchmark.py --pack 64`) uses 1K–128K vertices (an 80 MiB pack).
    - **No shipped pack yet:** today's only compiled model (the crate) is core content and stays embedded. A content pack ships when there is content beyond the core set.
    - **Material pool:** the catalog's material pool (one per installed submesh) was raised from 64 to 256 after the stress run hit `PoolFull`.
-3. **Hot reload.** The source watcher, reimport, and generation-bumped swaps for models, blueprints, and mod scripts.
+3. **Hot reload — implemented (2026-10-01).** `-Dhot-reload=true` watches manifest model/blueprint sources and installed mod Wasm modules on a worker, including external glTF buffers and model scale settings. Results swap in `App.publish` under the render mutex. Models reuse their catalog slot with a new generation and staged materials; blueprint data updates retain state in compatible unmodified live machines; scripts retain their registered names with newly validated bytecode. Invalid edits preserve the working asset.
+
+   Scope and deviations:
+   - Mesh handles bump generations. Blueprint pointers remain stable, and script names stay registered; these systems do not use generational handles.
+   - Physical layout/ID/kind changes and vehicle edits require restart. Locally edited machines and captured prefabs remain independent.
+   - Development reload permits stale source hashes without writing `.meta`; the next build still requires `build import`. Changed importer versions are rejected until supported by the executable.
+   - Watches follow known paths; a live rename requires a manifest rebuild/restart. Heightmaps, generated assets, textures, shaders, mod manifests and mod blueprints are outside this slice.
+   - `-Dreload-smoke=true -Dsmoke-frames=600` edits an isolated crate fixture under `zig-out/reload-smoke`, checks stale-handle rejection and the changed material, and requires GPU readiness within two seconds. The Metal validation run completed in 848 ms.
 
 ## Acceptance
 

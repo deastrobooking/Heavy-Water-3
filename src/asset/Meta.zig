@@ -65,7 +65,15 @@ fn importerFor(kind: Kind) Importer {
 /// Parses and checks a sidecar against its source: format, kind, importer, settings, and that
 /// the source has not changed since import.
 pub fn check(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path: []const u8, source: []const u8) (Error || error{OutOfMemory})!Meta {
-    const parsed = std.json.parseFromSlice(Doc, allocator, meta_bytes, .{}) catch return error.InvalidMeta;
+    return checkSource(allocator, meta_bytes, source_path, source, true);
+}
+
+/// Live imports validate identity/settings, but source edits need not rewrite tracked sidecars.
+pub fn checkReload(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path: []const u8, source: []const u8) (Error || error{OutOfMemory})!Meta {
+    return checkSource(allocator, meta_bytes, source_path, source, false);
+}
+fn checkSource(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path: []const u8, source: []const u8, require_hash: bool) (Error || error{OutOfMemory})!Meta {
+    const parsed = std.json.parseFromSlice(Doc, allocator, meta_bytes, .{}) catch |err| return if (err == error.OutOfMemory) error.OutOfMemory else error.InvalidMeta;
     defer parsed.deinit();
     const doc = parsed.value;
     if (doc.format != format_version) return error.UnsupportedMetaFormat;
@@ -74,12 +82,12 @@ pub fn check(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path: 
     const importer = importerFor(kind);
     if (!std.mem.eql(u8, doc.importer.name, importer.name)) return error.WrongKind;
     if (doc.importer.version != importer.version) return error.OldImporter;
-    if (!std.mem.eql(u8, doc.source_hash, &hashSource(source))) return error.StaleMeta;
+    if (require_hash and !std.mem.eql(u8, doc.source_hash, &hashSource(source))) return error.StaleMeta;
     var meta: Meta = .{ .guid = doc.guid, .kind = kind };
     switch (kind) {
         .model => {
             if (doc.settings != .null) {
-                const s = std.json.parseFromValue(ModelSettings, allocator, doc.settings, .{}) catch return error.InvalidSettings;
+                const s = std.json.parseFromValue(ModelSettings, allocator, doc.settings, .{}) catch |err| return if (err == error.OutOfMemory) error.OutOfMemory else error.InvalidSettings;
                 defer s.deinit();
                 if (!std.math.isFinite(s.value.scale) or s.value.scale <= 0 or s.value.scale > 1000) return error.InvalidSettings;
                 meta.model = s.value;
@@ -87,7 +95,7 @@ pub fn check(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path: 
         },
         .heightmap => {
             if (doc.settings != .null) {
-                const s = std.json.parseFromValue(Heightmap.Settings, allocator, doc.settings, .{}) catch return error.InvalidSettings;
+                const s = std.json.parseFromValue(Heightmap.Settings, allocator, doc.settings, .{}) catch |err| return if (err == error.OutOfMemory) error.OutOfMemory else error.InvalidSettings;
                 defer s.deinit();
                 if (!Heightmap.validSettings(s.value)) return error.InvalidSettings;
                 meta.heightmap = s.value;
@@ -110,7 +118,7 @@ pub fn refresh(allocator: std.mem.Allocator, existing: ?[]const u8, source_path:
         defer parsed.deinit();
         guid = parsed.value.guid;
         if (kind == .model and parsed.value.settings != .null) {
-            const s = std.json.parseFromValue(ModelSettings, allocator, parsed.value.settings, .{}) catch return error.InvalidSettings;
+            const s = std.json.parseFromValue(ModelSettings, allocator, parsed.value.settings, .{}) catch |err| return if (err == error.OutOfMemory) error.OutOfMemory else error.InvalidSettings;
             defer s.deinit();
             model = s.value;
         }

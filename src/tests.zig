@@ -1,4 +1,6 @@
 test {
+    _ = @import("character/root.zig");
+    _ = @import("character/Ranger.zig");
     _ = @import("engine/Time.zig");
     _ = @import("world/Camera.zig");
     _ = @import("render/Layout.zig");
@@ -19,6 +21,7 @@ test {
     _ = @import("asset/Registry.zig");
     _ = @import("asset/Pack.zig");
     _ = @import("asset/Loader.zig");
+    _ = @import("asset/HotReload.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
     _ = @import("render/Visibility.zig");

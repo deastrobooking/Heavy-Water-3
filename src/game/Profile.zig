@@ -22,7 +22,10 @@ pub const accent_colors = [_][4]f32{
     .{ 0.30, 0.95, 1.00, 1 }, .{ 1.00, 0.72, 0.25, 1 }, .{ 1.00, 0.40, 0.85, 1 }, .{ 0.60, 1.00, 0.35, 1 }, .{ 0.95, 0.95, 1.00, 1 },
 };
 pub const HairStyle = enum { short, ponytail, long, crest, hood };
-pub const Field = enum { name, height, build, skin, hair_style, hair_color, outfit, accent };
+pub const Clothing = enum { undersuit, field_jacket };
+pub const Armor = enum { none, scout, sentinel };
+pub const Helmet = enum { open, visor, sealed };
+pub const Field = enum { name, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -35,6 +38,9 @@ hair_style: HairStyle = .short,
 hair_color: u8 = 1,
 outfit: u8 = 0,
 accent: u8 = 0,
+clothing: Clothing = .field_jacket,
+armor: Armor = .scout,
+helmet: Helmet = .visor,
 
 pub fn name(self: *const Profile) []const u8 {
     return self.name_buffer[0..self.name_len];
@@ -76,6 +82,9 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .hair_style => self.hair_style = @enumFromInt(cycle(@intFromEnum(self.hair_style), delta, std.meta.fields(HairStyle).len)),
         .hair_color => self.hair_color = cycle(self.hair_color, delta, hair_colors.len),
         .outfit => self.outfit = cycle(self.outfit, delta, outfit_colors.len),
+        .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, 2)),
+        .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, 3)),
+        .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, 3)),
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
     }
 }
@@ -95,10 +104,13 @@ pub const Doc = struct {
     hair_color: u8,
     outfit: u8,
     accent: u8,
+    clothing: Clothing = .field_jacket,
+    armor: Armor = .scout,
+    helmet: Helmet = .visor,
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent };
+    return .{ .name = self.name(), .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -113,6 +125,9 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.hair_color = doc.hair_color;
     result.outfit = doc.outfit;
     result.accent = doc.accent;
+    result.clothing = doc.clothing;
+    result.armor = doc.armor;
+    result.helmet = doc.helmet;
     return result;
 }
 

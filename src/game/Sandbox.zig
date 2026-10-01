@@ -323,6 +323,52 @@ pub fn installMod(self: *Sandbox, pkg: *const Mod.Package) !void {
     self.mod_count += 1;
 }
 
+/// Live data edits keep state and bodies only when physical layout and device IDs match.
+/// Locally edited copies stay independent. Validation of every affected copy precedes commit.
+pub fn reloadBlueprint(self: *Sandbox, catalog: *Catalog, guid: @import("../asset/Guid.zig"), replacement: *const Blueprint) !usize {
+    const old = try catalog.registry.blueprint(.{ .guid = guid });
+    if (!std.mem.eql(u8, old.name(), replacement.name())) return error.AssetNameChanged;
+    if (try sameDesign(self.allocator, old, replacement)) return 0;
+    if (!sameLayout(old, replacement)) return error.PhysicalLayoutChanged;
+    var affected: [max_machines]bool = @splat(false);
+    var count: usize = 0;
+    for (&self.machines, 0..) |*placed, i| {
+        if (!placed.active) continue;
+        if (try sameDesign(self.allocator, &placed.blueprint, old)) {
+            affected[i] = true;
+            count += 1;
+        }
+    }
+    // Registry blueprint pointers refer into this mutable catalog's fixed storage.
+    for (catalog.blueprints[0..catalog.blueprint_count]) |*bp| if (bp == old) {
+        bp.* = replacement.*;
+        break;
+    };
+    for (&self.machines, affected) |*placed, applies| {
+        if (!applies) continue;
+        placed.blueprint = replacement.*;
+        placed.machine.reconfigure();
+    }
+    return count;
+}
+fn sameLayout(a: *const Blueprint, b: *const Blueprint) bool {
+    if (a.part_count != b.part_count or a.device_count != b.device_count) return false;
+    if ((a.vehicle == null) != (b.vehicle == null)) return false;
+    // Vehicle tuning affects instantiated physics. A vehicle edit currently requires restart.
+    if (a.vehicle != null) return false;
+    for (a.parts[0..a.part_count], b.parts[0..b.part_count]) |x, y| {
+        if (!std.meta.eql(x.offset, y.offset) or !std.meta.eql(x.size, y.size)) return false;
+    }
+    for (a.devices[0..a.device_count], b.devices[0..b.device_count]) |x, y| {
+        if (!std.meta.eql(x.id, y.id) or x.kind != y.kind or x.hasBody() != y.hasBody() or !std.meta.eql(x.offset, y.offset) or !std.meta.eql(x.size, y.size) or !std.meta.eql(x.travel, y.travel)) return false;
+    }
+    return true;
+}
+pub fn refreshCrateGeometry(self: *Sandbox) void {
+    const half = self.crateHalf();
+    for (0..max_crates) |i| if (self.crateLive(i)) self.physics.resizeBody(self.crates[i], half);
+}
+
 fn sameDesign(allocator: std.mem.Allocator, a: *const Blueprint, b: *const Blueprint) !bool {
     var arena: std.heap.ArenaAllocator = .init(allocator);
     defer arena.deinit();
@@ -1318,7 +1364,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and self.player.mode == .walk and n < out.len) {
-        n = avatar(self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount }, 1, self.catalog.content.block, out, n);
+        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, 1, self.catalog.content.block, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);
@@ -1375,17 +1421,22 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         const plaza = self.catalog.district.nodes[Market.stall_plazas[i]].position;
         const keeper: Profile = .{ .outfit = @intCast((i * 3 + 1) % Profile.outfit_colors.len), .accent = @intCast((i + 1) % Profile.accent_colors.len), .hair_style = @enumFromInt(i % 5), .skin = @intCast((i * 3) % Profile.skin_tones.len) };
         const toward = R.sub(plaza, stall);
+        const keeper_index = n;
         n += Avatar.build(keeper, .{ .feet = R.sub(stall, R.scale(R.normalize(.{ toward[0], 0, toward[2] }), 1.2)), .yaw = std.math.atan2(toward[0], toward[2]) }, self.catalog.content.block, out[n..]);
+        if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount }, @intCast(i + 2), self.catalog.content.block, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion }, @intCast(i + 2), self.catalog.content.block, out, n);
     };
     return Build.publish(self, out, n);
 }
 
 fn avatar(profile: Profile, pose: Avatar.Pose, owner: u8, block: Catalog.MeshHandle, out: []World.Prop, start: usize) usize {
     const end = start + Avatar.build(profile, pose, block, out[start..]);
-    for (out[start..end]) |*part| part.owner = owner;
+    for (out[start..end]) |*part| {
+        part.owner = owner;
+        part.character.?.id = owner - 1;
+    }
     return end;
 }
 
@@ -1903,8 +1954,8 @@ test "a named, customized character is shown in third person, aims from its eyes
     var parts: [World.max_props]World.Prop = undefined;
     const drawn = sandbox.publishProps(&parts);
     var avatar_parts: usize = 0;
-    for (parts[0..drawn]) |part| avatar_parts += @intFromBool(@abs(part.transform.position[0] - sandbox.player.feet[0]) < 0.6 and @abs(part.transform.position[2] - sandbox.player.feet[2]) < 0.6);
-    try std.testing.expect(avatar_parts >= 9);
+    for (parts[0..drawn]) |part| avatar_parts += @intFromBool(part.character != null and part.owner == 1);
+    try std.testing.expectEqual(@as(usize, 1), avatar_parts);
 
     const bytes = try sandbox.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
@@ -2881,4 +2932,51 @@ test "every bridge style is built, stood on along lanes and walkways, and keeps 
         try std.testing.expectEqual(style, sb.bridges[slot].?.edge.style);
         sb.removeBridge(slot);
     }
+}
+
+test "blueprint reload preserves open door state and local edits, rejects layout changes atomically" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const guid = catalog.guidOf(.blueprint, "powered_door").?;
+    const door = sb.findDevice(0, "door").?.device;
+    const toggle = sb.findDevice(0, "toggle").?.device;
+    const body = sb.machines[0].devices[door];
+    sb.machines[0].machine.state[door] = 1;
+    sb.machines[0].machine.state[toggle] = 1;
+    var local = catalog.content.powered_door.*;
+    local.devices[0].watts = 321;
+    const custom = try sb.spawnMachine(null, local, .{ 900, 40, 900 }, 0, true);
+    var replacement = catalog.content.powered_door.*;
+    replacement.devices[0].watts = 400;
+    replacement.devices[door].speed = 2;
+    try std.testing.expectEqual(@as(usize, 1), try sb.reloadBlueprint(&catalog, guid, &replacement));
+    try std.testing.expectEqual(@as(f32, 400), catalog.content.powered_door.devices[0].watts);
+    try std.testing.expectEqual(@as(f32, 400), sb.machines[0].blueprint.devices[0].watts);
+    try std.testing.expectEqual(@as(f32, 321), sb.machines[custom].blueprint.devices[0].watts);
+    try std.testing.expectEqual(body, sb.machines[0].devices[door]);
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[0].machine.state[door]);
+    try run(&sb, &camera, .{}, .{}, 10);
+    try std.testing.expectEqual(@as(f32, 1), sb.machines[0].machine.state[door]);
+    replacement.devices[door].travel[0] += 1;
+    try std.testing.expectError(error.PhysicalLayoutChanged, sb.reloadBlueprint(&catalog, guid, &replacement));
+    try std.testing.expectApproxEqAbs(@as(f32, 2.9), catalog.content.powered_door.devices[door].travel[0], 0.001);
+    try std.testing.expectEqual(body, sb.machines[0].devices[door]);
+    // An unchanged vehicle from the watcher's first scan is a no-op.
+    try std.testing.expectEqual(@as(usize, 0), try sb.reloadBlueprint(&catalog, catalog.guidOf(.blueprint, "rover").?, catalog.content.rover));
+    // Model size changes also update existing crate collision without moving the body.
+    const pos = sb.physics.position(sb.crates[0]).?;
+    const half = sb.crateHalf();
+    var model = try @import("../asset/Model.zig").decode(std.testing.allocator, @embedFile("crate.hwmesh"));
+    for (model.mesh.vertices) |*v| for (&v.position) |*c| {
+        c.* *= 2;
+    };
+    model.computeBounds();
+    _ = try catalog.replaceModel(std.testing.allocator, catalog.guidOf(.model, "crate").?, model);
+    sb.refreshCrateGeometry();
+    try std.testing.expectEqual(pos, sb.physics.position(sb.crates[0]).?);
+    for (half, sb.physics.halfExtents(sb.crates[0]).?) |x, y| try std.testing.expectApproxEqAbs(x * 2, y, 0.001);
 }

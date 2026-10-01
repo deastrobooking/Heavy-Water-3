@@ -64,4 +64,8 @@ Format 10 saves list the installed mods by name and version. Blueprints placed f
 
 ## Not in API 1
 
-Mods cannot yet add Arbor genomes, shrine templates, market wares, meshes, or textures. Scripts get no host functions: no world queries, logging, or randomness beyond their inputs. There is no dependency or load-order declaration (mods load in directory order and cannot reference each other), no hot reload, and no sandboxing beyond the interpreter. A mod's blueprints are trusted to be as harmless as any blueprint a player could build. See the [scripting evaluation](scripting.md) for why scripting is a WebAssembly interpreter.
+Mods cannot yet add Arbor genomes, shrine templates, market wares, meshes, or textures. Scripts get no host functions: no world queries, logging, or randomness beyond their inputs. There is no dependency or load-order declaration (mods load in directory order and cannot reference each other), no package reload, and no sandboxing beyond the interpreter. A mod's blueprints are trusted to be as harmless as any blueprint a player could build. See the [scripting evaluation](scripting.md) for why scripting is a WebAssembly interpreter.
+
+## Development script reload
+
+Run with `-Dhot-reload=true`, edit the mod's Zig source, then run `python3 tools/zig.py build mods` in another terminal. The watcher observes the compiled `.wasm` path recorded when the package loaded. It validates and stages the replacement on a worker, preserving registered script names and machine device state. Malformed modules, missing exports and signature changes leave the current module running. Export declarations, fuel/memory limits, package manifests and mod blueprints are fixed for the session; restart after changing them.

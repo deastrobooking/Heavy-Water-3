@@ -33,7 +33,7 @@ pub const Entry = struct {
     /// Material handle for each submesh, in submesh order.
     materials: [Model.max_submeshes]MaterialHandle = @splat(.none),
 };
-/// Named content the game refers to. Handles stay valid for the catalog's lifetime.
+/// Named content the game refers to. Model reload rebinds these handles; cached copies expire.
 pub const Content = struct {
     relic: MeshHandle,
     plant: MeshHandle,
@@ -293,4 +293,71 @@ test "deferred meshes reserve handles at load and install once, later" {
     try std.testing.expectError(error.AlreadyInstalled, catalog.install(std.testing.allocator, catalog.content.district, extra));
     const other = try Model.fromMesh(std.testing.allocator, try Mesh.block(std.testing.allocator), .named("y", .{ 1, 1, 1, 1 }));
     try std.testing.expectError(error.UnknownHandle, catalog.install(std.testing.allocator, .{ .index = 120, .generation = 9 }, other));
+}
+
+/// Atomically replaces a model by GUID, consuming `model` even on failure. All allocation
+/// and material-capacity checks finish before the old entry is touched. Call under the
+/// render mutex; the renderer detects the new generation and uploads under its budget.
+pub fn replaceModel(self: *Catalog, allocator: std.mem.Allocator, guid: Guid, model: Model) !MeshHandle {
+    errdefer model.deinit(allocator);
+    const old = try self.registry.mesh(.{ .guid = guid });
+    const entry = self.meshes.get(old) orelse return error.UnknownHandle;
+    if (!entry.ready) return error.AssetNotReady;
+    if (old.eql(self.content.crate)) for (model.halfExtents()) |half| {
+        if (!std.math.isFinite(half) or half <= 0) return error.InvalidColliderBounds;
+    };
+    if (old.generation == std.math.maxInt(u16)) return error.GenerationExhausted;
+    var staged = self.materials;
+    for (entry.materials[0..entry.model.submeshes.len]) |m| _ = staged.remove(m);
+    var materials: [Model.max_submeshes]MaterialHandle = @splat(.none);
+    for (model.submeshes, 0..) |submesh, i| materials[i] = try staged.add(model.materials[submesh.material]);
+    const retired = entry.model;
+    const next: MeshHandle = .{ .index = old.index, .generation = old.generation + 1 };
+    self.materials = staged;
+    entry.* = .{ .model = model, .materials = materials };
+    self.meshes.generations[old.index] = next.generation;
+    for (self.registry.entries[0..self.registry.count]) |*e| if (e.target == .mesh and e.target.mesh.eql(old)) {
+        e.target = .{ .mesh = next };
+    };
+    inline for (std.meta.fields(Content)) |field| {
+        if (field.type == MeshHandle) {
+            const handle = &@field(self.content, field.name);
+            if (handle.eql(old)) handle.* = next;
+        }
+    }
+    for (&self.arbors) |*arbor| {
+        if (arbor.mesh.eql(old)) arbor.mesh = next;
+        if (arbor.lod.eql(old)) arbor.lod = next;
+    }
+    retired.deinit(allocator);
+    return next;
+}
+
+test "model reload bumps generation and rebinds GUID and content without consuming pool slots" {
+    const a = std.testing.allocator;
+    var catalog: Catalog = undefined;
+    try catalog.load(a);
+    defer catalog.deinit(a);
+    const guid = catalog.guidOf(.model, "crate").?;
+    const old = catalog.content.crate;
+    const count = catalog.meshes.count();
+    const material_count = catalog.materials.count();
+    for (0..10) |_| {
+        const model = try Model.decode(a, @embedFile("crate.hwmesh"));
+        const next = try catalog.replaceModel(a, guid, model);
+        try std.testing.expectEqual(old.index, next.index);
+        try std.testing.expectEqual(count, catalog.meshes.count());
+        try std.testing.expectEqual(material_count, catalog.materials.count());
+    }
+    try std.testing.expect(catalog.mesh(old) == null);
+    try std.testing.expect((try catalog.registry.mesh(.{ .guid = guid })).eql(catalog.content.crate));
+    const before = catalog.content.crate;
+    const wrong = catalog.guidOf(.blueprint, "rover").?;
+    try std.testing.expectError(error.WrongKind, catalog.replaceModel(a, wrong, try Model.decode(a, @embedFile("crate.hwmesh"))));
+    try std.testing.expectEqual(before, catalog.content.crate);
+    catalog.meshes.generations[before.index] = std.math.maxInt(u16);
+    for (catalog.registry.entries[0..catalog.registry.count]) |*e| if (e.guid.eql(guid)) {
+        e.target.mesh.generation = std.math.maxInt(u16);
+    };
+    try std.testing.expectError(error.GenerationExhausted, catalog.replaceModel(a, guid, try Model.decode(a, @embedFile("crate.hwmesh"))));
 }

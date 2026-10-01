@@ -12,6 +12,7 @@ const Overlay = @import("Overlay.zig");
 const Modifications = @import("../world/Modifications.zig");
 const options = @import("options");
 const Renderer = @This();
+const Characters = @import("Characters.zig");
 
 pub const mach_module = .renderer;
 pub const mach_systems = .{ .init, .render, .deinit };
@@ -60,6 +61,7 @@ hud_lines: [3]Overlay.Line = @splat(.{}),
 panel: [panel_capacity]Overlay.Line = @splat(.{}),
 panel_count: usize = 0,
 scene: Scene = undefined,
+characters: Characters = .{},
 /// Views 2–4 stream their own terrain; created when first shown, kept until exit so pools
 /// never grow again mid-session.
 extra_scenes: [max_views - 1]?*Scene = @splat(null),
@@ -336,6 +338,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const light = Sky.at(sky_time);
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
     defer encoder.release();
+    try self.characters.prepare(self.allocator, window.device, encoder, self.props[0..self.prop_count]);
     // Catalog meshes installed after startup (deferred builds, reloads) upload under a budget.
     const late = self.scene.uploadMeshes(window.device, window.queue, options.asset_upload);
     if (options.benchmark_frames == 0 or self.frames >= Flythrough.warmup_frames) {
@@ -413,6 +416,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pass.setBindGroup(0, self.bind_groups[i].?, &.{});
         pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
         scenes[i].draw(pass);
+        self.characters.draw(pass, self.views[i].hide_owner);
         if (i == 0) if (self.field != null) {
             pass.setVertexBuffer(1, self.field_buffer.?, 0, self.field.?.gpuBytes());
             const near = self.scene.gpuMesh(self.scene.catalog.content.crate);
@@ -627,6 +631,7 @@ fn reportBenchmark(self: *Renderer) void {
 }
 
 pub fn deinit(self: *Renderer) void {
+    self.characters.deinit(self.allocator);
     if (self.outline_bind_group) |p| p.release();
     if (self.outline_layout) |p| p.release();
     if (self.outline_pipeline) |p| p.release();

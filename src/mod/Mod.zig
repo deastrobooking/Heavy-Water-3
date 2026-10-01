@@ -63,7 +63,7 @@ pub const Error = error{
     OutOfMemory,
 };
 
-/// A validated package. `wasm` and `exports` are owned; free with `deinit`.
+/// A validated package. `wasm` and `script_path` are owned; free with `deinit`.
 pub const Package = struct {
     allocator: std.mem.Allocator,
     name_buffer: [name_len]u8 = @splat(0),
@@ -72,6 +72,7 @@ pub const Package = struct {
     blueprints: [max_blueprints]Blueprint = undefined,
     blueprint_count: usize = 0,
     wasm: ?[]u8 = null,
+    script_path: ?[]u8 = null,
     export_names: [max_exports][name_len]u8 = undefined,
     export_lengths: [max_exports]usize = @splat(0),
     export_count: usize = 0,
@@ -88,6 +89,8 @@ pub const Package = struct {
     pub fn deinit(self: *Package) void {
         if (self.wasm) |w| self.allocator.free(w);
         self.wasm = null;
+        if (self.script_path) |path| self.allocator.free(path);
+        self.script_path = null;
     }
 };
 
@@ -133,6 +136,7 @@ pub fn load(allocator: std.mem.Allocator, dir_name: []const u8, files: anytype) 
         pkg.export_count = s.exports.len;
         pkg.fuel = s.fuel;
         pkg.memory_pages = s.memory_pages;
+        pkg.script_path = try allocator.dupe(u8, s.module);
         pkg.wasm = files.read(allocator, s.module) catch return error.MissingFile;
     }
     if (m.blueprints.len > max_blueprints) return error.TooManyBlueprints;

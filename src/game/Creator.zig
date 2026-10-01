@@ -62,6 +62,9 @@ fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u8 {
         .hair_style => @tagName(p.hair_style),
         .hair_color => std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.hair_color + 1, Profile.hair_colors.len }) catch buffer,
         .outfit => std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.outfit + 1, Profile.outfit_colors.len }) catch buffer,
+        .clothing => @tagName(p.clothing),
+        .armor => @tagName(p.armor),
+        .helmet => @tagName(p.helmet),
         .accent => std.fmt.bufPrint(buffer, "LUMEN {d} OF {d}", .{ p.accent + 1, Profile.accent_colors.len }) catch buffer,
     };
 }
@@ -115,6 +118,6 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     var panel: [16]Line = undefined;
     c.begin(result.confirmed);
     const count = c.lines(&panel);
-    try std.testing.expectEqual(@as(usize, 11), count);
+    try std.testing.expectEqual(@as(usize, 14), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
 }

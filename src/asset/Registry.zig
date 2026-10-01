@@ -13,7 +13,7 @@ const Registry = @This();
 pub const manifest_format: u32 = 1;
 pub const capacity = 96;
 pub const name_len = 32;
-pub const ManifestEntry = struct { guid: Guid, kind: Meta.Kind, name: []const u8, output: []const u8 };
+pub const ManifestEntry = struct { guid: Guid, kind: Meta.Kind, name: []const u8, output: []const u8, source: []const u8 = "" };
 pub const Manifest = struct { format: u32, assets: []const ManifestEntry };
 pub const Error = error{ InvalidManifest, DuplicateGuid, DuplicateName, TooManyAssets, UnknownAsset, WrongKind, Unbound };
 

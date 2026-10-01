@@ -15,7 +15,7 @@ pub const capacity = 256;
 pub const max_groups = 16;
 pub const max_packs = 4;
 pub const State = enum(u8) { empty, queued, loading, ready, failed, taken };
-pub const Ticket = struct { index: u16 };
+pub const Ticket = struct { index: u16, generation: u32 };
 pub const Generator = struct {
     context: *const anyopaque,
     build: *const fn (context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model,
@@ -40,6 +40,7 @@ pub const Stats = struct { loaded: u32 = 0, failed: u32 = 0, bytes_read: u64 = 0
 allocator: std.mem.Allocator,
 io: std.Io,
 slots: [capacity]Slot = @splat(.{}),
+generations: [capacity]u32 = @splat(0),
 packs: [max_packs]?OpenPack = @splat(null),
 mutex: std.Io.Mutex = .init,
 condition: std.Io.Condition = .init,
@@ -97,30 +98,43 @@ pub fn request(self: *Loader, source: Source, group: u8) !Ticket {
     if (group >= max_groups) return error.InvalidGroup;
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
+    if (source == .pack and (source.pack.pack >= max_packs or self.packs[source.pack.pack] == null)) return error.UnknownPack;
     const index = for (self.slots, 0..) |s, i| {
         if (s.state == .empty) break i;
     } else return error.LoaderFull;
+    self.generations[index] +%= 1;
+    if (self.generations[index] == 0) self.generations[index] = 1;
     self.slots[index] = .{ .state = .queued, .group = group, .source = source };
     self.condition.signal(self.io);
-    return .{ .index = @intCast(index) };
+    return .{ .index = @intCast(index), .generation = self.generations[index] };
+}
+
+fn valid(self: *const Loader, ticket: Ticket) bool {
+    return ticket.index < capacity and ticket.generation != 0 and self.generations[ticket.index] == ticket.generation and self.slots[ticket.index].state != .empty;
+}
+pub fn snapshotStats(self: *Loader) Stats {
+    self.mutex.lockUncancelable(self.io);
+    defer self.mutex.unlock(self.io);
+    return self.stats;
 }
 
 pub fn state(self: *Loader, ticket: Ticket) State {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
-    return self.slots[ticket.index].state;
+    return if (self.valid(ticket)) self.slots[ticket.index].state else .empty;
 }
 
 pub fn failure(self: *Loader, ticket: Ticket) ?anyerror {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
-    return self.slots[ticket.index].failure;
+    return if (self.valid(ticket)) self.slots[ticket.index].failure else error.StaleTicket;
 }
 
 /// The finished model, once; the caller owns it. Null until ready (or after failure).
 pub fn take(self: *Loader, ticket: Ticket) ?Model {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
+    if (!self.valid(ticket)) return null;
     const slot = &self.slots[ticket.index];
     if (slot.state != .ready) return null;
     const m = slot.model.?;
@@ -133,6 +147,7 @@ pub fn take(self: *Loader, ticket: Ticket) ?Model {
 pub fn release(self: *Loader, ticket: Ticket) void {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
+    if (!self.valid(ticket)) return;
     const slot = &self.slots[ticket.index];
     if (slot.state == .queued or slot.state == .loading) return;
     if (slot.model) |m| m.deinit(self.allocator);
@@ -284,4 +299,27 @@ test "a pack of 64 models loads in the background with progress; damage fails on
     // A damaged table is refused when the pack is opened.
     try tmp.dir.writeFile(io, .{ .sub_path = "bad.hwpk", .data = "HWPK\x07\x00\x00\x00" ++ [_]u8{0} ** 8 });
     try std.testing.expectError(error.UnsupportedPackVersion, loader.openPack(tmp.dir, "bad.hwpk"));
+}
+
+test "reused loader slots reject stale tickets and invalid pack indices" {
+    const a = std.testing.allocator;
+    const bytes = try testModel(a, 3);
+    defer a.free(bytes);
+    const loader = try Loader.create(a, std.testing.io);
+    defer loader.destroy();
+    const old = try loader.request(.{ .bytes = bytes }, 0);
+    try std.testing.expect(loader.wait(0, 5000));
+    loader.release(old);
+    const next = try loader.request(.{ .bytes = bytes }, 0);
+    try std.testing.expectEqual(old.index, next.index);
+    try std.testing.expect(next.generation != old.generation);
+    loader.release(old);
+    try std.testing.expect(loader.take(old) == null);
+    try std.testing.expectEqual(State.empty, loader.state(old));
+    try std.testing.expect(loader.wait(0, 5000));
+    const model = loader.take(next).?;
+    model.deinit(a);
+    loader.release(next);
+    try std.testing.expectError(error.UnknownPack, loader.request(.{ .pack = .{ .pack = 255, .guid = .{ .value = 1 } } }, 0));
+    try std.testing.expectEqual(State.empty, loader.state(.{ .index = 65535, .generation = 1 }));
 }

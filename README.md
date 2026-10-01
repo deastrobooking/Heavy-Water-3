@@ -31,6 +31,8 @@ python3 tools/zig.py build assets     # compile models and validate blueprints
 python3 tools/zig.py build import     # after adding or changing a source asset: create/refresh its .meta sidecar (GUID, hash)
 python3 tools/zig.py build mods       # build the example WebAssembly mod
 python3 tools/zig.py build run -Dsmoke-frames=120
+python3 tools/zig.py build run -Dhot-reload=true  # watch models, built-in blueprints and mod Wasm
+python3 tools/zig.py build run -Dreload-smoke=true -Dsmoke-frames=600 -Doptimize=ReleaseSafe
 python3 tools/benchmark.py --canopy
 python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 meshes during measurement
 ```
