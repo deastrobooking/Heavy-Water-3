@@ -6,6 +6,7 @@ const std = @import("std");
 const Guid = @import("Guid.zig");
 const Meta = @import("Meta.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
+const Heightmap = @import("../procedural/Heightmap.zig");
 const Handle = @import("../engine/Handle.zig");
 const Registry = @This();
 
@@ -17,7 +18,7 @@ pub const Manifest = struct { format: u32, assets: []const ManifestEntry };
 pub const Error = error{ InvalidManifest, DuplicateGuid, DuplicateName, TooManyAssets, UnknownAsset, WrongKind, Unbound };
 
 pub fn Target(comptime MeshHandle: type) type {
-    return union(enum) { unbound, mesh: MeshHandle, blueprint: *const Blueprint };
+    return union(enum) { unbound, mesh: MeshHandle, blueprint: *const Blueprint, heightmap: *const Heightmap };
 }
 
 /// A typed reference: serializes as the GUID string, resolves only to its own kind.
@@ -100,6 +101,15 @@ pub fn For(comptime MeshHandle: type) type {
             };
         }
 
+        pub fn heightmap(self: *const Self, ref: Ref(.heightmap)) Error!*const Heightmap {
+            const e = self.find(ref.guid) orelse return error.UnknownAsset;
+            if (e.kind != .heightmap) return error.WrongKind;
+            return switch (e.target) {
+                .heightmap => |map| map,
+                else => error.Unbound,
+            };
+        }
+
         /// Every entry is bound to loaded content (checked after catalog load).
         pub fn complete(self: *const Self) bool {
             for (self.entries[0..self.count]) |e| if (e.target == .unbound) return false;
@@ -113,17 +123,25 @@ test "manifests load atomically, refuse duplicates, and resolve typed references
     var r: For(H) = .{};
     const crate = try Guid.parse("11111111111111111111111111111111");
     const door = try Guid.parse("22222222222222222222222222222222");
+    const valley = try Guid.parse("33333333333333333333333333333333");
     const good =
         \\{"format":1,"assets":[{"guid":"11111111111111111111111111111111","kind":"model","name":"crate","output":"crate.hwmesh"},
-        \\ {"guid":"22222222222222222222222222222222","kind":"blueprint","name":"powered_door","output":"blueprints/powered_door.json"}]}
+        \\ {"guid":"22222222222222222222222222222222","kind":"blueprint","name":"powered_door","output":"blueprints/powered_door.json"},
+        \\ {"guid":"33333333333333333333333333333333","kind":"heightmap","name":"valley","output":"valley.hwmh"}]}
     ;
     try r.loadManifest(std.testing.allocator, good);
-    try std.testing.expectEqual(@as(usize, 2), r.count);
+    try std.testing.expectEqual(@as(usize, 3), r.count);
     try std.testing.expectError(error.Unbound, r.mesh(.{ .guid = crate }));
+    try std.testing.expectError(error.Unbound, r.heightmap(.{ .guid = valley }));
     try r.bind(.model, "crate", .{ .mesh = .{ .index = 3, .generation = 1 } });
+    var map_samples = [_]u16{ 0, 0, 0, 0 };
+    const map: Heightmap = .{ .width = 2, .height = 2, .settings = .{}, .samples = &map_samples };
+    try r.bind(.heightmap, "valley", .{ .heightmap = &map });
     try std.testing.expectEqual(@as(u16, 3), (try r.mesh(.{ .guid = crate })).index);
+    try std.testing.expect(r.heightmap(.{ .guid = valley }) catch unreachable == &map);
     try std.testing.expectError(error.WrongKind, r.mesh(.{ .guid = door }));
-    try std.testing.expectError(error.UnknownAsset, r.blueprint(.{ .guid = try Guid.parse("33333333333333333333333333333333") }));
+    try std.testing.expectError(error.WrongKind, r.blueprint(.{ .guid = valley }));
+    try std.testing.expectError(error.UnknownAsset, r.blueprint(.{ .guid = try Guid.parse("55555555555555555555555555555555") }));
     try std.testing.expect(!r.complete());
     // A manifest that repeats a GUID is rejected whole, leaving the registry unchanged.
     const dup =
@@ -131,7 +149,7 @@ test "manifests load atomically, refuse duplicates, and resolve typed references
         \\ {"guid":"11111111111111111111111111111111","kind":"model","name":"b","output":"b"}]}
     ;
     try std.testing.expectError(error.DuplicateGuid, r.loadManifest(std.testing.allocator, dup));
-    try std.testing.expectEqual(@as(usize, 2), r.count);
+    try std.testing.expectEqual(@as(usize, 3), r.count);
     // References serialize as their GUID string.
     const json = try std.json.Stringify.valueAlloc(std.testing.allocator, struct { model: Ref(.model) }{ .model = .{ .guid = crate } }, .{});
     defer std.testing.allocator.free(json);

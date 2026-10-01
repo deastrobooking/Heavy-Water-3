@@ -10,7 +10,7 @@ const Heightmap = @import("procedural/Heightmap.zig");
 /// Build-time tool:
 ///   asset-compiler compile <source> <source.meta> <output>
 ///       check the sidecar (GUID, kind, importer, settings, unchanged source), then compile a
-///       glTF model (external buffers resolve relative to the source) or validate a blueprint
+///       glTF model, validate a blueprint, or compile a PGM heightmap
 ///   asset-compiler manifest <output> (<source.meta> <name> <output-name>)...
 ///       write the asset manifest the runtime registry loads
 ///   asset-compiler import <directory>
@@ -94,6 +94,13 @@ fn compile(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_pat
                 model.computeBounds();
             }
             const bytes = try model.encode(gpa);
+            defer gpa.free(bytes);
+            try cwd.writeFile(io, .{ .sub_path = output, .data = bytes });
+        },
+        .heightmap => {
+            const heightmap = try Heightmap.importPgm(gpa, source, meta.heightmap);
+            defer heightmap.deinit(gpa);
+            const bytes = try heightmap.encode(gpa);
             defer gpa.free(bytes);
             try cwd.writeFile(io, .{ .sub_path = output, .data = bytes });
         },

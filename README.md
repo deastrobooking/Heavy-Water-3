@@ -51,6 +51,7 @@ python3 tools/benchmark.py --canopy
 | [Mods](docs/mods.md) | Mod packages and the constrained WebAssembly API |
 | [Scale Tests](docs/scale.md) | Reproducible workload and performance methodology |
 | [Validation](docs/validation.md) | Test results, platform coverage, and known limitations |
+| [Heightmapped Landscapes](docs/plans/landscapes.md) | Heightmap import, biome shaping, and temple/cave generation plan |
 
 Additional system plans live in [`docs/plans/`](docs/plans/), including scenes, the asset pipeline, animation, and engine alignment.
 

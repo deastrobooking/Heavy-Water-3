@@ -3,6 +3,8 @@ const std = @import("std");
 const Heightmap = @import("Heightmap.zig");
 const Noise = @import("Noise.zig");
 const Seed = @import("Seed.zig");
+const Chunk = @import("Chunk.zig");
+const Mesh = @import("../render/Mesh.zig");
 const Landscape = @This();
 
 pub const max_stamps = 32;
@@ -20,6 +22,8 @@ pub const TempleSite = struct { position: [3]f32, yaw: f32, pad_radius: f32 };
 pub const CaveSite = struct { entrance: [3]f32, yaw: f32, length: f32, depth: f32, radius: f32 };
 pub const Features = struct { temple: ?TempleSite = null, cave: ?CaveSite = null };
 pub const Surface = struct { height: f32, slope: f32, biome: Biome };
+pub const TerrainSurface = struct { height: f32, normal: [3]f32, biome: Biome };
+pub const spacing: f32 = Chunk.extent / Chunk.cells;
 
 /// Applies smooth radial stamps in order; later edits may refine earlier terrain.
 pub fn height(map: Heightmap, x: f32, z: f32, stamps: []const Stamp) ?f32 {
@@ -64,18 +68,85 @@ pub fn surface(map: Heightmap, seed: u64, x: f32, z: f32, stamps: []const Stamp,
     return .{ .height = y, .slope = slope, .biome = biome };
 }
 
+/// Sample the exact triangle and face normal produced by `fillChunk`.
+pub fn terrainSurface(map: Heightmap, seed: u64, x: f32, z: f32, stamps: []const Stamp, sea_level: f32, snow_line: f32) ?TerrainSurface {
+    const gx = @floor(x / spacing);
+    const gz = @floor(z / spacing);
+    const u = x / spacing - gx;
+    const v = z / spacing - gz;
+    const x0 = gx * spacing;
+    const z0 = gz * spacing;
+    const h00 = height(map, x0, z0, stamps) orelse return null;
+    const h10 = height(map, x0 + spacing, z0, stamps) orelse return null;
+    const h01 = height(map, x0, z0 + spacing, stamps) orelse return null;
+    var dx: f32 = undefined;
+    var dz: f32 = undefined;
+    var h: f32 = undefined;
+    if (u + v <= 1) {
+        dx = h10 - h00;
+        dz = h01 - h00;
+        h = h00 + dx * u + dz * v;
+    } else {
+        const h11 = height(map, x0 + spacing, z0 + spacing, stamps) orelse return null;
+        dx = h11 - h01;
+        dz = h11 - h10;
+        h = h11 - dx * (1 - u) - dz * (1 - v);
+    }
+    const normal = faceNormal(dx, dz);
+    const slope = @sqrt(normal[0] * normal[0] + normal[2] * normal[2]) / normal[1];
+    return .{ .height = h, .normal = normal, .biome = classify(seed, x, z, h, slope, sea_level, snow_line) };
+}
+
+/// Generate one 128 m chunk from the imported map; chunks outside its footprint are rejected.
+pub fn generateChunk(allocator: std.mem.Allocator, map: Heightmap, seed: u64, cx: i32, cz: i32, stamps: []const Stamp) !Mesh {
+    const vertices = try allocator.alloc(Mesh.Vertex, Chunk.vertex_count);
+    errdefer allocator.free(vertices);
+    const indices = try allocator.alloc(u32, Chunk.index_count);
+    errdefer allocator.free(indices);
+    if (!fillChunk(map, seed, cx, cz, vertices, indices, stamps)) return error.OutsideHeightmap;
+    return .{ .vertices = vertices, .indices = indices };
+}
+
+/// Fill caller-owned storage, matching the standard chunk's winding, diagonal, and dimensions.
+pub fn fillChunk(map: Heightmap, seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32, stamps: []const Stamp) bool {
+    std.debug.assert(vertices.len == Chunk.vertex_count and indices.len == Chunk.index_count);
+    const ox = @as(f32, @floatFromInt(cx)) * Chunk.extent - Chunk.extent / 2;
+    const oz = @as(f32, @floatFromInt(cz)) * Chunk.extent - Chunk.extent / 2;
+    for (0..Chunk.cells + 1) |z| {
+        for (0..Chunk.cells + 1) |x| {
+            const wx = ox + @as(f32, @floatFromInt(x)) * spacing;
+            const wz = oz + @as(f32, @floatFromInt(z)) * spacing;
+            const h = height(map, wx, wz, stamps) orelse return false;
+            const left = height(map, wx - 0.5, wz, stamps) orelse h;
+            const right = height(map, wx + 0.5, wz, stamps) orelse h;
+            const north = height(map, wx, wz - 0.5, stamps) orelse h;
+            const south = height(map, wx, wz + 0.5, stamps) orelse h;
+            const normal = faceNormal(right - left, south - north);
+            const slope = @sqrt(normal[0] * normal[0] + normal[2] * normal[2]) / normal[1];
+            const biome = classify(seed, wx, wz, h, slope, map.settings.base_height + 2, map.settings.base_height + map.settings.elevation * 0.88);
+            vertices[z * (Chunk.cells + 1) + x] = .{ .position = .{ wx, h, wz }, .normal = normal, .uv = .{ wx / 4, wz / 4 }, .color = biomeColor(biome) };
+        }
+    }
+    for (0..Chunk.cells) |z| for (0..Chunk.cells) |x| {
+        const a: u32 = @intCast(z * (Chunk.cells + 1) + x);
+        const base = (z * Chunk.cells + x) * 6;
+        @memcpy(indices[base..][0..6], &[_]u32{ a, a + Chunk.cells + 1, a + 1, a + 1, a + Chunk.cells + 1, a + Chunk.cells + 2 });
+    };
+    return true;
+}
+
 /// Finds stable, buildable landmarks; no random retry state or per-call allocation.
 pub fn planFeatures(map: Heightmap, seed: u64) Features {
     var result: Features = .{};
     var temple_score: u64 = 0;
     var cave_score: u64 = 0;
     const min_extent = @min(map.settings.world_width, map.settings.world_depth);
-    const spacing = min_extent / 18;
+    const candidate_spacing = min_extent / 18;
     for (0..17) |iz| for (0..17) |ix| {
         const x = (@as(f32, @floatFromInt(ix)) / 16 - 0.5) * map.settings.world_width * 0.84;
         const z = (@as(f32, @floatFromInt(iz)) / 16 - 0.5) * map.settings.world_depth * 0.84;
         const y = map.sample(x, z) orelse continue;
-        const slope = localSlope(map, x, z, spacing) orelse continue;
+        const slope = localSlope(map, x, z, candidate_spacing) orelse continue;
         const gx: i64 = @intCast(ix);
         const gz: i64 = @intCast(iz);
         const score = Seed.at(seed ^ 0x54454d504c45, gx, gz);
@@ -89,7 +160,7 @@ pub fn planFeatures(map: Heightmap, seed: u64) Features {
         const x = (@as(f32, @floatFromInt(ix)) / 16 - 0.5) * map.settings.world_width * 0.84;
         const z = (@as(f32, @floatFromInt(iz)) / 16 - 0.5) * map.settings.world_depth * 0.84;
         const y = map.sample(x, z) orelse continue;
-        const slope = localSlope(map, x, z, spacing) orelse continue;
+        const slope = localSlope(map, x, z, candidate_spacing) orelse continue;
         if (slope > 0.42) continue;
         if (result.temple) |temple| if (distance2(x, z, temple.position[0], temple.position[2]) < min_extent * min_extent * 0.045) continue;
         const gx: i64 = @intCast(ix);
@@ -131,6 +202,28 @@ fn stampDistance(stamp: Stamp, dx: f32, dz: f32) f32 {
     const along = c * dx + s * dz;
     const across = -s * dx + c * dz;
     return @max(@abs(across), @abs(along) * 0.2);
+}
+
+fn faceNormal(dx: f32, dz: f32) [3]f32 {
+    const nx = -dx / spacing;
+    const nz = -dz / spacing;
+    const inv = 1 / @sqrt(nx * nx + 1 + nz * nz);
+    return .{ nx * inv, inv, nz * inv };
+}
+
+fn classify(seed: u64, x: f32, z: f32, y: f32, slope: f32, sea_level: f32, snow_line: f32) Biome {
+    if (y <= sea_level + 2) return .wetland;
+    if (y >= snow_line or slope > 0.78) return .alpine;
+    return if (Noise.value(Seed.mix(seed ^ 0x4c414e444d4f4953), x / 360, z / 360) > 0.59) .forest else .meadow;
+}
+
+fn biomeColor(biome: Biome) [3]f32 {
+    return switch (biome) {
+        .wetland => .{ 0.15, 0.39, 0.43 },
+        .meadow => .{ 0.35, 0.55, 0.31 },
+        .forest => .{ 0.16, 0.36, 0.22 },
+        .alpine => .{ 0.62, 0.68, 0.69 },
+    };
 }
 
 fn localSlope(map: Heightmap, x: f32, z: f32, step: f32) ?f32 {
@@ -187,4 +280,33 @@ test "biome classification and temple/cave plans are deterministic and terrain a
     try std.testing.expectApproxEqAbs(cave.entrance[1] - 2, start[1], 0.001);
     try std.testing.expect(end[1] < start[1] - 20);
     try std.testing.expectApproxEqAbs(cave.length, @sqrt(distance2(start[0], start[2], end[0], end[2])), cave.length * 0.1);
+}
+
+test "heightmapped chunk seams and triangle surface queries agree with generated vertices" {
+    const samples = try std.testing.allocator.alloc(u16, 33 * 33);
+    defer std.testing.allocator.free(samples);
+    for (0..33) |z| {
+        for (0..33) |x| samples[z * 33 + x] = @intCast(x * 1024 + z * 512);
+    }
+    const map: Heightmap = .{ .width = 33, .height = 33, .settings = .{ .world_width = 640, .world_depth = 640, .base_height = -10, .elevation = 100 }, .samples = samples };
+    const stamps = [_]Stamp{.{ .kind = .plateau, .center = .{ -128, 0 }, .radius = 36, .amount = 52 }};
+    const west = try generateChunk(std.testing.allocator, map, 42, -2, 0, &stamps);
+    defer west.deinit(std.testing.allocator);
+    const east = try generateChunk(std.testing.allocator, map, 42, -1, 0, &stamps);
+    defer east.deinit(std.testing.allocator);
+    for (0..Chunk.cells + 1) |z| {
+        try std.testing.expectEqualDeep(west.vertices[z * (Chunk.cells + 1) + Chunk.cells], east.vertices[z * (Chunk.cells + 1)]);
+    }
+    for (0..west.indices.len) |i| {
+        if (i % 997 != 0) continue;
+        const a = west.vertices[west.indices[i]].position;
+        const b = west.vertices[west.indices[i + 1]].position;
+        const c = west.vertices[west.indices[i + 2]].position;
+        const x = (a[0] + b[0] + c[0]) / 3;
+        const z = (a[2] + b[2] + c[2]) / 3;
+        const expected_y = (a[1] + b[1] + c[1]) / 3;
+        const result = terrainSurface(map, 42, x, z, &stamps, -20, 75).?;
+        try std.testing.expectApproxEqAbs(expected_y, result.height, 0.0001);
+        try std.testing.expect(result.normal[1] > 0);
+    }
 }

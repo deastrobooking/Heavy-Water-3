@@ -4,14 +4,16 @@
 //! always deliberate and versioned with the asset.
 const std = @import("std");
 const Guid = @import("Guid.zig");
+const Heightmap = @import("../procedural/Heightmap.zig");
 const Meta = @This();
 
 pub const format_version: u32 = 1;
-pub const Kind = enum { model, blueprint, scene, animation, texture };
+pub const Kind = enum { model, blueprint, heightmap, scene, animation, texture };
 /// Current importer versions; raising one makes every asset of that kind stale.
 pub const importers = struct {
     pub const gltf: u32 = 1;
     pub const blueprint: u32 = 1;
+    pub const heightmap: u32 = 1;
 };
 pub const ModelSettings = struct {
     /// Uniform scale applied to positions at import.
@@ -31,6 +33,7 @@ pub const Error = error{ InvalidMeta, UnsupportedMetaFormat, WrongKind, StaleMet
 guid: Guid,
 kind: Kind,
 model: ModelSettings = .{},
+heightmap: Heightmap.Settings = .{},
 
 /// "blake3:" + 64 hex characters of the source bytes.
 pub fn hashSource(source: []const u8) [71]u8 {
@@ -46,6 +49,7 @@ pub fn hashSource(source: []const u8) [71]u8 {
 pub fn kindOf(path: []const u8) Error!Kind {
     if (std.mem.endsWith(u8, path, ".gltf") or std.mem.endsWith(u8, path, ".glb")) return .model;
     if (std.mem.endsWith(u8, path, ".json")) return .blueprint;
+    if (std.mem.endsWith(u8, path, ".pgm")) return .heightmap;
     return error.UnknownSourceType;
 }
 
@@ -53,6 +57,7 @@ fn importerFor(kind: Kind) Importer {
     return switch (kind) {
         .model => .{ .name = "gltf", .version = importers.gltf },
         .blueprint => .{ .name = "blueprint", .version = importers.blueprint },
+        .heightmap => .{ .name = "pgm", .version = importers.heightmap },
         else => .{ .name = "none", .version = 0 },
     };
 }
@@ -80,6 +85,14 @@ pub fn check(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path: 
                 meta.model = s.value;
             }
         },
+        .heightmap => {
+            if (doc.settings != .null) {
+                const s = std.json.parseFromValue(Heightmap.Settings, allocator, doc.settings, .{}) catch return error.InvalidSettings;
+                defer s.deinit();
+                if (!Heightmap.validSettings(s.value)) return error.InvalidSettings;
+                meta.heightmap = s.value;
+            }
+        },
         else => if (doc.settings != .null and !(doc.settings == .object and doc.settings.object.count() == 0)) return error.InvalidSettings,
     }
     return meta;
@@ -91,6 +104,7 @@ pub fn refresh(allocator: std.mem.Allocator, existing: ?[]const u8, source_path:
     const kind = try kindOf(source_path);
     var guid = fresh;
     var model: ModelSettings = .{};
+    var heightmap: Heightmap.Settings = .{};
     if (existing) |bytes| {
         const parsed = std.json.parseFromSlice(Doc, allocator, bytes, .{}) catch return error.InvalidMeta;
         defer parsed.deinit();
@@ -100,10 +114,28 @@ pub fn refresh(allocator: std.mem.Allocator, existing: ?[]const u8, source_path:
             defer s.deinit();
             model = s.value;
         }
+        if (kind == .heightmap and parsed.value.settings != .null) {
+            const s = try std.json.parseFromValue(Heightmap.Settings, allocator, parsed.value.settings, .{});
+            defer s.deinit();
+            if (!Heightmap.validSettings(s.value)) return error.InvalidSettings;
+            heightmap = s.value;
+        }
     }
     const hash = hashSource(source);
-    const Out = struct { format: u32, guid: Guid, kind: Kind, source_hash: []const u8, importer: Importer, settings: ?ModelSettings };
-    return std.json.Stringify.valueAlloc(allocator, Out{ .format = format_version, .guid = guid, .kind = kind, .source_hash = &hash, .importer = importerFor(kind), .settings = if (kind == .model) model else null }, .{ .whitespace = .indent_2, .emit_null_optional_fields = false });
+    const SettingsOut = struct {
+        scale: ?f32 = null,
+        world_width: ?f32 = null,
+        world_depth: ?f32 = null,
+        base_height: ?f32 = null,
+        elevation: ?f32 = null,
+    };
+    const Out = struct { format: u32, guid: Guid, kind: Kind, source_hash: []const u8, importer: Importer, settings: ?SettingsOut };
+    const settings: ?SettingsOut = switch (kind) {
+        .model => .{ .scale = model.scale },
+        .heightmap => .{ .world_width = heightmap.world_width, .world_depth = heightmap.world_depth, .base_height = heightmap.base_height, .elevation = heightmap.elevation },
+        else => null,
+    };
+    return std.json.Stringify.valueAlloc(allocator, Out{ .format = format_version, .guid = guid, .kind = kind, .source_hash = &hash, .importer = importerFor(kind), .settings = settings }, .{ .whitespace = .indent_2, .emit_null_optional_fields = false });
 }
 
 test "sidecars keep identity and settings, detect stale sources, and reject bad settings" {
@@ -136,4 +168,21 @@ test "sidecars keep identity and settings, detect stale sources, and reject bad 
     defer a.free(old);
     try std.testing.expectError(error.OldImporter, check(a, old, "crate.gltf", "v1"));
     try std.testing.expectError(error.UnknownSourceType, kindOf("notes.txt"));
+}
+
+test "heightmap sidecars preserve physical scale and reject invalid settings" {
+    const a = std.testing.allocator;
+    const first = try refresh(a, null, "valley.pgm", "P2\n2 2\n255\n0 1 2 3", Guid.generate(std.testing.io));
+    defer a.free(first);
+    const meta = try check(a, first, "valley.pgm", "P2\n2 2\n255\n0 1 2 3");
+    try std.testing.expectEqual(Kind.heightmap, meta.kind);
+    try std.testing.expectEqual(@as(f32, 512), meta.heightmap.world_width);
+    const settings = try std.mem.replaceOwned(u8, a, first, "\"world_width\": 512", "\"world_width\": 4096");
+    defer a.free(settings);
+    const parsed = try check(a, settings, "valley.pgm", "P2\n2 2\n255\n0 1 2 3");
+    try std.testing.expectEqual(@as(f32, 4096), parsed.heightmap.world_width);
+    try std.testing.expectError(error.StaleMeta, check(a, first, "valley.pgm", "changed"));
+    const bad = try std.mem.replaceOwned(u8, a, first, "\"elevation\": 128", "\"elevation\": 0");
+    defer a.free(bad);
+    try std.testing.expectError(error.InvalidSettings, check(a, bad, "valley.pgm", "P2\n2 2\n255\n0 1 2 3"));
 }

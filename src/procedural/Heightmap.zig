@@ -125,7 +125,7 @@ fn heightAt(self: Heightmap, x: usize, z: usize) f32 {
     return self.settings.base_height + normalized * self.settings.elevation;
 }
 
-fn validSettings(settings: Settings) bool {
+pub fn validSettings(settings: Settings) bool {
     return std.math.isFinite(settings.world_width) and settings.world_width > 0 and settings.world_width <= 1_000_000 and
         std.math.isFinite(settings.world_depth) and settings.world_depth > 0 and settings.world_depth <= 1_000_000 and
         std.math.isFinite(settings.base_height) and @abs(settings.base_height) <= 1_000_000 and

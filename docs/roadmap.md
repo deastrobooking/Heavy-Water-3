@@ -275,11 +275,11 @@ Acceptance:
 
 See [plan](plans/networking.md).
 
-## Landscape authoring — foundation implemented
+## Landscape authoring — isolated generation foundation implemented
 
-The first heightmap authoring slice is in place: the asset compiler imports ASCII/binary 8- or 16-bit PGM into validated `HWMH` v1 assets, and the procedural layer provides biome classification, bounded terrain stamps, deterministic temple pads, and cave route plans. This is not yet connected to the active terrain sampler or renderer, and temples/caves do not yet have in-world geometry or collision. Keep the current world as the default until an opt-in landscape scene proves mesh/physics agreement and chunk seams.
+The importer emits validated `HWMH` v1 assets, and `.pgm` sidecars preserve GUIDs, source hashes, importer versions, and validated physical settings. A typed registry reference can resolve a decoded heightmap. Procedural shaping provides biome classification, bounded terrain stamps, deterministic temple pads, and cave route plans. `Landscape.generateChunk` and `Landscape.terrainSurface` use the same shaped-height source; headless tests verify adjacent chunk seams and agreement with the generated triangle mesh.
 
-Next: add heightmap sidecars/GUID manifest registration; pass an immutable landscape context to both streamed mesh generation and `Terrain.surface`; then build a playable biome/temple/cave slice using the existing blueprint validator and shrine solver. See [Heightmapped Landscapes](plans/landscapes.md).
+This isolated path is not yet bound through `Catalog` into the active streamer, `Terrain.surface`, renderer, physics, or Sandbox. Temple/cave plans do not yet produce in-world meshes or colliders. Keep the current world as default until an opt-in scene proves those runtime paths together. Next: manifest/Catalog binding, then pass one immutable landscape context through streaming and gameplay before building a playable biome/temple/cave slice with the existing blueprint validator and shrine solver. See [Heightmapped Landscapes](plans/landscapes.md).
 
 ## Next
 
