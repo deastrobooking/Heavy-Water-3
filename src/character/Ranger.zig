@@ -16,7 +16,24 @@ const Ranger = @This();
 /// Skinned characters drawn at once: players 0–3, keepers 4–6, pedestrians 7–14, Hive troopers
 /// 16–23.
 pub const capacity = 24;
-pub const Pose = struct { feet: [3]f32, yaw: f32, walk_phase: f32 = 0, walk_amount: f32 = 0, motion: Player.Motion = .idle, time: f32 = 0 };
+/// What the arms are doing on top of the gait: aiming a rifle (two hands, at `aim_pitch`),
+/// swinging the saber (`action_t` 0–1 through the arc for `combo`), guarding, casting a power
+/// (both arms forward), or throwing.
+pub const Action = enum { none, aim, swing, guard, cast, throw };
+/// Saber arcs: forehand, backhand, overhead finisher, dash cut, aerial, charged wave.
+pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged };
+pub const Pose = struct {
+    feet: [3]f32,
+    yaw: f32,
+    walk_phase: f32 = 0,
+    walk_amount: f32 = 0,
+    motion: Player.Motion = .idle,
+    time: f32 = 0,
+    action: Action = .none,
+    action_t: f32 = 0,
+    arc: Arc = .forehand,
+    aim_pitch: f32 = 0,
+};
 pub const Draw = struct { profile: Profile, pose: Pose, id: u8 = 0 };
 character: gen.Character,
 instance: gen.Instance,
@@ -31,7 +48,7 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     const outfit_len = outfit(profile, &garments);
     const feminine = profile.presentation == .feminine;
     var ch = try gen.Character.build(a, .{
-        .body = .{ .height = 1.8 * profile.height, .head_ratio = 7.5, .femininity = if (feminine) 0.84 else 0.18, .bust = if (feminine) 0.24 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * profile.build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * profile.build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * profile.build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * profile.build, .head_width = if (feminine) 0.80 else 0.83, .jaw_sharpness = if (feminine) 0.65 else 0.28 },
+        .body = bodySpec(profile),
         .skin = rgb(Profile.skin_tones[profile.skin], 1),
         .eyes = .{ .size = if (feminine) 0.18 else 0.15, .aspect = if (feminine) 0.82 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = spec.Rgb.hex(0x213946), .pupil_size = if (feminine) 0.35 else 0.31, .highlight_count = 1 },
         .hair = .{ .style = switch (profile.hair_style) {
@@ -83,7 +100,54 @@ pub fn sameAppearance(a: Profile, b: Profile) bool {
 }
 pub fn update(self: *Ranger, state: Pose) void {
     const p = &self.instance.pose;
-    p.reset(&self.character.skeleton);
+    poseSkeleton(p, &self.character.skeleton, state);
+    self.instance.skin(&self.character);
+    for (self.mesh.vertices, self.instance.pos, self.instance.nrm) |*v, pos, normal| {
+        v.position = .{ pos.x, pos.y, pos.z };
+        v.normal = .{ normal.x, normal.y, normal.z };
+    }
+}
+
+/// Turns `joint` so the bone toward `child` points along `dir` (model frame).
+fn pointBone(p: *sk.Pose, skel: *const sk.Skeleton, joint: sk.Joint, child: sk.Joint, dir: V) void {
+    p.updateGlobal(skel);
+    const from = p.global[joint.idx()].translation;
+    const to = p.global[child.idx()].translation;
+    const current = to.sub(from).normalizeOr(V.unit_z);
+    const q = Q.fromTo(current, dir.normalizeOr(V.unit_z));
+    p.setGlobalRotation(skel, joint.idx(), q.mul(p.global[joint.idx()].rotation));
+}
+
+/// Direction from azimuth `a` (0 ahead, + toward the character's left) and elevation `e`.
+fn heading(a: f32, e: f32) V {
+    return V.init(@sin(a) * @cos(e), @sin(e), @cos(a) * @cos(e));
+}
+
+/// Pitches a model-frame direction up by `pitch` (rotation about the left axis).
+fn pitched(d: V, pitch: f32) V {
+    return Q.fromAxisAngle(V.unit_x, -pitch).rotate(d);
+}
+
+/// Saber arm direction at progress `t` through `arc`.
+pub fn swingDirection(arc: Arc, t: f32) V {
+    const k = std.math.clamp(t, 0, 1);
+    // Ease through the cut: fast in the middle.
+    const e = k * k * (3 - 2 * k);
+    const r = m.radians;
+    return switch (arc) {
+        .forehand => heading(m.lerp(r(-110), r(70), e), m.lerp(r(22), r(-12), e)),
+        .backhand => heading(m.lerp(r(70), r(-100), e), m.lerp(r(-6), r(16), e)),
+        .overhead => heading(m.lerp(r(-8), r(4), e), m.lerp(r(105), r(-45), e)),
+        .dash => heading(m.lerp(r(-70), r(65), e), r(-4)),
+        .aerial => heading(m.lerp(r(-150), r(150), e), r(-28)),
+        .charged => heading(m.lerp(r(-150), r(130), e), m.lerp(r(10), r(-5), e)),
+    };
+}
+
+/// The full procedural pose: the gait, then any combat action on the arms. Shared by the
+/// renderer's skinned characters and the simulation's rigs, so blades hit where they are drawn.
+pub fn poseSkeleton(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose) void {
+    p.reset(skel);
     const amount = std.math.clamp(state.walk_amount, 0, 1);
     const swing = @sin(state.walk_phase) * 0.65 * amount;
     const airborne = switch (state.motion) {
@@ -102,12 +166,45 @@ pub fn update(self: *Ranger, state: Pose) void {
     p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_y, swing * 0.08));
     p.local[sk.Joint.hips.idx()].translation.y += @sin(state.time * 2) * 0.003 * (1 - amount);
     if (state.motion == .roll or state.motion == .dash or state.motion == .board) p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.35));
-    p.updateGlobal(&self.character.skeleton);
-    self.instance.skin(&self.character);
-    for (self.mesh.vertices, self.instance.pos, self.instance.nrm) |*v, pos, normal| {
-        v.position = .{ pos.x, pos.y, pos.z };
-        v.normal = .{ normal.x, normal.y, normal.z };
+    const t = std.math.clamp(state.action_t, 0, 1);
+    switch (state.action) {
+        .none => {},
+        .aim => {
+            pointBone(p, skel, .upper_arm_r, .lower_arm_r, pitched(V.init(-0.12, -0.3, 0.95), state.aim_pitch));
+            pointBone(p, skel, .lower_arm_r, .hand_r, pitched(V.init(0.12, 0.04, 1), state.aim_pitch));
+            pointBone(p, skel, .upper_arm_l, .lower_arm_l, pitched(V.init(0.32, -0.38, 0.87), state.aim_pitch));
+            pointBone(p, skel, .lower_arm_l, .hand_l, pitched(V.init(-0.5, 0.06, 0.86), state.aim_pitch));
+        },
+        .swing => {
+            const d = swingDirection(state.arc, t);
+            // The torso turns into the cut.
+            p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_y, std.math.atan2(d.x, @max(d.z, 0.1)) * 0.35));
+            pointBone(p, skel, .upper_arm_r, .lower_arm_r, d.add(V.init(-0.25, -0.1, 0)));
+            pointBone(p, skel, .lower_arm_r, .hand_r, d);
+        },
+        .guard => {
+            pointBone(p, skel, .upper_arm_r, .lower_arm_r, V.init(-0.25, 0.05, 0.95));
+            pointBone(p, skel, .lower_arm_r, .hand_r, V.init(0.6, 0.55, 0.58));
+        },
+        .cast => {
+            for ([_]sk.Joint{ .upper_arm_r, .upper_arm_l }, [_]sk.Joint{ .lower_arm_r, .lower_arm_l }, [_]sk.Joint{ .hand_r, .hand_l }, [_]f32{ -1, 1 }) |arm, fore, hand, side| {
+                pointBone(p, skel, arm, fore, pitched(V.init(side * 0.12, 0.02, 1), state.aim_pitch));
+                pointBone(p, skel, fore, hand, pitched(V.init(-side * 0.06, 0.04, 1), state.aim_pitch));
+            }
+        },
+        .throw => {
+            const d = heading(m.lerp(m.radians(-160), m.radians(-15), t), m.lerp(m.radians(65), m.radians(8), t));
+            pointBone(p, skel, .upper_arm_r, .lower_arm_r, d);
+            pointBone(p, skel, .lower_arm_r, .hand_r, d);
+        },
     }
+    p.updateGlobal(skel);
+}
+
+/// The body part of a profile's character spec (everything the skeleton depends on).
+pub fn bodySpec(profile: Profile) spec.BodySpec {
+    const feminine = profile.presentation == .feminine;
+    return .{ .height = 1.8 * profile.height, .head_ratio = 7.5, .femininity = if (feminine) 0.84 else 0.18, .bust = if (feminine) 0.24 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * profile.build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * profile.build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * profile.build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * profile.build, .head_width = if (feminine) 0.80 else 0.83, .jaw_sharpness = if (feminine) 0.65 else 0.28 };
 }
 
 fn mix(a: [4]f32, b: spec.Rgb, t: f32) spec.Rgb {
