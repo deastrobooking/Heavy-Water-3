@@ -8,6 +8,7 @@ const Catalog = @This();
 const Arbor = @import("../procedural/Arbor.zig");
 const Seed = @import("../procedural/Seed.zig");
 const District = @import("../procedural/District.zig");
+const Vegetation = @import("../procedural/Vegetation.zig");
 const Guid = @import("Guid.zig");
 pub const Registry = @import("Registry.zig").For(MeshHandle);
 pub const Ref = @import("Registry.zig").Ref;
@@ -38,6 +39,8 @@ pub const Entry = struct {
 pub const Content = struct {
     relic: MeshHandle,
     plant: MeshHandle,
+    flora: [Vegetation.variant_count]MeshHandle,
+    tree_trunk: MeshHandle,
     crate: MeshHandle,
     /// Centered unit cube; machine parts and device bodies scale it per axis.
     block: MeshHandle,
@@ -175,7 +178,10 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.* = .{};
     errdefer self.deinit(allocator);
     self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.cube(allocator), .named("relic", .{ 1, 1, 1, 1 })));
-    self.content.plant = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.vegetation(allocator), .named("plant", .{ 1, 1, 1, 1 })));
+    const flora_colors = [_][4]f32{ .{ 0.30, 0.56, 0.22, 1 }, .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 }, .{ 0.18, 0.43, 0.20, 1 }, .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 } };
+    for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (i < Vegetation.tree_first) try Vegetation.plant(allocator, @intCast(i)) else try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)), .named(Vegetation.names[i], flora_colors[i])));
+    self.content.plant = self.content.flora[0];
+    self.content.tree_trunk = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator), .named("canopy trunk", .{ 0.24, 0.15, 0.09, 1 })));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
     self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
@@ -225,6 +231,9 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     // Generated meshes have no sidecar: their GUIDs derive from fixed names.
     const generated = [_]struct { name: []const u8, handle: MeshHandle }{
         .{ .name = "relic", .handle = self.content.relic },           .{ .name = "plant", .handle = self.content.plant },
+        .{ .name = "fern", .handle = self.content.flora[1] },         .{ .name = "wildflower", .handle = self.content.flora[2] },
+        .{ .name = "broadleaf", .handle = self.content.flora[3] },    .{ .name = "needleleaf", .handle = self.content.flora[4] },
+        .{ .name = "willow", .handle = self.content.flora[5] },       .{ .name = "canopy_trunk", .handle = self.content.tree_trunk },
         .{ .name = "block", .handle = self.content.block },           .{ .name = "wheel", .handle = self.content.wheel },
         .{ .name = "test_arbor", .handle = self.content.test_arbor }, .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
         .{ .name = "district", .handle = self.content.district },     .{ .name = "arbor_1", .handle = self.arbors[0].mesh },

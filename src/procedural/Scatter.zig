@@ -6,8 +6,9 @@ const Key = @import("../world/ChunkKey.zig");
 const Transform = @import("../world/Transform.zig");
 pub const capacity = 192;
 pub const Kind = enum { relic, vegetation };
+const Vegetation = @import("Vegetation.zig");
 /// Stable identity is (world seed, generator version, chunk key, local candidate ID).
-pub const Object = struct { local_id: u16, kind: Kind, transform: Transform, tint: [4]f32 };
+pub const Object = struct { local_id: u16, kind: Kind, variant: u8 = 0, transform: Transform, tint: [4]f32 };
 
 pub fn allowed(normal_y: f32, kind: Kind) bool {
     return normal_y >= (if (kind == .vegetation) @as(f32, 0.94) else 0.88);
@@ -27,12 +28,15 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         if (!allowed(1 / @sqrt(nx * nx + 1 + nz * nz), kind)) continue;
         const chance = Seed.unit(Seed.mix(h +% 2));
         if (kind == .vegetation and chance > 0.85 - biome.arid * 0.65) continue;
+        const choice = Seed.unit(Seed.mix(h +% 3));
+        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.97) Vegetation.tree_first + @as(u8, @intCast(Seed.mix(h +% 4) % 3)) else if (choice > 0.80) 2 else if (choice > 0.62) 1 else 0;
         const color = biome.color();
         output[count] = .{
             .local_id = @intCast(i),
             .kind = kind,
-            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.1, z }, .scale = 0.6 + Seed.unit(Seed.mix(h +% 1)) * (if (kind == .vegetation) @as(f32, 2.8) else 1.5) },
-            .tint = if (kind == .relic) .{ 0.40, 0.72, 0.81, 1 } else .{ color[0] * 0.8, color[1] * 1.3, color[2] * 0.9, 1 },
+            .variant = variant,
+            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (variant >= Vegetation.tree_first) 7 + Seed.unit(Seed.mix(h +% 1)) * 6 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .tint = if (kind == .relic) .{ 0.40, 0.72, 0.81, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else .{ color[0] * 0.8, color[1] * 1.3, color[2] * 0.9, 1 },
         };
         count += 1;
     }
@@ -53,4 +57,21 @@ test "scatter is stable, locally unique, bounded and slope aware" {
     }
     try std.testing.expect(!allowed(0.5, .vegetation));
     try std.testing.expect(allowed(1, .vegetation));
+}
+
+test "seeded scatter distributes all plant forms and three tree species reproducibly" {
+    var first: [capacity]Object = undefined;
+    var second: [capacity]Object = undefined;
+    var species_mask: u8 = 0;
+    for (0..10) |z| for (0..10) |x| {
+        const key: Key = .{ .x = @as(i32, @intCast(x)) - 5, .z = @as(i32, @intCast(z)) - 5 };
+        const count = generate(987654321, key, &first);
+        try std.testing.expectEqual(count, generate(987654321, key, &second));
+        try std.testing.expectEqualSlices(Object, first[0..count], second[0..count]);
+        for (first[0..count]) |object| if (object.kind == .vegetation) {
+            try std.testing.expect(object.variant < @import("Vegetation.zig").variant_count);
+            species_mask |= @as(u8, 1) << @intCast(object.variant);
+        };
+    };
+    try std.testing.expectEqual(@as(u8, 0x3f), species_mask);
 }

@@ -47,6 +47,7 @@ instances: [max_instances]Instance = undefined,
 instance_count: u32 = 1,
 relic_count: u32 = 0,
 plant_count: u32 = 0,
+flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @splat(0),
 resident_count: usize = 0,
 peak_resident_count: usize = 0,
 active_missing: usize = 0,
@@ -193,20 +194,26 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         }
     }
     self.peak_resident_count = @max(self.peak_resident_count, self.resident_count);
-    self.relic_count = self.gather(.relic, vp, culling, removed);
-    self.plant_count = self.gather(.vegetation, vp, culling, removed);
+    self.relic_count = self.gather(.relic, vp, culling, removed, null);
+    self.plant_count = 0;
+    for (&self.flora_counts, 0..) |*count, variant| {
+        count.* = self.gather(.vegetation, vp, culling, removed, @intCast(variant));
+        self.plant_count += count.*;
+    }
     self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
 
-fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) u32 {
+fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, variant: ?u8) u32 {
     const first = self.instance_count;
-    const color = self.baseColor(if (kind == .relic) self.catalog.content.relic else self.catalog.content.plant);
+    const handle = if (kind == .relic) self.catalog.content.relic else self.catalog.content.flora[variant.?];
+    const color = self.baseColor(handle);
     for (self.residents) |resident| {
         if (!resident.visible) continue;
         const view = resident.view.?;
         const data = self.stream.payload(view).?;
         for (data.objects[0..data.object_count]) |object| {
             if (object.kind != kind) continue;
+            if (variant) |v| if (object.variant != v) continue;
             // Saved removals apply to regenerated content by stable (chunk, local_id) identity.
             if (removed.len > 0 and removed.contains(.of(view.key, object.local_id))) continue;
             const t = object.transform.toInstance();
@@ -252,7 +259,16 @@ fn multiply(a: [4]f32, b: [4]f32) [4]f32 {
 pub fn draw(self: *Scene, pass: *gpu.RenderPassEncoder) void {
     for (self.residents) |resident| if (resident.visible) resident.mesh.draw(pass, 1, 0);
     if (self.relic_count > 0) if (self.gpuMesh(self.catalog.content.relic)) |mesh| mesh.draw(pass, self.relic_count, 1);
-    if (self.plant_count > 0) if (self.gpuMesh(self.catalog.content.plant)) |mesh| mesh.draw(pass, self.plant_count, 1 + self.relic_count);
+    var next: u32 = 1 + self.relic_count;
+    for (self.flora_counts, 0..) |count, variant| {
+        if (count == 0) continue;
+        const handle = self.catalog.content.flora[variant];
+        if (variant >= @import("../procedural/Vegetation.zig").tree_first) {
+            if (self.gpuMesh(self.catalog.content.tree_trunk)) |trunk| trunk.draw(pass, count, next);
+        }
+        if (self.gpuMesh(handle)) |mesh| mesh.draw(pass, count, next);
+        next += count;
+    }
     for (self.draws[0..self.draw_count]) |d| d.mesh.drawRange(pass, d.first_index, d.index_count, d.instances, d.first_instance);
 }
 
