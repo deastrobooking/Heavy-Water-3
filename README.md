@@ -61,6 +61,7 @@ python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 m
 | [Mods](docs/mods.md) | Mod packages and the constrained WebAssembly API |
 | [Scale Tests](docs/scale.md) | Reproducible workload and performance methodology |
 | [Validation](docs/validation.md) | Test results, platform coverage, and known limitations |
+| [Next Steps](docs/plans/next-steps.md) | Ordered plan after the frontier and flight work: play and tune, air war depth, Hive campaign, co-op, engine phases |
 | [Heightmapped Landscapes](docs/plans/landscapes.md) | Heightmap import, biome shaping, and temple/cave generation plan |
 
 Additional system plans live in [`docs/plans/`](docs/plans/), including scenes, the asset pipeline, animation, and engine alignment.

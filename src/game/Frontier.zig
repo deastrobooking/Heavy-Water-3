@@ -304,7 +304,6 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
             .sting => sb.cuePitch(.hive_zap, s.position, 1.4),
         },
         .burst => |at| {
-            sb.combat.effects[0] = sb.combat.effects[0];
             burst(sb, at, 4, .{ 1, 0.55, 0.2 });
             sb.cue(.boom, at);
         },

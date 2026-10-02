@@ -198,7 +198,8 @@ pub const Fighter = struct {
             self.grounded = true;
             const v = b.pointVelocity(p);
             self.impact = @max(self.impact, -v.y);
-            const normal = (depth * 9 - v.y * 1.4) * b.mass / 3 * 9.81 / 9;
+            // Each leg carries a third of the weight at 10 cm of compression, well damped.
+            const normal = (depth * 10 - v.y * 1.5) * b.mass / 3 * gravity;
             b.addForceAt(Vec3.init(0, @max(0, normal), 0), p);
             const brake: f32 = if (self.throttle < 0.15 and !input.afterburner) 0.9 else 0.08;
             b.addForceAt(Vec3.init(-v.x, 0, -v.z).scale(b.mass / 3 * brake), p);
@@ -291,6 +292,18 @@ test "mouse aim: the fighter turns to fly where the pilot points" {
     const before = f.body.pos.y;
     for (0..60 * 4) |_| f.step(1.0 / 60.0, .{ .aim = Vec3.init(1, 0.6, 0).normalize(), .afterburner = true }, &sky, Flat.probe);
     try testing.expect(f.body.pos.y > before + 80);
+}
+
+test "a jet left in the air with its engine off settles onto its gear" {
+    var f = testFighter(Vec3.init(0, 30, 0), 0);
+    f.body.vel = Vec3.init(0, 0, 40);
+    f.throttle = 0;
+    const ground: Flat = .{ .height = 0 };
+    for (0..60 * 25) |_| f.step(1.0 / 60.0, .{ .aim = f.forward(), .steer = false, .climb = if (f.grounded) 0 else -0.6 }, &ground, Flat.probe);
+    try testing.expect(f.grounded);
+    // Resting on the gear (legs 1.4 m below the COM, about 10 cm compressed), not the floor clamp.
+    try testing.expect(f.body.pos.y > 1.25 and f.body.pos.y < 1.4);
+    try testing.expect(f.body.vel.length() < 0.5);
 }
 
 test "a hard crash into the ground costs hull" {

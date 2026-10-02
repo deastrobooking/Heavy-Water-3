@@ -176,6 +176,7 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   - F (pad: X) climbs out.
 
   The chase camera sits 24 m behind the aim. A wrecked jet throws the pilot clear (40 damage) and a new one waits on the pad. Saves keep where it was left.
+- **Gear and empty jets:** each gear leg carries a third of the weight at 10 cm of compression. A jet with no pilot idles: engine off, wings levelled, and the lift jets let it down onto its gear, even if it was left in flight.
 - **The air war:** `game/Skies.zig`.
   - **Carriers:** they circle 260–320 m up on circuits beyond the first two nests, and wake when a player is within 650 m. Awake, they launch wasps (six each at most) and fire proximity-fused flak at the jet.
   - **Wasps:**
@@ -291,7 +292,32 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 
 ## Saves
 
-`game/Save.zig` writes JSON format v10: format, seed, generator version, content version, tick, player pose and mode, every crate by slot, removed relic IDs, and every machine by slot with its full blueprint document (as edited in the world), origin, quarter-turn yaw, workshop flag, per-device state, and for vehicles the chassis pose and velocities, plus the captured prefab library as blueprint documents, the player's profile, Arbor/district generator versions, player bridge endpoint pairs (bridges already closing are left out), the market wallet (scrap, parts, kits), each stall's stock with its market day, each machine's market-kit flag, each Rootdeep shrine machine's shrine index, and the installed mods by name and version. Content version 6 added the market blueprints; version 7 the shrines and Rootsong reward blueprints. The save therefore describes the whole built world; the default layout is only the new-game state. Older formats are rejected, not migrated. Content version 2 added the door and elevator; version 3 added the rover. Whether the player is seated is not saved: loading leaves the player standing. Writes go to a temporary file and are renamed over `saves/quicksave.json`. Loading parses and validates everything (versions, seed, slot ranges, duplicates, finite values, each blueprint through `fromDoc`, machine state restored into scratch machines, at most one workshop, and physics body and rigid capacity, and district graph validation) before tearing down and rebuilding the session. Bridge colliders are allocated into staging first, with cleanup on failure, so a rejected save changes nothing. Procedural content is never stored; it is regenerated from seed and generator version, and the saved deltas are applied on top.
+`game/Save.zig` writes JSON format v11 (content version 7). It records:
+- the format, seed, generator and content versions, and the tick;
+- the player's pose and mode, and their profile;
+- every crate by slot, and the removed relic IDs;
+- every machine by slot: its full blueprint document as edited in the world, origin, quarter-turn yaw, workshop flag, per-device state, market-kit flag, shrine index, and for vehicles the chassis pose and velocities;
+- the captured prefab library;
+- player bridge endpoint pairs (bridges already closing are left out);
+- the market wallet (scrap, parts, kits) and each stall's stock with its market day;
+- the installed mods by name and version.
+
+Later additions are optional fields with defaults, so older v11 saves still load:
+- **progress:** suit upgrade levels, owned suits, armor accents, weapons, cars and the fighter, held pickups, collected pickup IDs, and story flags (including destroyed nests and carriers);
+- **cars:** each hover car's pose;
+- **fighter:** the Kestrel's pose.
+
+Formats before v11 are rejected, not migrated. Whether the player is seated or piloting is not saved: loading leaves the player standing. City life, guests, Hive units, wasps and shots are not saved either.
+
+Writes go to a temporary file, then rename over `saves/quicksave.json`. Loading validates everything before tearing down and rebuilding the session:
+- versions, seed, slot ranges and duplicates;
+- finite values, including the car and fighter poses;
+- each blueprint through `fromDoc`, with machine state restored into scratch machines;
+- at most one workshop, and physics body and rigid capacity;
+- district graph validation;
+- progress ranges.
+
+Bridge colliders are allocated into staging first, with cleanup on failure, so a rejected save changes nothing. Procedural content is never stored: it is regenerated from the seed and generator version, and the saved deltas are applied on top.
 
 ## Coordinates and GPU layout
 

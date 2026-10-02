@@ -67,7 +67,9 @@ pub fn controls(input: Input, camera: Camera) jet.Input {
 /// Steps the jet: flown when piloted, otherwise parked (gear holds it, the computer levels).
 pub fn step(self: *Hangar, physics: *const Physics, input: jet.Input, dt: f32) void {
     const f = &(self.fighter orelse return);
-    const in: jet.Input = if (self.piloting) input else .{ .aim = f.forward(), .steer = false };
+    // Unpiloted, the jet idles: engine off, wings levelled, and the lift jets let it down gently.
+    const in: jet.Input = if (self.piloting) input else .{ .aim = f.forward(), .steer = false, .climb = if (f.grounded) 0 else -0.6 };
+    if (!self.piloting) f.throttle = 0;
     f.step(dt, in, physics, probe);
 }
 

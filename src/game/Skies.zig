@@ -415,7 +415,11 @@ fn strikeAlong(self: *Skies, enemies: *Enemies, origin: V, dir: V, length: f32, 
             hit = .{ .carrier = @intCast(ci) };
             weak = false;
         };
-        for (ShipMeshes.carrier_bays) |bay| if (Enemies.segmentSphere(origin, dir, best + 4, c.point(bay), 4.5 + pad)) |t| if (t <= best + 4) {
+        // Bays sit inside the hull spheres: a bay counts if it is reached within 4 m of this
+        // carrier's own hull hit, but never past something nearer (a wasp, another ship).
+        const hull_hit = hit != null and hit.? == .carrier and hit.?.carrier == ci;
+        const reach = if (hull_hit) best + 4 else best;
+        for (ShipMeshes.carrier_bays) |bay| if (Enemies.segmentSphere(origin, dir, reach, c.point(bay), 4.5 + pad)) |t| {
             best = @min(best, t);
             hit = .{ .carrier = @intCast(ci) };
             weak = true;
@@ -563,6 +567,23 @@ test "carriers circle, launch wasps near a player, and the wasps attack and hit"
     try std.testing.expect(dist(sky.carriers[0].position(), c0) > 300);
     // Wasps stay well above the ground.
     for (sky.wasps) |slot| if (slot) |w| try std.testing.expect(w.position[1] > Terrain.surface(5, w.position[0], w.position[2]).height + 5);
+}
+
+test "a wasp in front of a carrier bay takes the shot" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var enemies: Enemies = .{};
+    var sky = Skies.init(2, .{ 0, 0, 0 }, &.{});
+    sky.carriers[1].alive = false;
+    const bay = sky.carriers[0].point(ShipMeshes.carrier_bays[0]);
+    // Shoot straight up into the bay, with a wasp 6 m below it in the way.
+    sky.wasps[0] = .{ .position = R.sub(bay, .{ 0, 6, 0 }), .carrier = 0 };
+    var events: [8]Event = undefined;
+    var n: usize = 0;
+    const before = sky.carriers[0].health;
+    try std.testing.expect(sky.strikeAlong(&enemies, R.sub(bay, .{ 0, 40, 0 }), .{ 0, 1, 0 }, 60, 0, 10, &events, &n));
+    try std.testing.expectEqual(before, sky.carriers[0].health);
+    try std.testing.expect(sky.wasps[0].?.health < wasp_health);
 }
 
 test "the jet's cannons down a wasp and a locked missile homes onto a carrier bay" {

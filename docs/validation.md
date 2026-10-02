@@ -240,6 +240,23 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Focused review: flight, air war and frontier — 2026-10-01
+
+Review of the flight, air war, combat, garage and frontier code since the vehicle work began. Findings and outcomes:
+
+- **Fixed (high):** a Kestrel left mid-flight kept its throttle and flew on unpiloted. Empty jets now cut the engine and let the lift jets lower them onto the gear. Test: a jet left at 30 m and 40 m/s settles onto its gear.
+- **Fixed (medium):** the gear springs balanced at about 1 m of penetration, so parked jets rested on the hard-floor clamp rather than the gear. Each leg now carries a third of the weight at 10 cm. The same test checks the rest height.
+- **Fixed (medium):** a shot could register on a carrier's launch bay even with a wasp nearer along the line, because the bay's 4 m allowance applied against any nearer hit. It now applies only past that carrier's own hull hit. Test: a wasp between the gun and a bay takes the shot, and the carrier is unharmed.
+- **Fixed (low):** a stray no-op statement in `Frontier.stepSkies`.
+- **Open (low):** a missile locked on a ground Hive unit tracks its slot index; if the unit dies and the slot is reused, the missile homes on the newcomer. See [next steps](plans/next-steps.md).
+- **Open (docs):** the save-format description was stale (v10, without progress, cars or the fighter); it is rewritten in [architecture](architecture.md).
+- **Checked, no change:**
+  - The HUD projection's basis matches `Camera.move`'s right vector, and the up vector is forward × right. A capture with a live lock is still needed to confirm the reticle's side.
+  - Wasps keep thinking after their carrier sleeps; with analytic avoidance that is bounded (14 at most).
+  - Guests are in the wasps' target list with matching player indices.
+- **Debug suite: 269/269 tests pass.**
+- **Metal smoke:** native Apple M3 Pro, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 300 smoke frames: no validation errors, clean exit; frontier and flight stages passed (Kestrel fabricated, lifted off, wasp downed).
+
 ## Flight: the Kestrel and the air war — 2026-10-01
 
 - Debug suite: **267/267 tests pass**. New tests:

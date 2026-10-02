@@ -316,7 +316,15 @@ This isolated path is not yet bound through `Catalog` into the active streamer, 
 
 ## Next
 
-Phases 1–13 have runnable slices. The next milestone is the Mach `main` evaluation before phase 14 skeletal animation (rigged ranger, pose sampling and skinning). Phases 15–16 follow with scenes and networking. Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
+Phases 1–13 have runnable slices. The game layer has also grown well beyond the phases: menus and conversations, procedural audio, hover cars and the Kestrel fighter, the Hive on the ground and in the air, fabrication and progression. The ordered plan for what comes next is [next steps](plans/next-steps.md):
+1. **Play, measure and tune:** a frontier benchmark with frame budgets, a hand-play checklist, and correctness fixes.
+2. **Air war depth:** collisions, carrier assault stages, new Hive wings, Kestrel upgrades.
+3. **A Hive campaign:** corruption spread, story beats and a quest log.
+4. **Engine work:** the Mach `main` evaluation, then phase 14 skeletal animation.
+5. **Co-op completeness.**
+6. **Phases 15–16:** scenes and networking.
+
+Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
 
 - **Mach:** update or fork it for indirect draws, shader atomics, timestamp queries, and texture-to-buffer copies (phase 12). The plan is to evaluate the current Mach `main` on a branch before phase 14 ([alignment](plans/alignment.md#mach-tracking)).
 - **Economy:** whether building should cost resources (phase 9 markets are additive today).
