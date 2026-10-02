@@ -12,7 +12,7 @@ const World = @import("../world/World.zig");
 const Sandbox = @import("Sandbox.zig");
 const Vec3 = Physics.Vec3;
 
-pub const Tool = enum { hands, build, wire, bridge };
+pub const Tool = enum { hands, build, wire, bridge, weapon };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
 pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon, root_sender, root_listener };
 pub const build_reach: f32 = 14;
@@ -153,7 +153,7 @@ pub fn selectTool(sb: *Sandbox, tool: Tool) void {
 pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Actions) !void {
     const st = &sb.tools;
     switch (st.tool) {
-        .hands => {},
+        .hands, .weapon => {},
         .bridge => {
             if (actions.next_item) @import("BridgeTool.zig").cycleStyle(sb);
             try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary);
@@ -333,7 +333,7 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
             if (!sb.closeBridge(i)) return sb.say("bridge closed: removed once traffic clears", .{});
             sb.say("removed bridge", .{});
         },
-        .relic, .stall, .walker, .none => sb.say("nothing to remove", .{}),
+        .relic, .stall, .walker, .car, .fabricator, .none => sb.say("nothing to remove", .{}),
     }
 }
 
@@ -560,6 +560,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools;
     return switch (st.tool) {
         .hands => "",
+        .weapon => if (sb.combat.active) |w| std.fmt.bufPrint(buffer, "{s}  CLICK FIRE  RMB ALTERNATE  TAB SWITCH", .{@tagName(w)}) catch buffer else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
         .build => switch (current(sb)) {
             .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.wallet.kits[@intFromEnum(ware)] }) catch buffer,

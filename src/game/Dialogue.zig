@@ -10,7 +10,7 @@ const Market = @import("../city/Market.zig");
 const Dialogue = @This();
 
 pub const Action = enum { none, trade, upgrades, wardrobe };
-pub const max_choices = 6;
+pub const max_choices = 8;
 pub const max_text = 280;
 pub const Choice = struct {
     text: []const u8,

@@ -12,6 +12,8 @@ const Progress = @import("../game/Progress.zig");
 const Dialogue = @import("../game/Dialogue.zig");
 const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
+const Fabricator = @import("../game/Fabricator.zig");
+const Collectibles = @import("../game/Collectibles.zig");
 const Market = @import("../city/Market.zig");
 const Rect = Canvas.Rect;
 const Color = Canvas.Color;
@@ -27,7 +29,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 20, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -100,6 +102,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     if (sb.creator.open) drawCreator(c, sb, hud.view) else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
         .upgrades => drawUpgrades(c, sb, shop.row, hud.view),
         .wardrobe => drawWardrobe(c, sb, shop.row, hud.view),
+        .fabricate => drawFabricator(c, sb, shop, hud.view),
     } else if (sb.trading) |stall| drawShop(c, sb, stall, hud.view) else if (hud.inspect.len > 0) drawInspect(c, hud);
     switch (menu.screen) {
         .none, .title => {},
@@ -234,16 +237,20 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
 fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     const v = hud.view;
     // Vitals, bottom left (hidden under conversation and shop panels).
-    if (sb.seated == null and !panels) vitals(c, v, sb.player, sb.profile);
+    if (sb.seated == null and !panels) {
+        vitals(c, v, sb.player, sb.profile, sb.combat.vitals[0]);
+        weaponLine(c, v, sb);
+    }
     // Wallet and clock, top right.
     {
         var buffer: [48]u8 = undefined;
         const scrap = std.fmt.bufPrint(&buffer, "{d} SCRAP", .{sb.wallet.scrap}) catch "";
         const w: f32 = 290;
-        const r: Rect = .{ .x = v.x + v.w - w - 20, .y = v.y + 20, .w = w, .h = 58 };
+        const r: Rect = .{ .x = v.x + v.w - w - 20, .y = v.y + 20, .w = w, .h = 72 };
         c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
         c.text(r.x + 14, r.y + 10, scrap, 1.3, gold);
         c.print(r.x + 14, r.y + 32, 1, ink, "{d} PARTS   {d} KITS", .{ sb.wallet.parts, kits(sb.wallet) });
+        inventoryLine(c, sb, r.x + 14, r.y + 50, 1);
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
     }
     if (panels) return;
@@ -253,18 +260,39 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
 }
 
 /// Name, motion, fuel and stamina in the bottom-left corner of a view.
-fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profile) void {
-    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 92, .w = 250, .h = 72 };
+fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profile, health: @import("../game/Combat.zig").Vitals) void {
+    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 110, .w = 250, .h = 90 };
+    // Hurt: the view's edges flush red.
+    if (health.hurt > 0) {
+        const a = health.hurt * 0.9;
+        c.rect(.{ .x = v.x, .y = v.y, .w = v.w, .h = 10 }, .{ 0.9, 0.05, 0.05, a });
+        c.rect(.{ .x = v.x, .y = v.y + v.h - 10, .w = v.w, .h = 10 }, .{ 0.9, 0.05, 0.05, a });
+        c.rect(.{ .x = v.x, .y = v.y, .w = 10, .h = v.h }, .{ 0.9, 0.05, 0.05, a });
+        c.rect(.{ .x = v.x + v.w - 10, .y = v.y, .w = 10, .h = v.h }, .{ 0.9, 0.05, 0.05, a });
+    }
     c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
     c.rect(.{ .x = r.x, .y = r.y, .w = 3, .h = r.h }, Profile.accent_colors[profile.accent]);
     var name_buffer: [32]u8 = undefined;
     c.text(r.x + 14, r.y + 10, profile.name(), 1.2, ink);
     const motion = if (p.mode == .fly) "FLY" else @tagName(p.motion);
     c.text(r.x + 14 + Canvas.textWidth(profile.name(), 1.2) + 12, r.y + 12, pretty(&name_buffer, motion), 1, dim);
-    c.text(r.x + 14, r.y + 32, "FUEL", 0.9, dim);
-    bar(c, .{ .x = r.x + 66, .y = r.y + 32, .w = 166, .h = 8 }, p.fuel / p.suit.fuel_max, accent);
-    c.text(r.x + 14, r.y + 50, "STAMINA", 0.9, dim);
-    bar(c, .{ .x = r.x + 66, .y = r.y + 50, .w = 166, .h = 8 }, p.stamina / 100, good);
+    c.text(r.x + 14, r.y + 32, "HEALTH", 0.9, dim);
+    bar(c, .{ .x = r.x + 66, .y = r.y + 32, .w = 166, .h = 8 }, health.health / health.max, .{ 0.95, 0.32, 0.32, 1 });
+    c.text(r.x + 14, r.y + 50, "FUEL", 0.9, dim);
+    bar(c, .{ .x = r.x + 66, .y = r.y + 50, .w = 166, .h = 8 }, p.fuel / p.suit.fuel_max, accent);
+    c.text(r.x + 14, r.y + 68, "STAMINA", 0.9, dim);
+    bar(c, .{ .x = r.x + 66, .y = r.y + 68, .w = 166, .h = 8 }, p.stamina / 100, good);
+}
+
+/// The selected weapon and its charge, above the vitals (weapon tool only).
+fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox) void {
+    if (sb.tools.tool != .weapon) return;
+    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 142, .w = 250, .h = 26 };
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+    var buffer: [24]u8 = undefined;
+    const name = if (sb.combat.active) |w| pretty(&buffer, @tagName(w)) else "NO WEAPON";
+    c.text(r.x + 14, r.y + 9, name, 1, gold);
+    bar(c, .{ .x = r.x + 160, .y = r.y + 10, .w = 76, .h = 6 }, sb.combat.charge(), gold);
 }
 
 fn prompt(c: *Canvas, v: Rect, text: []const u8, tint: Color) void {
@@ -283,7 +311,7 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const g = &sb.guests[guest.index];
     const v = guest.view;
     const tint = Profile.accent_colors[g.profile.accent];
-    vitals(c, v, g.player, g.profile);
+    vitals(c, v, g.player, g.profile, sb.combat.vitals[guest.index + 1]);
     const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
     const w = @min(v.w - 40, 460);
     const h = 84 + @as(f32, Sandbox.trade_rows) * 26;
@@ -534,6 +562,75 @@ fn drawWardrobe(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
     const count = Canvas.wrap(suit_about[@min(selected, suit_about.len - 1)], columns, &lines);
     for (lines[0..count], 0..) |line, i| c.text(r.x + 18, r.y + r.h - 68 + @as(f32, @floatFromInt(i)) * 16, line, 1, ink);
     c.text(r.x + 18, r.y + r.h - 28, "ENTER BUY / WEAR  ESC CLOSE  F4 COLORS", 0.9, alpha(dim, 0.8));
+}
+
+fn inventoryLine(c: *Canvas, sb: *const Sandbox, x: f32, y: f32, scale: f32) void {
+    var cx = x;
+    for (0..Collectibles.kind_count) |k| {
+        const kind: Collectibles.Kind = @enumFromInt(k);
+        const t = Collectibles.tint(kind);
+        c.rect(.{ .x = cx, .y = y + 1, .w = 8 * scale, .h = 8 * scale }, .{ t[0], t[1], t[2], 1 });
+        var buffer: [24]u8 = undefined;
+        const text = std.fmt.bufPrint(&buffer, "{d}", .{sb.progress.count(kind)}) catch "";
+        c.text(cx + 12 * scale, y + 1, text, scale, ink);
+        cx += 12 * scale + Canvas.textWidth(text, scale) + 16;
+    }
+}
+
+fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) void {
+    var list: [Fabricator.recipes.len]u8 = undefined;
+    const rows = Fabricator.onTab(@enumFromInt(shop.tab), &list);
+    const r = shopFrame(c, v, rows.len + 1, "FABRICATOR", hitId(.shop_close, 0), false);
+    // Tabs.
+    var tx = r.x + 18;
+    for (0..Fabricator.tab_count) |t| {
+        var buffer: [16]u8 = undefined;
+        const label = pretty(&buffer, @tagName(@as(Fabricator.Tab, @enumFromInt(t))));
+        const w = Canvas.textWidth(label, 1) + 24;
+        const tab: Rect = .{ .x = tx, .y = r.y + 44, .w = w, .h = 22 };
+        c.rect(tab, if (shop.tab == t) alpha(accent, 0.3) else alpha(accent, 0.08));
+        c.text(tab.x + 12, tab.y + 6, label, 1, if (shop.tab == t) accent else dim);
+        c.hit(tab, hitId(.fab_tab, t));
+        tx += w + 8;
+    }
+    inventoryLine(c, sb, r.x + r.w - 300, r.y + 50, 1);
+    var y = r.y + 76;
+    for (rows, 0..) |index, i| {
+        const recipe = Fabricator.recipes[index];
+        const row: Rect = .{ .x = r.x + 10, .y = y, .w = r.w - 20, .h = 30 };
+        rowBack(c, row, shop.row == i);
+        c.hit(row, hitId(.shop_row, i));
+        var buffer: [24]u8 = undefined;
+        c.text(row.x + 14, row.y + 10, Fabricator.name(recipe.output, &buffer), 1.1, if (shop.row == i) accent else ink);
+        if (Fabricator.made(&sb.progress, recipe.output)) {
+            c.text(row.x + row.w - 250, row.y + 10, "MADE", 1, good);
+        } else {
+            // Cost chips, red where short.
+            var cx = row.x + row.w - 250;
+            const parts = [_]struct { kind: ?Collectibles.Kind, amount: u32 }{
+                .{ .kind = .lumen_shard, .amount = recipe.cost.lumen },
+                .{ .kind = .rotor_core, .amount = recipe.cost.rotor },
+                .{ .kind = .hive_alloy, .amount = recipe.cost.alloy },
+                .{ .kind = null, .amount = recipe.cost.scrap },
+            };
+            for (parts) |p| if (p.amount > 0) {
+                const have = if (p.kind) |k| sb.progress.count(k) else sb.wallet.scrap;
+                var text: [16]u8 = undefined;
+                const label = if (p.kind == null) std.fmt.bufPrint(&text, "{d} SCRAP", .{p.amount}) catch "" else std.fmt.bufPrint(&text, "{d}", .{p.amount}) catch "";
+                if (p.kind) |k| {
+                    const t = Collectibles.tint(k);
+                    c.rect(.{ .x = cx, .y = row.y + 10, .w = 9, .h = 9 }, .{ t[0], t[1], t[2], 1 });
+                    cx += 13;
+                }
+                c.text(cx, row.y + 10, label, 1, if (have >= p.amount) gold else bad);
+                cx += Canvas.textWidth(label, 1) + 14;
+            };
+        }
+        y += 34;
+    }
+    const selected = Fabricator.recipes[rows[@min(shop.row, rows.len - 1)]];
+    c.text(r.x + 18, r.y + r.h - 50, selected.about, 1, ink);
+    c.text(r.x + 18, r.y + r.h - 28, "LEFT RIGHT TAB  ENTER FABRICATE  ESC CLOSE  FIND PICKUPS IN THE WORLD", 0.9, alpha(dim, 0.8));
 }
 
 // ---------------------------------------------------------------- conversations

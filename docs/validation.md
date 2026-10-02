@@ -240,6 +240,32 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Frontier: hover cars, pickups, fabricator, the Hive and weapons — 2026-10-01
+
+- **Generator code:** your vehicle generator modules (`hull`, `airfoil`, `prims`, `fan`, `nozzle`, `dynamics`) were added with their imports pointed at the character core. Their tests all passed the first time. The paste ended partway through the `dynamics` tests, so the energy test and a torque-direction test were finished here. `hover.zig` and `car.zig` were not in the paste and are written for this game.
+- Debug suite: **255/255 tests pass**. New coverage:
+  - **Vehicle geometry:** watertight hull, wing, fan and nozzle meshes; NACA and Helmbold values; the isentropic area ratio; closed-form box inertia; torus volume; energy-conserving torque-free spin.
+  - **Hover:** momentum theory and its inverse; ground effect; lift shares balanced about an aft COM; settling level at ride height; cruise and boost caps; rolling hills at 45 m/s without touching; altitude hold over gaps; wall stops.
+  - **Garage:** a built car hovers, all three designs lift themselves, and a car parks, is boarded, flown and left.
+  - **Pickups and fabricator:** deterministic placement covering every kind; collect-once; drop expiry; recipes paid exactly and made once; first weapons alloy-free.
+  - **Hive:** nest sites away from landmarks; dormant nests; woken nests spawning units that hunt, shoot and hit; strikes downing units and nests; a destroyed nest stops spawning.
+  - **Combat:** weapon selection and cycling; a blaster shot destroying a drone; the saber cutting only in front; shield absorption; regeneration; restoring a downed player; health from vital cells.
+  - **Saves and screens:** progress round-trips with inventory, picked IDs and owned cars, armor and weapons, and every screen, including the fabricator, lays out inside the window.
+- **Fixed during the work:**
+  - **Momentum theory:** four 0.6 m fans at 60 kW lift only about 7 kN; a 1.1 t car needs about 280 kW per fan, so fans now have 300 kW.
+  - **Aft COM:** the COM sits 0.42 m aft, so equal lift per fan pitched the car up and it drifted backward. Lift is now shared by lever arm, plus a trim integral.
+  - **Glow-mesh leak:** a glow mesh leaked when the catalog failed partway through; the allocation-failure test caught it.
+  - **Top speed:** boosting reached 91 m/s; drag now includes fan ram drag.
+  - **Ground loss:** at speed, a pad dipping into a slope lost the ground (its ray started underground) and the car sank. Rays now start 2 m up, there is a 0.9 s look-ahead probe and a hard keel floor.
+- **Metal smoke:** native Apple M3 Pro, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames**: no validation errors, clean exit. `Smoke frontier` fabricated a Skimmer and a blaster through the panel, the car flew 19.5 m in 2 s, and 3 nests and 62 pickups were placed. That run reported "drone downed=false" because the smoke gave the drone 30 health against a 22-damage shot; the test was corrected to 15. This smoke ran before the hover floor and drag fix, the sound cues and the new dialogue.
+- **Not re-run:** the screen locked partway through, so later smoke and capture runs could not render (`CGSSessionScreenIsLocked`; the app idles in its event loop). Re-run `-Dsmoke-frames=300` under Metal validation and the `-Dshowcase=29..32` captures once the session is unlocked.
+- **Visual review** (`-Dshowcase=29..31`): the three cars hover on their pads with light strips and wings; the nest spire glows, drones and a sentinel hunt and fire red bolts, and the player's health drops; the fabricator panel shows tabs, cost chips and inventory. The first flight capture showed the 91 m/s top speed and the ground loss, both fixed above.
+- **Not measured:**
+  - frame cost of the Hive and the hover probes at full load;
+  - flying the car by hand;
+  - guests' weapons (not implemented);
+  - listening to the new sounds.
+
 ## Audio — 2026-10-01
 
 - Debug and ReleaseSafe suites: **216/216 tests pass**. New tests:

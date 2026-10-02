@@ -23,14 +23,22 @@ pub const Sound = enum {
     salvage,
     vault,
     restock,
+    zap,
+    slash,
+    impact,
+    boom,
+    hive_zap,
+    pickup,
+    hurt,
     // Loops.
     wind,
     jet,
     canopy,
+    engine,
 
     pub fn loops(s: Sound) bool {
         return switch (s) {
-            .wind, .jet, .canopy => true,
+            .wind, .jet, .canopy, .engine => true,
             else => false,
         };
     }
@@ -139,7 +147,7 @@ fn makeLoop(buffer: []f32, fade: usize) []f32 {
 
 /// Synthesizes `sound`; the caller owns the returned samples.
 pub fn generate(allocator: std.mem.Allocator, sound: Sound) ![]f32 {
-    const durations = [sound_count]f32{ 0.035, 0.12, 0.1, 0.16, 0.7, 0.03, 0.09, 0.2, 0.22, 0.26, 0.24, 0.9, 2.4, 0.9, 6.25, 1.25, 8 };
+    const durations = [sound_count]f32{ 0.035, 0.12, 0.1, 0.16, 0.7, 0.03, 0.09, 0.2, 0.22, 0.26, 0.24, 0.9, 2.4, 0.9, 0.16, 0.22, 0.12, 0.9, 0.2, 0.35, 0.25, 6.25, 1.25, 8, 1.0 };
     const loop_fade = frames(0.25);
     const extra = if (sound.loops()) loop_fade else 0;
     const buffer = try allocator.alloc(f32, frames(durations[@intFromEnum(sound)]) + extra);
@@ -188,6 +196,52 @@ pub fn generate(allocator: std.mem.Allocator, sound: Sound) ![]f32 {
             bell(out, 0, 784, 0.3, 1);
             bell(out, 0.18, 1046.5, 0.4, 1);
         },
+        .zap => {
+            // A bright descending square-ish chirp.
+            tone(out, 1400, 380, 0.05, &.{ 1, 0, 0.33, 0, 0.2, 0, 0.14 });
+            whoosh(out, 0x2a9, 0.7, 0.3, 0.001, 0.03);
+        },
+        .slash => {
+            whoosh(out, 0x51a5, 0.15, 0.7, 0.03, 0.07);
+            bell(out, 0.02, 1760, 0.12, 0.35);
+        },
+        .impact => {
+            whoosh(out, 0x1b9a, 0.6, 0.2, 0.001, 0.03);
+            thud(out, 140, 0.04, 0.6);
+        },
+        .boom => {
+            whoosh(out, 0xb00, 0.12, 0.03, 0.004, 0.25);
+            thud(out, 48, 0.3, 1.4);
+        },
+        .hive_zap => {
+            // Lower and detuned: the Hive sounds wrong on purpose.
+            tone(out, 620, 210, 0.07, &.{ 1, 0.4, 0.5, 0, 0.3 });
+            tone(out, 655, 230, 0.07, &.{ 0.6, 0, 0.3 });
+        },
+        .pickup => {
+            bell(out, 0, 1318.5, 0.12, 0.8);
+            bell(out, 0.07, 1975.5, 0.18, 0.8);
+        },
+        .hurt => {
+            thud(out, 85, 0.07, 1.2);
+            whoosh(out, 0x4d7, 0.4, 0.1, 0.002, 0.06);
+        },
+        .engine => {
+            // A turbine hum: four fans' blade-pass tones over a breathy duct roar.
+            var noise: Noise = .{ .state = 0xe9e };
+            var low: Lowpass = .{};
+            const length = out.len - loop_fade;
+            for (out, 0..) |*v, i| {
+                const t = seconds(i);
+                var hum: f32 = 0;
+                for ([_]f32{ 96, 192, 288, 405 }, 0..) |f, k| {
+                    const fitted = @round(f * seconds(length)) / seconds(length);
+                    hum += @sin(tau * fitted * t) / @as(f32, @floatFromInt(k + 1));
+                }
+                v.* = hum * 0.5 + low.step(noise.next(), 0.15) * 0.6;
+            }
+            out = makeLoop(out, loop_fade);
+        },
         .wind => {
             var noise: Noise = .{ .state = 0x3111d };
             var low: Lowpass = .{};
@@ -226,7 +280,7 @@ pub fn generate(allocator: std.mem.Allocator, sound: Sound) ![]f32 {
         },
     }
     normalize(out, switch (sound) {
-        .wind, .jet, .canopy => 0.7,
+        .wind, .jet, .canopy, .engine => 0.7,
         .ui_move, .talk_blip => 0.5,
         else => 0.9,
     });

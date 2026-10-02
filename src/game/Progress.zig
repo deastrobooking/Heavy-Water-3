@@ -5,6 +5,9 @@ const std = @import("std");
 const Market = @import("../city/Market.zig");
 const Profile = @import("Profile.zig");
 const Player = @import("Player.zig");
+const Collectibles = @import("Collectibles.zig");
+const Designs = @import("../vehicle/Designs.zig");
+const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 const Progress = @This();
 
 pub const Upgrade = enum { fuel_tank, jet_efficiency, sprint_servos, stamina_weave, grapple_reel, salvage_kit };
@@ -29,11 +32,42 @@ const base_scrap = [upgrade_count]u32{ 40, 50, 30, 30, 45, 35 };
 levels: [upgrade_count]u8 = @splat(0),
 /// Owned clothing, one bit per `Profile.Clothing`; the undersuit and field jacket are free.
 suits: u8 = free_suits,
+/// Collected pickups held (vital cells count as installed health upgrades).
+inventory: [Collectibles.kind_count]u32 = @splat(0),
+/// World pickups already collected, by ID.
+picked: Collectibles.Picked = .initEmpty(),
+/// Fabricated hover car designs, armor accents and weapons (bit per enum value).
+vehicles: u8 = 0,
+armors: u8 = free_armors,
+weapons: u8 = 0,
 flag_names: [max_flags][flag_capacity]u8 = undefined,
 flag_lens: [max_flags]u8 = @splat(0),
 flag_count: usize = 0,
 
 pub const free_suits: u8 = bit(.undersuit) | bit(.field_jacket);
+pub const free_armors: u8 = armorBit(.none) | armorBit(.scout);
+pub const health_per_cell: f32 = 20;
+
+pub fn armorBit(a: Profile.Armor) u8 {
+    return @as(u8, 1) << @intCast(@intFromEnum(a));
+}
+
+pub fn ownsArmor(self: *const Progress, a: Profile.Armor) bool {
+    return self.armors & armorBit(a) != 0;
+}
+pub fn ownsVehicle(self: *const Progress, d: Designs.Design) bool {
+    return self.vehicles & (@as(u8, 1) << @intCast(@intFromEnum(d))) != 0;
+}
+pub fn ownsWeapon(self: *const Progress, w: WeaponKind) bool {
+    return self.weapons & (@as(u8, 1) << @intCast(@intFromEnum(w))) != 0;
+}
+pub fn count(self: *const Progress, k: Collectibles.Kind) u32 {
+    return self.inventory[@intFromEnum(k)];
+}
+/// Maximum health with every collected vital cell installed.
+pub fn maxHealth(self: *const Progress) f32 {
+    return 100 + health_per_cell * @as(f32, @floatFromInt(self.count(.vital_cell)));
+}
 
 pub fn bit(c: Profile.Clothing) u8 {
     return @as(u8, 1) << @intCast(@intFromEnum(c));
@@ -125,6 +159,13 @@ pub fn flag(self: *const Progress, i: usize) []const u8 {
 pub const Doc = struct {
     /// One level per upgrade, in `Upgrade` order; a save from before an upgrade existed is shorter.
     levels: []const u8 = &.{},
+    /// Held pickups in `Collectibles.Kind` order (shorter in older saves).
+    inventory: []const u32 = &.{},
+    /// IDs of collected world pickups.
+    picked: []const u16 = &.{},
+    vehicles: []const Designs.Design = &.{},
+    armors: []const Profile.Armor = &.{},
+    weapons: []const WeaponKind = &.{},
     suits: []const Profile.Clothing = &.{},
     flags: []const []const u8 = &.{},
 };
@@ -134,7 +175,16 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     inline for (@typeInfo(Profile.Clothing).@"enum".fields) |f| if (self.owns(@enumFromInt(f.value))) try suits.append(arena, @enumFromInt(f.value));
     const flags = try arena.alloc([]const u8, self.flag_count);
     for (flags, 0..) |*out, i| out.* = try arena.dupe(u8, self.flag(i));
-    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags };
+    var picked: std.ArrayList(u16) = .empty;
+    var it = self.picked.iterator(.{});
+    while (it.next()) |i| try picked.append(arena, @intCast(i));
+    var vehicles: std.ArrayList(Designs.Design) = .empty;
+    inline for (@typeInfo(Designs.Design).@"enum".fields) |f| if (self.ownsVehicle(@enumFromInt(f.value))) try vehicles.append(arena, @enumFromInt(f.value));
+    var armors: std.ArrayList(Profile.Armor) = .empty;
+    inline for (@typeInfo(Profile.Armor).@"enum".fields) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
+    var weapons: std.ArrayList(WeaponKind) = .empty;
+    inline for (@typeInfo(WeaponKind).@"enum".fields) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
+    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
@@ -143,6 +193,15 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     for (doc.levels) |l| if (l > max_level) return error.InvalidProgress;
     @memcpy(result.levels[0..doc.levels.len], doc.levels);
     for (doc.suits) |c| result.suits |= bit(c);
+    if (doc.inventory.len > Collectibles.kind_count) return error.InvalidProgress;
+    @memcpy(result.inventory[0..doc.inventory.len], doc.inventory);
+    for (doc.picked) |i| {
+        if (i >= Collectibles.max_items) return error.InvalidProgress;
+        result.picked.set(i);
+    }
+    for (doc.vehicles) |d| result.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d));
+    for (doc.armors) |a| result.armors |= armorBit(a);
+    for (doc.weapons) |w| result.weapons |= @as(u8, 1) << @intCast(@intFromEnum(w));
     if (doc.flags.len > max_flags) return error.InvalidProgress;
     for (doc.flags) |name| {
         if (name.len == 0 or name.len > flag_capacity) return error.InvalidProgress;
@@ -194,6 +253,23 @@ test "suits are bought once, and progress round-trips through its save shape" {
     const parsed = try std.json.parseFromSliceLeaky(Doc, arena.allocator(), json, .{});
     const back = try fromDoc(parsed);
     try std.testing.expect(back.owns(.exo_rig) and back.hasFlag("met_maro") and back.level(.grapple_reel) == 2);
+    {
+        var more: Progress = .{};
+        more.inventory = .{ 5, 1, 7, 2 };
+        more.picked.set(3);
+        more.picked.set(90);
+        more.vehicles = 0b101;
+        more.weapons = 0b11;
+        more.armors |= armorBit(.skyguard);
+        const d2 = try more.toDoc(arena.allocator());
+        const j2 = try std.json.Stringify.valueAlloc(arena.allocator(), d2, .{});
+        const r2 = try fromDoc(try std.json.parseFromSliceLeaky(Doc, arena.allocator(), j2, .{}));
+        try std.testing.expectEqual(more.inventory, r2.inventory);
+        try std.testing.expect(r2.picked.isSet(90) and r2.picked.isSet(3) and r2.picked.count() == 2);
+        try std.testing.expect(r2.ownsVehicle(.courier) and !r2.ownsVehicle(.dart) and r2.ownsArmor(.skyguard) and r2.ownsArmor(.scout));
+        try std.testing.expectEqual(@as(f32, 140), r2.maxHealth());
+        try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .picked = &.{999} }));
+    }
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &(.{0} ** (upgrade_count + 1)) }));
     // Saves made before later upgrades existed list fewer levels; the rest start at 0.

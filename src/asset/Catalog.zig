@@ -2,6 +2,7 @@ const std = @import("std");
 const Handle = @import("../engine/Handle.zig");
 const Mesh = @import("../render/Mesh.zig");
 const Model = @import("Model.zig");
+const Designs = @import("../vehicle/Designs.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Catalog = @This();
 const Arbor = @import("../procedural/Arbor.zig");
@@ -55,6 +56,24 @@ pub const Content = struct {
     /// Shrine rewards, by shrine index.
     rewards: [2]*const Blueprint,
     district: MeshHandle,
+    /// Hover car designs (see `vehicle/Designs.zig`), in `Design` order.
+    cars: [Designs.count]CarAsset,
+    /// Hive units and nests (dark shell + emissive glow), and the pickup gem.
+    drone: MeshHandle,
+    drone_glow: MeshHandle,
+    sentinel: MeshHandle,
+    sentinel_glow: MeshHandle,
+    spire: MeshHandle,
+    spire_glow: MeshHandle,
+    gem: MeshHandle,
+};
+/// One hover car design: its body, a rotor drawn spinning at each pivot, emissive light strips,
+/// and the mass properties the simulation flies it with.
+pub const CarAsset = struct {
+    body: MeshHandle,
+    rotor: MeshHandle,
+    lights: MeshHandle,
+    physical: Designs.Physical,
 };
 
 meshes: Handle.Pool(MeshTag, Entry, mesh_capacity) = .{},
@@ -103,6 +122,21 @@ const Build = struct {
     }
 };
 
+/// Builds a hover car design (a few milliseconds) and registers its three meshes.
+fn registerCar(self: *Catalog, allocator: std.mem.Allocator, design: Designs.Design) !CarAsset {
+    const car = @import("../vehicle/car.zig");
+    var parts = try car.build(allocator, Designs.spec(design));
+    defer parts.deinit(allocator);
+    const p = Designs.palette(design);
+    const white: [4]f32 = .{ 1, 1, 1, 1 };
+    return .{
+        .body = try self.register(allocator, try Model.fromMesh(allocator, try Designs.renderMesh(allocator, &parts.body, p), .named(Designs.name(design), white))),
+        .rotor = try self.register(allocator, try Model.fromMesh(allocator, try Designs.renderMesh(allocator, &parts.rotor, p), .named("rotor", white))),
+        .lights = try self.register(allocator, try Model.fromMesh(allocator, try Designs.renderMesh(allocator, &parts.lights, p), .named("car lights", white))),
+        .physical = .{ .mass = parts.mass, .pivots = parts.pivots },
+    };
+}
+
 /// Takes a handle for content that will be installed later.
 pub fn reserve(self: *Catalog) !MeshHandle {
     return self.meshes.add(.{ .ready = false, .model = .{ .mesh = .{ .vertices = &.{}, .indices = &.{} }, .submeshes = &.{}, .materials = &.{}, .bounds_min = @splat(0), .bounds_max = @splat(0) } });
@@ -150,6 +184,21 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         asset.lod = try self.reserve();
         self.pending[self.pending_count + 1] = .{ .handle = asset.lod, .generator = .{ .context = &asset.tree, .build = Build.arborProxy } };
         self.pending_count += 2;
+    }
+    for (&self.content.cars, 0..) |*asset, i| asset.* = try self.registerCar(allocator, @enumFromInt(i));
+    {
+        const H = @import("../vehicle/HiveMeshes.zig");
+        const white: [4]f32 = .{ 1, 1, 1, 1 };
+        inline for (.{ .{ "drone", H.drone }, .{ "sentinel", H.sentinel }, .{ "spire", H.spire } }) |entry| {
+            const pair = try entry[1](allocator);
+            // The glow mesh is ours until its model takes it.
+            var glow_owned = true;
+            errdefer if (glow_owned) pair.glow.deinit(allocator);
+            @field(self.content, entry[0]) = try self.register(allocator, try Model.fromMesh(allocator, pair.shell, .named(entry[0], white)));
+            glow_owned = false;
+            @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
+        }
+        self.content.gem = try self.register(allocator, try Model.fromMesh(allocator, try H.gem(allocator), .named("gem", white)));
     }
     self.district = try District.generate(seed);
     self.content.district = try self.reserve();

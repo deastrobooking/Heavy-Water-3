@@ -11,6 +11,8 @@
 - Talk with stall keepers and locals in branching conversations; buy suit upgrades and armor suits from the south-market tinker; customize your ranger.
 - Title, pause, settings (saved to `saves/settings.json`) and controls screens, driven by keyboard, mouse, or controller; every key can be rebound.
 - Procedural sound: synthesized footsteps, jets, wind, a canopy ambience, interface and dialogue sounds, mixed in native Zig, with volume controls.
+- Fly fabricated hover cars (momentum-theory fans, a ride-height flight computer, three designs), collect lumen shards, rotor cores, Hive alloy and vital cells, and fabricate cars, armor and weapons.
+- Fight the Hive: drones and sentinels guard three nests in the outskirts; blaster, saber, bow with warp arrows, missiles, shield and giant blast.
 - Use grapple, hover, flight, wall jumps, dashes, and other traversal kits; play local split-screen with up to four players.
 - Grow procedural trees and connect machines through sap power and Rootsong networks.
 - Run on a native Zig engine using Mach for platform and GPU foundations.

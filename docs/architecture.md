@@ -137,14 +137,55 @@ The avatar appears in your own view in third person (F2), the creator, conversat
 - **Settings:** `game/Settings.zig` holds look sensitivity, invert Y, field of view, interface size, third-person start, the performance overlay and the key bindings. They are clamped on load and written to `saves/settings.json` when leaving the settings screen.
 - **Conversations:** `game/Dialogue.zig` loads `game/conversations.json` (embedded) and validates it at `Sandbox.init`: speakers, unique ids, node and next references, text lengths, choice counts and flag names. A conversation starts at its first entry whose flag conditions hold. Nodes set flags; choices are gated by `requires`/`unless`, can set flags and give scrap, and either move on, end, or end by opening a panel. Text reveals at 70 characters a second, and the first confirm completes it. Conversation `keeper_<stall>` belongs to a market keeper; pedestrians cycle through the `walker_` conversations. While talking, the player is frozen, a pedestrian stops (`Life.chatting`) and turns, and the camera frames the partner over the right shoulder.
 - **Progression:** `game/Progress.zig` holds six suit upgrades (three levels each, priced in scrap and, from level 2, parts), the owned clothing bits, and up to 48 story flags. `Progress.suit()` becomes `Player.suit` for every player each step: fuel capacity, a fuel burn multiplier, sprint speed, stamina recovery and grapple reach. The salvage kit adds parts per relic. Flags also come from the world: `salvaged`, `shrine_complete`, `bridge_built`. Progress saves as an optional `progress` field (levels as a list, so later upgrades load old saves), and an older save without it loads as a fresh start.
-- **Showcases:** `-Dshowcase=18..28` captures each GUI screen for review: title, conversation, upgrades, shop, wardrobe, customization, pause, settings, HUD, four-player split screen, and controls while rebinding.
+- **Showcases:** `-Dshowcase=18..32` captures each GUI screen for review: title, conversation, upgrades, shop, wardrobe, customization, pause, settings, HUD, four-player split screen, and controls while rebinding. They also cover the garage with all three cars, a Hive nest under attack, the fabricator, and the Skimmer in flight.
+
+## Hover cars
+
+- **Generator:** `src/vehicle/` builds cars from specs on the character generator's math and mesh core. You supplied `hull`, `airfoil`, `prims`, `fan`, `nozzle` and `dynamics` (your paste was cut off partway through the `dynamics` tests, which are completed here); `hover` and `car` are written for this game. The parts:
+  - a faceted wedge hull lofted from linear knot tables;
+  - NACA four-digit sections, a thin-airfoil zero-lift angle, and a Helmbold finite-wing lift slope;
+  - a lathe with automatic winding;
+  - ducted fans with constant-pitch rotors;
+  - isentropic convergent-divergent nozzles;
+  - mass properties by the divergence theorem, with parallel-axis composition;
+  - a six-degree-of-freedom rigid body with gyroscopic torque.
+- **Car assembly:** `car.zig` assembles a `CarSpec` into a static body mesh, one rotor (drawn spinning at each fan pivot) and emissive light strips. Each part has a mass budget, and the combined mass properties are computed from the meshes.
+- **Hover physics:** `hover.zig` flies the car.
+  - **Thrust:** each fan's maximum comes from actuator-disk momentum theory, T_max = (P·√(4ρAσ))^(2/3), boosted near the ground by the Cheeseman–Bennett ground effect. Lifting a 1.1 t car with four 0.6 m ducts needs about 280 kW per fan; the fusion cells supply 300 kW.
+  - **Flight computer:** it holds a ride height over the surface below and over a ground point 0.9 s ahead. Over gaps it holds altitude and sinks 0.6 m/s.
+  - **Attitude and drive:** a PID leans the body into manoeuvres. The base lift is split by the fans' lever arms, since the COM sits 0.42 m aft. Vanes yaw the car, and the rear nozzles push it.
+  - **Drag and contacts:** quadratic drag includes fan ram drag (about 30 m/s cruising, 45 boosting). Skids are spring-dampers, a hard floor keeps the keel above the ground, and a wall probe along the velocity stops the car at walls.
+  - **World probing:** the module only probes the world through the caller's ray cast.
+- **In the game:** `vehicle/Designs.zig` defines three fabricable designs (Skimmer, Dart, Courier). Their render meshes get per-vertex colors by material. `game/Garage.zig` parks owned cars on pads beside the spawn, idling in a low hover, and flies the piloted one through `Physics.castRay`. The chase camera eases behind the car and can be orbited. Leaving puts P1 on the floor to the left. Cars are not saved; owned designs park again after a load.
+
+## Frontier: pickups, fabricator, the Hive and weapons
+
+- **Pickups:** `game/Collectibles.zig` places 62 pickups from the seed and the world's landmarks, each settled onto the real surface with a downward ray. Collecting is by proximity, for any local player.
+  - lumen shards on plazas, roads and the spawn meadow;
+  - rotor cores on the tallest roofs, by the shrines and at the nests;
+  - Hive alloy caches at the nests;
+  - vital cells, which add 20 maximum health each.
+  - World pickups have stable IDs, and the save remembers which were collected. Defeated Hive units drop alloy, which fades after 90 s.
+- **Fabricator:** `game/Fabricator.zig` turns pickups and scrap into hover cars, suits, armor accents and weapons, once each. Recipes sit on four tabs, the first two weapons need no alloy, and nothing changes when a recipe can't be paid. The kiosk stands at the head of the garage pads. Suits and armor accents are equipped when made. The creator only offers owned suits and armor accents; whatever a loaded ranger wears stays owned.
+- **The Hive:** `game/Enemies.zig` places three nests (procedural spires) on a ring 380–540 m from the spawn, at least 140 m from the Arbors, plazas, shrines and spawn.
+  - **Spawning:** a nest wakes when a player is within 170 m. It fabricates up to five units every nine seconds: a sentinel first, then drones. Units far from every player stop thinking.
+  - **Behaviour:** units patrol an orbit and hunt the nearest player they can see, with a physics line of sight. They circle at a standoff distance, keep clear of the ground, and climb over obstacles. Drones retreat to the nest when badly hurt, and every unit returns home past a 110 m leash.
+  - **Fire:** units shoot bolts with lead and spread. Drones fire single bolts; sentinels fire three-bolt bursts.
+  - **Destruction:** a destroyed nest stops spawning, drops alloy and a rotor core, and stays destroyed (story flag `nest_N_down`).
+- **Combat:** `game/Combat.zig` connects the existing `combat/` weapons to the world.
+  - **Weapon tool (5):** the left mouse button is the primary trigger and the right is the alternate (both tracked as held buttons); Tab cycles the fabricated weapons.
+  - **Weapons:** the blaster charges while held. The saber does a combo, plus a charged slash on the alternate, and cuts only in front. The bow draws, and its alternate fires a warp arrow that carries the archer to where it lands. Missiles home on the nearest unit. The shield absorbs damage while raised, and a timely raise parries. The giant blast charges, then burns a beam.
+  - **Hits:** player shots sweep through units and nests before meeting the world; charged plasma and missiles burst on impact.
+  - **Health:** players have health, which recovers after 5 quiet seconds. A downed P1 is restored at the spawn, and a downed guest beside P1.
+- **HUD:** health, fuel and stamina bars; the weapon and its charge; collectible counts; and a red edge flash when hurt, for P1 and each guest. In a car, the HUD shows speed, height above the ground, and the controls.
 
 ## Audio
 
 - **Output:** `audio/Audio.zig` opens the default playback device through Mach `sysaudio` (CoreAudio on macOS). The build enables it with `.sysaudio = true` on the Mach dependency. The device calls `write` on its own high-priority thread, which renders the mixer in chunks of 256 frames, spreads stereo over the device's channels, and converts to its sample format. A missing device, `-Daudio=false`, or a benchmark run leaves the game silent.
-- **Synthesis:** `audio/Synth.zig` synthesizes all 17 sounds at startup (a few milliseconds) from oscillators, inharmonic bell partials, seeded noise, one-pole filters and envelopes, so there are no audio files yet. Sounds are peak-normalized. The three loops (wind, jet, canopy pad) crossfade their tail into their head, and the pad's partials are fitted to whole cycles per loop. `zig build sounds` writes them all to `zig-out/sounds/*.wav` for listening.
+- **Synthesis:** `audio/Synth.zig` synthesizes all 25 sounds at startup (a few milliseconds) from oscillators, inharmonic bell partials, seeded noise, one-pole filters and envelopes, so there are no audio files yet. Sounds are peak-normalized. The four loops (wind, jet, canopy pad, hover engine) crossfade their tail into their head, and the pad's partials are fitted to whole cycles per loop. `zig build sounds` writes them all to `zig-out/sounds/*.wav` for listening.
 - **Mixer:** `audio/Mixer.zig` takes commands through a lock-free single-producer, single-consumer ring: the game thread sends, the audio thread drains. It has 32 one-shot voices with oldest-first stealing, with pitch by linear interpolation and equal-power pan. Each loop has one voice whose gain glides about 80 ms toward its target, so loops never click. A master volume and three buses (effects, ambience, interface) scale the mix, and a tanh soft limiter keeps it under full scale. A full ring drops commands rather than blocking.
 - **Director:** `audio/Director.zig` diffs a per-frame `Snapshot` of the session. It plays footfalls on each half stride, jumps, landings scaled by fall speed, rolls, dashes, stomps and grapple shots. It also covers purchases and income, salvage, the first opened vault, the dawn restock, refusals ("cannot …" notices), and a dialogue blip every third revealed character, pitched by the speaker. Guests are attenuated by distance from P1's camera and panned by side. Wind follows speed and height above the terrain, the jet loop plays while jetting, hovering, boarding or gliding, and the canopy pad plays always. A paused world dips the ambience and makes no event sounds. Menus play move, confirm and back on the interface bus, and hovering a new control ticks.
+- **Cues:** the simulation queues short cues as things happen (`Sandbox.cue`), and the application plays them through the director, placed in stereo by distance from P1's camera. Cues cover weapon fire, the saber, impacts, Hive bolts, explosions, pickups, damage and warps. The hover engine loop rises in gain and pitch with the piloted car's speed; loops take a pitch.
 - **Settings:** master, effects, ambience and interface volumes (percent, steps of 10) apply as soon as they change.
 
 ## Traversal

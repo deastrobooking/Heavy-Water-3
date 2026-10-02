@@ -43,6 +43,8 @@ pub const Snapshot = struct {
     refusal: bool = false,
     /// The world is paused (menus): ambience dips and nothing steps.
     paused: bool = false,
+    /// P1's hover car speed while piloting (drives the engine loop), else null.
+    engine: ?f32 = null,
 };
 pub const Ui = enum { move, confirm, back, refuse };
 
@@ -59,7 +61,8 @@ pub fn snapshot(sb: *const Sandbox, camera: Camera, paused: bool) Snapshot {
         .market_day = sb.market.day,
         .notice_serial = sb.notice_until,
         .refusal = std.mem.startsWith(u8, sb.noticeText(), "cannot"),
-        .flying = sb.player.mode == .fly or sb.seated != null,
+        .flying = sb.player.mode == .fly or sb.seated != null or sb.garage.piloting != null,
+        .engine = if (sb.garage.piloting) |i| sb.garage.cars[i].?.flyer.body.vel.length() else null,
         .paused = paused,
     };
     const p = sb.player;
@@ -87,6 +90,13 @@ pub fn place(s: Snapshot, point: [3]f32) struct { gain: f32, pan: f32 } {
     const right: [3]f32 = .{ @cos(s.yaw), 0, -@sin(s.yaw) };
     const pan = if (distance < 0.5) 0 else (d[0] * right[0] + d[2] * right[2]) / distance;
     return .{ .gain = 1 / (1 + distance / 6), .pan = pan * 0.8 };
+}
+
+/// A gameplay cue from the simulation, placed by distance and side when it has a position.
+pub fn cue(sink: anytype, s: Snapshot, sound: Mixer.Sound, position: ?[3]f32, pitch: f32) void {
+    const where = if (position) |p| place(s, p) else @TypeOf(place(s, .{ 0, 0, 0 })){ .gain = 1, .pan = 0 };
+    if (where.gain <= 0.01) return;
+    sink.send(.{ .play = .{ .sound = sound, .gain = where.gain * 0.8, .pan = where.pan, .pitch = pitch } });
 }
 
 /// Menu and panel feedback, on the interface bus.
@@ -123,6 +133,9 @@ pub fn update(self: *Director, sink: anytype, now: Snapshot) void {
         else => 0,
     };
     sink.send(.{ .loop = .{ .sound = .jet, .gain = jet, .bus = .effects } });
+    // The hover engine: louder and higher with speed.
+    const engine_speed = now.engine orelse 0;
+    sink.send(.{ .loop = .{ .sound = .engine, .gain = if (now.engine == null or now.paused) 0 else 0.35 + @min(0.4, engine_speed / 80), .bus = .effects, .pitch = 0.8 + engine_speed / 45 } });
     if (!self.primed or now.paused) return;
 
     for (now.bodies, was.bodies, 0..) |b, before, i| {

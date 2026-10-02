@@ -26,7 +26,7 @@ pub const Play = struct {
 pub const Command = union(enum) {
     play: Play,
     /// A loop's target gain (0 silences it) and pan; it glides there over ~80 ms.
-    loop: struct { sound: Sound, gain: f32, pan: f32 = 0, bus: Bus = .ambience },
+    loop: struct { sound: Sound, gain: f32, pan: f32 = 0, bus: Bus = .ambience, pitch: f32 = 1 },
     volume: struct { bus: ?Bus, value: f32 },
 };
 
@@ -46,6 +46,7 @@ const Loop = struct {
     target: f32 = 0,
     pan: f32 = 0,
     bus: Bus = .ambience,
+    pitch: f32 = 1,
 };
 
 /// Immutable synthesized clips, shared read-only with the audio thread.
@@ -107,6 +108,7 @@ fn apply(self: *Mixer, command: Command) void {
             loop.target = std.math.clamp(l.gain, 0, 4);
             loop.pan = l.pan;
             loop.bus = l.bus;
+            loop.pitch = std.math.clamp(l.pitch, 0.25, 4);
         },
         .volume => |v| {
             const value = std.math.clamp(v.value, 0, 1);
@@ -166,7 +168,7 @@ pub fn render(self: *Mixer, out: []f32) void {
             const s = sample(clip, l.position);
             out[f * 2] += s * g[0];
             out[f * 2 + 1] += s * g[1];
-            l.position += step;
+            l.position += step * l.pitch;
             if (l.position >= length) l.position -= length;
         }
     }

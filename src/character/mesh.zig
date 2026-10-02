@@ -44,6 +44,14 @@ pub const Material = enum(u8) {
     accent,
     /// Hard-surface armor plates (rigidly bound, segmented).
     armor,
+    // hard-surface (vehicles, props)
+    paint,
+    paint_accent,
+    glass,
+    carbon,
+    metal,
+    emissive,
+    rubber,
 };
 
 pub const max_influences = 4;

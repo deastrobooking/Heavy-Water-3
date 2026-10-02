@@ -65,6 +65,14 @@ test {
     _ = @import("audio/Synth.zig");
     _ = @import("audio/Mixer.zig");
     _ = @import("audio/Director.zig");
+    _ = @import("vehicle.zig");
+    _ = @import("vehicle/Designs.zig");
+    _ = @import("game/Garage.zig");
+    _ = @import("game/Collectibles.zig");
+    _ = @import("game/Fabricator.zig");
+    _ = @import("vehicle/HiveMeshes.zig");
+    _ = @import("game/Enemies.zig");
+    _ = @import("game/Combat.zig");
     _ = @import("render/Overlay.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");

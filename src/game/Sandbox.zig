@@ -35,6 +35,12 @@ const Routes = @import("../city/Routes.zig");
 const Sky = @import("../engine/Sky.zig");
 const Progress = @import("Progress.zig");
 const Dialogue = @import("Dialogue.zig");
+const Garage = @import("Garage.zig");
+const Collectibles = @import("Collectibles.zig");
+const Enemies = @import("Enemies.zig");
+const Combat = @import("Combat.zig");
+const Fabricator = @import("Fabricator.zig");
+const Frontier = @import("Frontier.zig");
 /// `closing`: removed from the road graph, standing until the traffic on it has crossed.
 pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
@@ -73,10 +79,23 @@ pub const Target = union(enum) {
     stall: u8,
     /// A pedestrian, by `Life` walker index.
     walker: u8,
+    /// A parked hover car, by design.
+    car: u8,
+    /// The fabricator kiosk at the garage.
+    fabricator,
 };
 /// Panels the tinker opens from a conversation: suit upgrades or the armor wardrobe.
-pub const Shop = struct { kind: enum { upgrades, wardrobe }, row: u8 = 0 };
-pub const ShopKey = enum { up, down, confirm, close };
+/// A sound for the application to play, placed in the world when it has a position.
+pub const Cue = struct { sound: @import("../audio/Synth.zig").Sound, position: ?Physics.Vec3 = null, pitch: f32 = 1 };
+
+pub fn cue(self: *Sandbox, sound: @import("../audio/Synth.zig").Sound, position: ?Physics.Vec3) void {
+    if (self.cue_count == self.cues.len) return;
+    self.cues[self.cue_count] = .{ .sound = sound, .position = position };
+    self.cue_count += 1;
+}
+
+pub const Shop = struct { kind: enum { upgrades, wardrobe, fabricate }, row: u8 = 0, tab: u8 = 0 };
+pub const ShopKey = enum { up, down, left, right, confirm, close };
 pub const wardrobe_rows = @typeInfo(Profile.Clothing).@"enum".fields.len;
 /// Keys the trade panel understands while a stall is open.
 pub const TradeKey = enum { up, down, confirm, close };
@@ -224,6 +243,16 @@ dialogue: Dialogue = undefined,
 talk: ?Dialogue.Session = null,
 /// Open tinker panel.
 shop: ?Shop = null,
+/// Hover cars, pickups, the Hive and P1's arsenal (see `Frontier.zig`).
+garage: Garage = .{},
+collectibles: Collectibles = .{},
+enemies: Enemies = .{},
+combat: Combat = .{},
+/// Sounds the step produced (shots, hits, pickups), drained by the application each frame.
+cues: [32]Cue = undefined,
+cue_count: usize = 0,
+/// Weapon triggers held this step (primary and alternate), set by the application.
+trigger: struct { fire: bool = false, alt: bool = false } = .{},
 /// Stall whose trade panel is open (P1 only), and the selected row.
 trading: ?u8 = null,
 trade_row: u8 = 0,
@@ -309,6 +338,7 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     }
     self.market = .init(seed, 0);
     self.resetPlayer(camera);
+    Frontier.init(self);
 }
 
 /// Installs a validated mod package: its scripts into the host and its blueprints into the
@@ -700,6 +730,10 @@ pub fn resetPlayer(self: *Sandbox, camera: *Camera) void {
 }
 
 /// Where aiming starts: the camera in first person, the character's eyes otherwise.
+pub fn aimCameraPublic(self: *const Sandbox, camera: Camera) Camera {
+    return self.aimCamera(camera);
+}
+
 fn aimCamera(self: *const Sandbox, camera: Camera) Camera {
     var aim = camera;
     if (self.bodyShown()) aim.position = self.player.eye();
@@ -708,7 +742,7 @@ fn aimCamera(self: *const Sandbox, camera: Camera) Camera {
 
 /// The avatar is drawn in third person, the creator, conversations and the wardrobe, on foot only.
 pub fn bodyShown(self: *const Sandbox) bool {
-    return self.seated == null and self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen());
+    return self.seated == null and self.garage.piloting == null and self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen());
 }
 
 /// The wardrobe shows the character from the front, like the creator.
@@ -797,6 +831,7 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     if (raw_actions.toggle_view) self.view = if (self.view == .first) .third else .first;
     // The creator, conversations and tinker panels freeze the character and every tool.
     self.creator.owned = self.progress.suits;
+    self.creator.owned_armor = self.progress.armors;
     const frozen = self.creator.open or self.talk != null or self.shop != null;
     const suit = self.progress.suit();
     self.player.suit = suit;
@@ -806,20 +841,26 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     const actions: Actions = if (frozen) .{} else raw_actions;
     if (self.creator.open) camera.yaw = self.body_yaw;
     if (actions.reset) self.resetPlayer(camera);
-    if (actions.toggle_mode and self.seated == null) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
-    if (actions.select_tool != 0 and self.seated == null) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
+    const riding = self.seated != null or self.garage.piloting != null;
+    if (actions.toggle_mode and !riding) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
+    if (actions.select_tool != 0 and !riding) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
     var primary = actions.interact;
     if (self.seated != null) {
         if (primary) self.exitVehicle(camera) else self.driver_input = .{ .throttle = input.forward, .steer = input.right, .brake = @floatFromInt(@intFromBool(input.jump)) };
         primary = false;
     }
-    if (self.seated == null) self.player.step(&self.physics, camera, input, dt);
+    if (self.garage.piloting != null) {
+        if (primary) Frontier.leave(self, camera);
+        primary = false;
+    }
+    if (self.seated == null and self.garage.piloting == null) self.player.step(&self.physics, camera, input, dt);
     if (!frozen) self.body_yaw = camera.yaw;
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
     for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);
     self.stepMachines(dt);
     self.checkShrines();
     self.stepLife(dt);
+    Frontier.step(self, camera, input, actions, frozen, dt);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
         // Spring the held crate toward a point in front of the eye; physics still resolves contacts.
@@ -847,6 +888,12 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
         self.target = .none;
         return;
     }
+    if (self.garage.follow(self.seed, camera, dt)) |feet| {
+        self.player.feet = feet;
+        self.player.velocity = .{ 0, 0, 0 };
+        self.target = .none;
+        return;
+    }
     self.placeCamera(camera);
     if (frozen) {
         self.target = .none;
@@ -856,6 +903,10 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     // Build and wire tools reach farther and ignore relics.
     const hands = self.tools.tool == .hands;
     self.target = self.pick(aim.position, aim.forward(), if (hands) reach else Build.build_reach, hands, hands);
+    if (hands and self.target == .none) {
+        const f = aim.forward();
+        if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |t| self.target = t;
+    }
     if (actions.channel_down or actions.channel_up) Build.adjustChannel(self, if (actions.channel_up) 1 else -1);
     switch (self.tools.tool) {
         .hands => {
@@ -864,6 +915,8 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
                     .prop => |i| self.hold(i),
                     .stall => |i| self.startTalk(.{ .keeper = i }),
                     .walker => |i| self.startTalk(.{ .walker = i }),
+                    .car => |i| Frontier.board(self, i, camera),
+                    .fabricator => self.shop = .{ .kind = .fabricate },
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);
@@ -887,6 +940,8 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
             };
         },
         .build, .wire, .bridge => try Build.update(self, aim, primary, actions),
+        // The arsenal fires from `Frontier.step`, from the held triggers.
+        .weapon => {},
     }
 }
 
@@ -1223,6 +1278,10 @@ fn reason(err: anyerror) []const u8 {
         error.AlreadyOwned => "already owned",
         error.SoldOut => "sold out until dawn",
         error.NoParts => "no parts to sell",
+        error.AlreadyMade => "already fabricated",
+        error.NotEnoughLumen => "not enough lumen shards",
+        error.NotEnoughRotors => "not enough rotor cores",
+        error.NotEnoughAlloy => "not enough hive alloy",
         else => "the stall cannot do that",
     };
 }
@@ -1232,6 +1291,10 @@ pub fn shopRows(self: *const Sandbox) u8 {
     return switch (shop.kind) {
         .upgrades => Progress.upgrade_count,
         .wardrobe => wardrobe_rows,
+        .fabricate => blk: {
+            var buffer: [Fabricator.recipes.len]u8 = undefined;
+            break :blk @intCast(Fabricator.onTab(@enumFromInt(shop.tab), &buffer).len);
+        },
     };
 }
 
@@ -1242,12 +1305,43 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
     switch (key) {
         .up => shop.row = (shop.row + rows - 1) % rows,
         .down => shop.row = (shop.row + 1) % rows,
+        .left, .right => if (shop.kind == .fabricate) {
+            const tabs: u8 = Fabricator.tab_count;
+            shop.tab = if (key == .left) (shop.tab + tabs - 1) % tabs else (shop.tab + 1) % tabs;
+            shop.row = 0;
+        },
         .close => self.shop = null,
         .confirm => switch (shop.kind) {
             .upgrades => {
                 const u: Progress.Upgrade = @enumFromInt(shop.row);
                 self.progress.buy(u, &self.wallet) catch |err| return self.say("cannot upgrade: {s}", .{reason(err)});
                 self.say("{s} now level {d}", .{ Progress.info[shop.row].name, self.progress.level(u) });
+            },
+            .fabricate => {
+                var buffer: [Fabricator.recipes.len]u8 = undefined;
+                const index = Fabricator.onTab(@enumFromInt(shop.tab), &buffer)[shop.row];
+                const made = Fabricator.make(&self.progress, &self.wallet, index) catch |err| return self.say("cannot fabricate: {s}", .{reason(err)});
+                var name_buffer: [24]u8 = undefined;
+                const name = Fabricator.name(made, &name_buffer);
+                switch (made) {
+                    .vehicle => |d| {
+                        self.garage.park(self.seed, spawn, self.catalog, d);
+                        self.say("{s} is on its garage pad", .{name});
+                    },
+                    .suit => |c| {
+                        self.profile.clothing = c;
+                        self.say("fabricated and wearing the {s}", .{name});
+                    },
+                    .armor => |a| {
+                        self.profile.armor = a;
+                        self.say("fabricated and wearing {s} armor", .{name});
+                    },
+                    .weapon => |w| {
+                        self.combat.active = w;
+                        self.say("{s} ready: tool 5 to wield", .{name});
+                    },
+                }
+                self.progress.setFlag("fabricated");
             },
             .wardrobe => {
                 const c: Profile.Clothing = @enumFromInt(shop.row);
@@ -1585,6 +1679,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
         n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion }, @intCast(i + 2), self.catalog.content.block, out, n);
     };
+    n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);
 }
 
@@ -1816,6 +1911,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (&self.guests, 0..) |*g, i| if (g.active) self.respawnGuest(i);
     self.sap_stats = @splat(.{});
     self.tap_links = @splat(@splat(null));
+    Frontier.refresh(self);
 }
 
 pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {

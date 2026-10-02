@@ -1,46 +1,120 @@
 {
   "speakers": [
-    { "id": "maro", "name": "Maro", "role": "South market tinker", "accent": 2 },
-    { "id": "ines", "name": "Ines", "role": "North market sap broker", "accent": 3 },
-    { "id": "tavi", "name": "Tavi", "role": "West market scout", "accent": 4 },
-    { "id": "local", "name": "Canopy local", "role": "Resident", "accent": 0 }
+    {
+      "id": "maro",
+      "name": "Maro",
+      "role": "South market tinker",
+      "accent": 2
+    },
+    {
+      "id": "ines",
+      "name": "Ines",
+      "role": "North market sap broker",
+      "accent": 3
+    },
+    {
+      "id": "tavi",
+      "name": "Tavi",
+      "role": "West market scout",
+      "accent": 4
+    },
+    {
+      "id": "local",
+      "name": "Canopy local",
+      "role": "Resident",
+      "accent": 0
+    }
   ],
   "conversations": [
     {
       "id": "keeper_0",
       "speaker": "maro",
-      "entries": [{ "node": "first", "unless": "met_maro" }, { "node": "hello" }],
+      "entries": [
+        {
+          "node": "first",
+          "unless": "met_maro"
+        },
+        {
+          "node": "hello"
+        }
+      ],
       "nodes": [
         {
           "id": "first",
           "sets": "met_maro",
           "text": "New face! Name's Maro. I tune suits for the jet-and-grapple crowd. Bring me scrap and parts and I'll make that rig sing.",
           "choices": [
-            { "text": "What can you do for my suit?", "next": "upgrades_intro" },
-            { "text": "Got any armor?", "next": "armor" },
-            { "text": "Show me your stall.", "action": "trade" },
-            { "text": "Just looking." }
+            {
+              "text": "What can you do for my suit?",
+              "next": "upgrades_intro"
+            },
+            {
+              "text": "Got any armor?",
+              "next": "armor"
+            },
+            {
+              "text": "Show me your stall.",
+              "action": "trade"
+            },
+            {
+              "text": "Just looking."
+            }
           ]
         },
         {
           "id": "hello",
           "text": "Back again, ranger? The canopy treating you well?",
           "choices": [
-            { "text": "Tune my suit.", "action": "upgrades" },
-            { "text": "Show me the armor.", "action": "wardrobe" },
-            { "text": "Let's trade.", "action": "trade" },
-            { "text": "I salvaged a relic.", "requires": "salvaged", "unless": "maro_salvage", "sets": "maro_salvage", "next": "salvage" },
-            { "text": "Any spare scrap for a beginner?", "unless": "maro_gift", "sets": "maro_gift", "scrap": 25, "next": "gift" },
-            { "text": "Later, Maro." }
+            {
+              "text": "Tune my suit.",
+              "action": "upgrades"
+            },
+            {
+              "text": "Show me the armor.",
+              "action": "wardrobe"
+            },
+            {
+              "text": "Let's trade.",
+              "action": "trade"
+            },
+            {
+              "text": "Can I build a hover car?",
+              "next": "fabricator"
+            },
+            {
+              "text": "I salvaged a relic.",
+              "requires": "salvaged",
+              "unless": "maro_salvage",
+              "sets": "maro_salvage",
+              "next": "salvage"
+            },
+            {
+              "text": "Any spare scrap for a beginner?",
+              "unless": "maro_gift",
+              "sets": "maro_gift",
+              "scrap": 25,
+              "next": "gift"
+            },
+            {
+              "text": "Later, Maro."
+            }
           ]
         },
         {
           "id": "upgrades_intro",
           "text": "Bigger fuel cells, faster servos, a longer grapple line. Every part you pry off the old relics is worth something to me. Scrap pays for the rest.",
           "choices": [
-            { "text": "Let's see the upgrades.", "action": "upgrades" },
-            { "text": "Where do parts come from?", "next": "parts" },
-            { "text": "Maybe later." }
+            {
+              "text": "Let's see the upgrades.",
+              "action": "upgrades"
+            },
+            {
+              "text": "Where do parts come from?",
+              "next": "parts"
+            },
+            {
+              "text": "Maybe later."
+            }
           ]
         },
         {
@@ -52,8 +126,14 @@
           "id": "armor",
           "text": "Plate from the old shrine foundries. Exo rigs for climbers, hardsuits for the Rootdeep, and a vanguard set I don't sell to just anyone.",
           "choices": [
-            { "text": "Show me.", "action": "wardrobe" },
-            { "text": "Something else.", "next": "hello" }
+            {
+              "text": "Show me.",
+              "action": "wardrobe"
+            },
+            {
+              "text": "Something else.",
+              "next": "hello"
+            }
           ]
         },
         {
@@ -65,34 +145,97 @@
           "id": "gift",
           "text": "Here, twenty-five scrap. Pay me back by not falling off a bridge.",
           "next": "hello"
+        },
+        {
+          "id": "fabricator",
+          "sets": "heard_fabricator",
+          "text": "The fabricator by the garage, near where you woke, takes lumen shards, rotor cores and Hive alloy. Two rotor cores and a handful of lumen gets you a Skimmer: fans, wing, the lot.",
+          "choices": [
+            {
+              "text": "Where are rotor cores?",
+              "next": "rotors"
+            },
+            {
+              "text": "Thanks.",
+              "next": "hello"
+            }
+          ]
+        },
+        {
+          "id": "rotors",
+          "text": "Up high. Tower roofs, shrine steps. And the Hive hoards them by its spires. Bring a weapon if you go looking there.",
+          "next": "hello"
         }
       ]
     },
     {
       "id": "keeper_1",
       "speaker": "ines",
-      "entries": [{ "node": "first", "unless": "met_ines" }, { "node": "hello" }],
+      "entries": [
+        {
+          "node": "first",
+          "unless": "met_ines"
+        },
+        {
+          "node": "hello"
+        }
+      ],
       "nodes": [
         {
           "id": "first",
           "sets": "met_ines",
           "text": "Careful by the rail; the wind off the crown gets strong up here. I'm Ines. I broker sap contracts and sell kits to anyone wiring the north span.",
           "choices": [
-            { "text": "Let's trade.", "action": "trade" },
-            { "text": "Sap contracts?", "next": "sap" },
-            { "text": "What are the Arbors, really?", "next": "arbors" },
-            { "text": "Goodbye." }
+            {
+              "text": "Let's trade.",
+              "action": "trade"
+            },
+            {
+              "text": "Sap contracts?",
+              "next": "sap"
+            },
+            {
+              "text": "What are the Arbors, really?",
+              "next": "arbors"
+            },
+            {
+              "text": "Goodbye."
+            }
           ]
         },
         {
           "id": "hello",
           "text": "Ranger. The sap runs strong today.",
           "choices": [
-            { "text": "Let's trade.", "action": "trade" },
-            { "text": "Tell me about sap again.", "next": "sap" },
-            { "text": "What are the Arbors, really?", "next": "arbors" },
-            { "text": "I built a bridge.", "requires": "bridge_built", "unless": "ines_bridge", "sets": "ines_bridge", "next": "bridge" },
-            { "text": "Goodbye." }
+            {
+              "text": "Let's trade.",
+              "action": "trade"
+            },
+            {
+              "text": "Tell me about sap again.",
+              "next": "sap"
+            },
+            {
+              "text": "What are the Arbors, really?",
+              "next": "arbors"
+            },
+            {
+              "text": "I built a bridge.",
+              "requires": "bridge_built",
+              "unless": "ines_bridge",
+              "sets": "ines_bridge",
+              "next": "bridge"
+            },
+            {
+              "text": "Like my hover car?",
+              "requires": "fabricated",
+              "unless": "ines_car",
+              "sets": "ines_car",
+              "next": "car"
+            },
+            {
+              "text": "Goodbye."
+            }
           ]
         },
         {
@@ -109,34 +252,89 @@
           "id": "bridge",
           "text": "I saw. Traffic took to it within the hour. The city grows where you lead it.",
           "next": "hello"
+        },
+        {
+          "id": "car",
+          "text": "Four ducts and a wedge of paint. Keep it off the bridge decks at rush hour, and keep it out of the Arbors' branches.",
+          "next": "hello"
         }
       ]
     },
     {
       "id": "keeper_2",
       "speaker": "tavi",
-      "entries": [{ "node": "first", "unless": "met_tavi" }, { "node": "hello" }],
+      "entries": [
+        {
+          "node": "first",
+          "unless": "met_tavi"
+        },
+        {
+          "node": "hello"
+        }
+      ],
       "nodes": [
         {
           "id": "first",
           "sets": "met_tavi",
           "text": "Shh. Listen. Hear that hum under the wind? That's the Rootdeep. I'm Tavi. I map the shrines down there and sell whatever I can't carry.",
           "choices": [
-            { "text": "Shrines?", "next": "shrines" },
-            { "text": "What's the hum?", "next": "hum" },
-            { "text": "Let's trade.", "action": "trade" },
-            { "text": "Goodbye." }
+            {
+              "text": "Shrines?",
+              "next": "shrines"
+            },
+            {
+              "text": "What's the hum?",
+              "next": "hum"
+            },
+            {
+              "text": "Let's trade.",
+              "action": "trade"
+            },
+            {
+              "text": "Goodbye."
+            }
           ]
         },
         {
           "id": "hello",
           "text": "Still in one piece? Good. The roots ate two of my maps this week.",
           "choices": [
-            { "text": "Let's trade.", "action": "trade" },
-            { "text": "Tell me about the shrines.", "next": "shrines" },
-            { "text": "What's the hum?", "next": "hum" },
-            { "text": "I opened a shrine.", "requires": "shrine_complete", "unless": "tavi_reward", "sets": "tavi_reward", "scrap": 30, "next": "reward" },
-            { "text": "Goodbye." }
+            {
+              "text": "Let's trade.",
+              "action": "trade"
+            },
+            {
+              "text": "Tell me about the shrines.",
+              "next": "shrines"
+            },
+            {
+              "text": "What's the hum?",
+              "next": "hum"
+            },
+            {
+              "text": "What are the black spires?",
+              "requires": "heard_hum",
+              "next": "nests"
+            },
+            {
+              "text": "I brought down a Hive nest.",
+              "requires": "nest_destroyed",
+              "unless": "tavi_nest",
+              "sets": "tavi_nest",
+              "scrap": 40,
+              "next": "nest_reward"
+            },
+            {
+              "text": "I opened a shrine.",
+              "requires": "shrine_complete",
+              "unless": "tavi_reward",
+              "sets": "tavi_reward",
+              "scrap": 30,
+              "next": "reward"
+            },
+            {
+              "text": "Goodbye."
+            }
           ]
         },
         {
@@ -149,8 +347,14 @@
           "sets": "heard_hum",
           "text": "Old machines waking up. Most are friendly. But last week I found claw marks on a vault door. Big ones. Metal ones.",
           "choices": [
-            { "text": "The Hive?", "next": "hive" },
-            { "text": "I'll keep my eyes open.", "next": "hello" }
+            {
+              "text": "The Hive?",
+              "next": "hive"
+            },
+            {
+              "text": "I'll keep my eyes open.",
+              "next": "hello"
+            }
           ]
         },
         {
@@ -163,45 +367,104 @@
           "id": "reward",
           "text": "You did? Then the vaults still remember us. Here, a scout's cut: thirty scrap. Tell me everything you saw down there.",
           "next": "hello"
+        },
+        {
+          "id": "nests",
+          "sets": "heard_nests",
+          "text": "Nests. Out past the grove, three of them, humming. Drones circle them and a heavy sentinel keeps watch. Break the spire and the swarm stops coming.",
+          "next": "hello"
+        },
+        {
+          "id": "nest_reward",
+          "text": "You did WHAT? Then it's true: the Hive is back, and it can bleed. Forty scrap, ranger. And watch the sky.",
+          "next": "hello"
         }
       ]
     },
     {
       "id": "walker_0",
       "speaker": "local",
-      "entries": [{ "node": "hi" }],
-      "nodes": [{ "id": "hi", "text": "Morning! Mind the lanes. The rovers never brake for anyone." }]
+      "entries": [
+        {
+          "node": "hi"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "hi",
+          "text": "Morning! Mind the lanes. The rovers never brake for anyone."
+        }
+      ]
     },
     {
       "id": "walker_1",
       "speaker": "local",
-      "entries": [{ "node": "hi" }],
+      "entries": [
+        {
+          "node": "hi"
+        }
+      ],
       "nodes": [
         {
           "id": "hi",
           "text": "Have you seen the north span at dusk? The whole bridge glows like a branch full of fireflies.",
-          "choices": [{ "text": "It's beautiful.", "next": "grandmother" }, { "text": "I'm in a hurry." }]
+          "choices": [
+            {
+              "text": "It's beautiful.",
+              "next": "grandmother"
+            },
+            {
+              "text": "I'm in a hurry."
+            }
+          ]
         },
-        { "id": "grandmother", "text": "Isn't it? My grandmother helped graft those towers. She said the trees chose where they'd stand." }
+        {
+          "id": "grandmother",
+          "text": "Isn't it? My grandmother helped graft those towers. She said the trees chose where they'd stand."
+        }
       ]
     },
     {
       "id": "walker_2",
       "speaker": "local",
-      "entries": [{ "node": "hi" }],
-      "nodes": [{ "id": "hi", "text": "The markets restock at dawn. If you want a gate kit, get to a stall early." }]
+      "entries": [
+        {
+          "node": "hi"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "hi",
+          "text": "The markets restock at dawn. If you want a gate kit, get to a stall early."
+        }
+      ]
     },
     {
       "id": "walker_3",
       "speaker": "local",
-      "entries": [{ "node": "hi" }],
+      "entries": [
+        {
+          "node": "hi"
+        }
+      ],
       "nodes": [
         {
           "id": "hi",
           "text": "My cousin says something big is moving under the roots. I say my cousin needs more sleep.",
-          "choices": [{ "text": "Something big?", "next": "tavi" }, { "text": "Probably nothing." }]
+          "choices": [
+            {
+              "text": "Something big?",
+              "next": "tavi"
+            },
+            {
+              "text": "Probably nothing."
+            }
+          ]
         },
-        { "id": "tavi", "text": "Ask Tavi at the west market. She goes down there. On purpose!" }
+        {
+          "id": "tavi",
+          "text": "Ask Tavi at the west market. She goes down there. On purpose!"
+        }
       ]
     }
   ]

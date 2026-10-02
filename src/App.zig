@@ -102,6 +102,9 @@ settings_dirty: bool = false,
 audio: ?*Audio = null,
 /// The GUI control under the mouse last frame (hover sounds play on change).
 hovered: ?u16 = null,
+/// Mouse buttons held while captured: the weapon tool's primary and alternate triggers.
+fire_held: bool = false,
+alt_held: bool = false,
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
@@ -215,9 +218,10 @@ fn uiNav(self: *App, k: Menu.Key) void {
     if (sb.shop != null) return sb.shopKey(switch (k) {
         .up => .up,
         .down => .down,
+        .left => .left,
+        .right => .right,
         .confirm => .confirm,
         .back => .close,
-        else => return,
     });
     if (sb.trading != null) return sb.tradeKey(switch (k) {
         .up => .up,
@@ -327,6 +331,10 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.adjust(if (Screens.hitArea(hit) == .creator_left) -1 else 1);
         },
         .creator_done => if (click) self.creatorInput(.enter),
+        .fab_tab => if (sb.shop) |*shop| if (click) {
+            shop.tab = row;
+            shop.row = 0;
+        },
         .trade_row => if (sb.trading != null) {
             sb.trade_row = row;
             if (click) sb.tradeKey(.confirm);
@@ -470,7 +478,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             self.runCommand(self.menu.bindKey(key.key));
         } else if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
             // Number keys pick a conversation choice directly.
-            const digits = [_]mach.Core.KeyButtonID{ .one, .two, .three, .four, .five, .six };
+            const digits = [_]mach.Core.KeyButtonID{ .one, .two, .three, .four, .five, .six, .seven, .eight };
             if (self.menu.screen == .none) if (self.sandbox.talk) |*talk| for (digits, 0..) |d, i| if (key.key == d and self.sandbox.dialogue.revealed(talk.*)) {
                 var visible: [Dialogue.max_choices]u8 = undefined;
                 if (i < self.sandbox.dialogue.visibleChoices(talk.*, &self.sandbox.progress, &visible)) {
@@ -494,6 +502,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .tool_build => self.actions.select_tool = 2,
             .tool_wire => self.actions.select_tool = 3,
             .tool_bridge => self.actions.select_tool = 4,
+            .tool_weapon => self.actions.select_tool = 5,
             .next_item => self.actions.next_item = true,
             .rotate => self.actions.rotate = true,
             .capture_prefab => self.actions.capture = true,
@@ -507,19 +516,28 @@ pub fn update(self: *App, core: *mach.Core) void {
             .traversal => self.engine.input.cycle_mode = true,
             .add_guest => self.toggleGuest(),
         },
+        .mouse_release => |mouse| switch (mouse.button) {
+            .left => self.fire_held = false,
+            .right => self.alt_held = false,
+            else => {},
+        },
         .mouse_press => |mouse| if (self.uiActive()) {
             if (mouse.button == .left) self.pointAt(true);
         } else switch (mouse.button) {
             .left => if (self.captured) {
+                self.fire_held = true;
                 self.actions.interact = true;
             } else self.capture(core, true),
             .right => if (self.captured) {
+                self.alt_held = true;
                 self.actions.secondary = true;
             },
             else => {},
         },
         .mouse_capture_gained => self.captured = true,
         .mouse_capture_lost, .focus_lost => {
+            self.fire_held = false;
+            self.alt_held = false;
             self.captured = false;
             self.engine.input = .{};
         },
@@ -554,6 +572,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         for (&self.sandbox.guests) |*g| g.camera.fov = fov;
     }
     if (self.uiActive()) self.engine.input = .{};
+    self.sandbox.trigger = .{ .fire = self.fire_held and self.captured and !self.uiActive(), .alt = self.alt_held and self.captured and !self.uiActive() };
     const title = self.menu.screen != .none and self.menu.base == .title;
     const paused = self.menu.screen != .none and self.menu.base == .pause;
     if (title) self.titleCamera();
@@ -574,7 +593,12 @@ pub fn update(self: *App, core: *mach.Core) void {
         self.engine.input.clearEdges();
         self.pads.consume();
     }
-    if (self.audio) |a| a.director.update(a, Audio.Director.snapshot(&self.sandbox, self.engine.camera, paused));
+    if (self.audio) |a| {
+        const snap = Audio.Director.snapshot(&self.sandbox, self.engine.camera, paused);
+        a.director.update(a, snap);
+        for (self.sandbox.cues[0..self.sandbox.cue_count]) |c| Audio.Director.cue(a, snap, c.sound, c.position, c.pitch);
+    }
+    self.sandbox.cue_count = 0;
     if (self.sandbox.exported) |index| {
         self.sandbox.exported = null;
         self.exportPrefab(index);
@@ -722,7 +746,9 @@ fn showcase(self: *App) void {
 
 /// `-Dshowcase=18..26`: GUI screens for review. 18 title, 19 conversation, 20 upgrades,
 /// 21 market shop, 22 wardrobe, 23 customization, 24 pause, 25 settings, 26 HUD,
-/// 27 four-player split screen with a guest trading, 28 controls while rebinding.
+/// 27 four-player split screen with a guest trading, 28 controls while rebinding,
+/// 29 the garage with all three hover cars, 30 a Hive nest under attack, 31 the fabricator,
+/// 32 the Skimmer in flight.
 fn guiShowcase(self: *App, v: u32) void {
     const sb = &self.sandbox;
     self.engine.input = .{};
@@ -733,6 +759,12 @@ fn guiShowcase(self: *App, v: u32) void {
         return;
     }
     if (sb.talk) |*talk| talk.reveal = 999;
+    // 32: fly the Skimmer forward, boosting, from the garage toward the city.
+    if (v == 32 and self.gui_showcase_ready) {
+        self.engine.input.forward = 1;
+        self.engine.input.fast = true;
+        self.engine.input.jump = sb.garage.cars[0] != null and sb.garage.cars[0].?.flyer.ride < 4;
+    }
     if (self.gui_showcase_ready) return;
     self.gui_showcase_ready = true;
     // Stand on the south market plaza, facing Maro's counter.
@@ -764,6 +796,35 @@ fn guiShowcase(self: *App, v: u32) void {
             self.menu.open(.pause);
             self.menu.open(.settings);
         },
+        29 => {
+            sb.progress.vehicles = 0b111;
+            @import("game/Frontier.zig").refresh(sb);
+            const pad = @import("game/Garage.zig").padPosition(sb.seed, Sandbox.spawn, .dart);
+            sb.player.feet = .{ pad[0] - 4, pad[1], pad[2] - 13 };
+            self.engine.camera.yaw = 0.25;
+            self.engine.camera.pitch = -0.2;
+        },
+        30 => {
+            const nest = sb.enemies.nests[0].position;
+            sb.player.feet = .{ nest[0] - 45, @import("procedural/Terrain.zig").surface(sb.seed, nest[0] - 45, nest[2]).height, nest[2] };
+            self.engine.camera.yaw = std.math.pi / 2.0;
+            self.engine.camera.pitch = 0.12;
+            for (0..4) |_| sb.enemies.units[sb.enemies.unitCount(null)] = .{ .kind = .drone, .nest = 0, .position = .{ nest[0] - 15, nest[1] + 12, nest[2] + @as(f32, @floatFromInt(sb.enemies.unitCount(null))) * 4 - 6 }, .health = 60, .orbit = @as(f32, @floatFromInt(sb.enemies.unitCount(null))) };
+            sb.enemies.units[5] = .{ .kind = .sentinel, .nest = 0, .position = .{ nest[0] - 8, nest[1] + 18, nest[2] }, .health = 260, .orbit = 0 };
+            sb.progress.weapons = 0b10;
+            sb.combat.active = .blaster;
+            sb.tools.tool = .weapon;
+        },
+        32 => {
+            sb.progress.vehicles = 0b001;
+            @import("game/Frontier.zig").refresh(sb);
+            sb.player.mode = .walk;
+            Frontier_board(sb, &self.engine.camera);
+        },
+        31 => {
+            sb.progress.inventory = .{ 14, 3, 9, 2 };
+            sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 0 };
+        },
         28 => {
             self.menu.open(.pause);
             self.menu.open(.controls);
@@ -778,6 +839,15 @@ fn guiShowcase(self: *App, v: u32) void {
         },
         else => {},
     }
+}
+
+fn Frontier_board(sb: *Sandbox, camera: *@import("world/Camera.zig")) void {
+    const car = &sb.garage.cars[0].?.flyer;
+    // Face the city: the district's first plaza.
+    const plaza = sb.catalog.district.nodes[0].position;
+    const yaw = std.math.atan2(plaza[0] - car.body.pos.x, plaza[2] - car.body.pos.z);
+    car.body.rot = @import("character/math.zig").Quat.fromAxisAngle(@import("character/math.zig").Vec3.unit_y, yaw);
+    @import("game/Frontier.zig").board(sb, 0, camera);
 }
 
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
@@ -829,6 +899,7 @@ fn exerciseSmoke(self: *App) void {
         },
         2 => {
             self.smokeGui();
+            self.smokeFrontier();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -941,6 +1012,49 @@ fn smokeGui(self: *App) void {
     self.uiNav(.back);
     sb.wallet.scrap = scrap;
     std.log.info("Smoke GUI: pause/settings closed={any}, keeper greeting {s}, upgrades opened={any}, fuel tank level {d}, panels closed={any}", .{ menu_closed, greeting, opened, level, !self.uiActive() });
+}
+
+/// Fabricates a car and a blaster through the fabricator panel, flies the car, and shoots a
+/// drone, through the same calls the window and the simulation use.
+fn smokeFrontier(self: *App) void {
+    const sb = &self.sandbox;
+    const Combat = @import("game/Combat.zig");
+    const keep = sb.progress;
+    const wallet = sb.wallet;
+    sb.progress.inventory = .{ 20, 6, 20, 0 };
+    sb.wallet.scrap += 200;
+    sb.shop = .{ .kind = .fabricate };
+    self.uiNav(.confirm);
+    sb.shop.?.tab = 3;
+    sb.shop.?.row = 0;
+    self.uiNav(.confirm);
+    self.uiNav(.back);
+    const cars = sb.garage.cars[0] != null;
+    const blaster = sb.progress.ownsWeapon(.blaster);
+    // Fly the Skimmer for two seconds.
+    var camera = self.engine.camera;
+    sb.garage.board(0, &camera);
+    const takeoff = sb.garage.cars[0].?.flyer.body.pos;
+    for (0..120) |_| sb.garage.step(&sb.physics, .{ .forward = 1 }, 1.0 / 60.0);
+    const flown = sb.garage.cars[0].?.flyer.body.pos.distance(takeoff);
+    _ = sb.garage.leave(&sb.physics);
+    // A drone ahead of a blaster.
+    sb.enemies.units[0] = .{ .kind = .drone, .nest = 0, .position = .{ 0, 300, 20 }, .health = 15, .orbit = 0 };
+    var events: [32]Combat.Event = undefined;
+    var aim: Combat.Aim = .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = .{ 0, 298.5, 0 }, .fire = true };
+    var downed = false;
+    for (0..60) |k| {
+        if (k == 1) aim.fire = false;
+        const n = sb.combat.step(&sb.physics, &sb.enemies, sb.progress.weapons, aim, 1.0 / 60.0, &events);
+        for (events[0..@min(n, events.len)]) |e| if (e == .hive and e.hive == .unit_down) {
+            downed = true;
+        };
+    }
+    std.log.info("Smoke frontier: skimmer parked={any} flew {d:.1} m, blaster={any}, drone downed={any}; {d} nests, {d} pickups", .{ cars, flown, blaster, downed, sb.enemies.nest_count, sb.collectibles.count });
+    // Leave the run's progress as it was (later stages log the market and wallet).
+    sb.progress = keep;
+    sb.wallet = wallet;
+    @import("game/Frontier.zig").refresh(sb);
 }
 
 fn smokeSap(self: *App) void {
@@ -1118,7 +1232,11 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
     const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "FLY" else @tagName(sandbox.player.motion);
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.wallet.scrap, sandbox.wallet.parts });
-    if (sandbox.seated) |m| {
+    if (sandbox.garage.piloting) |i| {
+        const car = &sandbox.garage.cars[i].?.flyer;
+        const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, car.body.pos.x, car.body.pos.z).height;
+        renderer.hud_lines[1].set("{s}  {d:.0} M/S  {d:.0} M UP  W/S THRUST  A/D TURN  SPACE/Q RIDE  SHIFT BOOST  CLICK LEAVE", .{ @import("vehicle/Designs.zig").name(@enumFromInt(i)), car.body.vel.length(), car.body.pos.y - ground });
+    } else if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;
         renderer.hud_lines[1].set("{d:.1} M/S  POWER {d:.0}%  WASD DRIVE  SPACE BRAKE  CLICK EXIT", .{ placed.vehicle.?.forwardSpeed(&sandbox.physics), placed.machine.satisfaction(motor) * 100 });
@@ -1130,6 +1248,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
         .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  CLICK", .{Screens.keeperName(sandbox, i)}),
         .walker => renderer.hud_lines[1].set("CANOPY LOCAL  CLICK TALK", .{}),
+        .car => |i| renderer.hud_lines[1].set("{s}  CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
+        .fabricator => renderer.hud_lines[1].set("FABRICATOR  CLICK OPEN", .{}),
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;

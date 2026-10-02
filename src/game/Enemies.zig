@@ -1,0 +1,521 @@
+//! The Hive's forces in the outskirts. Three nests (dark spires) stand on seeded sites away from
+//! the city and the grove; each fabricates drones and a sentinel while a player is in range.
+//!
+//! Units fly. Each one patrols an orbit around its nest, and turns hostile when a player comes
+//! within sight: close enough and with a clear line (a physics ray). It then circles at a
+//! standoff distance, shooting bolts with lead and spread. It retreats to its nest when badly
+//! hurt (drones only), and returns home past its leash. Units keep clear of the ground and
+//! climb over whatever is ahead. Drones shoot single bolts; sentinels are slower and tougher,
+//! and fire three-bolt bursts. Defeated units drop Hive alloy. A destroyed nest stops spawning,
+//! drops a cache, and stays destroyed in the save (a story flag).
+//!
+//! Units far from every player stop thinking, so idle nests cost almost nothing.
+const std = @import("std");
+const Physics = @import("../physics/Physics.zig");
+const Seed = @import("../procedural/Seed.zig");
+const Terrain = @import("../procedural/Terrain.zig");
+const R = Physics.Rotation;
+const V = Physics.Vec3;
+const Enemies = @This();
+
+pub const Kind = enum { drone, sentinel };
+pub const max_nests = 3;
+pub const max_units = 18;
+pub const max_bolts = 48;
+pub const units_per_nest = 5;
+pub const nest_radius: f32 = 4;
+pub const nest_health: f32 = 900;
+/// Players beyond this distance from a nest leave it dormant.
+pub const wake_distance: f32 = 170;
+
+pub const Stats = struct { health: f32, speed: f32, accel: f32, radius: f32, standoff: f32, sight: f32, cooldown: f32, burst: u8, damage: f32, bolt_speed: f32 };
+pub fn stats(k: Kind) Stats {
+    return switch (k) {
+        .drone => .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 7, .bolt_speed = 34 },
+        .sentinel => .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 11, .bolt_speed = 28 },
+    };
+}
+
+pub const State = enum { patrol, hunt, retreat };
+pub const Unit = struct {
+    kind: Kind,
+    nest: u8,
+    position: V,
+    velocity: V = @splat(0),
+    yaw: f32 = 0,
+    health: f32,
+    state: State = .patrol,
+    /// Player index being hunted.
+    target: u8 = 0,
+    orbit: f32,
+    cooldown: f32 = 1,
+    burst_left: u8 = 0,
+    burst_timer: f32 = 0,
+    state_timer: f32 = 0,
+    /// Seconds of hit flash left (rendering).
+    flash: f32 = 0,
+};
+pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = 2, flash: f32 = 0 };
+pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
+
+/// A player the Hive can see and shoot.
+pub const Target = struct { chest: V, velocity: V, alive: bool = true };
+pub const Event = union(enum) {
+    shot: V,
+    player_hit: struct { player: u8, damage: f32, from: V },
+    unit_down: struct { kind: Kind, position: V },
+    nest_down: struct { nest: u8, position: V },
+};
+
+seed: u64 = 0,
+nests: [max_nests]Nest = undefined,
+nest_count: usize = 0,
+units: [max_units]?Unit = @splat(null),
+bolts: [max_bolts]?Bolt = @splat(null),
+rng: std.Random.DefaultPrng = .init(0),
+
+/// Picks nest sites on the terrain at least `clear` metres from every point in `avoid`
+/// (Arbors, plazas, shrines, the spawn), on a ring around the spawn.
+pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
+    var self: Enemies = .{ .seed = seed, .rng = .init(Seed.mix(seed ^ 0x48495645)) };
+    const random = self.rng.random();
+    var attempts: usize = 0;
+    while (self.nest_count < max_nests and attempts < 400) : (attempts += 1) {
+        const angle = (@as(f32, @floatFromInt(self.nest_count)) + random.float(f32) * 0.7) * 2 * std.math.pi / max_nests + 0.6;
+        const r = 380 + random.float(f32) * 160;
+        const x = spawn[0] + @sin(angle) * r;
+        const z = spawn[2] + @cos(angle) * r;
+        var ok = true;
+        for (avoid) |p| {
+            const dx = p[0] - x;
+            const dz = p[2] - z;
+            if (dx * dx + dz * dz < clear * clear) ok = false;
+        }
+        if (!ok) continue;
+        self.nests[self.nest_count] = .{ .position = .{ x, Terrain.surface(seed, x, z).height, z } };
+        self.nest_count += 1;
+    }
+    return self;
+}
+
+pub fn unitCount(self: *const Enemies, nest: ?u8) usize {
+    var n: usize = 0;
+    for (self.units) |slot| if (slot) |u| {
+        n += @intFromBool(nest == null or u.nest == nest.?);
+    };
+    return n;
+}
+
+fn spawnUnit(self: *Enemies, nest: u8) void {
+    const random = self.rng.random();
+    var sentinels: usize = 0;
+    for (self.units) |slot| if (slot) |u| {
+        sentinels += @intFromBool(u.nest == nest and u.kind == .sentinel);
+    };
+    const kind: Kind = if (sentinels == 0) .sentinel else .drone;
+    for (&self.units) |*slot| if (slot.* == null) {
+        const n = self.nests[nest];
+        slot.* = .{
+            .kind = kind,
+            .nest = nest,
+            .position = R.add(n.position, .{ 0, 24, 0 }),
+            .health = stats(kind).health,
+            .orbit = random.float(f32) * 2 * std.math.pi,
+        };
+        return;
+    };
+}
+
+fn horizontal(v: V) f32 {
+    return @sqrt(v[0] * v[0] + v[2] * v[2]);
+}
+
+fn sees(physics: *const Physics, from: V, to: V) bool {
+    const d = R.sub(to, from);
+    const length = R.length(d);
+    if (length < 0.1) return true;
+    return physics.castRay(from, R.scale(d, 1 / length), length - 0.6, .none) == null;
+}
+
+/// One fixed step. Events (shots, hits on players, units and nests destroyed) go to `out`.
+pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt: f32, out: []Event) usize {
+    var n: usize = 0;
+    const push = struct {
+        fn f(o: []Event, count: *usize, e: Event) void {
+            if (count.* < o.len) o[count.*] = e;
+            count.* += 1;
+        }
+    }.f;
+    const random = self.rng.random();
+
+    // Nests: wake near players and fabricate up to their quota.
+    for (self.nests[0..self.nest_count], 0..) |*nest, ni| {
+        nest.flash = @max(0, nest.flash - dt);
+        if (!nest.alive or !nearAny(players, nest.position, wake_distance)) continue;
+        nest.spawn_timer -= dt;
+        if (nest.spawn_timer <= 0 and self.unitCount(@intCast(ni)) < units_per_nest) {
+            self.spawnUnit(@intCast(ni));
+            nest.spawn_timer = 9;
+        }
+    }
+
+    for (&self.units) |*slot| {
+        const u = &(slot.* orelse continue);
+        const s = stats(u.kind);
+        const nest = self.nests[u.nest];
+        // Dormant when no player is anywhere near (keeps distant nests free).
+        if (!nearAny(players, u.position, wake_distance + 40)) continue;
+        u.flash = @max(0, u.flash - dt);
+        u.cooldown = @max(0, u.cooldown - dt);
+        u.state_timer = @max(0, u.state_timer - dt);
+
+        // Senses: the nearest visible living player within sight.
+        var seen: ?u8 = null;
+        var seen_distance: f32 = s.sight;
+        for (players, 0..) |p, pi| {
+            if (!p.alive) continue;
+            const d = R.length(R.sub(p.chest, u.position));
+            if (d < seen_distance and sees(physics, u.position, p.chest)) {
+                seen = @intCast(pi);
+                seen_distance = d;
+            }
+        }
+        const from_nest = horizontal(R.sub(u.position, nest.position));
+        switch (u.state) {
+            .patrol => if (seen) |pi| {
+                u.state = .hunt;
+                u.target = pi;
+                u.cooldown = @max(u.cooldown, 0.6);
+            },
+            .hunt => {
+                if (u.kind == .drone and u.health < s.health * 0.3) {
+                    u.state = .retreat;
+                    u.state_timer = 4;
+                } else if (from_nest > 110 or !players[u.target].alive or (seen == null and u.state_timer == 0 and R.length(R.sub(players[u.target].chest, u.position)) > s.sight * 1.4)) {
+                    u.state = .patrol;
+                } else if (seen) |pi| {
+                    u.target = pi;
+                    u.state_timer = 3;
+                }
+            },
+            .retreat => if (u.state_timer == 0) {
+                u.state = if (seen != null) .hunt else .patrol;
+            },
+        }
+
+        // Where to go.
+        u.orbit += dt * (if (u.state == .hunt) @as(f32, 0.45) else 0.25) * (if (u.kind == .drone) @as(f32, 1) else 0.6);
+        var goal: V = undefined;
+        switch (u.state) {
+            .patrol, .retreat => {
+                const r: f32 = if (u.state == .retreat) 6 else 20 + @as(f32, @floatFromInt(u.nest % 3)) * 3;
+                goal = R.add(nest.position, .{ @sin(u.orbit) * r, 16 + @sin(u.orbit * 2.3) * 3, @cos(u.orbit) * r });
+            },
+            .hunt => {
+                const p = players[u.target].chest;
+                goal = R.add(p, .{ @sin(u.orbit) * s.standoff, 5 + @sin(u.orbit * 1.7) * 2, @cos(u.orbit) * s.standoff });
+            },
+        }
+        // Steering toward the goal, limited by acceleration and speed.
+        const to_goal = R.sub(goal, u.position);
+        const dist = R.length(to_goal);
+        const desired = if (dist > 0.01) R.scale(to_goal, @min(s.speed, dist * 1.2) / dist) else @as(V, @splat(0));
+        var dv = R.sub(desired, u.velocity);
+        const dv_len = R.length(dv);
+        if (dv_len > s.accel * dt) dv = R.scale(dv, s.accel * dt / dv_len);
+        u.velocity = R.add(u.velocity, dv);
+        // Keep clear of the ground and climb over obstacles ahead.
+        if (physics.castRay(u.position, .{ 0, -1, 0 }, 4, .none) != null) u.velocity[1] = @max(u.velocity[1], 4);
+        const speed = R.length(u.velocity);
+        if (speed > 0.5) {
+            if (physics.castRay(u.position, R.scale(u.velocity, 1 / speed), 2 + speed * 0.6, .none)) |hit| {
+                u.velocity = R.add(R.scale(u.velocity, 0.6), R.add(R.scale(hit.normal, 3), .{ 0, 5, 0 }));
+            }
+        }
+        u.position = R.add(u.position, R.scale(u.velocity, dt));
+        // Face the target while hunting, the direction of travel otherwise.
+        const facing = if (u.state == .hunt) R.sub(players[u.target].chest, u.position) else u.velocity;
+        if (horizontal(facing) > 0.1) u.yaw = std.math.atan2(facing[0], facing[2]);
+
+        // Shooting.
+        if (u.state == .hunt and seen != null and seen.? == u.target and seen_distance < s.sight) {
+            if (u.burst_left == 0 and u.cooldown == 0) {
+                u.burst_left = s.burst;
+                u.burst_timer = 0;
+                u.cooldown = s.cooldown;
+            }
+        }
+        if (u.burst_left > 0) {
+            u.burst_timer -= dt;
+            if (u.burst_timer <= 0) {
+                u.burst_left -= 1;
+                u.burst_timer = 0.18;
+                const p = players[u.target];
+                // Lead the target, then spread.
+                const muzzle = R.add(u.position, .{ 0, -0.2, 0 });
+                const t = R.length(R.sub(p.chest, muzzle)) / s.bolt_speed;
+                const aim = R.add(p.chest, R.scale(p.velocity, t * 0.8));
+                var dir = R.normalize(R.sub(aim, muzzle));
+                dir = R.normalize(R.add(dir, .{ (random.float(f32) - 0.5) * 0.08, (random.float(f32) - 0.5) * 0.06, (random.float(f32) - 0.5) * 0.08 }));
+                self.fire(muzzle, R.scale(dir, s.bolt_speed), s.damage);
+                push(out, &n, .{ .shot = muzzle });
+            }
+        }
+    }
+
+    // Bolts: fly, hit players (a 0.6 m chest sphere) or the world, or fade.
+    for (&self.bolts) |*slot| {
+        const b = &(slot.* orelse continue);
+        b.life -= dt;
+        if (b.life <= 0) {
+            slot.* = null;
+            continue;
+        }
+        const travel = R.scale(b.velocity, dt);
+        const length = R.length(travel);
+        const dir = R.scale(travel, 1 / @max(length, 1e-4));
+        var hit_player: ?u8 = null;
+        var best = length;
+        for (players, 0..) |p, pi| {
+            if (!p.alive) continue;
+            if (segmentSphere(b.position, dir, length, p.chest, 0.6)) |t| if (t < best) {
+                best = t;
+                hit_player = @intCast(pi);
+            };
+        }
+        const wall = physics.castRay(b.position, dir, best, .none);
+        if (wall == null) if (hit_player) |pi| {
+            push(out, &n, .{ .player_hit = .{ .player = pi, .damage = b.damage, .from = R.sub(b.position, R.scale(dir, 5)) } });
+            slot.* = null;
+            continue;
+        };
+        if (wall != null) {
+            slot.* = null;
+            continue;
+        }
+        b.position = R.add(b.position, travel);
+    }
+    return n;
+}
+
+fn fire(self: *Enemies, from: V, velocity: V, damage: f32) void {
+    for (&self.bolts) |*slot| if (slot.* == null) {
+        slot.* = .{ .position = from, .velocity = velocity, .damage = damage, .life = 3 };
+        return;
+    };
+}
+
+fn nearAny(players: []const Target, p: V, d: f32) bool {
+    for (players) |t| {
+        const x = R.sub(t.chest, p);
+        if (x[0] * x[0] + x[2] * x[2] < d * d) return true;
+    }
+    return false;
+}
+
+/// Distance along a unit ray to a sphere, if it is hit within `length`.
+pub fn segmentSphere(origin: V, dir: V, length: f32, center: V, radius: f32) ?f32 {
+    const oc = R.sub(origin, center);
+    const b = R.dot(oc, dir);
+    const c = R.dot(oc, oc) - radius * radius;
+    if (c <= 0) return 0;
+    const disc = b * b - c;
+    if (disc < 0) return null;
+    const t = -b - @sqrt(disc);
+    return if (t >= 0 and t <= length) t else null;
+}
+
+/// Damage to whatever a player attack hits: the nearest unit or nest along a segment (radius
+/// `pad` widens it, for big shots). Returns the distance hit, or null.
+pub fn strikeAlong(self: *Enemies, origin: V, dir: V, length: f32, pad: f32, damage: f32, out: []Event, n: *usize) ?f32 {
+    var best = length;
+    var unit: ?usize = null;
+    var nest: ?usize = null;
+    for (self.units, 0..) |slot, i| if (slot) |u| {
+        if (segmentSphere(origin, dir, best, u.position, stats(u.kind).radius + pad)) |t| {
+            best = t;
+            unit = i;
+        }
+    };
+    for (self.nests[0..self.nest_count], 0..) |nst, i| {
+        if (!nst.alive) continue;
+        // The spire as a stack of spheres up its lower half.
+        var k: f32 = 0;
+        while (k < 3) : (k += 1) {
+            const c = R.add(nst.position, .{ 0, 3 + k * 4, 0 });
+            if (segmentSphere(origin, dir, best, c, nest_radius - k + pad)) |t| {
+                best = t;
+                nest = i;
+                unit = null;
+            }
+        }
+    }
+    if (unit == null and nest == null) return null;
+    if (nest) |i| {
+        self.damageNest(@intCast(i), damage, out, n);
+    } else self.damageUnit(unit.?, damage, out, n);
+    return best;
+}
+
+/// Damage to everything within `half_width` of the segment from `origin` along `dir` (beams).
+pub fn strikeCapsule(self: *Enemies, origin: V, dir: V, length: f32, half_width: f32, damage: f32, out: []Event, n: *usize) usize {
+    var hits: usize = 0;
+    for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
+        if (distanceToSegment(u.position, origin, dir, length) <= half_width + stats(u.kind).radius) {
+            self.damageUnit(i, damage, out, n);
+            hits += 1;
+        }
+    };
+    for (self.nests[0..self.nest_count], 0..) |nst, i| {
+        if (nst.alive and distanceToSegment(R.add(nst.position, .{ 0, 6, 0 }), origin, dir, length) <= half_width + nest_radius) {
+            self.damageNest(@intCast(i), damage, out, n);
+            hits += 1;
+        }
+    }
+    return hits;
+}
+
+fn distanceToSegment(p: V, origin: V, dir: V, length: f32) f32 {
+    const t = std.math.clamp(R.dot(R.sub(p, origin), dir), 0, length);
+    return R.length(R.sub(p, R.add(origin, R.scale(dir, t))));
+}
+
+/// Damage to every unit and nest within `radius` of `center` (blasts, saber arcs).
+pub fn strikeArea(self: *Enemies, center: V, radius: f32, damage: f32, facing: ?V, out: []Event, n: *usize) usize {
+    var hits: usize = 0;
+    for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
+        const d = R.sub(u.position, center);
+        const dist = R.length(d);
+        if (dist > radius + stats(u.kind).radius) continue;
+        // A saber only cuts in front.
+        if (facing) |f| if (dist > 0.5 and R.dot(R.scale(d, 1 / dist), f) < 0.2) continue;
+        self.damageUnit(i, damage, out, n);
+        hits += 1;
+    };
+    for (self.nests[0..self.nest_count], 0..) |nst, i| {
+        if (!nst.alive) continue;
+        const d = R.sub(R.add(nst.position, .{ 0, 3, 0 }), center);
+        if (horizontal(d) < radius + nest_radius and @abs(d[1]) < 8) {
+            self.damageNest(@intCast(i), damage, out, n);
+            hits += 1;
+        }
+    }
+    return hits;
+}
+
+fn damageUnit(self: *Enemies, i: usize, damage: f32, out: []Event, n: *usize) void {
+    const u = &(self.units[i] orelse return);
+    u.health -= damage;
+    u.flash = 0.15;
+    // Being shot reveals the shooter.
+    if (u.state == .patrol) {
+        u.state = .hunt;
+        u.state_timer = 4;
+    }
+    if (u.health <= 0) {
+        if (n.* < out.len) out[n.*] = .{ .unit_down = .{ .kind = u.kind, .position = u.position } };
+        n.* += 1;
+        self.units[i] = null;
+    }
+}
+
+fn damageNest(self: *Enemies, i: u8, damage: f32, out: []Event, n: *usize) void {
+    const nest = &self.nests[i];
+    if (!nest.alive) return;
+    nest.health -= damage;
+    nest.flash = 0.15;
+    if (nest.health <= 0) {
+        nest.alive = false;
+        if (n.* < out.len) out[n.*] = .{ .nest_down = .{ .nest = i, .position = nest.position } };
+        n.* += 1;
+    }
+}
+
+/// The nearest living unit to `p` within `reach`, for homing missiles.
+pub fn nearestUnit(self: *const Enemies, p: V, reach: f32) ?V {
+    var best: ?V = null;
+    var best_d = reach;
+    for (self.units) |slot| if (slot) |u| {
+        const d = R.length(R.sub(u.position, p));
+        if (d < best_d) {
+            best_d = d;
+            best = u.position;
+        }
+    };
+    return best;
+}
+
+fn testPhysics() Physics {
+    return Physics.init(.{ .sample = struct {
+        fn f(_: ?*const anyopaque, _: f32, _: f32) Physics.GroundSample {
+            return .{ .height = 0, .normal = .{ 0, 1, 0 } };
+        }
+    }.f });
+}
+
+test "nest sites avoid landmarks and sleep until a player comes near" {
+    const e = Enemies.init(42, .{ 0, 0, 0 }, &.{.{ 400, 0, 0 }}, 150);
+    try std.testing.expect(e.nest_count == max_nests);
+    for (e.nests[0..e.nest_count]) |nest| {
+        try std.testing.expect(horizontal(nest.position) > 370);
+        try std.testing.expect(horizontal(R.sub(nest.position, .{ 400, 0, 0 })) >= 150);
+    }
+    var physics = testPhysics();
+    defer physics.deinit();
+    var far = e;
+    var events: [16]Event = undefined;
+    for (0..600) |_| _ = far.step(&physics, &.{.{ .chest = .{ 0, 1.4, 0 }, .velocity = @splat(0) }}, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(@as(usize, 0), far.unitCount(null));
+}
+
+test "a woken nest fabricates units that hunt, shoot, and can be destroyed" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{ .seed = 1, .rng = .init(1) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    const player: Target = .{ .chest = .{ 30, 1.4, 0 }, .velocity = @splat(0) };
+    var events: [64]Event = undefined;
+    var hits: usize = 0;
+    var shots: usize = 0;
+    for (0..60 * 30) |_| {
+        const count = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+        for (events[0..@min(count, events.len)]) |ev| switch (ev) {
+            .player_hit => hits += 1,
+            .shot => shots += 1,
+            else => {},
+        };
+    }
+    try std.testing.expect(e.unitCount(0) >= 3);
+    try std.testing.expect(shots > 5 and hits > 0);
+    var hunting: usize = 0;
+    for (e.units) |slot| if (slot) |u| {
+        hunting += @intFromBool(u.state == .hunt);
+    };
+    try std.testing.expect(hunting > 0);
+
+    // Strike every unit until it falls, then the nest.
+    var n: usize = 0;
+    for (e.units) |slot| if (slot) |u| {
+        while (e.strikeArea(u.position, 0.5, 50, null, &events, &n) > 0 and e.unitCount(0) > 0) {}
+    };
+    while (e.nests[0].alive) _ = e.strikeArea(.{ 0, 3, 0 }, 1, 100, null, &events, &n);
+    try std.testing.expect(!e.nests[0].alive);
+    // A dead nest fabricates nothing more.
+    for (&e.units) |*slot| slot.* = null;
+    for (0..60 * 20) |_| _ = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(@as(usize, 0), e.unitCount(0));
+}
+
+test "segment-sphere and line strikes find the nearest target" {
+    try std.testing.expectApproxEqAbs(@as(f32, 4), segmentSphere(.{ 0, 0, 0 }, .{ 1, 0, 0 }, 10, .{ 5, 0, 0 }, 1).?, 1e-5);
+    try std.testing.expect(segmentSphere(.{ 0, 0, 0 }, .{ 1, 0, 0 }, 3, .{ 5, 0, 0 }, 1) == null);
+    var e: Enemies = .{};
+    e.units[0] = .{ .kind = .drone, .nest = 0, .position = .{ 10, 0, 0 }, .health = 60, .orbit = 0 };
+    e.units[1] = .{ .kind = .drone, .nest = 0, .position = .{ 20, 0, 0 }, .health = 60, .orbit = 0 };
+    var events: [4]Event = undefined;
+    var n: usize = 0;
+    try std.testing.expect(e.strikeAlong(.{ 0, 0, 0 }, .{ 1, 0, 0 }, 50, 0, 100, &events, &n) != null);
+    try std.testing.expect(e.units[0] == null and e.units[1] != null);
+    try std.testing.expectEqual(@as(usize, 1), n);
+}

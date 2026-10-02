@@ -33,7 +33,10 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Armor style: none, scout, sentinel, rootweave (bark-green plates with lumen tracery), or skyguard (streamlined blue-green plates and light strips). Helmet: open, visor, or sealed; the visor is a curved wraparound shield with an inset lumen slit.
 
 - Suit upgrades from the south-market tinker: fuel tank, jet efficiency, sprint servos, stamina weave, grapple reel and salvage kit, three levels each, shared by the party. The armor suits (exo rig, hardsuit, vanguard) are bought from him too; the undersuit and field jacket are free.
-- Conversations: keepers and locals talk in branching dialogue, remember what you have done (salvage, shrines, bridges), and hint at the Rootdeep's waking machines.
+- Conversations: keepers and locals talk in branching dialogue, remember what you have done (salvage, shrines, bridges, nests), and hint at the Rootdeep's waking machines.
+- Pickups to find: lumen shards on the plazas and roads, rotor cores on high roofs and by the shrines, Hive alloy from the Hive, and vital cells that raise maximum health.
+- The fabricator at the garage builds hover cars (Skimmer, Dart, Courier), armor suits and accents, and weapons from those pickups.
+- The Hive is back: three black spires in the outskirts send drones and sentinels after anyone who comes near. Breaking a spire stops its swarm.
 
 Clothing, gear, and accent unlocks found while exploring are future growth for this system.
 

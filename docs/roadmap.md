@@ -77,6 +77,22 @@ A customizable, nameable ranger-engineer: the creator on a new game (F4 any time
 
 A resolution-independent GUI canvas replaces the text panels: title and pause menus, settings saved to `saves/settings.json`, controls, a graphical HUD, customization with palette swatches, a market shop, the tinker's suit upgrades and armor wardrobe, and branching data-driven conversations with the three keepers and pedestrians. Keyboard, mouse and P1's controller all navigate. Suit upgrades, owned suits and story flags save with the world. Acceptance: headless tests cover menu navigation, settings clamping, dialogue validation, flag-gated branches and one-time gifts, upgrade and suit purchases that change nothing on failure, the Sandbox stall-greeting flow, and every screen laid out inside the window. A Metal smoke drives pause → settings → resume and a conversation into the upgrade panel. Captures (`-Dshowcase=18..28`) cover each screen. Guests' split views have their own HUD and stall panel, and all 32 gameplay keys can be rebound. Audio is in: Mach `sysaudio` output, a lock-free native mixer, 17 synthesized sounds and loops, a director that turns gameplay, UI and dialogue into sound with guests placed in stereo, and four volume settings. Next: authored audio assets (an `audio` asset kind and streamed music), reverb and occlusion, and conversations and tinker panels for guests.
 
+## Frontier: vehicles, pickups, the Hive and weapons — implemented
+
+Hover cars built by your generator (`src/vehicle/`) fly on momentum-theory fans with a ride-height flight computer, and three designs are fabricable. 62 seeded pickups (lumen shards, rotor cores, Hive alloy, vital cells) feed a fabricator for cars, suits, armor accents and weapons. Three Hive nests in new outskirts send drones and sentinels that patrol, hunt with line of sight, and shoot back. The `combat/` weapons are connected through a weapon tool, and players have health and respawns.
+
+Acceptance:
+- **Generator tests:** watertight meshes, textbook aerodynamics and nozzle values, closed-form mass properties, energy-conserving spin.
+- **Flight tests:** hover level at ride height, cruise and boost caps, following rolling hills at speed, holding altitude over gaps, wall stops.
+- **Gameplay tests:** pickups collected once, recipes paid exactly, nests that wake, spawn, hunt, shoot and fall, and shots that destroy drones. The saber cuts only in front, and the shield absorbs.
+- **Smoke:** fabricates a car and a blaster through the panel, flies the car, and downs a drone, under Metal validation.
+
+Next:
+- guests' weapons and conversations;
+- saved car positions;
+- Hive troopers on foot (character generator) and nest assault events;
+- texture/material polish and engine sounds for the cars.
+
 ## Traversal and local co-op — implemented
 
 Starfall's traversal verbs are ported to metres, seconds and the fixed step. They cover buffered and coyote jumps, wall slides, wall jumps, jump-started climbing, ledge hang and mantle, rolls, stomps, swimming volumes, and four traversal kits: grapple, hover jet, flight and hoverboard. Up to four local players share one window in split screen. The macOS GameController bridge handles drop-in join and leave, and F6 adds a keyboard-less guest for testing.

@@ -282,15 +282,74 @@ pub const Mat3 = extern struct {
     pub fn col(a: Mat3, i: usize) Vec3 {
         return Vec3.init(a.m[i][0], a.m[i][1], a.m[i][2]);
     }
+    pub const identity: Mat3 = .{ .m = .{ .{ 1, 0, 0 }, .{ 0, 1, 0 }, .{ 0, 0, 1 } } };
+    pub const zero: Mat3 = .{ .m = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } } };
+
+    pub fn diag(d: Vec3) Mat3 {
+        return .{ .m = .{ .{ d.x, 0, 0 }, .{ 0, d.y, 0 }, .{ 0, 0, d.z } } };
+    }
+    /// a * b^T (outer product).
+    pub fn outer(a: Vec3, b: Vec3) Mat3 {
+        return fromColumns(a.scale(b.x), a.scale(b.y), a.scale(b.z));
+    }
+    pub fn fromQuat(q: Quat) Mat3 {
+        return fromColumns(q.rotate(Vec3.unit_x), q.rotate(Vec3.unit_y), q.rotate(Vec3.unit_z));
+    }
+    pub fn mulVec(a: Mat3, v: Vec3) Vec3 {
+        return a.col(0).scale(v.x).add(a.col(1).scale(v.y)).add(a.col(2).scale(v.z));
+    }
+    pub fn mul(a: Mat3, b: Mat3) Mat3 {
+        return fromColumns(a.mulVec(b.col(0)), a.mulVec(b.col(1)), a.mulVec(b.col(2)));
+    }
+    pub fn add(a: Mat3, b: Mat3) Mat3 {
+        var r: Mat3 = undefined;
+        inline for (0..3) |c| inline for (0..3) |k| {
+            r.m[c][k] = a.m[c][k] + b.m[c][k];
+        };
+        return r;
+    }
+    pub fn scale(a: Mat3, s: f32) Mat3 {
+        var r: Mat3 = undefined;
+        inline for (0..3) |c| inline for (0..3) |k| {
+            r.m[c][k] = a.m[c][k] * s;
+        };
+        return r;
+    }
+    pub fn transpose(a: Mat3) Mat3 {
+        var r: Mat3 = undefined;
+        inline for (0..3) |c| inline for (0..3) |k| {
+            r.m[c][k] = a.m[k][c];
+        };
+        return r;
+    }
+    pub fn trace(a: Mat3) f32 {
+        return a.m[0][0] + a.m[1][1] + a.m[2][2];
+    }
+    pub fn determinant(a: Mat3) f32 {
+        return a.col(0).dot(a.col(1).cross(a.col(2)));
+    }
+    /// Inverse via the adjugate (rows of the inverse are cross products of columns).
+    pub fn inverse(a: Mat3) Mat3 {
+        const c0 = a.col(0);
+        const c1 = a.col(1);
+        const c2 = a.col(2);
+        const det = c0.dot(c1.cross(c2));
+        if (@abs(det) < 1e-20) return identity;
+        const inv_det = 1.0 / det;
+        const r0 = c1.cross(c2).scale(inv_det);
+        const r1 = c2.cross(c0).scale(inv_det);
+        const r2 = c0.cross(c1).scale(inv_det);
+        return fromColumns(r0, r1, r2).transpose();
+    }
     /// Robust rotation-matrix -> quaternion (Shepperd's method).
     pub fn toQuat(a: Mat3) Quat {
         const m00 = a.m[0][0];
         const m11 = a.m[1][1];
         const m22 = a.m[2][2];
-        const trace = m00 + m11 + m22;
+        const tr = m00 + m11 + m22;
         var q: Quat = undefined;
-        if (trace > 0) {
-            const s = @sqrt(trace + 1.0) * 2.0;
+        if (tr > 0) {
+            const s = @sqrt(tr + 1.0) * 2.0;
             q = .{ .w = 0.25 * s, .x = (a.m[1][2] - a.m[2][1]) / s, .y = (a.m[2][0] - a.m[0][2]) / s, .z = (a.m[0][1] - a.m[1][0]) / s };
         } else if (m00 > m11 and m00 > m22) {
             const s = @sqrt(1.0 + m00 - m11 - m22) * 2.0;

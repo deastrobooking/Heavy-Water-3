@@ -22,9 +22,11 @@ draft: Profile = .{},
 confirmed: bool = false,
 /// Clothing the player owns, one bit per `Profile.Clothing`; others are skipped when cycling.
 owned: u8 = 0xff,
+/// Armor accents owned, one bit per `Profile.Armor`.
+owned_armor: u8 = 0xff,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
@@ -57,6 +59,13 @@ pub fn key(self: *Creator, k: Key) Result {
 /// Changes the selected field; clothing skips types not yet owned.
 pub fn adjust(self: *Creator, delta: i32) void {
     self.draft.adjust(self.field, delta);
+    if (self.field == .armor) {
+        for (0..@typeInfo(Profile.Armor).@"enum".fields.len) |_| {
+            if (self.owned_armor & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.armor))) != 0) return;
+            self.draft.adjust(.armor, delta);
+        }
+        return;
+    }
     if (self.field != .clothing) return;
     for (0..@typeInfo(Profile.Clothing).@"enum".fields.len) |_| {
         if (self.owned & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.clothing))) != 0) return;
