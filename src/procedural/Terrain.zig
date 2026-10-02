@@ -40,11 +40,11 @@ fn normal(dx: f32, dz: f32) [3]f32 {
 test "surface matches rendered chunk vertices and triangle interiors, including negative chunks" {
     const mesh = try Chunk.generate(std.testing.allocator, 42, -2, 1);
     defer mesh.deinit(std.testing.allocator);
-    for (mesh.vertices) |vertex| {
+    for (mesh.vertices[0..Chunk.terrain_vertex_count]) |vertex| {
         try std.testing.expectApproxEqAbs(vertex.position[1], surface(42, vertex.position[0], vertex.position[2]).height, 0.0001);
     }
     var i: usize = 0;
-    while (i < mesh.indices.len) : (i += 997 * 3) {
+    while (i < Chunk.terrain_index_count) : (i += 997 * 3) {
         const a = mesh.vertices[mesh.indices[i]].position;
         const b = mesh.vertices[mesh.indices[i + 1]].position;
         const c = mesh.vertices[mesh.indices[i + 2]].position;

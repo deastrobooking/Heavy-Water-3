@@ -399,6 +399,14 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, Debug, **300 smoke frames** with the armor lineup: no validation errors, clean exit.
 - Not measured: CPU skinning cost with many armored characters (an armored body has about 3.5K more vertices), and a manual review of the creator cycling clothing in the window.
 
+## Rivers, waterfalls, mountains and snow — 2026-10-02
+
+- Seeded terrain now transitions from a smooth hub valley to ridged highlands. Exposed alpine rock and snow use elevation and slope masks.
+- Rivers carve continuous channels and stream as blue world-space ribbons. Periodic seeded drops add vertical waterfall curtains; geometry is generated with each terrain chunk, including across chunk boundaries.
+- World generator version is 4 because the terrain and water generation changed; saves from prior generator versions are rejected. Profile and content data are unaffected.
+- ReleaseSafe tests and app checks: **276/276 pass**. New coverage checks waterfall drop height, river mesh indices, snow coloration, terrain sampling against the rendered ground mesh, and existing district/building/bridge clearances.
+- Four-player native Metal smoke passed with terrain streaming, save/restore, construction and rover checks. `-Dshowcase=36` captures the river and waterfall viewpoint for visual review.
+
 ## Development asset reload (phase 13, slice 3) — 2026-10-01
 
 - Baseline review: 159 ReleaseSafe tests and the application compile passed. Fixed index-only loader tickets that could access reused slots, checked pack indices before worker access, and replaced an unlocked telemetry read with a mutex-protected snapshot.

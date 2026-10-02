@@ -693,7 +693,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if (v >= 18) return self.guiShowcase(v);
+    if (v >= 18 and v <= 35) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -733,6 +733,18 @@ fn showcase(self: *App) void {
         eye = .{ Sandbox_.spawn[0] + 0.6, ground + 1.5, Sandbox_.spawn[2] - 1.6 };
         // 17: a three-quarter close-up of the hardsuit.
         if (v == 17) eye = .{ Sandbox_.spawn[0] + 0.9, ground + 1.35, Sandbox_.spawn[2] + 1.35 };
+    } else if (v == 36) {
+        const Hydrology = @import("procedural/Hydrology.zig");
+        const Seed = @import("procedural/Seed.zig");
+        const lane: i64 = 0;
+        const lane_seed = Seed.mix(self.sandbox.seed ^ @as(u64, @bitCast(lane)) ^ 0x464c4f57);
+        const phase = @floor(Seed.unit(lane_seed) * Hydrology.fall_period / 4) * 4;
+        var fall_x = Hydrology.fall_period - phase;
+        while (fall_x < 900) fall_x += Hydrology.fall_period;
+        const fall_z = Hydrology.centerZ(self.sandbox.seed, lane, fall_x);
+        const water = Hydrology.level(self.sandbox.seed, lane, fall_x + 0.02);
+        target = .{ fall_x, water - 1.2, fall_z };
+        eye = .{ fall_x + 130, water + 105, fall_z - 180 };
     } else if (v == 9) {
         const s = District.span(layout, layout.edges[0]);
         target = s.point(0.6);

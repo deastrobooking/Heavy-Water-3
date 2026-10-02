@@ -99,9 +99,9 @@ pub fn terrainSurface(map: Heightmap, seed: u64, x: f32, z: f32, stamps: []const
 
 /// Generate one 128 m chunk from the imported map; chunks outside its footprint are rejected.
 pub fn generateChunk(allocator: std.mem.Allocator, map: Heightmap, seed: u64, cx: i32, cz: i32, stamps: []const Stamp) !Mesh {
-    const vertices = try allocator.alloc(Mesh.Vertex, Chunk.vertex_count);
+    const vertices = try allocator.alloc(Mesh.Vertex, Chunk.terrain_vertex_count);
     errdefer allocator.free(vertices);
-    const indices = try allocator.alloc(u32, Chunk.index_count);
+    const indices = try allocator.alloc(u32, Chunk.terrain_index_count);
     errdefer allocator.free(indices);
     if (!fillChunk(map, seed, cx, cz, vertices, indices, stamps)) return error.OutsideHeightmap;
     return .{ .vertices = vertices, .indices = indices };
@@ -109,7 +109,7 @@ pub fn generateChunk(allocator: std.mem.Allocator, map: Heightmap, seed: u64, cx
 
 /// Fill caller-owned storage, matching the standard chunk's winding, diagonal, and dimensions.
 pub fn fillChunk(map: Heightmap, seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32, stamps: []const Stamp) bool {
-    std.debug.assert(vertices.len == Chunk.vertex_count and indices.len == Chunk.index_count);
+    std.debug.assert(vertices.len == Chunk.terrain_vertex_count and indices.len == Chunk.terrain_index_count);
     const ox = @as(f32, @floatFromInt(cx)) * Chunk.extent - Chunk.extent / 2;
     const oz = @as(f32, @floatFromInt(cz)) * Chunk.extent - Chunk.extent / 2;
     for (0..Chunk.cells + 1) |z| {

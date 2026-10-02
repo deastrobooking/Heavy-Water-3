@@ -16,6 +16,24 @@ pub const Weights = struct {
     }
 };
 
+/// Altitude and exposed steep faces transition through alpine stone into permanent snow.
+pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
+    const weights = sample(seed, x, z);
+    const base = weights.color();
+    const alpine = std.math.clamp((height - 12) / 24, 0, 1);
+    const exposed = std.math.clamp((slope - 0.72) / 0.9, 0, 1) * alpine;
+    const snowline = 27 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
+    const snow = std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
+    const rock = [3]f32{ 0.42, 0.48, 0.49 };
+    const snow_color = [3]f32{ 0.86, 0.91, 0.94 };
+    var result: [3]f32 = undefined;
+    for (&result, 0..) |*channel, i| {
+        const alpine_color = base[i] * (1 - exposed) + rock[i] * exposed;
+        channel.* = alpine_color * (1 - snow) + snow_color[i] * snow;
+    }
+    return result;
+}
+
 /// Continuous world-space moisture mask. No chunk-local normalization or thresholds at seams.
 pub fn sample(seed: u64, x: f32, z: f32) Weights {
     const moisture = Noise.value(Seed.mix(seed ^ 0x42494f4d45), x / 220, z / 220);
@@ -35,4 +53,11 @@ test "biome weights are normalized and produce multiple regions" {
         max = @max(max, w.arid);
     }
     try std.testing.expect(max - min > 0.5);
+}
+
+test "terrain color adds exposed alpine rock and persistent snow above the snowline" {
+    const low = terrainColor(42, 10, 20, -3, 0.1);
+    const snowy = terrainColor(42, 10, 20, 70, 0.4);
+    try std.testing.expect(snowy[0] > low[0]);
+    try std.testing.expect(snowy[1] > low[1]);
 }
