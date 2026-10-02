@@ -3,8 +3,9 @@ const Input = @import("Input.zig");
 const Gamepads = @This();
 pub const Sample = extern struct { lx: f32 = 0, ly: f32 = 0, rx: f32 = 0, ry: f32 = 0, buttons: u32 = 0, connected: u32 = 0 };
 /// `join` (Menu) adds or removes the pad's player; `respawn` (Options) returns it beside P1.
-/// `up` / `down` / `left` / `right` are D-pad edges (menus, panels, market stalls).
-pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false };
+/// `up` / `down` / `left` / `right` are D-pad edges (menus, panels, market stalls); `fire` is
+/// the right trigger, held.
+pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, fire: bool = false };
 extern fn hw_gamepads(out: [*]Sample) void;
 previous: [4]u32 = @splat(0),
 commands: [4]Command = @splat(.{}),
@@ -33,6 +34,7 @@ pub fn sample(self: *Gamepads, samples: [4]Sample) void {
         cmd.input.look_y = -look[1];
         cmd.input.jump = buttons & 1 != 0;
         cmd.input.fast = buttons & (1 << 6) != 0;
+        cmd.fire = buttons & (1 << 7) != 0;
         cmd.input.dodge_held = buttons & 2 != 0;
         cmd.input.mantle = buttons & (1 << 2) != 0;
         cmd.input.jump_pressed = cmd.input.jump_pressed or edges & 1 != 0;

@@ -1,7 +1,8 @@
 //! The Hive's forces in the outskirts. Three nests (dark spires) stand on seeded sites away from
 //! the city and the grove; each fabricates drones and a sentinel while a player is in range.
 //!
-//! Units fly. Each one patrols an orbit around its nest, and turns hostile when a player comes
+//! Drones and sentinels fly; troopers (the character generator in dark red Hive plate) walk the
+//! ground, sliding along walls. Each unit patrols an orbit around its nest, and turns hostile when a player comes
 //! within sight: close enough and with a clear line (a physics ray). It then circles at a
 //! standoff distance, shooting bolts with lead and spread. It retreats to its nest when badly
 //! hurt (drones only), and returns home past its leash. Units keep clear of the ground and
@@ -18,11 +19,12 @@ const R = Physics.Rotation;
 const V = Physics.Vec3;
 const Enemies = @This();
 
-pub const Kind = enum { drone, sentinel };
+pub const Kind = enum { drone, sentinel, trooper };
 pub const max_nests = 3;
 pub const max_units = 18;
 pub const max_bolts = 48;
-pub const units_per_nest = 5;
+pub const units_per_nest = 6;
+pub const troopers_per_nest = 2;
 pub const nest_radius: f32 = 4;
 pub const nest_health: f32 = 900;
 /// Players beyond this distance from a nest leave it dormant.
@@ -31,8 +33,9 @@ pub const wake_distance: f32 = 170;
 pub const Stats = struct { health: f32, speed: f32, accel: f32, radius: f32, standoff: f32, sight: f32, cooldown: f32, burst: u8, damage: f32, bolt_speed: f32 };
 pub fn stats(k: Kind) Stats {
     return switch (k) {
-        .drone => .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 7, .bolt_speed = 34 },
-        .sentinel => .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 11, .bolt_speed = 28 },
+        .drone => .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 5, .bolt_speed = 34 },
+        .sentinel => .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 8, .bolt_speed = 28 },
+        .trooper => .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32 },
     };
 }
 
@@ -54,6 +57,14 @@ pub const Unit = struct {
     state_timer: f32 = 0,
     /// Seconds of hit flash left (rendering).
     flash: f32 = 0,
+    /// Troopers: stride phase and amount for the walk animation.
+    walk_phase: f32 = 0,
+    walk_amount: f32 = 0,
+
+    /// Where the unit is hit and shoots from: troopers' chests, other units' centres.
+    pub fn center(u: Unit) V {
+        return if (u.kind == .trooper) R.add(u.position, .{ 0, 1.2, 0 }) else u.position;
+    }
 };
 pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = 2, flash: f32 = 0 };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
@@ -109,16 +120,20 @@ pub fn unitCount(self: *const Enemies, nest: ?u8) usize {
 fn spawnUnit(self: *Enemies, nest: u8) void {
     const random = self.rng.random();
     var sentinels: usize = 0;
-    for (self.units) |slot| if (slot) |u| {
-        sentinels += @intFromBool(u.nest == nest and u.kind == .sentinel);
+    var troopers: usize = 0;
+    for (self.units) |slot| if (slot) |u| if (u.nest == nest) {
+        sentinels += @intFromBool(u.kind == .sentinel);
+        troopers += @intFromBool(u.kind == .trooper);
     };
-    const kind: Kind = if (sentinels == 0) .sentinel else .drone;
+    const kind: Kind = if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else .drone;
     for (&self.units) |*slot| if (slot.* == null) {
         const n = self.nests[nest];
+        // Fliers launch from the spire tip; troopers march out of its foot.
+        const angle = random.float(f32) * 2 * std.math.pi;
         slot.* = .{
             .kind = kind,
             .nest = nest,
-            .position = R.add(n.position, .{ 0, 24, 0 }),
+            .position = if (kind == .trooper) R.add(n.position, .{ @sin(angle) * 7, 0.5, @cos(angle) * 7 }) else R.add(n.position, .{ 0, 24, 0 }),
             .health = stats(kind).health,
             .orbit = random.float(f32) * 2 * std.math.pi,
         };
@@ -174,8 +189,8 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         var seen_distance: f32 = s.sight;
         for (players, 0..) |p, pi| {
             if (!p.alive) continue;
-            const d = R.length(R.sub(p.chest, u.position));
-            if (d < seen_distance and sees(physics, u.position, p.chest)) {
+            const d = R.length(R.sub(p.chest, u.center()));
+            if (d < seen_distance and sees(physics, u.center(), p.chest)) {
                 seen = @intCast(pi);
                 seen_distance = d;
             }
@@ -216,51 +231,15 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
                 goal = R.add(p, .{ @sin(u.orbit) * s.standoff, 5 + @sin(u.orbit * 1.7) * 2, @cos(u.orbit) * s.standoff });
             },
         }
-        // Steering toward the goal, limited by acceleration and speed.
-        const to_goal = R.sub(goal, u.position);
-        const dist = R.length(to_goal);
-        const desired = if (dist > 0.01) R.scale(to_goal, @min(s.speed, dist * 1.2) / dist) else @as(V, @splat(0));
-        var dv = R.sub(desired, u.velocity);
-        const dv_len = R.length(dv);
-        if (dv_len > s.accel * dt) dv = R.scale(dv, s.accel * dt / dv_len);
-        u.velocity = R.add(u.velocity, dv);
-        // Keep clear of the ground and climb over obstacles ahead.
-        if (physics.castRay(u.position, .{ 0, -1, 0 }, 4, .none) != null) u.velocity[1] = @max(u.velocity[1], 4);
-        const speed = R.length(u.velocity);
-        if (speed > 0.5) {
-            if (physics.castRay(u.position, R.scale(u.velocity, 1 / speed), 2 + speed * 0.6, .none)) |hit| {
-                u.velocity = R.add(R.scale(u.velocity, 0.6), R.add(R.scale(hit.normal, 3), .{ 0, 5, 0 }));
-            }
+        if (u.kind == .trooper) {
+            walkGround(physics, u, goal, s, dt);
+        } else {
+            flyToward(physics, u, goal, s, dt);
         }
-        u.position = R.add(u.position, R.scale(u.velocity, dt));
         // Face the target while hunting, the direction of travel otherwise.
-        const facing = if (u.state == .hunt) R.sub(players[u.target].chest, u.position) else u.velocity;
+        const facing = if (u.state == .hunt) R.sub(players[u.target].chest, u.center()) else u.velocity;
         if (horizontal(facing) > 0.1) u.yaw = std.math.atan2(facing[0], facing[2]);
-
-        // Shooting.
-        if (u.state == .hunt and seen != null and seen.? == u.target and seen_distance < s.sight) {
-            if (u.burst_left == 0 and u.cooldown == 0) {
-                u.burst_left = s.burst;
-                u.burst_timer = 0;
-                u.cooldown = s.cooldown;
-            }
-        }
-        if (u.burst_left > 0) {
-            u.burst_timer -= dt;
-            if (u.burst_timer <= 0) {
-                u.burst_left -= 1;
-                u.burst_timer = 0.18;
-                const p = players[u.target];
-                // Lead the target, then spread.
-                const muzzle = R.add(u.position, .{ 0, -0.2, 0 });
-                const t = R.length(R.sub(p.chest, muzzle)) / s.bolt_speed;
-                const aim = R.add(p.chest, R.scale(p.velocity, t * 0.8));
-                var dir = R.normalize(R.sub(aim, muzzle));
-                dir = R.normalize(R.add(dir, .{ (random.float(f32) - 0.5) * 0.08, (random.float(f32) - 0.5) * 0.06, (random.float(f32) - 0.5) * 0.08 }));
-                self.fire(muzzle, R.scale(dir, s.bolt_speed), s.damage);
-                push(out, &n, .{ .shot = muzzle });
-            }
-        }
+        self.shoot(u, s, players, seen, seen_distance, dt, random, out, &n);
     }
 
     // Bolts: fly, hit players (a 0.6 m chest sphere) or the world, or fade.
@@ -298,6 +277,86 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
     return n;
 }
 
+/// Fliers: steer toward the goal within their acceleration and speed, keep clear of the ground,
+/// and climb over whatever is ahead.
+fn flyToward(physics: *const Physics, u: *Unit, goal: V, s: Stats, dt: f32) void {
+    const to_goal = R.sub(goal, u.position);
+    const dist = R.length(to_goal);
+    const desired = if (dist > 0.01) R.scale(to_goal, @min(s.speed, dist * 1.2) / dist) else @as(V, @splat(0));
+    var dv = R.sub(desired, u.velocity);
+    const dv_len = R.length(dv);
+    if (dv_len > s.accel * dt) dv = R.scale(dv, s.accel * dt / dv_len);
+    u.velocity = R.add(u.velocity, dv);
+    if (physics.castRay(u.position, .{ 0, -1, 0 }, 4, .none) != null) u.velocity[1] = @max(u.velocity[1], 4);
+    const speed = R.length(u.velocity);
+    if (speed > 0.5) {
+        if (physics.castRay(u.position, R.scale(u.velocity, 1 / speed), 2 + speed * 0.6, .none)) |hit| {
+            u.velocity = R.add(R.scale(u.velocity, 0.6), R.add(R.scale(hit.normal, 3), .{ 0, 5, 0 }));
+        }
+    }
+    u.position = R.add(u.position, R.scale(u.velocity, dt));
+}
+
+/// Troopers: walk the horizontal part of the way to the goal on whatever floor is below, and
+/// slide along walls instead of walking into them.
+fn walkGround(physics: *const Physics, u: *Unit, goal: V, s: Stats, dt: f32) void {
+    var to_goal = R.sub(goal, u.position);
+    to_goal[1] = 0;
+    const dist = horizontal(to_goal);
+    const desired = if (dist > 0.4) R.scale(to_goal, @min(s.speed, dist) / dist) else @as(V, @splat(0));
+    var dv = R.sub(desired, .{ u.velocity[0], 0, u.velocity[2] });
+    const dv_len = R.length(dv);
+    if (dv_len > s.accel * dt) dv = R.scale(dv, s.accel * dt / dv_len);
+    u.velocity = .{ u.velocity[0] + dv[0], 0, u.velocity[2] + dv[2] };
+    const speed = horizontal(u.velocity);
+    if (speed > 0.1) {
+        const dir = R.scale(u.velocity, 1 / speed);
+        if (physics.castRay(u.center(), dir, 0.9 + speed * dt, .none)) |hit| {
+            // Remove the part of the motion into the wall.
+            const into = R.dot(u.velocity, hit.normal);
+            if (into < 0) u.velocity = R.sub(u.velocity, R.scale(hit.normal, into));
+            u.velocity[1] = 0;
+        }
+    }
+    var next = R.add(u.position, R.scale(u.velocity, dt));
+    // Stand on the floor below (decks, roofs or terrain), stepping up small ledges.
+    if (physics.castRay(R.add(next, .{ 0, 1.2, 0 }), .{ 0, -1, 0 }, 30, .none)) |floor| {
+        next[1] = floor.point[1];
+    } else {
+        next = u.position;
+        u.velocity = @splat(0);
+    }
+    u.position = next;
+    u.walk_amount = @min(1, horizontal(u.velocity) / s.speed);
+    u.walk_phase = @mod(u.walk_phase + horizontal(u.velocity) * dt * 2.4, 2 * std.math.pi);
+}
+
+/// Starts a burst when hunting a visible target, and fires its bolts with lead and spread.
+fn shoot(self: *Enemies, u: *Unit, s: Stats, players: []const Target, seen: ?u8, seen_distance: f32, dt: f32, random: std.Random, out: []Event, n: *usize) void {
+    if (u.state == .hunt and seen != null and seen.? == u.target and seen_distance < s.sight) {
+        if (u.burst_left == 0 and u.cooldown == 0) {
+            u.burst_left = s.burst;
+            u.burst_timer = 0;
+            u.cooldown = s.cooldown;
+        }
+    }
+    if (u.burst_left == 0) return;
+    u.burst_timer -= dt;
+    if (u.burst_timer > 0) return;
+    u.burst_left -= 1;
+    u.burst_timer = 0.18;
+    const p = players[u.target];
+    const muzzle = if (u.kind == .trooper) R.add(u.center(), .{ 0, 0.2, 0 }) else R.add(u.position, .{ 0, -0.2, 0 });
+    const t = R.length(R.sub(p.chest, muzzle)) / s.bolt_speed;
+    const aim = R.add(p.chest, R.scale(p.velocity, t * 0.8));
+    var dir = R.normalize(R.sub(aim, muzzle));
+    // Spread wide enough that a moving ranger dodges much of a volley.
+    dir = R.normalize(R.add(dir, .{ (random.float(f32) - 0.5) * 0.14, (random.float(f32) - 0.5) * 0.08, (random.float(f32) - 0.5) * 0.14 }));
+    self.fire(muzzle, R.scale(dir, s.bolt_speed), s.damage);
+    if (n.* < out.len) out[n.*] = .{ .shot = muzzle };
+    n.* += 1;
+}
+
 fn fire(self: *Enemies, from: V, velocity: V, damage: f32) void {
     for (&self.bolts) |*slot| if (slot.* == null) {
         slot.* = .{ .position = from, .velocity = velocity, .damage = damage, .life = 3 };
@@ -332,7 +391,7 @@ pub fn strikeAlong(self: *Enemies, origin: V, dir: V, length: f32, pad: f32, dam
     var unit: ?usize = null;
     var nest: ?usize = null;
     for (self.units, 0..) |slot, i| if (slot) |u| {
-        if (segmentSphere(origin, dir, best, u.position, stats(u.kind).radius + pad)) |t| {
+        if (segmentSphere(origin, dir, best, u.center(), stats(u.kind).radius + pad)) |t| {
             best = t;
             unit = i;
         }
@@ -361,7 +420,7 @@ pub fn strikeAlong(self: *Enemies, origin: V, dir: V, length: f32, pad: f32, dam
 pub fn strikeCapsule(self: *Enemies, origin: V, dir: V, length: f32, half_width: f32, damage: f32, out: []Event, n: *usize) usize {
     var hits: usize = 0;
     for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
-        if (distanceToSegment(u.position, origin, dir, length) <= half_width + stats(u.kind).radius) {
+        if (distanceToSegment(u.center(), origin, dir, length) <= half_width + stats(u.kind).radius) {
             self.damageUnit(i, damage, out, n);
             hits += 1;
         }
@@ -384,7 +443,7 @@ fn distanceToSegment(p: V, origin: V, dir: V, length: f32) f32 {
 pub fn strikeArea(self: *Enemies, center: V, radius: f32, damage: f32, facing: ?V, out: []Event, n: *usize) usize {
     var hits: usize = 0;
     for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
-        const d = R.sub(u.position, center);
+        const d = R.sub(u.center(), center);
         const dist = R.length(d);
         if (dist > radius + stats(u.kind).radius) continue;
         // A saber only cuts in front.
@@ -413,7 +472,7 @@ fn damageUnit(self: *Enemies, i: usize, damage: f32, out: []Event, n: *usize) vo
         u.state_timer = 4;
     }
     if (u.health <= 0) {
-        if (n.* < out.len) out[n.*] = .{ .unit_down = .{ .kind = u.kind, .position = u.position } };
+        if (n.* < out.len) out[n.*] = .{ .unit_down = .{ .kind = u.kind, .position = u.center() } };
         n.* += 1;
         self.units[i] = null;
     }
@@ -436,10 +495,10 @@ pub fn nearestUnit(self: *const Enemies, p: V, reach: f32) ?V {
     var best: ?V = null;
     var best_d = reach;
     for (self.units) |slot| if (slot) |u| {
-        const d = R.length(R.sub(u.position, p));
+        const d = R.length(R.sub(u.center(), p));
         if (d < best_d) {
             best_d = d;
-            best = u.position;
+            best = u.center();
         }
     };
     return best;
@@ -505,6 +564,25 @@ test "a woken nest fabricates units that hunt, shoot, and can be destroyed" {
     for (&e.units) |*slot| slot.* = null;
     for (0..60 * 20) |_| _ = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
     try std.testing.expectEqual(@as(usize, 0), e.unitCount(0));
+}
+
+test "troopers march out of the nest, keep to the ground, and hunt" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{ .seed = 3, .rng = .init(3) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    var events: [64]Event = undefined;
+    const player: Target = .{ .chest = .{ 25, 1.4, 0 }, .velocity = @splat(0) };
+    for (0..60 * 40) |_| _ = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+    var troopers: usize = 0;
+    for (e.units) |slot| if (slot) |u| if (u.kind == .trooper) {
+        troopers += 1;
+        try std.testing.expectApproxEqAbs(@as(f32, 0), u.position[1], 0.01);
+        try std.testing.expect(u.state == .hunt);
+        try std.testing.expect(horizontal(R.sub(u.position, .{ 25, 0, 0 })) < 30);
+    };
+    try std.testing.expectEqual(@as(usize, troopers_per_nest), troopers);
 }
 
 test "segment-sphere and line strikes find the nearest target" {

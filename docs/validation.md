@@ -240,6 +240,24 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Guest weapons, Hive troopers, saved cars — 2026-10-01
+
+- Debug suite: **258/258 tests pass**. New tests:
+  - Troopers march out of a nest, stay on the ground, and hunt.
+  - Saved car positions and headings round-trip, unowned designs stay absent, and collected pickups stay collected.
+  - A guest fires the party's blaster with the trigger through `Sandbox.step` and downs a drone.
+  - The combat tests now run per arsenal; a shield raised by any player absorbs.
+- Two first versions of the guest test failed on placement, not code:
+  - The drone sat under the slope along the guest's pitched aim.
+  - The shot met the crate row beside the spawn.
+
+  The debug traces showed the shot flying true, so the test now levels the aim and uses a nearer drone.
+- **Metal smoke:** native Apple M3 Pro, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames** (screen unlocked): no validation errors, clean exit. `Smoke frontier` fabricated a car and a blaster, the car flew 19.5 m, and the drone went down; four-player stages ran with guest arsenals.
+- **Captures:**
+  - `-Dshowcase=32` (in flight) shows the Skimmer cruising 7 m over the terrain toward the city. Flown straight ahead, it stopped at a wall as designed.
+  - `-Dshowcase=30` shows troopers in Hive plate advancing beside drones and a sentinel. The player lost 65% of their health in about 2.5 s standing still, so bolt damage was lowered and the spread widened; bolts are thinner too.
+- **Not measured:** difficulty by hand, controller play, and skinning cost with eight troopers near P1.
+
 ## Frontier: hover cars, pickups, fabricator, the Hive and weapons — 2026-10-01
 
 - **Generator code:** your vehicle generator modules (`hull`, `airfoil`, `prims`, `fan`, `nozzle`, `dynamics`) were added with their imports pointed at the character core. Their tests all passed the first time. The paste ended partway through the `dynamics` tests, so the energy test and a torque-direction test were finished here. `hover.zig` and `car.zig` were not in the paste and are written for this game.

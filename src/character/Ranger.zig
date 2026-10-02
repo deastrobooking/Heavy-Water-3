@@ -12,7 +12,9 @@ const Mesh = @import("../render/Mesh.zig");
 const V = m.Vec3;
 const Q = m.Quat;
 const Ranger = @This();
-pub const capacity = 16;
+/// Skinned characters drawn at once: players 0–3, keepers 4–6, pedestrians 7–14, Hive troopers
+/// 16–23.
+pub const capacity = 24;
 pub const Pose = struct { feet: [3]f32, yaw: f32, walk_phase: f32 = 0, walk_amount: f32 = 0, motion: Player.Motion = .idle, time: f32 = 0 };
 pub const Draw = struct { profile: Profile, pose: Pose, id: u8 = 0 };
 character: gen.Character,

@@ -156,7 +156,7 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   - **Attitude and drive:** a PID leans the body into manoeuvres. The base lift is split by the fans' lever arms, since the COM sits 0.42 m aft. Vanes yaw the car, and the rear nozzles push it.
   - **Drag and contacts:** quadratic drag includes fan ram drag (about 30 m/s cruising, 45 boosting). Skids are spring-dampers, a hard floor keeps the keel above the ground, and a wall probe along the velocity stops the car at walls.
   - **World probing:** the module only probes the world through the caller's ray cast.
-- **In the game:** `vehicle/Designs.zig` defines three fabricable designs (Skimmer, Dart, Courier). Their render meshes get per-vertex colors by material. `game/Garage.zig` parks owned cars on pads beside the spawn, idling in a low hover, and flies the piloted one through `Physics.castRay`. The chase camera eases behind the car and can be orbited. Leaving puts P1 on the floor to the left. Cars are not saved; owned designs park again after a load.
+- **In the game:** `vehicle/Designs.zig` defines three fabricable designs (Skimmer, Dart, Courier). Their render meshes get per-vertex colors by material. `game/Garage.zig` parks owned cars on pads beside the spawn, idling in a low hover, and flies the piloted one through `Physics.castRay`. The chase camera eases behind the car and can be orbited. Leaving puts P1 on the floor to the left. Saves keep each car's position and heading (`Save.Document.cars`); a car without a saved pose parks on its pad.
 
 ## Frontier: pickups, fabricator, the Hive and weapons
 
@@ -168,11 +168,12 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   - World pickups have stable IDs, and the save remembers which were collected. Defeated Hive units drop alloy, which fades after 90 s.
 - **Fabricator:** `game/Fabricator.zig` turns pickups and scrap into hover cars, suits, armor accents and weapons, once each. Recipes sit on four tabs, the first two weapons need no alloy, and nothing changes when a recipe can't be paid. The kiosk stands at the head of the garage pads. Suits and armor accents are equipped when made. The creator only offers owned suits and armor accents; whatever a loaded ranger wears stays owned.
 - **The Hive:** `game/Enemies.zig` places three nests (procedural spires) on a ring 380–540 m from the spawn, at least 140 m from the Arbors, plazas, shrines and spawn.
-  - **Spawning:** a nest wakes when a player is within 170 m. It fabricates up to five units every nine seconds: a sentinel first, then drones. Units far from every player stop thinking.
+  - **Spawning:** a nest wakes when a player is within 170 m. It fabricates up to six units every nine seconds: a sentinel, two troopers, then drones. Units far from every player stop thinking.
+  - **Troopers:** walk the floor below them (decks, roofs or terrain) and slide along walls. They are drawn as skinned characters in dark red vanguard plate with sealed helmets (ids 16–23; the character limit is now 24), only within 120 m of P1.
   - **Behaviour:** units patrol an orbit and hunt the nearest player they can see, with a physics line of sight. They circle at a standoff distance, keep clear of the ground, and climb over obstacles. Drones retreat to the nest when badly hurt, and every unit returns home past a 110 m leash.
-  - **Fire:** units shoot bolts with lead and spread. Drones fire single bolts; sentinels fire three-bolt bursts.
+  - **Fire:** units shoot bolts with lead and spread. Drones fire single bolts (5 damage), troopers pairs (6), and sentinels three-bolt bursts (8). The spread is wide enough that a moving ranger dodges much of a volley.
   - **Destruction:** a destroyed nest stops spawning, drops alloy and a rotor core, and stays destroyed (story flag `nest_N_down`).
-- **Combat:** `game/Combat.zig` connects the existing `combat/` weapons to the world.
+- **Combat:** `game/Combat.zig` connects the existing `combat/` weapons to the world. Each local player has an `Arsenal` (selection, charges, cooldowns, projectiles) over the party's fabricated weapons. Guests fire with the right trigger and switch with the D-pad, and their weapons share every rule below.
   - **Weapon tool (5):** the left mouse button is the primary trigger and the right is the alternate (both tracked as held buttons); Tab cycles the fabricated weapons.
   - **Weapons:** the blaster charges while held. The saber does a combo, plus a charged slash on the alternate, and cuts only in front. The bow draws, and its alternate fires a warp arrow that carries the archer to where it lands. Missiles home on the nearest unit. The shield absorbs damage while raised, and a timely raise parries. The giant blast charges, then burns a beam.
   - **Hits:** player shots sweep through units and nests before meeting the world; charged plasma and missiles burst on impact.

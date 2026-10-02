@@ -224,12 +224,13 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
     const count = sb.enemies.step(&sb.physics, targets(sb, &who), dt, &events);
     for (events[0..@min(count, events.len)]) |e| hive(sb, e, camera);
 
-    // The arsenal (weapon tool, on foot).
+    // Arsenals: P1 with the weapon tool on foot, guests with the right trigger.
+    sb.combat.tick(dt);
     const armed = !frozen and sb.tools.tool == .weapon and sb.garage.piloting == null and sb.seated == null;
     const aim_camera = sb.aimCameraPublic(camera.*);
     const f = aim_camera.forward();
     var out: [32]Combat.Event = undefined;
-    const fought = sb.combat.step(&sb.physics, &sb.enemies, sb.progress.weapons, .{
+    const fought = sb.combat.step(0, &sb.physics, &sb.enemies, sb.progress.weapons, .{
         .eye = .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() },
         .forward = .{ f.x(), f.y(), f.z() },
         .feet = sb.player.feet,
@@ -239,22 +240,45 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .alt = armed and sb.trigger.alt,
         .cycle = armed and actions.next_item,
     }, dt, &out);
-    for (out[0..@min(fought, out.len)]) |e| switch (e) {
+    arsenalEvents(sb, 0, out[0..@min(fought, out.len)], camera);
+    for (&sb.guests, 1..) |*g, p| {
+        defer g.next_weapon = false;
+        if (!g.active) continue;
+        const eye = g.player.eye();
+        const gf = g.camera.forward();
+        const n = sb.combat.step(@intCast(p), &sb.physics, &sb.enemies, sb.progress.weapons, .{
+            .eye = .{ eye.x(), eye.y(), eye.z() },
+            .forward = .{ gf.x(), gf.y(), gf.z() },
+            .feet = g.player.feet,
+            .dashing = g.player.motion == .dash or g.player.motion == .roll,
+            .airborne = !g.player.grounded,
+            .fire = g.fire and g.trading == null,
+            .cycle = g.next_weapon and g.trading == null,
+        }, dt, &out);
+        arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
+    }
+}
+
+/// Sounds, warps and Hive outcomes from player `p`'s arsenal.
+fn arsenalEvents(sb: *Sandbox, p: u8, events: []const Combat.Event, camera: *Camera) void {
+    const at: ?V = if (p == 0) null else R.add(sb.guests[p - 1].player.feet, .{ 0, 1.2, 0 });
+    for (events) |e| switch (e) {
         .fired => |w| sb.cue(switch (w) {
             .blaster, .energy_bow => .zap,
             .tracking_missile => .dash,
             .giant_blast => .boom,
             else => .zap,
-        }, null),
-        .slash => sb.cue(.slash, null),
-        .impact => |at| sb.cue(.impact, at),
+        }, at),
+        .slash => sb.cue(.slash, at),
+        .impact => |spot| sb.cue(.impact, spot),
         .parried => sb.cue(.ui_confirm, null),
-        .warp => |at| {
-            sb.cue(.grapple, null);
+        .warp => |to| {
+            sb.cue(.grapple, at);
             // The warp arrow carries the archer to where it struck.
-            sb.player.feet = .{ at[0], at[1] - 0.9, at[2] };
-            sb.player.velocity = .{ 0, 0, 0 };
-            sb.say("warp strike", .{});
+            const player = if (p == 0) &sb.player else &sb.guests[p - 1].player;
+            player.feet = .{ to[0], to[1] - 0.9, to[2] };
+            player.velocity = .{ 0, 0, 0 };
+            if (p == 0) sb.say("warp strike", .{});
         },
         .hive => |h| hive(sb, h, camera),
         else => {},
@@ -328,7 +352,22 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             n += 1;
         }
     }
+    // Troopers are skinned characters (ids 16–23), drawn only near P1 to bound skinning cost.
+    var trooper_id: u8 = 16;
+    for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .trooper) {
+        if (trooper_id >= @import("../character/Ranger.zig").capacity or !room(out, n, 1)) break;
+        const d = R.sub(u.position, sb.player.feet);
+        if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
+        out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = .{ 1, 1, 1, 1 }, .character = .{
+            .profile = trooper_profile,
+            .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t },
+            .id = trooper_id,
+        } };
+        trooper_id += 1;
+        n += 1;
+    };
     for (sb.enemies.units) |slot| if (slot) |u| {
+        if (u.kind == .trooper) continue;
         if (!room(out, n, 2)) break;
         const shell = if (u.kind == .drone) c.drone else c.sentinel;
         const glow = if (u.kind == .drone) c.drone_glow else c.sentinel_glow;
@@ -339,11 +378,11 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         n += 2;
     };
     for (sb.enemies.bolts) |slot| if (slot) |b| if (room(out, n, 1)) {
-        out[n] = .{ .mesh = c.block, .transform = .{ .position = b.position }, .tint = Material.emissive(.{ 1, 0.15, 0.1, 1 }, 1), .size = .{ 0.12, 0.12, 0.9 }, .rotation = facing(b.velocity) };
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = b.position }, .tint = Material.emissive(.{ 1, 0.15, 0.1, 1 }, 1), .size = .{ 0.07, 0.07, 0.6 }, .rotation = facing(b.velocity) };
         n += 1;
     };
     // Player shots and effects.
-    for (sb.combat.system.projectiles.items) |p| if (p.active and room(out, n, 1)) {
+    for (sb.combat.arsenals) |arsenal| for (arsenal.system.projectiles.items) |p| if (p.active and room(out, n, 1)) {
         const color = @import("../combat/Weapon.zig").Element.color(p.element);
         const s = p.radius * 0.8;
         out[n] = .{ .mesh = c.block, .transform = .{ .position = p.position }, .tint = Material.emissive(.{ color[0], color[1], color[2], 1 }, 1), .size = .{ s, s, @max(0.6, s * 3) }, .rotation = facing(p.velocity) };
@@ -361,6 +400,9 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     };
     return n;
 }
+
+/// Hive troopers: dark red heavy plate, sealed helmets, magenta lumen.
+const trooper_profile: @import("Profile.zig") = .{ .outfit = 3, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 2, .skin = 7, .build = 1.1, .height = 1.05 };
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {
     const color = Collectibles.tint(kind);

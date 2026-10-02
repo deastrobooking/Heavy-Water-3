@@ -661,6 +661,8 @@ fn routePads(self: *App) void {
         g.toggle_view = g.toggle_view or cmd.view;
         g.trade_up = g.trade_up or cmd.up;
         g.trade_down = g.trade_down or cmd.down;
+        g.fire = cmd.fire;
+        g.next_weapon = g.next_weapon or cmd.left or cmd.right;
     }
 }
 
@@ -811,8 +813,13 @@ fn guiShowcase(self: *App, v: u32) void {
             self.engine.camera.pitch = 0.12;
             for (0..4) |_| sb.enemies.units[sb.enemies.unitCount(null)] = .{ .kind = .drone, .nest = 0, .position = .{ nest[0] - 15, nest[1] + 12, nest[2] + @as(f32, @floatFromInt(sb.enemies.unitCount(null))) * 4 - 6 }, .health = 60, .orbit = @as(f32, @floatFromInt(sb.enemies.unitCount(null))) };
             sb.enemies.units[5] = .{ .kind = .sentinel, .nest = 0, .position = .{ nest[0] - 8, nest[1] + 18, nest[2] }, .health = 260, .orbit = 0 };
+            for ([_]f32{ -4, 4 }, 6..) |dz, slot| {
+                const x = nest[0] - 22;
+                const z = nest[2] + dz;
+                sb.enemies.units[slot] = .{ .kind = .trooper, .nest = 0, .position = .{ x, @import("procedural/Terrain.zig").surface(sb.seed, x, z).height, z }, .health = 120, .orbit = 0 };
+            }
             sb.progress.weapons = 0b10;
-            sb.combat.active = .blaster;
+            sb.combat.arsenals[0].active = .blaster;
             sb.tools.tool = .weapon;
         },
         32 => {
@@ -1045,7 +1052,7 @@ fn smokeFrontier(self: *App) void {
     var downed = false;
     for (0..60) |k| {
         if (k == 1) aim.fire = false;
-        const n = sb.combat.step(&sb.physics, &sb.enemies, sb.progress.weapons, aim, 1.0 / 60.0, &events);
+        const n = sb.combat.step(0, &sb.physics, &sb.enemies, sb.progress.weapons, aim, 1.0 / 60.0, &events);
         for (events[0..@min(n, events.len)]) |e| if (e == .hive and e.hive == .unit_down) {
             downed = true;
         };

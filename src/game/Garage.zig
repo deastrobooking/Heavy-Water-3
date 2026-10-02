@@ -2,8 +2,8 @@
 //! hover idle there; P1 boards one by clicking it and flies it with the hover flight computer
 //! (`vehicle/hover.zig`), which probes the real world (terrain, decks, Arbors, towers) through
 //! physics ray casts for ride height, skids and walls. The chase camera follows the car and can
-//! be orbited with the mouse; it eases back behind the car while flying. Cars are not saved:
-//! owned designs park on their pads again after a load.
+//! be orbited with the mouse; it eases back behind the car while flying. Saves keep each car's
+//! position and heading; a car without one parks on its pad.
 const std = @import("std");
 const math = @import("mach").math;
 const Physics = @import("../physics/Physics.zig");
@@ -36,6 +36,11 @@ pub fn padPosition(seed: u64, spawn: Physics.Vec3, design: Designs.Design) Physi
 
 /// Parks `design` on its pad (replacing any copy already flying).
 pub fn park(self: *Garage, seed: u64, spawn: Physics.Vec3, catalog: *const Catalog, design: Designs.Design) void {
+    self.place(seed, spawn, catalog, design, null, 0);
+}
+
+/// Puts `design` where it was left (its COM at `at`, facing `yaw`), or on its pad.
+pub fn place(self: *Garage, seed: u64, spawn: Physics.Vec3, catalog: *const Catalog, design: Designs.Design, at: ?Physics.Vec3, yaw: f32) void {
     const i = @intFromEnum(design);
     if (self.piloting == @as(?u8, @intCast(i))) self.piloting = null;
     const asset = catalog.content.cars[i];
@@ -52,7 +57,7 @@ pub fn park(self: *Garage, seed: u64, spawn: Physics.Vec3, catalog: *const Catal
         .ride_height = s.ride_height,
         .skid_depth = com.y,
         .half_length = s.hull.length * 0.5,
-    }, m.Vec3.init(pad[0], pad[1] + com.y + s.ride_height, pad[2]), 0);
+    }, if (at) |p| m.Vec3.init(p[0], p[1], p[2]) else m.Vec3.init(pad[0], pad[1] + com.y + s.ride_height, pad[2]), if (at != null) yaw else 0);
     flyer.ride = 0.6;
     self.cars[i] = .{ .design = design, .flyer = flyer };
 }

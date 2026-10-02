@@ -195,6 +195,9 @@ pub const Guest = struct {
     /// Trade-panel edges from the pad (D-pad up/down; B closes; X confirms via `interact`).
     trade_up: bool = false,
     trade_down: bool = false,
+    /// Right trigger held (fire the party's selected weapon) and a weapon-switch edge (D-pad).
+    fire: bool = false,
+    next_weapon: bool = false,
 };
 /// Where guests appear relative to P1's facing: left, right, and behind.
 const guest_offsets = [_]Physics.Vec3{ .{ -1.6, 0, -0.6 }, .{ 1.6, 0, -0.6 }, .{ 0, 0, -2 } };
@@ -1337,7 +1340,7 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
                         self.say("fabricated and wearing {s} armor", .{name});
                     },
                     .weapon => |w| {
-                        self.combat.active = w;
+                        self.combat.arsenals[0].active = w;
                         self.say("{s} ready: tool 5 to wield", .{name});
                     },
                 }
@@ -1780,6 +1783,14 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .machines = machines[0..machine_count],
         .wallet = self.wallet,
         .progress = try self.progress.toDoc(arena),
+        .cars = cars: {
+            var list: std.ArrayList(Save.CarState) = .empty;
+            for (self.garage.cars) |slot| if (slot) |c| {
+                const p = c.flyer.body.pos;
+                try list.append(arena, .{ .design = c.design, .position = .{ p.x, p.y, p.z }, .yaw = c.flyer.heading() });
+            };
+            break :cars list.items;
+        },
         .mods = mods: {
             const refs = try arena.alloc(Save.ModState, self.mod_count);
             for (refs, self.mods[0..self.mod_count]) |*out, *m| out.* = .{ .name = try arena.dupe(u8, m.name()), .version = try std.fmt.allocPrint(arena, "{d}.{d}.{d}", .{ m.version.major, m.version.minor, m.version.patch }) };
@@ -1912,6 +1923,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.sap_stats = @splat(.{});
     self.tap_links = @splat(@splat(null));
     Frontier.refresh(self);
+    for (doc.cars) |c| if (self.progress.ownsVehicle(c.design)) self.garage.place(self.seed, spawn, self.catalog, c.design, c.position, c.yaw);
 }
 
 pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {
@@ -3251,4 +3263,65 @@ test "blueprint reload preserves open door state and local edits, rejects layout
     sb.refreshCrateGeometry();
     try std.testing.expectEqual(pos, sb.physics.position(sb.crates[0]).?);
     for (half, sb.physics.halfExtents(sb.crates[0]).?) |x, y| try std.testing.expectApproxEqAbs(x * 2, y, 0.001);
+}
+
+test "hover cars stay where they were left across a save, and pickups stay collected" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.progress.vehicles = 1 << @intFromEnum(@import("../vehicle/Designs.zig").Design.skimmer);
+    Frontier.refresh(&sb);
+    try std.testing.expect(sb.garage.cars[0] != null and sb.garage.cars[1] == null);
+    // Move it far from its pad and turn it.
+    const moved: Physics.Vec3 = .{ 30, 40, 60 };
+    sb.garage.place(sb.seed, spawn, sb.catalog, .skimmer, moved, 1.2);
+    // Collect the first pickup.
+    sb.progress.picked.set(0);
+    const bytes = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sb.garage = .{};
+    sb.progress.picked = .initEmpty();
+    try sb.restore(std.testing.allocator, bytes, &camera);
+    const car = sb.garage.cars[0].?.flyer;
+    try std.testing.expectApproxEqAbs(moved[0], car.body.pos.x, 1e-3);
+    try std.testing.expectApproxEqAbs(moved[2], car.body.pos.z, 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.2), car.heading(), 1e-3);
+    try std.testing.expect(sb.progress.picked.isSet(0));
+    try std.testing.expect(sb.garage.cars[1] == null);
+}
+
+test "a guest fires the party's blaster with the trigger and downs a drone" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.joinGuest(0);
+    sb.progress.weapons = 1 << @intFromEnum(@import("../combat/Weapon.zig").WeaponKind.blaster);
+    try run(&sb, &camera, .{}, .{}, 30);
+    const g = &sb.guests[0];
+    // Aim level so the drone stands in open air, not under the slope ahead.
+    g.camera.pitch = 0;
+    const eye = g.player.eye();
+    const f = g.camera.forward();
+    // A weak drone 4 m along the guest's aim (clear of the crate row beside the spawn).
+    sb.enemies.units[0] = .{ .kind = .drone, .nest = 0, .position = .{ eye.x() + f.x() * 4, eye.y() + f.y() * 4, eye.z() + f.z() * 4 }, .health = 10, .orbit = 0 };
+    g.fire = true;
+    try run(&sb, &camera, .{}, .{}, 1);
+    g.fire = false;
+    var downed = false;
+    for (0..30) |_| {
+        // Hold the drone still in front of the guest; only the shot matters here.
+        if (sb.enemies.units[0]) |*u| {
+            u.position = .{ eye.x() + f.x() * 4, eye.y() + f.y() * 4, eye.z() + f.z() * 4 };
+            u.velocity = @splat(0);
+        } else downed = true;
+        try run(&sb, &camera, .{}, .{}, 1);
+    }
+    try std.testing.expect(downed or sb.enemies.units[0] == null);
+    try std.testing.expectEqual(@as(?@import("../combat/Weapon.zig").WeaponKind, .blaster), sb.combat.arsenals[1].active);
 }

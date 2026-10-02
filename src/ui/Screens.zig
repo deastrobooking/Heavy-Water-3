@@ -239,7 +239,7 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     // Vitals, bottom left (hidden under conversation and shop panels).
     if (sb.seated == null and !panels) {
         vitals(c, v, sb.player, sb.profile, sb.combat.vitals[0]);
-        weaponLine(c, v, sb);
+        if (sb.tools.tool == .weapon) weaponLine(c, v, sb, 0);
     }
     // Wallet and clock, top right.
     {
@@ -285,14 +285,14 @@ fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profil
 }
 
 /// The selected weapon and its charge, above the vitals (weapon tool only).
-fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox) void {
-    if (sb.tools.tool != .weapon) return;
+fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8) void {
     const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 142, .w = 250, .h = 26 };
     c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
     var buffer: [24]u8 = undefined;
-    const name = if (sb.combat.active) |w| pretty(&buffer, @tagName(w)) else "NO WEAPON";
+    const arsenal = &sb.combat.arsenals[player];
+    const name = if (arsenal.active) |w| pretty(&buffer, @tagName(w)) else "NO WEAPON";
     c.text(r.x + 14, r.y + 9, name, 1, gold);
-    bar(c, .{ .x = r.x + 160, .y = r.y + 10, .w = 76, .h = 6 }, sb.combat.charge(), gold);
+    bar(c, .{ .x = r.x + 160, .y = r.y + 10, .w = 76, .h = 6 }, arsenal.charge(), gold);
 }
 
 fn prompt(c: *Canvas, v: Rect, text: []const u8, tint: Color) void {
@@ -312,6 +312,7 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const v = guest.view;
     const tint = Profile.accent_colors[g.profile.accent];
     vitals(c, v, g.player, g.profile, sb.combat.vitals[guest.index + 1]);
+    if (sb.progress.weapons != 0) weaponLine(c, v, sb, guest.index + 1);
     const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
     const w = @min(v.w - 40, 460);
     const h = 84 + @as(f32, Sandbox.trade_rows) * 26;

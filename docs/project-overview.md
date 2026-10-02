@@ -70,7 +70,8 @@ Up to four players share one window in split screen. On macOS, supported extende
 | A | Jump |
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
 | X | Press the aimed button or open a stall; hold to hang and mantle |
-| D-pad | Choose a market stall row (P1: navigate any menu or panel) |
+| D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons |
+| Right trigger | Fire the party's selected weapon (hold to charge or draw) |
 | Menu (P1's controller) | Open or close the pause menu |
 | Y | First- / third-person view |
 | LB / RB | Grapple / cycle traversal kit |

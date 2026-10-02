@@ -87,11 +87,12 @@ Acceptance:
 - **Gameplay tests:** pickups collected once, recipes paid exactly, nests that wake, spawn, hunt, shoot and fall, and shots that destroy drones. The saber cuts only in front, and the shield absorbs.
 - **Smoke:** fabricates a car and a blaster through the panel, flies the car, and downs a drone, under Metal validation.
 
+Since then: guests carry the party's weapons on their controllers, saves keep car positions, and Hive troopers on foot join each nest.
+
 Next:
-- guests' weapons and conversations;
-- saved car positions;
-- Hive troopers on foot (character generator) and nest assault events;
-- texture/material polish and engine sounds for the cars.
+- guests' conversations and car piloting;
+- nest assault events and a Hive progression across the map;
+- texture and material polish for the cars.
 
 ## Traversal and local co-op — implemented
 
