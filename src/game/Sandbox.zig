@@ -1702,7 +1702,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     for (0..Market.stall_count) |i| if (n < out.len) {
         const stall = self.stallPosition(i);
         const plaza = self.catalog.district.nodes[Market.stall_plazas[i]].position;
-        const keeper: Profile = .{ .outfit = @intCast((i * 3 + 1) % Profile.outfit_colors.len), .accent = @intCast((i + 1) % Profile.accent_colors.len), .hair_style = @enumFromInt(i % 5), .skin = @intCast((i * 3) % Profile.skin_tones.len) };
+        const keeper: Profile = .{ .presentation = if (i % 2 == 0) .masculine else .feminine, .outfit = @intCast((i * 3 + 1) % Profile.outfit_colors.len), .accent = @intCast((i + 1) % Profile.accent_colors.len), .hair_style = @enumFromInt(i % 5), .skin = @intCast((i * 3) % Profile.skin_tones.len) };
         const toward = R.sub(plaza, stall);
         const keeper_index = n;
         n += Avatar.build(keeper, .{ .feet = self.keeperPosition(i), .yaw = std.math.atan2(toward[0], toward[2]) }, self.catalog.content.block, out[n..]);

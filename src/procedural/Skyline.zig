@@ -37,11 +37,11 @@ pub const Building = struct {
     }
 };
 
-const palettes = [_]struct { body: V, band: V, fin: V }{
-    .{ .body = .{ 0.20, 0.33, 0.38 }, .band = .{ 0.78, 0.82, 0.80 }, .fin = .{ 0.55, 0.62, 0.66 } },
-    .{ .body = .{ 0.46, 0.30, 0.22 }, .band = .{ 0.20, 0.17, 0.15 }, .fin = .{ 0.72, 0.52, 0.32 } },
-    .{ .body = .{ 0.82, 0.84, 0.82 }, .band = .{ 0.30, 0.60, 0.64 }, .fin = .{ 0.40, 0.74, 0.78 } },
-    .{ .body = .{ 0.26, 0.28, 0.34 }, .band = .{ 0.60, 0.64, 0.70 }, .fin = .{ 0.85, 0.55, 0.30 } },
+const palettes = [_]struct { body: V, band: V, fin: V, glass: V }{
+    .{ .body = .{ 0.20, 0.33, 0.38 }, .band = .{ 0.78, 0.82, 0.80 }, .fin = .{ 0.55, 0.62, 0.66 }, .glass = .{ 0.22, 0.59, 0.66 } },
+    .{ .body = .{ 0.46, 0.30, 0.22 }, .band = .{ 0.20, 0.17, 0.15 }, .fin = .{ 0.72, 0.52, 0.32 }, .glass = .{ 0.30, 0.58, 0.62 } },
+    .{ .body = .{ 0.82, 0.84, 0.82 }, .band = .{ 0.30, 0.60, 0.64 }, .fin = .{ 0.40, 0.74, 0.78 }, .glass = .{ 0.23, 0.64, 0.72 } },
+    .{ .body = .{ 0.26, 0.28, 0.34 }, .band = .{ 0.60, 0.64, 0.70 }, .fin = .{ 0.85, 0.55, 0.30 }, .glass = .{ 0.24, 0.51, 0.62 } },
 };
 
 fn planar(a: V, b: V) f32 {
@@ -160,7 +160,7 @@ pub fn generate(layout: *District.Layout) void {
     layout.building_count = n;
 }
 
-/// Setback tiers, floor bands, corner fins, a crown, a spire, and (beside a plaza) the sky lobby.
+/// Setback tiers, inset glass bays, floor bands, crown ribs, a light-catching dome, and a spire.
 pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void {
     const p = palettes[b.palette];
     var bottom = b.base[1] - 2;
@@ -169,6 +169,16 @@ pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void
         const top = if (k + 1 == b.tiers) b.roof else bottom + (b.roof - bottom) * (0.55 + 0.1 * @as(f32, @floatFromInt(k)));
         const height = top - bottom;
         try out.add(.{ .center = .{ b.base[0], bottom + height / 2, b.base[2] }, .size = .{ half[0] * 2, height, half[1] * 2 }, .color = p.body });
+        // Narrow, inset glass bays break up the old blank box facades. Repeating three calm
+        // vertical ribbons on each face keeps the tower legible from the ground and distant hills.
+        const bay_w = @min(1.5, half[0] * 0.22);
+        const bay_h = @max(2, height - 4);
+        for ([_]f32{ -0.58, 0, 0.58 }) |u| {
+            try out.add(.{ .center = .{ b.base[0] + u * half[0], bottom + height / 2, b.base[2] + half[1] + 0.12 }, .size = .{ bay_w, bay_h, 0.18 }, .color = p.glass, .solid = false });
+            try out.add(.{ .center = .{ b.base[0] + u * half[0], bottom + height / 2, b.base[2] - half[1] - 0.12 }, .size = .{ bay_w, bay_h, 0.18 }, .color = p.glass, .solid = false });
+            try out.add(.{ .center = .{ b.base[0] + half[0] + 0.12, bottom + height / 2, b.base[2] + u * half[1] }, .size = .{ 0.18, bay_h, bay_w }, .color = p.glass, .solid = false });
+            try out.add(.{ .center = .{ b.base[0] - half[0] - 0.12, bottom + height / 2, b.base[2] + u * half[1] }, .size = .{ 0.18, bay_h, bay_w }, .color = p.glass, .solid = false });
+        }
         // Floor bands, at most 14 per tier.
         const spacing = @max(7, height / 14);
         var y = bottom + spacing;
@@ -180,8 +190,25 @@ pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void
         bottom = top;
         half = .{ half[0] * 0.72, half[1] * 0.72 };
     }
-    // Crown and spire.
+    // Layer a shallow, faceted dome above the crown. Its open ribs preserve the sky through the
+    // structure and read as an observatory crown instead of another solid cube.
     try out.add(.{ .center = .{ b.base[0], b.roof + 2.5, b.base[2] }, .size = .{ half[0] * 1.2, 4, half[1] * 1.2 }, .color = p.fin });
+    const dome_r = @min(half[0], half[1]) * 0.44;
+    var lower: [3]f32 = .{ b.base[0], b.roof + 4.6, b.base[2] };
+    var upper: [3]f32 = .{ b.base[0], b.roof + 13, b.base[2] };
+    for (0..12) |i| {
+        const a0 = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 12;
+        const a1 = @as(f32, @floatFromInt(i + 1)) * 2 * std.math.pi / 12;
+        lower[0] = b.base[0] + @cos(a0) * dome_r;
+        lower[1] = b.roof + 4.6;
+        lower[2] = b.base[2] + @sin(a0) * dome_r;
+        upper[0] = b.base[0] + @cos(a1) * dome_r;
+        upper[1] = b.roof + 4.6;
+        upper[2] = b.base[2] + @sin(a1) * dome_r;
+        try Bridges.beam(out, lower, upper, 0.62, p.glass, false);
+        const apex: V = .{ b.base[0], b.roof + 12.5, b.base[2] };
+        try Bridges.beam(out, lower, apex, 0.48, p.fin, false);
+    }
     try Bridges.beam(out, .{ b.base[0], b.roof + 4, b.base[2] }, b.beacon(), 0.8, p.band, true);
     if (b.plaza) |i| {
         // Sky lobby: a walkable deck from the plaza edge to the tower at plaza level.
@@ -229,6 +256,11 @@ test "the skyline is seeded, plentiful, and clear of roads, bridge routes, plaza
             beside += @intFromBool(b.plaza != null);
         }
         try std.testing.expect(beside >= 2);
+        var facade: District.CityParts = .{};
+        try geometry(&layout, layout.buildings[0], &facade);
+        var glass_parts: usize = 0;
+        for (facade.slice()) |part| glass_parts += @intFromBool(std.meta.eql(part.color, palettes[layout.buildings[0].palette].glass));
+        try std.testing.expect(glass_parts >= 12);
         try std.testing.expectEqualDeep(layout, try District.generate(seed));
         // Every documented bridge route stays buildable.
         try District.validate(&layout, &.{.{ .a = 0, .b = 3 }});

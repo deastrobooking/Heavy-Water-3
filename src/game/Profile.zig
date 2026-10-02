@@ -22,15 +22,17 @@ pub const accent_colors = [_][4]f32{
     .{ 0.30, 0.95, 1.00, 1 }, .{ 1.00, 0.72, 0.25, 1 }, .{ 1.00, 0.40, 0.85, 1 }, .{ 0.60, 1.00, 0.35, 1 }, .{ 0.95, 0.95, 1.00, 1 },
 };
 pub const HairStyle = enum { short, ponytail, long, crest, hood };
+pub const Presentation = enum { masculine, feminine };
 /// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
 /// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
 pub const Armor = enum { none, scout, sentinel, rootweave, skyguard };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
+pub const Field = enum { name, presentation, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
+presentation: Presentation = .masculine,
 /// Relative to the 1.8 m reference: 0.9–1.1.
 height: f32 = 1,
 /// Shoulder and limb width: 0.85–1.15.
@@ -78,6 +80,7 @@ pub fn backspace(self: *Profile) void {
 pub fn adjust(self: *Profile, field: Field, delta: i32) void {
     switch (field) {
         .name => {},
+        .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, @typeInfo(Presentation).@"enum".fields.len)),
         .height => self.height = std.math.clamp(self.height + @as(f32, @floatFromInt(delta)) * 0.02, 0.9, 1.1),
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
         .skin => self.skin = cycle(self.skin, delta, skin_tones.len),
@@ -99,6 +102,7 @@ fn cycle(value: anytype, delta: i32, count: usize) @TypeOf(value) {
 /// JSON shape stored in saves.
 pub const Doc = struct {
     name: []const u8,
+    presentation: Presentation = .masculine,
     height: f32,
     build: f32,
     skin: u8,
@@ -112,7 +116,7 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
+    return .{ .name = self.name(), .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -122,6 +126,7 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
     result.height = doc.height;
     result.build = doc.build;
+    result.presentation = doc.presentation;
     result.skin = doc.skin;
     result.hair_style = doc.hair_style;
     result.hair_color = doc.hair_color;
@@ -155,11 +160,17 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     try std.testing.expectEqual(@as(u8, 7), p.skin);
     p.adjust(.hair_style, -1);
     try std.testing.expectEqual(HairStyle.hood, p.hair_style);
+    p.adjust(.presentation, 1);
+    try std.testing.expectEqual(Presentation.feminine, p.presentation);
     for (0..20) |_| p.adjust(.height, 1);
     try std.testing.expectEqual(@as(f32, 1.1), p.height);
 
     const back = try fromDoc(p.toDoc());
     try std.testing.expectEqualDeep(p, back);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const legacy = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0}", .{});
+    try std.testing.expectEqual(Presentation.masculine, legacy.value.presentation);
     var bad = p.toDoc();
     bad.accent = accent_colors.len;
     try std.testing.expectError(error.InvalidProfile, fromDoc(bad));

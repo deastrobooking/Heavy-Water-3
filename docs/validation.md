@@ -410,5 +410,10 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 ## Ground flora and canopy trees
 
 - Scatter remains deterministic by seed, chunk and candidate ID. Generator version 3 adds sparse broadleaf, needleleaf and willow trees among grass, ferns and wildflowers. Each streamed chunk groups the new forms into instanced mesh draws; slope filters, biome thinning and stable removal IDs remain in place.
-- Mesh-generation tests check the three ground-plant forms, shared trunk, and distinct canopy silhouettes; deterministic scatter coverage finds all six species across a fixed 100-chunk sample. `python3 tools/zig.py build test check -Doptimize=ReleaseSafe --summary all` passed **272/272 tests** and the application compile check.
-- `caffeinate -d -u -t 60 python3 tools/zig.py build run -Dsmoke-frames=180 -Dcapture-frame=100 -Dcharacter-showcase=2 -Doptimize=ReleaseSafe` completed on Apple M3 Pro. Smoke logs confirmed four-player split-screen, streamed chunks, save round-trip, and generator version 3; frame 100 was captured at 2560×1600. The screenshot also confirms the current district scene and four-player character rendering.
+- Mesh-generation tests check the three ground-plant forms, shared trunk, and distinct canopy silhouettes; deterministic scatter coverage finds all six species across a fixed 100-chunk sample. `python3 tools/zig.py build test check -Doptimize=ReleaseSafe --summary all` passed **273/273 tests** and the application compile check.
+- `caffeinate -d -u -t 60 python3 tools/zig.py build run -Dsmoke-frames=180 -Dcapture-frame=100 -Dcharacter-showcase=4 -Doptimize=ReleaseSafe` completed on Apple M3 Pro. Smoke logs confirmed four-player split-screen, streamed chunks, save round-trip, and generator version 3; frame 100 was captured at 2560×1600.
+
+## Faces and skyline architecture
+
+- Ranger profiles now select masculine or feminine presentation in the creator. The game bakes analytic eye, iris, brow, and mouth decals into a denser face mesh, while head and body proportions vary with the selected presentation. Legacy profile JSON without the new field defaults to masculine.
+- Skyline towers add inset glass bays and open observatory crowns. District generator version 3 records the updated architecture rules. Tests assert glass detailing, deterministic placement, and district clearance. The ReleaseSafe 273-test run and four-player runtime smoke above passed with this upgrade.

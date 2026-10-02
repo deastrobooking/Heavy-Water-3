@@ -349,13 +349,11 @@ const HeadCtx = struct {
     }
 };
 
-fn buildHead(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks) !void {
+fn headContext(spec: CharacterSpec, lm: Landmarks) HeadCtx {
     const H = lm.H;
     const half = lm.head_half_width;
     const jaw = spec.body.jaw_sharpness;
-    const y0 = lm.chin_y + 0.08 * H;
-    const y1 = lm.chin_y + 0.72 * H;
-    var ctx: HeadCtx = .{
+    return .{
         .chin_y = lm.chin_y,
         .H = H,
         .half = half,
@@ -363,17 +361,24 @@ fn buildHead(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks) !v
         .a = .{ m.lerp(0.16, 0.10, jaw) * H, half * m.lerp(0.74, 0.56, jaw), half * 0.92, half, half * 1.02, half, half * 0.9 },
         .b = .{ 0.09 * H, 0.32 * H, 0.42 * H, 0.46 * H, 0.48 * H, 0.48 * H, 0.45 * H },
         .z = .{ 0.20 * H, 0.10 * H, 0.04 * H, 0.0, -0.02 * H, -0.03 * H, -0.04 * H },
-        .y0 = y0,
-        .y1 = y1,
+        .y0 = lm.chin_y + 0.08 * H,
+        .y1 = lm.chin_y + 0.72 * H,
     };
-    _ = &ctx;
-    const rows = spec.res(22, 8);
+}
+
+fn buildHead(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks) !void {
+    const ctx = headContext(spec, lm);
+    const y0 = ctx.y0;
+    const y1 = ctx.y1;
+    // Face features are baked from this UV field into game vertex colors. Keep the facial
+    // silhouette smooth and the UV grid dense enough for eyes and mouth to survive at distance.
+    const rows = spec.res(96, 48);
     const pts = try gpa.alloc(Vec3, rows);
     defer gpa.free(pts);
     for (pts, 0..) |*p, i| p.* = Vec3.init(0, m.lerp(y0, y1, @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(rows - 1))), 0);
     const top = ctx.section(1);
     _ = try loft_mod.loft(gpa, mesh, pts, .{
-        .cols = spec.res(36, 10),
+        .cols = spec.res(144, 64),
         .ref_normal = Vec3.unit_x.neg(),
         .region = .head,
         .cap_start = .dome,

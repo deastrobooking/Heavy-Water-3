@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const options = b.addOptions();
-    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1 scout, 2 sentinel, 3 unarmored; front view for capture") orelse 0);
+    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1 scout, 2 sentinel, 3 unarmored masculine, 4 unarmored feminine") orelse 0);
     options.addOption(bool, "hot_reload", b.option(bool, "hot-reload", "Watch model, blueprint and mod script sources during development") orelse false);
     options.addOption(bool, "reload_smoke", b.option(bool, "reload-smoke", "Exercise model reload using an isolated source fixture") orelse false);
     options.addOption(u64, "seed", b.option(u64, "seed", "World seed") orelse 0x4845415659);

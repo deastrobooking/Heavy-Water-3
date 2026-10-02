@@ -8,6 +8,7 @@ const spec = @import("spec.zig");
 const sk = @import("skeleton.zig");
 const cm = @import("mesh.zig");
 const m = @import("math.zig");
+const toon = @import("toon.zig");
 const Mesh = @import("../render/Mesh.zig");
 const V = m.Vec3;
 const Q = m.Quat;
@@ -28,10 +29,11 @@ fn rgb(c: [4]f32, factor: f32) spec.Rgb {
 pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     var garments: [16]spec.GarmentSpec = undefined;
     const outfit_len = outfit(profile, &garments);
+    const feminine = profile.presentation == .feminine;
     var ch = try gen.Character.build(a, .{
-        .body = .{ .height = 1.8 * profile.height, .head_ratio = 7.5, .femininity = 0.3, .bust = 0.12, .shoulder_width = 1.10 * profile.build, .waist_width = 1.12 * profile.build, .hip_width = profile.build, .limb_thickness = 1.1 * profile.build, .head_width = 0.78, .jaw_sharpness = 0.4 },
+        .body = .{ .height = 1.8 * profile.height, .head_ratio = 7.5, .femininity = if (feminine) 0.84 else 0.18, .bust = if (feminine) 0.24 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * profile.build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * profile.build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * profile.build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * profile.build, .head_width = if (feminine) 0.80 else 0.83, .jaw_sharpness = if (feminine) 0.65 else 0.28 },
         .skin = rgb(Profile.skin_tones[profile.skin], 1),
-        .eyes = .{ .size = 0.15, .aspect = 0.55 },
+        .eyes = .{ .size = if (feminine) 0.18 else 0.15, .aspect = if (feminine) 0.82 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = spec.Rgb.hex(0x213946), .pupil_size = if (feminine) 0.35 else 0.31, .highlight_count = 1 },
         .hair = .{ .style = switch (profile.hair_style) {
             .short, .crest => .short_spiky,
             .ponytail => .twin_tails,
@@ -52,7 +54,13 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     const indices = try a.dupe(u32, ch.mesh.indices.items);
     var self: Ranger = .{ .character = ch, .instance = inst, .mesh = .{ .vertices = vertices, .indices = indices }, .profile = profile };
     for (self.mesh.vertices, self.character.mesh.vertices.items, self.character.color_index.items) |*v, source, color| {
-        const c = self.character.palette.items[color];
+        var c = self.character.palette.items[color];
+        if (source.region == .face and source.uv.x >= 0 and source.uv.y >= 0) {
+            const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = if (feminine) 0.38 else 0.12 }, 0.008);
+            if (decal.alpha > 0) c = toon.mix(c, decal.color, decal.alpha);
+        }
+        // Face UVs drive the CPU decal bake above; game characters use a neutral renderer UV so
+        // the world checker texture is not sampled across skin and facial colors.
         v.* = .{ .position = .{ source.pos.x, source.pos.y, source.pos.z }, .normal = .{ source.normal.x, source.normal.y, source.normal.z }, .uv = .{ 0, 0 }, .color = .{ c.r, c.g, c.b } };
     }
     self.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0 });
@@ -212,13 +220,6 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         else => spec.Rgb.hex(0x71868e),
     };
     const accent = rgb(Profile.accent_colors[p.accent], 1.2);
-    // Face details have actual geometry, including eye whites, irises and brows.
-    for ([_]f32{ -1, 1 }) |side| {
-        const eye = V.init(side * lm.head_half_width * 0.42, lm.chin_y + 0.46 * lm.H, 0.43 * lm.H);
-        try plate(a, ch, .head, eye, V.init(0.026 * h, 0.012 * h, 0.009 * h), spec.Rgb.hex(0xe2ddd1));
-        try plate(a, ch, .head, eye.add(V.init(0, 0, 0.009 * h)), V.init(0.008 * h, 0.009 * h, 0.003 * h), spec.Rgb.hex(0x183e48));
-        try plate(a, ch, .head, eye.add(V.init(0, 0.021 * h, -0.001 * h)), V.init(0.030 * h, 0.004 * h, 0.009 * h), rgb(Profile.hair_colors[p.hair_color], 0.5));
-    }
     // Belt, boot cuffs and wrist seals bridge fabric transitions.
     try plate(a, ch, .hips, V.init(0, lm.waist_y - 0.08 * h, 0), V.init(lm.waist_half_width + 0.035, 0.035 * h, lm.waist_half_depth + 0.028), dark);
     if (p.clothing == .field_jacket) {
@@ -329,6 +330,34 @@ test "ranger meshes are smooth, layered, weighted and animate without allocation
     for (sealed.character.mesh.indices.items) |i| try std.testing.expect(sealed.character.mesh.vertices.items[i].material != .hair);
 }
 
+test "masculine and feminine ranger faces have fitted feature meshes and distinct proportions" {
+    const a = std.testing.allocator;
+    var masc = try init(a, .{ .armor = .none, .helmet = .open, .presentation = .masculine });
+    defer masc.deinit(a);
+    var fem = try init(a, .{ .armor = .none, .helmet = .open, .presentation = .feminine });
+    defer fem.deinit(a);
+    try std.testing.expectEqual(@as(f32, 0.18), masc.character.spec.body.femininity);
+    try std.testing.expectEqual(@as(f32, 0.84), fem.character.spec.body.femininity);
+    try std.testing.expect(!Ranger.sameAppearance(masc.profile, fem.profile));
+    try std.testing.expect(masc.character.spec.body.jaw_sharpness != fem.character.spec.body.jaw_sharpness);
+    try std.testing.expect(masc.character.spec.body.head_width != fem.character.spec.body.head_width);
+    try std.testing.expect(masc.character.spec.eyes.size != fem.character.spec.eyes.size);
+    const male_eye = toon.faceDecal(.{ .x = 0.5 + masc.character.spec.eyes.spacing, .y = masc.character.spec.eyes.height }, masc.character.spec.eyes, .{}, 0.01);
+    const female_eye = toon.faceDecal(.{ .x = 0.5 + fem.character.spec.eyes.spacing, .y = fem.character.spec.eyes.height }, fem.character.spec.eyes, .{}, 0.01);
+    try std.testing.expect(male_eye.alpha > 0.99 and female_eye.alpha > 0.99);
+    for ([_]Ranger{ masc, fem }) |ranger| {
+        var face_front: f32 = 0;
+        var face_count: usize = 0;
+        for (ranger.mesh.vertices, ranger.character.mesh.vertices.items) |vertex, source| {
+            try std.testing.expectEqual([2]f32{ 0, 0 }, vertex.uv);
+            if (source.region != .face) continue;
+            face_front += vertex.normal[2];
+            face_count += 1;
+        }
+        try std.testing.expect(face_front / @as(f32, @floatFromInt(face_count)) > 0.25);
+    }
+}
+
 test "armor suits are rigid, segmented plates that never stretch and grow with the suit" {
     const a = std.testing.allocator;
     var counts: [5]usize = undefined;
@@ -385,7 +414,7 @@ test "visor wraps around the face and field jacket adds modeled utility details"
     defer visor.deinit(a);
     var open = try init(a, .{ .clothing = .field_jacket, .helmet = .open, .armor = .none });
     defer open.deinit(a);
-    var undersuit = try init(a, .{ .clothing = .undersuit, .helmet = .open, .armor = .none });
+    var undersuit = try init(a, .{ .clothing = .undersuit, .helmet = .visor, .armor = .none });
     defer undersuit.deinit(a);
 
     const center_y = visor.character.landmarks.chin_y + 0.47 * visor.character.landmarks.H;

@@ -126,9 +126,10 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.importPrefabs();
     self.loadMods();
     if (options.character_showcase > 0) {
+        self.sandbox.profile.presentation = if (options.character_showcase == 4) .feminine else .masculine;
         self.sandbox.profile.armor = switch (options.character_showcase) {
             2 => .sentinel,
-            3 => .none,
+            3, 4 => .none,
             else => .scout,
         };
         self.sandbox.profile.helmet = if (options.character_showcase == 2) .sealed else .open;

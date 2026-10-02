@@ -8,8 +8,8 @@ const Seed = @import("Seed.zig");
 const Terrain = @import("Terrain.zig");
 const TestArbor = @import("TestArbor.zig");
 const V = R.Vec3;
-/// v2: styled steel bridges on braced piers, plaza braces, and the skyscraper skyline.
-pub const generator_version: u32 = 2;
+/// v3: glass-bay facades and open observatory crowns on the seeded skyline.
+pub const generator_version: u32 = 3;
 const Bridges = @import("Bridges.zig");
 const Skyline = @import("Skyline.zig");
 pub const Building = Skyline.Building;
