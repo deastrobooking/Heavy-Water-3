@@ -77,6 +77,18 @@ A customizable, nameable ranger-engineer: the creator on a new game (F4 any time
 
 A resolution-independent GUI canvas replaces the text panels: title and pause menus, settings saved to `saves/settings.json`, controls, a graphical HUD, customization with palette swatches, a market shop, the tinker's suit upgrades and armor wardrobe, and branching data-driven conversations with the three keepers and pedestrians. Keyboard, mouse and P1's controller all navigate. Suit upgrades, owned suits and story flags save with the world. Acceptance: headless tests cover menu navigation, settings clamping, dialogue validation, flag-gated branches and one-time gifts, upgrade and suit purchases that change nothing on failure, the Sandbox stall-greeting flow, and every screen laid out inside the window. A Metal smoke drives pause → settings → resume and a conversation into the upgrade panel. Captures (`-Dshowcase=18..28`) cover each screen. Guests' split views have their own HUD and stall panel, and all 32 gameplay keys can be rebound. Audio is in: Mach `sysaudio` output, a lock-free native mixer, 17 synthesized sounds and loops, a director that turns gameplay, UI and dialogue into sound with guests placed in stereo, and four volume settings. Next: authored audio assets (an `audio` asset kind and streamed music), reverb and occlusion, and conversations and tinker panels for guests.
 
+## Flight: the Kestrel and the air war — implemented
+
+The fabricable Kestrel VTOL fighter flies with wing aerodynamics, lift jets, and mouse-aim fly-by-wire. Two Brood carriers circle beyond the Hive nests, launching wasp fighters that dogfight with lead pursuit and strafe rangers on foot. Cannons and lock-on missiles, flak, carrier weak points and caches, a flight HUD with lock reticle, and turbine sounds complete it. Acceptance:
+- **Flight tests:** vertical takeoff and resting on the gear; wingborne cruise at a small angle of attack with a capped top speed; turning to the aim and leveling; climbing on afterburner; crash damage; the hover-to-flight transition.
+- **Air war tests:** carriers launching wasps that attack and hit the jet; flak; cannons downing a wasp; a locked missile damaging a carrier.
+- **Smoke:** fabricates the Kestrel, lifts off, and downs a wasp.
+
+Next:
+- collisions between the jet and ships;
+- carrier boarding and assault events;
+- the Kestrel's upgrades and paint.
+
 ## Frontier: vehicles, pickups, the Hive and weapons — implemented
 
 Hover cars built by your generator (`src/vehicle/`) fly on momentum-theory fans with a ride-height flight computer, and three designs are fabricable. 62 seeded pickups (lumen shards, rotor cores, Hive alloy, vital cells) feed a fabricator for cars, suits, armor accents and weapons. Three Hive nests in new outskirts send drones and sentinels that patrol, hunt with line of sight, and shoot back. The `combat/` weapons are connected through a weapon tool, and players have health and respawns.

@@ -41,6 +41,8 @@ const Enemies = @import("Enemies.zig");
 const Combat = @import("Combat.zig");
 const Fabricator = @import("Fabricator.zig");
 const Frontier = @import("Frontier.zig");
+const Hangar = @import("Hangar.zig");
+const Skies = @import("Skies.zig");
 /// `closing`: removed from the road graph, standing until the traffic on it has crossed.
 pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
@@ -83,14 +85,20 @@ pub const Target = union(enum) {
     car: u8,
     /// The fabricator kiosk at the garage.
     fabricator,
+    /// The parked Kestrel fighter.
+    jet,
 };
 /// Panels the tinker opens from a conversation: suit upgrades or the armor wardrobe.
 /// A sound for the application to play, placed in the world when it has a position.
 pub const Cue = struct { sound: @import("../audio/Synth.zig").Sound, position: ?Physics.Vec3 = null, pitch: f32 = 1 };
 
 pub fn cue(self: *Sandbox, sound: @import("../audio/Synth.zig").Sound, position: ?Physics.Vec3) void {
+    self.cuePitch(sound, position, 1);
+}
+
+pub fn cuePitch(self: *Sandbox, sound: @import("../audio/Synth.zig").Sound, position: ?Physics.Vec3, pitch: f32) void {
     if (self.cue_count == self.cues.len) return;
-    self.cues[self.cue_count] = .{ .sound = sound, .position = position };
+    self.cues[self.cue_count] = .{ .sound = sound, .position = position, .pitch = pitch };
     self.cue_count += 1;
 }
 
@@ -122,6 +130,8 @@ pub const Actions = packed struct {
     open_creator: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges.
     select_tool: u3 = 0,
+    /// Climb out of the Kestrel (its primary button fires).
+    leave_jet: bool = false,
 };
 const NearbyChunk = struct { key: Key, count: usize, objects: [Scatter.capacity]Scatter.Object };
 /// A machine slot: its own editable blueprint copy, runtime, placement, and bodies.
@@ -248,6 +258,9 @@ talk: ?Dialogue.Session = null,
 shop: ?Shop = null,
 /// Hover cars, pickups, the Hive and P1's arsenal (see `Frontier.zig`).
 garage: Garage = .{},
+/// The Kestrel fighter and the air war (see `Hangar.zig`, `Skies.zig`).
+hangar: Hangar = .{},
+skies: Skies = .{},
 collectibles: Collectibles = .{},
 enemies: Enemies = .{},
 combat: Combat = .{},
@@ -745,7 +758,7 @@ fn aimCamera(self: *const Sandbox, camera: Camera) Camera {
 
 /// The avatar is drawn in third person, the creator, conversations and the wardrobe, on foot only.
 pub fn bodyShown(self: *const Sandbox) bool {
-    return self.seated == null and self.garage.piloting == null and self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen());
+    return self.seated == null and self.garage.piloting == null and !self.hangar.piloting and self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen());
 }
 
 /// The wardrobe shows the character from the front, like the creator.
@@ -844,7 +857,7 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     const actions: Actions = if (frozen) .{} else raw_actions;
     if (self.creator.open) camera.yaw = self.body_yaw;
     if (actions.reset) self.resetPlayer(camera);
-    const riding = self.seated != null or self.garage.piloting != null;
+    const riding = self.seated != null or self.garage.piloting != null or self.hangar.piloting;
     if (actions.toggle_mode and !riding) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
     if (actions.select_tool != 0 and !riding) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
     var primary = actions.interact;
@@ -856,7 +869,12 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
         if (primary) Frontier.leave(self, camera);
         primary = false;
     }
-    if (self.seated == null and self.garage.piloting == null) self.player.step(&self.physics, camera, input, dt);
+    // In the Kestrel the primary button fires; climbing out is its own action (F).
+    if (self.hangar.piloting) {
+        if (actions.leave_jet) Frontier.leaveJet(self, camera);
+        primary = false;
+    }
+    if (self.seated == null and self.garage.piloting == null and !self.hangar.piloting) self.player.step(&self.physics, camera, input, dt);
     if (!frozen) self.body_yaw = camera.yaw;
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
     for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);
@@ -891,6 +909,12 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
         self.target = .none;
         return;
     }
+    if (self.hangar.follow(self.seed, camera)) |feet| {
+        self.player.feet = feet;
+        self.player.velocity = .{ 0, 0, 0 };
+        self.target = .none;
+        return;
+    }
     if (self.garage.follow(self.seed, camera, dt)) |feet| {
         self.player.feet = feet;
         self.player.velocity = .{ 0, 0, 0 };
@@ -920,6 +944,7 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
                     .walker => |i| self.startTalk(.{ .walker = i }),
                     .car => |i| Frontier.board(self, i, camera),
                     .fabricator => self.shop = .{ .kind = .fabricate },
+                    .jet => Frontier.boardJet(self, camera),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);
@@ -1330,6 +1355,10 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
                     .vehicle => |d| {
                         self.garage.park(self.seed, spawn, self.catalog, d);
                         self.say("{s} is on its garage pad", .{name});
+                    },
+                    .fighter => {
+                        self.hangar.place(self.seed, spawn, null, 0);
+                        self.say("the Kestrel stands on its pad beyond the garage", .{});
                     },
                     .suit => |c| {
                         self.profile.clothing = c;
@@ -1783,6 +1812,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .machines = machines[0..machine_count],
         .wallet = self.wallet,
         .progress = try self.progress.toDoc(arena),
+        .fighter = if (self.hangar.fighter) |f| .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .yaw = f.heading() } else null,
         .cars = cars: {
             var list: std.ArrayList(Save.CarState) = .empty;
             for (self.garage.cars) |slot| if (slot) |c| {
@@ -1924,6 +1954,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.tap_links = @splat(@splat(null));
     Frontier.refresh(self);
     for (doc.cars) |c| if (self.progress.ownsVehicle(c.design)) self.garage.place(self.seed, spawn, self.catalog, c.design, c.position, c.yaw);
+    if (doc.fighter) |f| if (self.progress.fighter) self.hangar.place(self.seed, spawn, f.position, f.yaw);
 }
 
 pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {

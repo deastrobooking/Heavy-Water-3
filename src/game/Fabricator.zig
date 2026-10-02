@@ -12,7 +12,7 @@ const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 
 pub const Tab = enum { vehicles, suits, armor, weapons };
 pub const tab_count = @typeInfo(Tab).@"enum".fields.len;
-pub const Output = union(enum) { vehicle: Designs.Design, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind };
+pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
 pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
@@ -22,6 +22,7 @@ pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
     .{ .tab = .vehicles, .output = .{ .vehicle = .dart }, .cost = .{ .lumen = 6, .rotor = 3, .alloy = 6 }, .about = "Light and fierce, with a huge boost." },
     .{ .tab = .vehicles, .output = .{ .vehicle = .courier }, .cost = .{ .rotor = 4, .alloy = 10, .scrap = 60 }, .about = "Big fans and a high ride for rough ground." },
+    .{ .tab = .vehicles, .output = .fighter, .cost = .{ .lumen = 12, .rotor = 5, .alloy = 14, .scrap = 80 }, .about = "Kestrel VTOL fighter: cannons and missiles to take the war to the Hive's skies." },
     .{ .tab = .suits, .output = .{ .suit = .exo_rig }, .cost = .{ .lumen = 6, .alloy = 3 }, .about = "Segmented limb plates for climbers." },
     .{ .tab = .suits, .output = .{ .suit = .hardsuit }, .cost = .{ .lumen = 10, .alloy = 10 }, .about = "Full white plate, cuirass to greaves." },
     .{ .tab = .suits, .output = .{ .suit = .vanguard }, .cost = .{ .rotor = 1, .alloy = 18 }, .about = "The heavy dark set." },
@@ -39,6 +40,7 @@ pub const recipes = [_]Recipe{
 pub fn name(output: Output, buffer: []u8) []const u8 {
     const tag = switch (output) {
         .vehicle => |d| return Designs.name(d),
+        .fighter => return "KESTREL FIGHTER",
         .suit => |c| @tagName(c),
         .armor => |a| @tagName(a),
         .weapon => |w| @tagName(w),
@@ -61,6 +63,7 @@ pub fn onTab(tab: Tab, out: *[recipes.len]u8) []const u8 {
 pub fn made(p: *const Progress, output: Output) bool {
     return switch (output) {
         .vehicle => |d| p.ownsVehicle(d),
+        .fighter => p.fighter,
         .suit => |c| p.owns(c),
         .armor => |a| p.ownsArmor(a),
         .weapon => |w| p.ownsWeapon(w),
@@ -86,6 +89,7 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
     wallet.scrap -= r.cost.scrap;
     switch (r.output) {
         .vehicle => |d| p.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d)),
+        .fighter => p.fighter = true,
         .suit => |c| p.suits |= Progress.bit(c),
         .armor => |a| p.armors |= Progress.armorBit(a),
         .weapon => |w| p.weapons |= @as(u8, 1) << @intCast(@intFromEnum(w)),
@@ -98,7 +102,7 @@ test "recipes pay exactly, make once, and refuse what cannot be paid" {
     var wallet: Market.Wallet = .{ .scrap = 100 };
     var tab: [recipes.len]u8 = undefined;
     const vehicles = onTab(.vehicles, &tab);
-    try std.testing.expectEqual(@as(usize, 3), vehicles.len);
+    try std.testing.expectEqual(@as(usize, 4), vehicles.len);
     try std.testing.expectError(error.NotEnoughLumen, make(&p, &wallet, vehicles[0]));
     p.inventory = .{ 10, 2, 0, 0 };
     const out = try make(&p, &wallet, vehicles[0]);

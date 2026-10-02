@@ -240,6 +240,26 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Flight: the Kestrel and the air war — 2026-10-01
+
+- Debug suite: **267/267 tests pass**. New tests:
+  - **Flight:** a vertical takeoff from the gear on the lift jets; wingborne cruise holding altitude at −4° to 10° angle of attack, with the top speed under 300 m/s; mouse-aim turns to a 90° aim and levels the wings; an afterburner climb; crash damage; a hangar test that takes off, transitions and flies.
+  - **Ship meshes:** they build at their intended lengths, and the Kestrel's fuselage and fins are closed solids.
+  - **Air war:** carriers launch wasps that attack, hit the jet and draw flak; cannons down a wasp; a locked missile damages a carrier.
+  - **Fabricator:** the Kestrel recipe.
+- **Found and fixed:**
+  - **Climb:** at 48 kN the fighter bled from 150 to 78 m/s in a turn-and-climb. Thrust is now 58/95 kN (about 0.9 thrust-to-weight).
+  - **Cruise angle of attack:** a fast cruise on the cambered NACA 2408 wing sits just below zero incidence, so the test range was corrected.
+  - **Fin winding:** the lofted fin was inside out (volume −0.28).
+  - **Hover transition:** hover drift-bleed fought the engine and capped the jet near 24 m/s, at the lift jets' handover. It now bleeds only sideways drift while the engine pushes.
+  - **Wasp cost:** each wasp cast a 120–170 m ray every step. A test sat at full CPU for over 11 minutes and the game would have paid it every frame. Avoidance is now analytic terrain samples plus a short structure ray every fourth step, and the suite is back to about 2 minutes.
+  - **Air war placement:** carriers now circle beyond the nests and wake within 650 m, so the air war stays over the Hive's ground.
+- **Metal smoke:** native Apple M3 Pro, `MTL_DEBUG_LAYER=1`, ReleaseSafe, **300 smoke frames**: no validation errors, clean exit. `Smoke flight` fabricated the Kestrel through the panel, lifted off, and downed a wasp with the cannons; carriers were at 264 m and 326 m. The first run reported no wasp downed because the smoke placed the wasp along a level line from the pad into rising ground; it now aims into open sky.
+- **Captures:**
+  - `-Dshowcase=33`: the Kestrel on its pad.
+  - `-Dshowcase=34`: the Kestrel banking hard on afterburner beside a Brood carrier, with wasps in formation and the second carrier distant.
+- **Not measured:** flying by hand, missile play, jet–ship collisions (not implemented), and frame cost with 12 wasps and two carriers awake.
+
 ## Guest weapons, Hive troopers, saved cars — 2026-10-01
 
 - Debug suite: **258/258 tests pass**. New tests:

@@ -8,6 +8,7 @@ pub const hull = @import("vehicle/hull.zig");
 pub const nozzle = @import("vehicle/nozzle.zig");
 pub const hover = @import("vehicle/hover.zig");
 pub const car = @import("vehicle/car.zig");
+pub const jet = @import("vehicle/jet.zig");
 
 test {
     _ = airfoil;
@@ -18,4 +19,5 @@ test {
     _ = nozzle;
     _ = hover;
     _ = car;
+    _ = jet;
 }

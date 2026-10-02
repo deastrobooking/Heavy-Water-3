@@ -36,7 +36,8 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Conversations: keepers and locals talk in branching dialogue, remember what you have done (salvage, shrines, bridges, nests), and hint at the Rootdeep's waking machines.
 - Pickups to find: lumen shards on the plazas and roads, rotor cores on high roofs and by the shrines, Hive alloy from the Hive, and vital cells that raise maximum health.
 - The fabricator at the garage builds hover cars (Skimmer, Dart, Courier), armor suits and accents, and weapons from those pickups.
-- The Hive is back: three black spires in the outskirts send drones and sentinels after anyone who comes near. Breaking a spire stops its swarm.
+- The Hive is back: three black spires in the outskirts send drones, sentinels and troopers after anyone who comes near. Breaking a spire stops its swarm.
+- In the skies beyond the nests, two Brood carriers (giant beetle ships) launch swarms of wasp fighters. The fabricated Kestrel, a VTOL fighter, takes the war to them.
 
 Clothing, gear, and accent unlocks found while exploring are future growth for this system.
 

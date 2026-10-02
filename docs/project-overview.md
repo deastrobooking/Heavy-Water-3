@@ -39,7 +39,8 @@ The planned Hive conflict, recruitable synthetic allies and bio-synth companions
 | 1 / 2 / 3 / 4 / 5 | Hands / build / wire / bridge / weapon tools |
 | Weapon tool | Left button fires (hold to charge or draw), right button is the alternate (warp arrow, charged slash, shield), Tab switches weapons |
 | Left click a hover car, hands | Board it. W / S thrust, A / D turn, Space or E climb, Q descend, Shift boost, click to leave |
-| Left click the fabricator kiosk | Fabricate cars, suits, armor and weapons from pickups |
+| Left click the fabricator kiosk | Fabricate cars, suits, armor, weapons and the Kestrel fighter from pickups |
+| Left click the Kestrel, hands | Board it. Mouse aims (the jet flies where you point), W / S throttle, A / D roll, Space or E climb and Q sink while hovering, Shift afterburner, left button cannons, hold right button to lock and release to fire a missile, F climbs out |
 | Q / E | Descend / ascend in flight |
 | Left click, then mouse | Capture pointer and look |
 | Left click (captured), hands | Grab or drop a crate, press a machine button, enter or exit the rover |

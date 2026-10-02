@@ -158,6 +158,36 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   - **World probing:** the module only probes the world through the caller's ray cast.
 - **In the game:** `vehicle/Designs.zig` defines three fabricable designs (Skimmer, Dart, Courier). Their render meshes get per-vertex colors by material. `game/Garage.zig` parks owned cars on pads beside the spawn, idling in a low hover, and flies the piloted one through `Physics.castRay`. The chase camera eases behind the car and can be orbited. Leaving puts P1 on the floor to the left. Saves keep each car's position and heading (`Save.Document.cars`); a car without a saved pose parks on its pad.
 
+## Flight: the Kestrel and the air war
+
+- **Flight model:** `vehicle/jet.zig` flies the Kestrel as a six-degree-of-freedom rigid body.
+  - **Wing:** lift and drag come from the wing through `airfoil.WingAero` (Helmbold lift slope for aspect 3.2, NACA 2408, flat-plate post-stall blend), with body drag, sideslip side force and a weathervane torque.
+  - **Engine:** 58 kN, or 95 kN with afterburner. Top speed stays under 300 m/s.
+  - **Lift jets:** they carry the weight below 22 m/s and fade out by 55 m/s. Parked on the gear they idle until the pilot climbs. In a hover, sideways drift bleeds away (forward drift too once the engine idles), so the transition to wingborne flight is free.
+  - **Gear and crashes:** the gear is three spring-damper contacts with brakes. A hard floor and wall probes cost hull on hard impacts.
+- **Mouse-aim fly-by-wire:** the pilot points with the chase camera, and the flight computer turns that into body rates. It pitches toward the aim; far off the nose it rolls the lift vector onto the aim, and near the nose it levels the wings; a little yaw helps. A rate loop then commands torques with authority scaled by dynamic pressure, floored for vectoring in a hover.
+- **Meshes:** `vehicle/ShipMeshes.zig` builds the ships from the vehicle primitives.
+  - **Kestrel:** a lathed fuselage, glass canopy, swept delta wing and canards, twin lofted canted fins, intakes, twin nozzles, and glowing burners.
+  - **Hive wasp:** a chitin thorax and head, a striped segmented abdomen, a stinger, legs, mandibles and compound eyes. A separate wing mesh is drawn four times, flapping.
+  - **Brood carrier:** a 92 m beetle with raised elytra, membrane wings, six legs and mandibles, four flak turrets, four glowing launch bays and glowing veins.
+- **Hangar:** `game/Hangar.zig` stands the fabricated Kestrel on a pad past the garage. Click to board. In flight:
+  - mouse aims; W/S throttle; A/D roll;
+  - Space or E climbs and Q sinks in a hover; Shift lights the afterburner;
+  - F (pad: X) climbs out.
+
+  The chase camera sits 24 m behind the aim. A wrecked jet throws the pilot clear (40 damage) and a new one waits on the pad. Saves keep where it was left.
+- **The air war:** `game/Skies.zig`.
+  - **Carriers:** they circle 260–320 m up on circuits beyond the first two nests, and wake when a player is within 650 m. Awake, they launch wasps (six each at most) and fire proximity-fused flak at the jet.
+  - **Wasps:**
+    - fly at a speed with a limited turn rate;
+    - hunt the airborne Kestrel within 900 m, or rangers on foot within 500 m;
+    - use lead pursuit with stinger bursts when lined up, break off past the target, and jink when hit;
+    - avoid terrain analytically (under and 40/80/120 m ahead), plus a short structure ray every fourth step.
+  - **Kestrel weapons:** twin cannons (12 rounds/s alternating, limited by heat). Missiles lock onto the Hive target nearest the nose within 25° and 1 km (air or ground) while the alternate is held, fire on release, and home. A carrier's bays take 2.5× damage.
+  - **Rewards:** downed wasps drop alloy to the floor below. A downed carrier drops six alloy, two rotor cores and a vital cell, and stays down (`carrier_N_down`).
+- **HUD:** the flight HUD shows speed, height, throttle and afterburner, hull and gun heat, a nose marker, and a lock reticle that closes as the lock builds. Both marks are projected from the camera.
+- **Sound:** a turbine (the engine loop pitched with throttle) and afterburner roar, cannon, missile, flak and stinger cues.
+
 ## Frontier: pickups, fabricator, the Hive and weapons
 
 - **Pickups:** `game/Collectibles.zig` places 62 pickups from the seed and the world's landmarks, each settled onto the real surface with a downward ray. Collecting is by proximity, for any local player.

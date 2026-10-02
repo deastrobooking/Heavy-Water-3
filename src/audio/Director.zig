@@ -45,6 +45,8 @@ pub const Snapshot = struct {
     paused: bool = false,
     /// P1's hover car speed while piloting (drives the engine loop), else null.
     engine: ?f32 = null,
+    /// The Kestrel's throttle and afterburner while flying it.
+    turbine: ?struct { throttle: f32, burn: bool } = null,
 };
 pub const Ui = enum { move, confirm, back, refuse };
 
@@ -63,6 +65,7 @@ pub fn snapshot(sb: *const Sandbox, camera: Camera, paused: bool) Snapshot {
         .refusal = std.mem.startsWith(u8, sb.noticeText(), "cannot"),
         .flying = sb.player.mode == .fly or sb.seated != null or sb.garage.piloting != null,
         .engine = if (sb.garage.piloting) |i| sb.garage.cars[i].?.flyer.body.vel.length() else null,
+        .turbine = if (sb.hangar.piloting) .{ .throttle = sb.hangar.fighter.?.throttle, .burn = sb.hangar.fighter.?.burn > 0.8 } else null,
         .paused = paused,
     };
     const p = sb.player;
@@ -135,7 +138,11 @@ pub fn update(self: *Director, sink: anytype, now: Snapshot) void {
     sink.send(.{ .loop = .{ .sound = .jet, .gain = jet, .bus = .effects } });
     // The hover engine: louder and higher with speed.
     const engine_speed = now.engine orelse 0;
-    sink.send(.{ .loop = .{ .sound = .engine, .gain = if (now.engine == null or now.paused) 0 else 0.35 + @min(0.4, engine_speed / 80), .bus = .effects, .pitch = 0.8 + engine_speed / 45 } });
+    if (now.turbine) |t| {
+        // The Kestrel's turbine: the engine loop pitched up with the throttle, plus afterburner roar.
+        sink.send(.{ .loop = .{ .sound = .engine, .gain = if (now.paused) 0 else 0.4 + 0.3 * t.throttle, .bus = .effects, .pitch = 1.6 + 1.2 * t.throttle } });
+        sink.send(.{ .loop = .{ .sound = .jet, .gain = if (t.burn and !now.paused) 0.7 else jet, .bus = .effects } });
+    } else sink.send(.{ .loop = .{ .sound = .engine, .gain = if (now.engine == null or now.paused) 0 else 0.35 + @min(0.4, engine_speed / 80), .bus = .effects, .pitch = 0.8 + engine_speed / 45 } });
     if (!self.primed or now.paused) return;
 
     for (now.bodies, was.bodies, 0..) |b, before, i| {

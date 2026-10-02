@@ -66,6 +66,14 @@ pub const Content = struct {
     spire: MeshHandle,
     spire_glow: MeshHandle,
     gem: MeshHandle,
+    /// Ships: the Kestrel fighter, Hive wasps (and a wing drawn four times), the Brood carrier.
+    kestrel: MeshHandle,
+    kestrel_glow: MeshHandle,
+    wasp: MeshHandle,
+    wasp_glow: MeshHandle,
+    wasp_wing: MeshHandle,
+    carrier: MeshHandle,
+    carrier_glow: MeshHandle,
 };
 /// One hover car design: its body, a rotor drawn spinning at each pivot, emissive light strips,
 /// and the mass properties the simulation flies it with.
@@ -199,6 +207,16 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
             @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
         }
         self.content.gem = try self.register(allocator, try Model.fromMesh(allocator, try H.gem(allocator), .named("gem", white)));
+        const S = @import("../vehicle/ShipMeshes.zig");
+        inline for (.{ .{ "kestrel", S.kestrel }, .{ "wasp", S.wasp }, .{ "carrier", S.carrier } }) |entry| {
+            const pair = try entry[1](allocator);
+            var glow_owned = true;
+            errdefer if (glow_owned) pair.glow.deinit(allocator);
+            @field(self.content, entry[0]) = try self.register(allocator, try Model.fromMesh(allocator, pair.shell, .named(entry[0], white)));
+            glow_owned = false;
+            @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
+        }
+        self.content.wasp_wing = try self.register(allocator, try Model.fromMesh(allocator, try S.waspWing(allocator), .named("wasp wing", white)));
     }
     self.district = try District.generate(seed);
     self.content.district = try self.reserve();

@@ -43,6 +43,7 @@ pub const MachineState = struct {
 /// A vehicle chassis: pose and velocities.
 pub const BodyState = struct { position: [3]f32, orientation: [4]f32, linear: [3]f32, angular: [3]f32 };
 pub const ModState = struct { name: []const u8, version: []const u8 };
+pub const FighterState = struct { position: [3]f32, yaw: f32 };
 pub const CarState = struct { design: @import("../vehicle/Designs.zig").Design, position: [3]f32, yaw: f32 };
 pub const PlayerState = struct { feet: [3]f32, yaw: f32, pitch: f32, mode: Player.Mode };
 pub const Document = struct {
@@ -63,6 +64,8 @@ pub const Document = struct {
     wallet: Market.Wallet,
     /// Where each hover car was left (its centre of mass) and its heading.
     cars: []const CarState = &.{},
+    /// Where the Kestrel was left, if fabricated.
+    fighter: ?FighterState = null,
     /// Suit upgrades, owned armor and story flags; absent in older saves (a fresh start).
     progress: @import("Progress.zig").Doc = .{},
     market_day: u64,
@@ -96,6 +99,10 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (doc.machines.len > machine_slots) return error.InvalidSave;
     if (doc.mods.len > 16) return error.InvalidSave;
     if (doc.cars.len > @import("../vehicle/Designs.zig").count) return error.InvalidSave;
+    if (doc.fighter) |f| {
+        for (f.position) |v| if (!finite(v)) return error.InvalidSave;
+        if (!finite(f.yaw)) return error.InvalidSave;
+    }
     for (doc.cars) |c| {
         for (c.position) |v| if (!finite(v)) return error.InvalidSave;
         if (!finite(c.yaw)) return error.InvalidSave;

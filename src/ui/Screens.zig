@@ -15,7 +15,7 @@ const Bindings = @import("../game/Bindings.zig");
 const Fabricator = @import("../game/Fabricator.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const Market = @import("../city/Market.zig");
-const Rect = Canvas.Rect;
+pub const Rect = Canvas.Rect;
 const Color = Canvas.Color;
 
 pub const ink: Color = .{ 0.86, 0.93, 0.94, 1 };
@@ -54,7 +54,11 @@ pub const Hud = struct {
     /// Active guests' split views (P2–P4), each with its aimed prompt.
     guests: []const Guest = &.{},
 
+    /// Flight marks on P1's view: the Kestrel's nose, and the missile lock (with progress).
+    marks: []const Mark = &.{},
+
     pub const Guest = struct { index: u8, view: Rect, prompt: []const u8 = "" };
+    pub const Mark = struct { x: f32, y: f32, kind: enum { nose, lock }, progress: f32 = 0 };
 };
 
 fn alpha(c: Color, a: f32) Color {
@@ -97,6 +101,19 @@ fn bar(c: *Canvas, r: Rect, fraction: f32, color: Color) void {
 pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     if (menu.screen == .title or (menu.base == .title and menu.screen != .none)) return drawTitle(c, menu, hud);
     for (hud.guests) |g| drawGuest(c, sb, g);
+    for (hud.marks) |mark| switch (mark.kind) {
+        .nose => {
+            c.frame(.{ .x = mark.x - 7, .y = mark.y - 7, .w = 14, .h = 14 }, 2, alpha(accent, 0.9));
+            c.rect(.{ .x = mark.x - 1, .y = mark.y - 1, .w = 2, .h = 2 }, accent);
+        },
+        .lock => {
+            const locked = mark.progress >= 1;
+            const size: f32 = 34 - 14 * mark.progress;
+            const color: Color = if (locked) bad else gold;
+            c.frame(.{ .x = mark.x - size / 2, .y = mark.y - size / 2, .w = size, .h = size }, if (locked) 3 else 2, color);
+            if (locked) c.centered(mark.x, mark.y + size / 2 + 6, "LOCK", 1, bad);
+        },
+    };
     const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or menu.screen != .none;
     if (!sb.creator.open) drawHud(c, sb, hud, panels);
     if (sb.creator.open) drawCreator(c, sb, hud.view) else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {

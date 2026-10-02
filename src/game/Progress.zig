@@ -40,6 +40,8 @@ picked: Collectibles.Picked = .initEmpty(),
 vehicles: u8 = 0,
 armors: u8 = free_armors,
 weapons: u8 = 0,
+/// The Kestrel fighter has been fabricated.
+fighter: bool = false,
 flag_names: [max_flags][flag_capacity]u8 = undefined,
 flag_lens: [max_flags]u8 = @splat(0),
 flag_count: usize = 0,
@@ -166,6 +168,7 @@ pub const Doc = struct {
     vehicles: []const Designs.Design = &.{},
     armors: []const Profile.Armor = &.{},
     weapons: []const WeaponKind = &.{},
+    fighter: bool = false,
     suits: []const Profile.Clothing = &.{},
     flags: []const []const u8 = &.{},
 };
@@ -184,7 +187,7 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     inline for (@typeInfo(Profile.Armor).@"enum".fields) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
     var weapons: std.ArrayList(WeaponKind) = .empty;
     inline for (@typeInfo(WeaponKind).@"enum".fields) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
-    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items };
+    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .fighter = self.fighter };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
@@ -202,6 +205,7 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     for (doc.vehicles) |d| result.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d));
     for (doc.armors) |a| result.armors |= armorBit(a);
     for (doc.weapons) |w| result.weapons |= @as(u8, 1) << @intCast(@intFromEnum(w));
+    result.fighter = doc.fighter;
     if (doc.flags.len > max_flags) return error.InvalidProgress;
     for (doc.flags) |name| {
         if (name.len == 0 or name.len > flag_capacity) return error.InvalidProgress;

@@ -29,6 +29,7 @@ const Settings = @import("game/Settings.zig");
 const Dialogue = @import("game/Dialogue.zig");
 const Audio = @import("audio/Audio.zig");
 const App = @This();
+const R3 = @import("physics/Rotation.zig");
 
 pub const Modules = mach.Modules(.{ mach.Core, App, World, Renderer });
 pub const mach_module = .app;
@@ -489,7 +490,11 @@ pub fn update(self: *App, core: *mach.Core) void {
             if (self.navKey(key.key)) |k| self.uiNav(k);
         } else if (key.key == .escape) self.menu.open(.pause) else if (self.menu.settings.bindings.action(key.key)) |action| switch (action) {
             // Held movement keys are sampled each frame; these are the press edges.
-            .forward, .back, .left, .right, .sprint, .mantle, .ascend, .descend => {},
+            .forward, .back, .left, .right, .sprint, .ascend, .descend => {},
+            // Mantle is held while climbing; pressed in the Kestrel it climbs out.
+            .mantle => if (self.sandbox.hangar.piloting) {
+                self.actions.leave_jet = true;
+            },
             .camera_view => self.actions.toggle_view = true,
             .customize => self.actions.open_creator = true,
             .reset => self.actions.reset = true,
@@ -651,6 +656,7 @@ fn routePads(self: *App) void {
             }
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
             self.actions.interact = self.actions.interact or cmd.interact;
+            if (self.sandbox.hangar.piloting and cmd.interact) self.actions.leave_jet = true;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
             continue;
         }
@@ -750,7 +756,8 @@ fn showcase(self: *App) void {
 /// 21 market shop, 22 wardrobe, 23 customization, 24 pause, 25 settings, 26 HUD,
 /// 27 four-player split screen with a guest trading, 28 controls while rebinding,
 /// 29 the garage with all three hover cars, 30 a Hive nest under attack, 31 the fabricator,
-/// 32 the Skimmer in flight.
+/// 32 the Skimmer in flight, 33 the Kestrel on its pad, 34 a dogfight by a Brood carrier,
+/// 35 the carrier from above.
 fn guiShowcase(self: *App, v: u32) void {
     const sb = &self.sandbox;
     self.engine.input = .{};
@@ -761,6 +768,15 @@ fn guiShowcase(self: *App, v: u32) void {
         return;
     }
     if (sb.talk) |*talk| talk.reveal = 999;
+    // 34/35: the Kestrel flies toward the first carrier on afterburner.
+    if ((v == 34 or v == 35) and self.gui_showcase_ready) {
+        const c = sb.skies.carriers[0].position();
+        const f = sb.hangar.fighter.?.body.pos;
+        const d = R3.normalize(.{ c[0] - f.x, c[1] + (if (v == 35) @as(f32, 30) else -10) - f.y, c[2] - f.z });
+        self.engine.camera.yaw = std.math.atan2(d[0], d[2]);
+        self.engine.camera.pitch = std.math.asin(d[1]);
+        self.engine.input.fast = true;
+    }
     // 32: fly the Skimmer forward, boosting, from the garage toward the city.
     if (v == 32 and self.gui_showcase_ready) {
         self.engine.input.forward = 1;
@@ -828,6 +844,28 @@ fn guiShowcase(self: *App, v: u32) void {
             sb.player.mode = .walk;
             Frontier_board(sb, &self.engine.camera);
         },
+        33 => {
+            sb.progress.fighter = true;
+            @import("game/Frontier.zig").refresh(sb);
+            const pad = @import("game/Hangar.zig").padPosition(sb.seed, Sandbox.spawn);
+            sb.player.feet = .{ pad[0] - 14, pad[1], pad[2] - 12 };
+            self.engine.camera.yaw = 0.85;
+            self.engine.camera.pitch = -0.08;
+        },
+        34, 35 => {
+            sb.progress.fighter = true;
+            @import("game/Frontier.zig").refresh(sb);
+            // Start airborne, already closing on the first carrier with wasps up.
+            const c = sb.skies.carriers[0].position();
+            const entry = R3.add(c, .{ -160, if (v == 35) @as(f32, 40) else -30, -220 });
+            sb.hangar.place(sb.seed, Sandbox.spawn, entry, std.math.atan2(@as(f32, 160), 220));
+            sb.hangar.fighter.?.body.vel = @import("character/math.zig").Vec3.init(80, 0, 110);
+            sb.hangar.fighter.?.throttle = 0.9;
+            sb.hangar.fighter.?.grounded = false;
+            sb.hangar.board(&self.engine.camera);
+            sb.trigger = .{ .fire = v == 34 };
+            for (0..5) |k| sb.skies.wasps[k] = .{ .position = R3.add(c, .{ -60 + @as(f32, @floatFromInt(k)) * 20, -25, -90 + @as(f32, @floatFromInt(k)) * 6 }), .forward = .{ -0.5, 0, -0.85 }, .carrier = 0, .state = .attack };
+        },
         31 => {
             sb.progress.inventory = .{ 14, 3, 9, 2 };
             sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 0 };
@@ -855,6 +893,25 @@ fn Frontier_board(sb: *Sandbox, camera: *@import("world/Camera.zig")) void {
     const yaw = std.math.atan2(plaza[0] - car.body.pos.x, plaza[2] - car.body.pos.z);
     car.body.rot = @import("character/math.zig").Quat.fromAxisAngle(@import("character/math.zig").Vec3.unit_y, yaw);
     @import("game/Frontier.zig").board(sb, 0, camera);
+}
+
+/// Screen position (canvas units within `view`) of a world point, or null behind the camera.
+fn project(camera: @import("world/Camera.zig"), view: Screens.Rect, point: [3]f32) ?[2]f32 {
+    const f = camera.forward();
+    const fw: [3]f32 = .{ f.x(), f.y(), f.z() };
+    const right: [3]f32 = .{ @cos(camera.yaw), 0, -@sin(camera.yaw) };
+    const up: [3]f32 = .{ fw[1] * right[2] - fw[2] * right[1], fw[2] * right[0] - fw[0] * right[2], fw[0] * right[1] - fw[1] * right[0] };
+    const d: [3]f32 = .{ point[0] - camera.position.x(), point[1] - camera.position.y(), point[2] - camera.position.z() };
+    const z = d[0] * fw[0] + d[1] * fw[1] + d[2] * fw[2];
+    if (z < 1) return null;
+    const x = d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
+    const y = d[0] * up[0] + d[1] * up[1] + d[2] * up[2];
+    const t = @tan(camera.fov / 2);
+    const aspect = view.w / view.h;
+    const nx = x / (z * t * aspect);
+    const ny = y / (z * t);
+    if (@abs(nx) > 1.2 or @abs(ny) > 1.2) return null;
+    return .{ view.x + (nx * 0.5 + 0.5) * view.w, view.y + (0.5 - ny * 0.5) * view.h };
 }
 
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
@@ -1058,6 +1115,37 @@ fn smokeFrontier(self: *App) void {
         };
     }
     std.log.info("Smoke frontier: skimmer parked={any} flew {d:.1} m, blaster={any}, drone downed={any}; {d} nests, {d} pickups", .{ cars, flown, blaster, downed, sb.enemies.nest_count, sb.collectibles.count });
+    // The Kestrel: fabricate it through the panel, lift off on its jets, and gun down a wasp.
+    sb.progress.inventory = .{ 20, 8, 20, 0 };
+    sb.wallet.scrap += 200;
+    sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 3 };
+    self.uiNav(.confirm);
+    self.uiNav(.back);
+    var jet_camera = self.engine.camera;
+    sb.hangar.board(&jet_camera);
+    for (0..180) |_| sb.hangar.step(&sb.physics, .{ .aim = sb.hangar.fighter.?.forward(), .climb = 1 }, 1.0 / 60.0);
+    const lifted = !sb.hangar.fighter.?.grounded;
+    const Skies = @import("game/Skies.zig");
+    const f = sb.hangar.fighter.?;
+    // Aim up into clear sky: a level line from the pad can run into the rising ground.
+    const wasp_at = f.body.pos.add(f.forward().scale(50)).add(@import("character/math.zig").Vec3.init(0, 60, 0));
+    const nose = wasp_at.sub(f.body.pos).normalize();
+    sb.skies.wasps[0] = .{ .position = .{ wasp_at.x, wasp_at.y, wasp_at.z }, .forward = .{ 0, 0, 1 }, .speed = 0, .carrier = 0, .health = 25 };
+    const jet: Skies.Jet = .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .velocity = @splat(0), .forward = .{ nose.x, nose.y, nose.z }, .airborne = true };
+    var sky_events: [64]Skies.Event = undefined;
+    var wasp_down = false;
+    for (0..90) |_| {
+        if (sb.skies.wasps[0]) |*w| {
+            w.position = .{ wasp_at.x, wasp_at.y, wasp_at.z };
+            w.speed = 0;
+        }
+        var count: usize = 0;
+        sb.skies.fireJet(&sb.enemies, jet, sb.hangar.guns(), true, false, 1.0 / 60.0, &sky_events, &count);
+        count = sb.skies.step(&sb.physics, &sb.enemies, null, &.{}, 1.0 / 60.0, &sky_events);
+        for (sky_events[0..@min(count, sky_events.len)]) |e| wasp_down = wasp_down or e == .wasp_down;
+    }
+    _ = sb.hangar.leave(&sb.physics);
+    std.log.info("Smoke flight: kestrel fabricated={any}, lifted off={any}, wasp downed={any}; carriers at {d:.0} and {d:.0} m up", .{ sb.progress.fighter, lifted, wasp_down, sb.skies.carriers[0].altitude, sb.skies.carriers[1].altitude });
     // Leave the run's progress as it was (later stages log the market and wallet).
     sb.progress = keep;
     sb.wallet = wallet;
@@ -1239,7 +1327,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
     const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "FLY" else @tagName(sandbox.player.motion);
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.wallet.scrap, sandbox.wallet.parts });
-    if (sandbox.garage.piloting) |i| {
+    if (sandbox.hangar.piloting) {
+        const f = &sandbox.hangar.fighter.?;
+        const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, f.body.pos.x, f.body.pos.z).height;
+        const g = &sandbox.skies.guns;
+        renderer.hud_lines[1].set("KESTREL  {d:.0} M/S  {d:.0} M  THR {d:.0}%{s}  HULL {d:.0}  GUNS {s}  CLICK GUNS  RMB LOCK  F OUT", .{ f.airspeed(), f.body.pos.y - ground, f.throttle * 100, if (self.engine.input.fast) " BURN" else "", @max(0, f.hull), if (g.overheated) "HOT" else "OK" });
+    } else if (sandbox.garage.piloting) |i| {
         const car = &sandbox.garage.cars[i].?.flyer;
         const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, car.body.pos.x, car.body.pos.z).height;
         renderer.hud_lines[1].set("{s}  {d:.0} M/S  {d:.0} M UP  W/S THRUST  A/D TURN  SPACE/Q RIDE  SHIFT BOOST  CLICK LEAVE", .{ @import("vehicle/Designs.zig").name(@enumFromInt(i)), car.body.vel.length(), car.body.pos.y - ground });
@@ -1256,6 +1349,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  CLICK", .{Screens.keeperName(sandbox, i)}),
         .walker => renderer.hud_lines[1].set("CANOPY LOCAL  CLICK TALK", .{}),
         .car => |i| renderer.hud_lines[1].set("{s}  CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
+        .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  CLICK OPEN", .{}),
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
@@ -1321,6 +1415,22 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
     var clock: [32]u8 = undefined;
     const f = Renderer.viewRect(0, renderer.view_count);
     const ui = &renderer.ui;
+    // Flight marks: where the Kestrel's nose points and the missile lock, projected on P1's view.
+    var marks: [2]Screens.Hud.Mark = undefined;
+    var mark_count: usize = 0;
+    if (sandbox.hangar.piloting) {
+        const view_rect: Screens.Rect = .{ .x = f.x * ui.width, .y = f.y * ui.height, .w = f.w * ui.width, .h = f.h * ui.height };
+        const jet = sandbox.hangar.fighter.?;
+        const nose = jet.body.pos.add(jet.forward().scale(400));
+        if (project(self.engine.camera, view_rect, .{ nose.x, nose.y, nose.z })) |p| {
+            marks[mark_count] = .{ .x = p[0], .y = p[1], .kind = .nose };
+            mark_count += 1;
+        }
+        if (sandbox.skies.lockPosition(&sandbox.enemies)) |target| if (project(self.engine.camera, view_rect, target)) |p| {
+            marks[mark_count] = .{ .x = p[0], .y = p[1], .kind = .lock, .progress = sandbox.skies.guns.lock_progress };
+            mark_count += 1;
+        };
+    }
     // Guest views follow P1 in join order, as published above.
     var guests: [Sandbox.max_players - 1]Screens.Hud.Guest = undefined;
     var guest_count: usize = 0;
@@ -1339,6 +1449,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         .time = self.seconds,
         .seed = sandbox.seed,
         .guests = guests[0..guest_count],
+        .marks = marks[0..mark_count],
     });
     self.hit_len = ui.hit_len;
     @memcpy(self.hits[0..ui.hit_len], ui.hits[0..ui.hit_len]);

@@ -73,6 +73,9 @@ test {
     _ = @import("vehicle/HiveMeshes.zig");
     _ = @import("game/Enemies.zig");
     _ = @import("game/Combat.zig");
+    _ = @import("vehicle/ShipMeshes.zig");
+    _ = @import("game/Skies.zig");
+    _ = @import("game/Hangar.zig");
     _ = @import("render/Overlay.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");
