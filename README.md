@@ -44,7 +44,7 @@ python3 tools/benchmark.py --canopy
 python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 meshes during measurement
 ```
 
-`run` needs a graphical desktop and GPU; headless tests do not open a window. More benchmark and showcase commands are in [Scale Tests](docs/scale.md).
+`run` needs a graphical desktop and GPU; headless tests do not open a window. The installed executable is `zig-out/bin/heavy-water`; run it from the repository root. Every build option, test, smoke run, benchmark, showcase and capture is documented in [Building and Testing](docs/building-and-testing.md).
 
 ## Documentation
 
@@ -52,6 +52,7 @@ python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 m
 | --- | --- |
 | [Project Overview](docs/project-overview.md) | Gameplay, controls, local co-op, and the technical snapshot |
 | [World and Systems](docs/world.md) | Setting, pillars, Arbors, and visual direction |
+| [Building and Testing](docs/building-and-testing.md) | Build steps and options, running, tests, smoke runs, benchmarks, showcases, captures, and troubleshooting |
 | [Development Roadmap](docs/roadmap.md) | Implemented milestones, acceptance evidence, and next work |
 | [Architecture and Ownership](docs/architecture.md) | System boundaries, memory, threads, assets, physics, and rendering |
 | [Arbor Genomes and Sap](docs/arbors.md) | Procedural trees, Rootsong, and sap power |

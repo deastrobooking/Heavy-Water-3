@@ -18,13 +18,16 @@ pub const Line = struct {
         return self.text[0..self.len];
     }
 };
-vertices: [capacity]Vertex = undefined,
+/// Heap storage of `capacity` vertices, allocated by the renderer. Kept off the struct: Mach
+/// holds module state (and copies it during init) on the main thread's stack, where 2.9 MB of
+/// inline vertices overflowed it in Debug builds.
+vertices: []Vertex = &.{},
 len: usize = 0,
 width: f32 = 1,
 height: f32 = 1,
 
 pub fn rect(self: *Overlay, x: f32, y: f32, w: f32, h: f32, color: [4]f32) void {
-    if (self.len + 6 > capacity) return;
+    if (self.len + 6 > self.vertices.len) return;
     const x0 = x / self.width * 2 - 1;
     const y0 = 1 - y / self.height * 2;
     const x1 = (x + w) / self.width * 2 - 1;
@@ -129,7 +132,8 @@ fn glyph(raw: u8) u15 {
 }
 
 test "scaled text merges lit runs and draws lowercase as capitals" {
-    var o: Overlay = .{ .width = 100, .height = 100 };
+    var storage: [256]Vertex = undefined;
+    var o: Overlay = .{ .width = 100, .height = 100, .vertices = &storage };
     o.textScaled(0, 0, "t", .{ 1, 1, 1, 1 }, 3);
     // T: one merged top bar plus four stem cells.
     try std.testing.expectEqual(@as(usize, 5 * 6), o.len);

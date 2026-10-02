@@ -127,6 +127,7 @@ capture_requested: bool = false,
 
 pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .seed = world.seed, .allocator = allocator, .io = io, .scene = try Scene.init(allocator, io, world.seed, &world.catalog) };
+    self.overlay.vertices = try allocator.alloc(Overlay.Vertex, Overlay.capacity);
     if (options.scale_objects > 0) {
         var timer = mach.time.Timer.start(io);
         self.field = try Field.generate(allocator, world.seed, options.scale_objects);
@@ -624,6 +625,8 @@ fn reportBenchmark(self: *Renderer) void {
 
 pub fn deinit(self: *Renderer) void {
     self.characters.deinit(self.allocator);
+    self.allocator.free(self.overlay.vertices);
+    self.overlay.vertices = &.{};
     if (self.outline_bind_group) |p| p.release();
     if (self.outline_layout) |p| p.release();
     if (self.outline_pipeline) |p| p.release();

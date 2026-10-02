@@ -1,3 +1,13 @@
+test "module states stay small: Mach keeps them (and init copies) on the main thread stack" {
+    const std = @import("std");
+    // The 8 MB main stack holds every module state twice during Mach's init. Large buffers
+    // belong on the heap; these limits catch an inline array creeping back.
+    try std.testing.expect(@sizeOf(@import("game/Sandbox.zig")) < 1 << 20);
+    try std.testing.expect(@sizeOf(@import("world/World.zig")) < 256 << 10);
+    try std.testing.expect(@sizeOf(@import("render/Overlay.zig")) < 4 << 10);
+    try std.testing.expect(@sizeOf(@import("ui/Canvas.zig")) < 256 << 10);
+}
+
 test {
     _ = @import("character/root.zig");
     _ = @import("character/Ranger.zig");

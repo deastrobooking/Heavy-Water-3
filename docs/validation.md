@@ -240,6 +240,14 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Debug executable stack overflow — 2026-10-01
+
+- **Report:** running `zig-out/bin/heavy-water` (a Debug build) crashed at startup with a segmentation fault in Mach's `Modules.init`, at a stack address.
+- **Cause:** Mach's entry point keeps every module's state by value on the main thread's 8 MB stack, and its `init` copies each module through a local. The overlay's inline vertex array (raised to 120,000 vertices for the GUI, 2.9 MB) sat inside the Renderer's state, so Debug builds, which keep those copies, overflowed. The smoke runs had all been ReleaseSafe or ReleaseFast, so they missed it.
+- **Fix:** the overlay's vertices are now allocated on the heap when the renderer starts. A test caps the module-state sizes the suite can see (Sandbox under 1 MB, World under 256 KiB, Overlay under 4 KiB, Canvas under 256 KiB).
+- **Verified:** the rebuilt Debug `zig-out/bin/heavy-water` starts, loads mods, opens audio and Metal, and runs for 25 s at the title screen. **270/270 tests pass.**
+- **Follow-up:** run at least one smoke in Debug after state-size changes.
+
 ## Focused review: flight, air war and frontier — 2026-10-01
 
 Review of the flight, air war, combat, garage and frontier code since the vehicle work began. Findings and outcomes:
