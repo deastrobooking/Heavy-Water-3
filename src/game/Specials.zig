@@ -223,7 +223,7 @@ fn activate(self: *Specials, p: u8, kind: Kind, physics: *const Physics, enemies
             var reach: f32 = 14;
             if (physics.castRay(chest, fwd, reach + 0.6, .none)) |hit| reach = @max(0, hit.distance - 0.6);
             var units: u32 = 0;
-            var nests: u8 = 0;
+            var nests: u16 = 0;
             _ = enemies.strikeBlade(chest, fwd, reach, 1.2, 45, R.add(R.scale(fwd, 4), .{ 0, 2, 0 }), 1.0, &units, &nests, hive, hn);
             effect(combat, .{ .kind = .trail, .position = R.add(chest, R.scale(fwd, reach / 2)), .dir = fwd, .life = 0.3, .size = 0.5, .length = reach, .color = .{ 0.75, 0.9, 1 } });
             push(out, n, .{ .blink = .{ .player = p, .to = R.add(use.feet, R.scale(fwd, reach)) } });

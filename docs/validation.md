@@ -240,6 +240,30 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Mountain ranges and cave dungeons — 2026-10-02
+
+- Debug suite: **288/288 tests pass** (about 3.5 minutes). New tests:
+  - **Ranges:** clear of the hub, peaks over 120 m, nothing added on river centre lines.
+  - **Panorama:** below the real ground and facing up.
+  - **Cave layout:** an open mouth; chambers under at least 7 m of rock; hollow above every chamber floor and solid below; the heart no higher than the mouth; deterministic.
+  - **Cave mesh:** a ray down from each chamber finds an upward floor within 0.6 m of its floor height, and every covered chamber has a ceiling.
+  - **Mouth coverage:** the cave mesh covers every dropped heightfield sample at the mouth. It first covered 95 of 105; ground quads that only touched the hole were being dropped, and are now kept.
+  - **Walk-in:** the full Sandbox walks a player through the first mouth. The player stays under the slope, stands on the floor of the first chamber, and sets `cave_0_found`; the collider is built on approach.
+- **World generator version 5:** saves from version 4 are rejected because the terrain changed. The Save, Enemies and nest-count tests were updated for this.
+- Native Metal smoke, ReleaseSafe, `MTL_DEBUG_LAYER=1`, 300 frames, unlocked screen, 394 simulation ticks:
+  - `Smoke caves: 6 cave systems in 4 ranges (highest spine ground 287 m), 6 meshes ready; walked in underground=true grounded=true 60.9 m under the slope, 1 colliders built`.
+  - The frontier stage now reports 9 nests and 114 pickups.
+  - No validation messages.
+- Captures (`-Dshowcase=41` to `44`):
+  - **Fixes from review:** the first captures had snow down to the cave mouths, so the range snowline was raised. They also showed a ragged hole around the mouth (the coverage bug above). The far panorama's edges were grown onto the foothills.
+  - **Now:** snow-capped ranges on the horizon from the foothills. A dark mouth with a rock rim. A cave chamber with rough walls, a tunnel onward and crystals. The heart chamber's nest, whose troopers engaged the player.
+- **Not measured or open:**
+  - the added cost of mountain sampling in every terrain query, and of cave tests in rays near the ranges (no benchmark run);
+  - collider build time on approach (a hitch, once per system);
+  - mouths on gentle flanks read as slots rather than arches;
+  - the sun still lights cave walls;
+  - the panorama's far edges show as thin outlines against the sky beyond the streamed terrain.
+
 ## Fighting, energy firearms and classes — 2026-10-02
 
 - Debug suite: **282/282 tests pass** (about 3 minutes). New tests:

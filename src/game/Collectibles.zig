@@ -67,7 +67,8 @@ items: [max_items]Item = undefined,
 count: usize = 0,
 drops: [max_drops]?Drop = @splat(null),
 
-fn add(self: *Collectibles, kind: Kind, position: V) void {
+/// Appends a world pickup (cave loot is added after `generate`, so earlier IDs stay put).
+pub fn add(self: *Collectibles, kind: Kind, position: V) void {
     if (self.count == max_items) return;
     self.items[self.count] = .{ .kind = kind, .position = position };
     self.count += 1;

@@ -48,8 +48,31 @@ pub fn fill(seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32
             @memcpy(indices[base..][0..6], &[_]u32{ a, a + cells + 1, a + 1, a + 1, a + cells + 1, a + cells + 2 });
         }
     }
+    openCaves(seed, ox, oz, vertices, indices);
     if (!fillRivers(seed, ox, oz, vertices, indices)) return false;
     return true;
+}
+
+/// Drops terrain triangles that touch cave air (mouths and breaches); the cave's own mesh
+/// carries the ground there. Dropped triangles become degenerate (all indices 0).
+fn openCaves(seed: u64, ox: f32, oz: f32, vertices: []const Mesh.Vertex, indices: []u32) void {
+    const Caves = @import("Caves.zig");
+    const Mountains = @import("Mountains.zig");
+    // Nothing near the hub or away from the ranges (and no cave layout work there).
+    const near_x = std.math.clamp(0, ox, ox + extent);
+    const near_z = std.math.clamp(0, oz, oz + extent);
+    const far_x = if (@abs(ox) > @abs(ox + extent)) ox else ox + extent;
+    const far_z = if (@abs(oz) > @abs(oz + extent)) oz else oz + extent;
+    if (far_x * far_x + far_z * far_z < Mountains.inner_clearance * Mountains.inner_clearance) return;
+    if (near_x * near_x + near_z * near_z > Mountains.outer_reach * Mountains.outer_reach) return;
+    const caves = Caves.cached(seed);
+    if (!Caves.nearChunk(caves, ox, oz, ox + extent, oz + extent)) return;
+    var open: [terrain_vertex_count]bool = undefined;
+    for (vertices[0..terrain_vertex_count], &open) |v, *o| o.* = Caves.openVertex(caves, v.position[0], v.position[1], v.position[2]);
+    var t: usize = 0;
+    while (t < terrain_index_count) : (t += 3) {
+        if (open[indices[t]] or open[indices[t + 1]] or open[indices[t + 2]]) @memset(indices[t..][0..3], 0);
+    }
 }
 
 /// Appends blue river ribbons and actual vertical curtains at seeded waterfall drops.

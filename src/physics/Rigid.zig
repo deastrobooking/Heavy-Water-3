@@ -162,7 +162,7 @@ fn gather(world: *const BoxWorld, body: State, out: *[max_contacts]Contact) usiz
         if (sx == 0 and sy == 0 and sz == 0) continue;
         if (n == out.len) return n;
         const p = body.toWorld(.{ sx * body.half[0], sy * body.half[1], sz * body.half[2] });
-        const g = world.ground.sample(world.ground.context, p[0], p[2]);
+        const g = world.ground.at(p) orelse continue;
         if (p[1] < g.height) {
             out[n] = .{ .point = p, .normal = g.normal, .depth = (g.height - p[1]) * g.normal[1], .other = null };
             n += 1;

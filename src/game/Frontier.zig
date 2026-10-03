@@ -57,9 +57,10 @@ pub fn init(sb: *Sandbox) void {
     avoid[a] = Sandbox.spawn;
     a += 1;
     sb.enemies = Enemies.init(sb.seed, Sandbox.spawn, avoid[0..a], 140);
+    const surface = sb.enemies.nest_count;
     var nest_sites: [Enemies.max_nests]V = undefined;
-    for (sb.enemies.nests[0..sb.enemies.nest_count], 0..) |nest, i| nest_sites[i] = nest.position;
-    sb.skies = Skies.init(sb.seed, Sandbox.spawn, nest_sites[0..sb.enemies.nest_count]);
+    for (sb.enemies.nests[0..surface], 0..) |nest, i| nest_sites[i] = nest.position;
+    sb.skies = Skies.init(sb.seed, Sandbox.spawn, nest_sites[0..surface]);
 
     var plazas: [District.node_count]Collectibles.Plaza = undefined;
     for (sb.catalog.district.nodes, &plazas) |node, *p| p.* = .{ .position = node.position, .arbor = node.kind == .arbor };
@@ -78,17 +79,90 @@ pub fn init(sb: *Sandbox) void {
     var shrines: [Sandbox.shrine_count]V = undefined;
     for (sb.shrines, &shrines) |s, *o| o.* = s.origin;
     var nests: [Enemies.max_nests]V = undefined;
-    for (sb.enemies.nests[0..sb.enemies.nest_count], 0..) |n, i| nests[i] = n.position;
+    for (sb.enemies.nests[0..surface], 0..) |n, i| nests[i] = n.position;
     const spawn: V = .{ Sandbox.spawn[0], Terrain.surface(sb.seed, Sandbox.spawn[0], Sandbox.spawn[2]).height, Sandbox.spawn[2] };
-    sb.collectibles = Collectibles.generate(.{ .seed = sb.seed, .spawn = spawn, .plazas = &plazas, .roads = &roads, .roofs = roofs[0..r], .shrines = &shrines, .nests = nests[0..sb.enemies.nest_count] });
-    // Settle every pickup onto what is really there: above the terrain, onto any deck or roof.
+    sb.collectibles = Collectibles.generate(.{ .seed = sb.seed, .spawn = spawn, .plazas = &plazas, .roads = &roads, .roofs = roofs[0..r], .shrines = &shrines, .nests = nests[0..surface] });
+    placeDungeons(sb);
+    // Settle every pickup onto what is really there: above the terrain (not inside a cave),
+    // onto any deck, roof or cave floor.
     for (sb.collectibles.items[0..sb.collectibles.count]) |*item| {
         const p = &item.position;
-        const ground = Terrain.surface(sb.seed, p[0], p[2]).height;
-        if (p[1] < ground + 0.5) p[1] = ground + 0.9;
+        if (sb.groundBelow(p.*)) |ground| if (p[1] < ground + 0.5) {
+            p[1] = ground + 0.9;
+        };
         if (sb.physics.castRay(R.add(p.*, .{ 0, 2.5, 0 }), .{ 0, -1, 0 }, 8, .none)) |hit| p[1] = hit.point[1] + 0.9;
     }
     refresh(sb);
+}
+
+/// The cave dungeons: a Hive nest in each heart chamber, and loot through the chambers (lumen
+/// in halls, shards and a rotor core in dead-end caches, a vital cell and alloy in the heart).
+fn placeDungeons(sb: *Sandbox) void {
+    const Caves = Sandbox.Caves;
+    for (sb.caves.systems[0..sb.caves.count]) |*sys| {
+        const heart = sys.heart();
+        sb.enemies.addCaveNest(.{ heart.center[0], heart.floor, heart.center[2] });
+        for (sys.rooms[0..sys.room_count], 0..) |room, i| {
+            const at = struct {
+                fn spot(s: *const Caves.System, r: usize, k: usize, n: usize) V {
+                    const p = Caves.floorSpot(s, @intCast(r), k, n, 0.45);
+                    return .{ p[0], p[1] + 0.9, p[2] };
+                }
+            }.spot;
+            switch (room.role) {
+                .mouth => {},
+                .hall => sb.collectibles.add(.lumen_shard, at(sys, i, 0, 1)),
+                .cache => {
+                    sb.collectibles.add(.lumen_shard, at(sys, i, 0, 3));
+                    sb.collectibles.add(.lumen_shard, at(sys, i, 1, 3));
+                    sb.collectibles.add(.rotor_core, at(sys, i, 2, 3));
+                },
+                .heart => {
+                    sb.collectibles.add(.vital_cell, at(sys, i, 0, 3));
+                    sb.collectibles.add(.hive_alloy, at(sys, i, 1, 3));
+                    sb.collectibles.add(.hive_alloy, at(sys, i, 2, 3));
+                },
+            }
+        }
+    }
+}
+
+/// Cave colliders are built the first time a player comes within 150 m of a system (a few
+/// milliseconds each in release builds), and stay. Entering a system is announced once.
+fn stepCaves(sb: *Sandbox) void {
+    const Caves = Sandbox.Caves;
+    var feet: [Sandbox.max_players]?V = @splat(null);
+    feet[0] = sb.player.feet;
+    for (sb.guests, 1..) |g, i| if (g.active) {
+        feet[i] = g.player.feet;
+    };
+    for (sb.caves.systems[0..sb.caves.count], 0..) |*sys, i| {
+        if (!sb.cave_colliders[i].eql(.none)) continue;
+        for (feet) |maybe| if (maybe) |f| {
+            var near = true;
+            for ([_]usize{ 0, 2 }) |a| if (f[a] < sys.lo[a] - 150 or f[a] > sys.hi[a] + 150) {
+                near = false;
+            };
+            if (!near) continue;
+            sb.cave_colliders[i] = Caves.collider(sb.allocator, &sb.physics, &sb.caves, @intCast(i), Sandbox.world_flag) catch |err| blk: {
+                std.log.err("cave {d} collider: {s}", .{ i, @errorName(err) });
+                break :blk .none;
+            };
+            break;
+        };
+    }
+    for (feet, 0..) |maybe, p| {
+        const f = maybe orelse continue;
+        const inside = Caves.systemAt(&sb.caves, R.add(f, .{ 0, 1, 0 }));
+        if (inside != null and inside != sb.cave_inside[p]) {
+            var flag: [20]u8 = undefined;
+            const first = !sb.progress.hasFlag(std.fmt.bufPrint(&flag, "cave_{d}_found", .{inside.?}) catch unreachable);
+            sb.progress.setFlag(std.fmt.bufPrint(&flag, "cave_{d}_found", .{inside.?}) catch unreachable);
+            if (p == 0) sb.say("{s}{s}", .{ Caves.name(inside.?), if (first) ": a new cave" else "" });
+            if (first) sb.cue(.vault, null);
+        }
+        sb.cave_inside[p] = inside;
+    }
 }
 
 /// After a load (or a new game): nests follow their flags, owned cars park on their pads, and
@@ -98,7 +172,7 @@ pub fn refresh(sb: *Sandbox) void {
         var flag: [16]u8 = undefined;
         const destroyed = sb.progress.hasFlag(nestFlag(&flag, @intCast(i)));
         nest.alive = !destroyed;
-        nest.health = if (destroyed) 0 else Enemies.nest_health;
+        nest.health = if (destroyed) 0 else if (nest.cave) Enemies.nest_health * 0.7 else Enemies.nest_health;
     }
     sb.enemies.units = @splat(null);
     sb.enemies.bolts = @splat(null);
@@ -217,9 +291,20 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             sb.progress.setFlag("nest_destroyed");
             sb.cue(.boom, n.position);
             sb.cue(.vault, null);
-            for (0..4) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 2, 1, 5 }));
-            sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, 6.5 }));
-            sb.say("hive nest destroyed", .{});
+            if (n.nest >= Enemies.surface_nests) {
+                // A cave's heart nest: the cave is cleared.
+                const cave = n.nest - Enemies.surface_nests;
+                var cleared: [20]u8 = undefined;
+                sb.progress.setFlag(std.fmt.bufPrint(&cleared, "cave_{d}_cleared", .{cave}) catch unreachable);
+                sb.progress.setFlag("cave_cleared");
+                for (0..2) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 0.75, 1, 3 }));
+                sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, -3 }));
+                sb.say("{s} cleared: the hive heart is broken", .{Sandbox.Caves.name(cave)});
+            } else {
+                for (0..4) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 2, 1, 5 }));
+                sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, 6.5 }));
+                sb.say("hive nest destroyed", .{});
+            }
         },
     }
 }
@@ -237,6 +322,7 @@ fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
 
 /// The frontier part of a fixed step. `frozen` (menus, talks) pauses triggers, not the world.
 pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Actions, frozen: bool, dt: f32) void {
+    stepCaves(sb);
     // Hover cars: the piloted one takes P1's movement keys; parked ones idle.
     sb.garage.step(&sb.physics, if (frozen) .{} else Garage.controls(input), dt);
 
@@ -550,6 +636,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         }
     }.ok;
     n += sb.garage.publish(sb.catalog, out[n..]);
+    n = publishMountains(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);
     if (room(out, n, 3)) {
@@ -570,13 +657,15 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| {
         if (!room(out, n, 2)) break;
         const pulse = 0.5 + 0.4 * @sin(t * 1.7) + nest.flash * 3;
+        // Cave nests grow smaller, under the chamber's roof.
+        const size: [3]f32 = if (nest.cave) @splat(0.45) else @splat(1);
         if (nest.alive) {
-            out[n] = .{ .mesh = c.spire, .transform = .{ .position = nest.position }, .tint = .{ 1, 1, 1, 1 } };
-            out[n + 1] = .{ .mesh = c.spire_glow, .transform = .{ .position = nest.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse) };
+            out[n] = .{ .mesh = c.spire, .transform = .{ .position = nest.position }, .tint = .{ 1, 1, 1, 1 }, .size = size };
+            out[n + 1] = .{ .mesh = c.spire_glow, .transform = .{ .position = nest.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = size };
             n += 2;
         } else {
             // A broken stump.
-            out[n] = .{ .mesh = c.spire, .transform = .{ .position = R.sub(nest.position, .{ 0, 1, 0 }) }, .tint = .{ 0.45, 0.4, 0.4, 1 }, .size = .{ 1, 0.22, 1 } };
+            out[n] = .{ .mesh = c.spire, .transform = .{ .position = R.sub(nest.position, .{ 0, 1, 0 }) }, .tint = .{ 0.45, 0.4, 0.4, 1 }, .size = .{ size[0], 0.22 * size[1], size[2] } };
             n += 1;
         }
     }
@@ -773,6 +862,48 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         out[i] = .{ .mesh = block, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = rotation };
     }
     return parts.len;
+}
+
+/// The ranges' far panorama (not while anyone is underground: it runs under the slopes, through
+/// the caves), cave rock near P1, and lumen crystals lighting the chambers.
+fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const Caves = Sandbox.Caves;
+    var n = start;
+    var underground = sb.cave_inside[0] != null;
+    for (sb.guests, 1..) |g, i| if (g.active and sb.cave_inside[i] != null) {
+        underground = true;
+    };
+    if (!underground and n < out.len and !sb.catalog.ranges.eql(.none)) {
+        out[n] = .{ .mesh = sb.catalog.ranges, .transform = .{ .position = .{ 0, 0, 0 } }, .tint = .{ 1, 1, 1, 1 } };
+        n += 1;
+    }
+    const eye = sb.player.feet;
+    for (sb.caves.systems[0..sb.caves.count], 0..) |*sys, i| {
+        var d: f32 = 0;
+        for ([_]usize{ 0, 2 }) |a| d = @max(d, @max(sys.lo[a] - eye[a], eye[a] - sys.hi[a]));
+        if (d > 320) continue;
+        if (n < out.len and i < sb.catalog.cave_meshes.len and !sb.catalog.cave_meshes[i].eql(.none)) {
+            out[n] = .{ .mesh = sb.catalog.cave_meshes[i], .transform = .{ .position = .{ 0, 0, 0 } }, .tint = .{ 1, 1, 1, 1 } };
+            n += 1;
+        }
+        if (d > 160) continue;
+        // Crystals cluster around each chamber's walls, in the system's hue.
+        const hues = [_][3]f32{ .{ 0.35, 0.9, 1 }, .{ 0.75, 0.45, 1 }, .{ 0.45, 1, 0.6 }, .{ 1, 0.7, 0.35 } };
+        const hue = hues[i % hues.len];
+        for (sys.rooms[0..sys.room_count], 0..) |room, r| {
+            const count: usize = if (room.role == .heart) 8 else 5;
+            for (0..count) |k| {
+                if (n == out.len) return n;
+                const p = Caves.floorSpot(sys, @intCast(r), k, count, 0.78);
+                const tall = 0.9 + @as(f32, @floatFromInt((k * 7 + r * 3) % 5)) * 0.35;
+                const lean = m.Quat.fromAxisAngle(m.Vec3.unit_y, @as(f32, @floatFromInt(k)) * 2.4).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 0.25));
+                const glow = 0.65 + 0.25 * @sin(t * 1.3 + @as(f32, @floatFromInt(k + r)));
+                out[n] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = .{ p[0], p[1] + tall * 0.6, p[2] } }, .tint = Material.emissive(.{ hue[0], hue[1], hue[2], 1 }, glow), .size = .{ 0.45 * tall, 1.6 * tall, 0.45 * tall }, .rotation = quat(lean) };
+                n += 1;
+            }
+        }
+    }
+    return n;
 }
 
 /// Hive troopers: dark red heavy plate, sealed helmets, magenta lumen.

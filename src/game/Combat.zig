@@ -96,7 +96,7 @@ pub const Swing = struct {
     knock: f32,
     stun: f32,
     units_hit: u32 = 0,
-    nests_hit: u8 = 0,
+    nests_hit: u16 = 0,
 };
 
 pub const Melee = struct {

@@ -78,8 +78,8 @@ Options are compiled in, so changing one rebuilds.
 python3 tools/zig.py build test --summary all
 ```
 
-- **Scope:** the suite (282 tests at the last count) is deterministic and headless. It covers the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee and class specials. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
-- **Time:** expect about 3 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
+- **Scope:** the suite (288 tests at the last count) is deterministic and headless. It covers the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee and class specials. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
+- **Time:** expect about 3.5 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
 - **Release mode:** `-Doptimize=ReleaseSafe` runs the same suite optimized.
 
 ## Smoke runs
@@ -96,6 +96,7 @@ Over the frame budget it steps through ten stages, logging `Smoke …` lines:
 - **Frontier:** fabricating a car and a blaster, flying the car, downing a drone (`Smoke frontier`).
 - **Flight:** fabricating the Kestrel, lifting off, downing a wasp (`Smoke flight`).
 - **Combat:** fabricating the saber and sniper rifle, a three-cut saber combo with P1's rig, a piercing sniper beam, an arc grenade and a kinetic slam (`Smoke combat`).
+- **Caves:** walking P1 into the first cave with the real simulation step, and reporting the cave systems, background-built meshes and colliders (`Smoke caves`).
 - **Character:** character creation.
 - **Building:** crate carrying, machine building and wiring, prefab capture.
 - **Saves:** in-memory save and restore. User save files are never touched.
@@ -175,6 +176,10 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 38 | Sniper rifle, first person |
 | 39 | Machine gun firing, first person |
 | 40 | A Synthetic channelling the lumen lance |
+| 41 | A mountain range from the foothills (the far panorama) |
+| 42 | A cave mouth on a mountainside |
+| 43 | Inside a cave's first chamber |
+| 44 | A cave's heart chamber and its Hive nest |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.
 

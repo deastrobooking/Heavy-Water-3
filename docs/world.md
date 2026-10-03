@@ -91,6 +91,10 @@ That is about 14 m of deck. Grades stay at 6% or less so vehicles and pedestrian
 
 Districts differ in purpose and mood: markets, workshops, gardens, residences, docks. Traffic follows lane graphs on the bridge roads, pedestrians follow walkway graphs, and both respond to what the player builds or breaks.
 
+## Mountains and caves
+
+Beyond the hub's valley and its ridged highlands, four great ranges rise 1.3–1.7 km out. Their summits carry snow, and rivers have cut passes through them. The ranges are hollow. Cave dungeons open in their lower flanks: a mouth in the mountainside, then chambers and tunnels that branch and descend under the rock. Lumen crystals light the chambers, dead ends hold caches, and the deepest chamber is a heart where the Hive has grown a nest. Breaking a heart clears the cave.
+
 ## Systems inspired by nature
 
 Each system pairs a natural analogue with gameplay and with the engine piece it maps onto.

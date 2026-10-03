@@ -89,6 +89,27 @@ Next:
 - carrier boarding and assault events;
 - the Kestrel's upgrades and paint.
 
+## Mountain ranges and cave dungeons — implemented
+
+Four seeded mountain ranges, peaks of 160–260 m with snow on their summits, stand 1.3–1.7 km from the hub. Rivers cut passes through them, and a far panorama keeps them on the horizon. Each range holds up to two cave dungeons: a mouth in the mountainside opens into a descending tree of chambers and tunnels. Halls and caches hold loot, lumen crystals light the chambers, and a Hive nest with troopers guards each heart. The caves are meshed watertight from a distance field. The streamed terrain opens over their mouths, and physics treats cave air as hollow, so players, troopers, drops and rays all work underground.
+
+Acceptance:
+- **Tests:**
+  - the ranges keep clear of the hub, reach real peaks and open passes for rivers;
+  - the panorama stays under the real ground;
+  - every cave system has a mouth, chambers under 7 m of rock, and a heart below its mouth;
+  - cave meshes have walkable floors and ceilings at every chamber;
+  - the cave mesh covers every dropped heightfield triangle at the mouth;
+  - a player walks in through a mouth with the full Sandbox step, stays under the slope, and stands on the floor of the first chamber.
+- **Smoke:** walks P1 into the first cave with the real simulation step. It also reports the systems, the background-built meshes and the colliders.
+- **Captures:** `-Dshowcase=41` to `44`: a range from the foothills, a cave mouth, the first chamber, and a heart chamber with its nest.
+
+Next:
+- steeper mouths with an overhang (they read as slots on gentle flanks);
+- interior lighting (the sun still shades cave walls) and audio reverb underground;
+- cave puzzles from the shrine solver;
+- the Landscape authoring path's cave plans, joined to this runtime.
+
 ## Fighting, energy firearms and classes — implemented
 
 The beam saber is a melee weapon: timed combo cuts that land where the drawn blade passes (a simulation rig shares the renderer's poser), queued presses, a charged wave, a guard that parries bolts back, knockback, stun, lunges, and bolts cut from the air. Four energy firearms join the fabricator: the sniper rifle (scoped, piercing beam), the machine gun (heat), the heavy rifle (piercing, charged) and the energy bazooka (arcing orb, burst, detonation). Players are Rangers (tech specials) or Synthetics (powers), each with energy and three specials. Bodies take aim, swing, guard and cast poses, and weapons are drawn in hand.

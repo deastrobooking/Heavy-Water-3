@@ -23,7 +23,7 @@ pub fn baseHeight(seed: u64, x: f32, z: f32) f32 {
     const detail = value(Seed.mix(seed), x * 0.045, z * 0.045) * 4 * relief;
     const ridge_signal = 1 - @abs(value(Seed.mix(seed ^ 0x4d4f554e5441494e), x * 0.009, z * 0.009) * 2 - 1);
     const ridges = std.math.pow(f32, ridge_signal, 2.15) * (15 + value(seed ^ 0x414c50494e45, x * 0.003, z * 0.003) * 24) * relief;
-    return broad + detail + ridges - 11;
+    return broad + detail + ridges - 11 + @import("Mountains.zig").height(seed, x, z);
 }
 
 pub fn height(seed: u64, x: f32, z: f32) f32 {

@@ -56,6 +56,15 @@ pub const GroundSample = struct { height: f32, normal: Vec3 };
 pub const Ground = struct {
     context: ?*const anyopaque = null,
     sample: *const fn (context: ?*const anyopaque, x: f32, z: f32) GroundSample,
+    /// Open space under the heightfield (caves): where it answers true, a point is in the air
+    /// whatever the terrain height above it, and mesh colliders are its only floors and walls.
+    hollow: ?*const fn (context: ?*const anyopaque, p: Vec3) bool = null,
+
+    /// The terrain under `p`, or null where `p` is in hollow space.
+    pub fn at(self: Ground, p: Vec3) ?GroundSample {
+        if (self.hollow) |h| if (h(self.context, p)) return null;
+        return self.sample(self.context, p[0], p[2]);
+    }
 };
 /// Exactly one of `body`, `rigid`, or `mesh` is set.
 pub const Hit = struct { body: Body = .none, rigid: Rigid = .none, mesh: MeshCollider = .none, distance: f32, point: Vec3, normal: Vec3, user: u32 };

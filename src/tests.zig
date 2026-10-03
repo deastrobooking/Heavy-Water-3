@@ -25,6 +25,8 @@ test {
     _ = @import("engine/Memory.zig");
     _ = @import("procedural/Bridges.zig");
     _ = @import("procedural/Skyline.zig");
+    _ = @import("procedural/Mountains.zig");
+    _ = @import("procedural/Caves.zig");
     _ = @import("render/Capture.zig");
     _ = @import("asset/Guid.zig");
     _ = @import("asset/Meta.zig");

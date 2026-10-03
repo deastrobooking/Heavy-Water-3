@@ -20,8 +20,12 @@ const V = Physics.Vec3;
 const Enemies = @This();
 
 pub const Kind = enum { drone, sentinel, trooper };
-pub const max_nests = 3;
-pub const max_units = 18;
+/// Three nests on the surface, then one in the heart of each cave system.
+pub const surface_nests = 3;
+pub const max_nests = surface_nests + @import("../procedural/Caves.zig").max_systems;
+pub const max_units = 24;
+/// Cave nests field troopers only (fliers have no room), at most this many.
+pub const cave_troopers = 4;
 pub const max_bolts = 48;
 pub const units_per_nest = 6;
 pub const troopers_per_nest = 2;
@@ -68,7 +72,8 @@ pub const Unit = struct {
         return if (u.kind == .trooper) R.add(u.position, .{ 0, 1.2, 0 }) else u.position;
     }
 };
-pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = 2, flash: f32 = 0 };
+/// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
+pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = 2, flash: f32 = 0, cave: bool = false };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
 
 /// A player the Hive can see and shoot. A raised guard (saber or shield) facing the bolt takes a
@@ -97,8 +102,8 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
     var self: Enemies = .{ .seed = seed, .rng = .init(Seed.mix(seed ^ 0x48495645)) };
     const random = self.rng.random();
     var attempts: usize = 0;
-    while (self.nest_count < max_nests and attempts < 400) : (attempts += 1) {
-        const angle = (@as(f32, @floatFromInt(self.nest_count)) + random.float(f32) * 0.7) * 2 * std.math.pi / max_nests + 0.6;
+    while (self.nest_count < surface_nests and attempts < 400) : (attempts += 1) {
+        const angle = (@as(f32, @floatFromInt(self.nest_count)) + random.float(f32) * 0.7) * 2 * std.math.pi / surface_nests + 0.6;
         const r = 380 + random.float(f32) * 160;
         const x = spawn[0] + @sin(angle) * r;
         const z = spawn[2] + @cos(angle) * r;
@@ -113,6 +118,13 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
         self.nest_count += 1;
     }
     return self;
+}
+
+/// A nest in a cave's heart chamber, standing on its floor.
+pub fn addCaveNest(self: *Enemies, floor: V) void {
+    if (self.nest_count == max_nests) return;
+    self.nests[self.nest_count] = .{ .position = floor, .cave = true, .health = nest_health * 0.7 };
+    self.nest_count += 1;
 }
 
 pub fn unitCount(self: *const Enemies, nest: ?u8) usize {
@@ -131,15 +143,17 @@ fn spawnUnit(self: *Enemies, nest: u8) void {
         sentinels += @intFromBool(u.kind == .sentinel);
         troopers += @intFromBool(u.kind == .trooper);
     };
-    const kind: Kind = if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else .drone;
+    const n = self.nests[nest];
+    if (n.cave and troopers >= cave_troopers) return;
+    const kind: Kind = if (n.cave) .trooper else if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else .drone;
+    const spread: f32 = if (n.cave) 3.5 else 7;
     for (&self.units) |*slot| if (slot.* == null) {
-        const n = self.nests[nest];
         // Fliers launch from the spire tip; troopers march out of its foot.
         const angle = random.float(f32) * 2 * std.math.pi;
         slot.* = .{
             .kind = kind,
             .nest = nest,
-            .position = if (kind == .trooper) R.add(n.position, .{ @sin(angle) * 7, 0.5, @cos(angle) * 7 }) else R.add(n.position, .{ 0, 24, 0 }),
+            .position = if (kind == .trooper) R.add(n.position, .{ @sin(angle) * spread, 0.5, @cos(angle) * spread }) else R.add(n.position, .{ 0, 24, 0 }),
             .health = stats(kind).health,
             .orbit = random.float(f32) * 2 * std.math.pi,
         };
@@ -459,7 +473,7 @@ pub fn strikeThrough(self: *Enemies, origin: V, dir: V, length: f32, pad: f32, d
 
 /// A blade: damage, knockback and stun to every unit (and nest) within `radius` of the segment,
 /// each at most once per swing (`units_hit`/`nests_hit` remember who was cut).
-pub fn strikeBlade(self: *Enemies, origin: V, dir: V, length: f32, radius: f32, damage: f32, knock: V, stun: f32, units_hit: *u32, nests_hit: *u8, out: []Event, n: *usize) usize {
+pub fn strikeBlade(self: *Enemies, origin: V, dir: V, length: f32, radius: f32, damage: f32, knock: V, stun: f32, units_hit: *u32, nests_hit: *u16, out: []Event, n: *usize) usize {
     var hits: usize = 0;
     for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
         const bit = @as(u32, 1) << @intCast(i);
@@ -480,7 +494,7 @@ pub fn strikeBlade(self: *Enemies, origin: V, dir: V, length: f32, radius: f32, 
         }
     };
     for (self.nests[0..self.nest_count], 0..) |nst, i| {
-        const bit = @as(u8, 1) << @intCast(i);
+        const bit = @as(u16, 1) << @intCast(i);
         if (!nst.alive or nests_hit.* & bit != 0) continue;
         if (distanceToSegment(R.add(nst.position, .{ 0, 3, 0 }), origin, dir, length) > radius + nest_radius) continue;
         nests_hit.* |= bit;
@@ -615,7 +629,7 @@ fn testPhysics() Physics {
 
 test "nest sites avoid landmarks and sleep until a player comes near" {
     const e = Enemies.init(42, .{ 0, 0, 0 }, &.{.{ 400, 0, 0 }}, 150);
-    try std.testing.expect(e.nest_count == max_nests);
+    try std.testing.expect(e.nest_count == surface_nests);
     for (e.nests[0..e.nest_count]) |nest| {
         try std.testing.expect(horizontal(nest.position) > 370);
         try std.testing.expect(horizontal(R.sub(nest.position, .{ 400, 0, 0 })) >= 150);
@@ -694,7 +708,7 @@ test "a blade cuts each unit once per swing, knocks it back and stuns it; guards
     var events: [8]Event = undefined;
     var n: usize = 0;
     var hit: u32 = 0;
-    var nests: u8 = 0;
+    var nests: u16 = 0;
     try std.testing.expectEqual(@as(usize, 1), e.strikeBlade(.{ -1, 1, 1 }, .{ 1, 0, 0 }, 2, 0.3, 40, .{ 0, 0, 8 }, 1, &hit, &nests, &events, &n));
     try std.testing.expectEqual(@as(usize, 0), e.strikeBlade(.{ -1, 1, 1 }, .{ 1, 0, 0 }, 2, 0.3, 40, .{ 0, 0, 8 }, 1, &hit, &nests, &events, &n));
     const u = e.units[0].?;

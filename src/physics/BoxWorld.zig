@@ -111,8 +111,7 @@ fn solveGround(self: *BoxWorld) void {
         for ([_][2]f32{ .{ 0, 0 }, .{ -1, -1 }, .{ 1, -1 }, .{ -1, 1 }, .{ 1, 1 } }) |c| {
             const x = b.position[0] + c[0] * b.half[0];
             const z = b.position[2] + c[1] * b.half[2];
-            const s = self.ground.sample(self.ground.context, x, z);
-            support = @max(support, s.height);
+            if (self.ground.at(.{ x, b.position[1], z })) |s| support = @max(support, s.height);
             // Mesh floors below the box's center height also support it.
             if (self.meshFloor(.{ x, b.position[1], z }, b.half[1] + 0.5)) |floor| support = @max(support, floor);
         }
@@ -195,7 +194,8 @@ pub fn castRay(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
     // Terrain: march in 5 cm steps, then bisect the crossing.
     const below = struct {
         fn f(world: *const BoxWorld, p: Vec3) bool {
-            return p[1] < world.ground.sample(world.ground.context, p[0], p[2]).height;
+            const g = world.ground.at(p) orelse return false;
+            return p[1] < g.height;
         }
     }.f;
     var t: f32 = 0;
@@ -399,7 +399,8 @@ fn overlapsFootprint(shape: Physics.Character, feet: Vec3, b: BodyState) bool {
 
 /// Highest standable surface under the character: terrain (no body) or a box top within step reach.
 fn characterSupport(self: *const BoxWorld, shape: Physics.Character, feet: Vec3) struct { height: f32, body: Physics.Body } {
-    var support = self.ground.sample(self.ground.context, feet[0], feet[2]).height;
+    // In hollow space (a cave) the terrain overhead is not underfoot.
+    var support = if (self.ground.at(.{ feet[0], feet[1] + 0.5, feet[2] })) |g| g.height else -std.math.inf(f32);
     var body: Physics.Body = .none;
     // Walkable mesh floors under the footprint (center and four points inside the radius).
     const r = shape.radius * 0.7;

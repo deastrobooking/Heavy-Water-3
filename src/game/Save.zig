@@ -172,7 +172,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     try std.testing.expectError(error.SeedMismatch, decode(allocator, bytes, 1, 4, 8));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 1, 8));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes[0 .. bytes.len / 2], doc.seed, 4, 8));
-    const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 4", "\"generator\": 2");
+    const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 5", "\"generator\": 2");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
     const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 11", "\"format\": 10");

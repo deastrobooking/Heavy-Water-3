@@ -70,8 +70,8 @@ reload_smoke_edited: ?std.Io.Timestamp = null,
 reload_smoke_initial: bool = false,
 reload_smoke_passed: bool = false,
 reload_smoke_old: @import("asset/Catalog.zig").MeshHandle = .{},
-deferred: [8]?Loader.Ticket = @splat(null),
-deferred_handles: [8]@import("asset/Catalog.zig").MeshHandle = undefined,
+deferred: [24]?Loader.Ticket = @splat(null),
+deferred_handles: [24]@import("asset/Catalog.zig").MeshHandle = undefined,
 catalog: *@import("asset/Catalog.zig") = undefined,
 started: std.Io.Timestamp = undefined,
 /// `-Dpack-stress`: a generated pack loaded during the measured benchmark frames.
@@ -122,6 +122,11 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.loader = try Loader.create(allocator, io);
     for (world.catalog.pending[0..world.catalog.pending_count], 0..) |p, i| {
         self.deferred[i] = try self.loader.?.request(.{ .generate = p.generator }, 0);
+        self.deferred_handles[i] = p.handle;
+    }
+    // Caves and the mountain panorama: built in the background after the near content.
+    for (world.catalog.landscape[0..world.catalog.landscape_count], world.catalog.pending_count..) |p, i| {
+        self.deferred[i] = try self.loader.?.request(.{ .generate = p.generator }, 1);
         self.deferred_handles[i] = p.handle;
     }
     if (options.pack_stress > 0) try self.writeStressPack(&world.catalog);
@@ -713,7 +718,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 40)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 44)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -817,7 +822,7 @@ fn guiShowcase(self: *App, v: u32) void {
         self.engine.input.jump = sb.garage.cars[0] != null and sb.garage.cars[0].?.flyer.ride < 4;
     }
     // 37–40: combat, held every frame: a trooper (or a squad) stays in front of the player.
-    if (v >= 37 and self.gui_showcase_ready) {
+    if (v >= 37 and v <= 40 and self.gui_showcase_ready) {
         const fwd: [3]f32 = .{ @sin(self.engine.camera.yaw), 0, @cos(self.engine.camera.yaw) };
         sb.player.feet = self.showcase_feet;
         const feet = sb.player.feet;
@@ -949,6 +954,57 @@ fn guiShowcase(self: *App, v: u32) void {
             if (v == 37) self.engine.camera.yaw += 0.6;
             self.showcase_feet = sb.player.feet;
             self.engine.camera.pitch = -0.05;
+        },
+        41, 42, 43, 44 => {
+            // Mountains and caves: the first range from the foothills, then cave system 0's
+            // mouth, its first chamber, and its heart.
+            const Caves = Sandbox.Caves;
+            const sys = &sb.caves.systems[0];
+            const Terrain = @import("procedural/Terrain.zig");
+            const look = struct {
+                fn at(camera: *@import("world/Camera.zig"), from: [3]f32, to: [3]f32) void {
+                    const d = R3.normalize(R3.sub(to, from));
+                    camera.yaw = std.math.atan2(d[0], d[2]);
+                    camera.pitch = std.math.asin(d[1]);
+                }
+            }.at;
+            sb.view = if (v == 42) .third else .first;
+            sb.tools.tool = .hands;
+            switch (v) {
+                41 => {
+                    const range = @import("procedural/Mountains.zig").ranges(sb.seed)[sys.range];
+                    const mid = range.spine[2];
+                    const toward = R3.normalize(.{ mid[0], 0, mid[1] });
+                    const from: [3]f32 = .{ mid[0] - toward[0] * 900, 0, mid[1] - toward[2] * 900 };
+                    sb.player.mode = .fly;
+                    sb.player.feet = .{ from[0], Terrain.surface(sb.seed, from[0], from[2]).height + 70, from[2] };
+                    // Free flight follows the camera.
+                    self.engine.camera.position = mach.math.vec3(sb.player.feet[0], sb.player.feet[1], sb.player.feet[2]);
+                    look(&self.engine.camera, sb.player.feet, .{ mid[0], 120, mid[1] });
+                },
+                42 => {
+                    const from = R3.add(sys.entrance, R3.add(R3.scale(sys.inward, -9), .{ sys.inward[2] * 3, 0, -sys.inward[0] * 3 }));
+                    sb.player.mode = .walk;
+                    sb.player.feet = .{ from[0], Terrain.surface(sb.seed, from[0], from[2]).height, from[2] };
+                    look(&self.engine.camera, R3.add(sb.player.feet, .{ 0, 4, 0 }), R3.add(sys.entrance, .{ 0, 2, 0 }));
+                },
+                43 => {
+                    const room = sys.rooms[0];
+                    const from = R3.sub(.{ room.center[0], room.floor, room.center[2] }, R3.scale(sys.inward, room.radii[0] * 0.5));
+                    sb.player.mode = .walk;
+                    sb.player.feet = from;
+                    const next = sys.rooms[1];
+                    look(&self.engine.camera, R3.add(from, .{ 0, 1.7, 0 }), .{ next.center[0], next.floor + 2, next.center[2] });
+                },
+                else => {
+                    const heart = sys.heart();
+                    const from = Caves.floorSpot(sys, @intCast(heart - &sys.rooms[0]), 0, 1, 0.7);
+                    sb.player.mode = .walk;
+                    sb.player.feet = from;
+                    look(&self.engine.camera, R3.add(from, .{ 0, 1.7, 0 }), .{ heart.center[0], heart.floor + 2.5, heart.center[2] });
+                },
+            }
+            sb.player.velocity = @splat(0);
         },
         31 => {
             sb.progress.inventory = .{ 14, 3, 9, 2 };
@@ -1231,6 +1287,7 @@ fn smokeFrontier(self: *App) void {
     _ = sb.hangar.leave(&sb.physics);
     std.log.info("Smoke flight: kestrel fabricated={any}, lifted off={any}, wasp downed={any}; carriers at {d:.0} and {d:.0} m up", .{ sb.progress.fighter, lifted, wasp_down, sb.skies.carriers[0].altitude, sb.skies.carriers[1].altitude });
     self.smokeCombat();
+    self.smokeCaves();
     // Leave the run's progress as it was (later stages log the market and wallet).
     sb.progress = keep;
     sb.wallet = wallet;
@@ -1296,6 +1353,43 @@ fn smokeCombat(self: *App) void {
     sb.enemies.units = @splat(null);
     sb.specials = .{};
     sb.combat.arsenals = @splat(.{});
+}
+
+/// Walks P1 in through the first cave mouth with the real simulation step, and reports the
+/// ranges and caves.
+fn smokeCaves(self: *App) void {
+    const sb = &self.sandbox;
+    const Terrain = @import("procedural/Terrain.zig");
+    const Mountains = @import("procedural/Mountains.zig");
+    const keep_player = sb.player;
+    const keep_view = sb.view;
+    var tallest: f32 = 0;
+    for (Mountains.ranges(sb.seed)) |r| for (r.spine) |p| {
+        tallest = @max(tallest, Terrain.surface(sb.seed, p[0], p[1]).height);
+    };
+    const sys = &sb.caves.systems[0];
+    const outside = R3.add(sys.entrance, R3.scale(sys.inward, -10));
+    sb.player = .{ .feet = .{ outside[0], Terrain.surface(sb.seed, outside[0], outside[2]).height, outside[2] }, .mode = .walk };
+    sb.view = .first;
+    var camera = self.engine.camera;
+    camera.yaw = std.math.atan2(sys.inward[0], sys.inward[2]);
+    camera.pitch = 0;
+    var underground = false;
+    for (0..60 * 8) |_| {
+        sb.step(&camera, .{ .forward = 1 }, .{}, 1.0 / 60.0) catch break;
+        const f = sb.player.feet;
+        if (Sandbox.Caves.systemAt(&sb.caves, R3.add(f, .{ 0, 1, 0 })) == 0 and f[1] < Terrain.surface(sb.seed, f[0], f[2]).height - 4) underground = true;
+    }
+    const f = sb.player.feet;
+    var built: usize = 0;
+    for (sb.cave_colliders) |c| built += @intFromBool(!c.eql(.none));
+    var meshes: usize = 0;
+    for (sb.catalog.cave_meshes[0..sb.caves.count]) |h| meshes += @intFromBool(if (sb.catalog.mesh(h)) |e| e.ready else false);
+    std.log.info("Smoke caves: {d} cave systems in {d} ranges (highest spine ground {d:.0} m), {d} meshes ready; walked in underground={any} grounded={any} {d:.1} m under the slope, {d} colliders built", .{ sb.caves.count, Mountains.count, tallest, meshes, underground, sb.player.grounded, Terrain.surface(sb.seed, f[0], f[2]).height - f[1], built });
+    sb.player = keep_player;
+    sb.view = keep_view;
+    sb.cave_inside = @splat(null);
+    sb.enemies.units = @splat(null);
 }
 
 fn smokeSap(self: *App) void {

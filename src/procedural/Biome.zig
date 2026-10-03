@@ -22,7 +22,9 @@ pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
     const base = weights.color();
     const alpine = std.math.clamp((height - 12) / 24, 0, 1);
     const exposed = std.math.clamp((slope - 0.72) / 0.9, 0, 1) * alpine;
-    const snowline = 27 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
+    // The great ranges carry their snow higher, on their peaks rather than their flanks.
+    const range = @import("Mountains.zig").sample(seed, x, z).influence;
+    const snowline = 27 + range * 165 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
     const snow = std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
     const rock = [3]f32{ 0.42, 0.48, 0.49 };
     const snow_color = [3]f32{ 0.86, 0.91, 0.94 };

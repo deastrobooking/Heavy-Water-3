@@ -9,6 +9,8 @@ const Arbor = @import("../procedural/Arbor.zig");
 const Seed = @import("../procedural/Seed.zig");
 const District = @import("../procedural/District.zig");
 const Vegetation = @import("../procedural/Vegetation.zig");
+const Caves = @import("../procedural/Caves.zig");
+const Mountains = @import("../procedural/Mountains.zig");
 const Guid = @import("Guid.zig");
 pub const Registry = @import("Registry.zig").For(MeshHandle);
 pub const Ref = @import("Registry.zig").Ref;
@@ -97,6 +99,15 @@ district: District.Layout = undefined,
 /// Meshes reserved by `loadSeededDeferred`, to be built by the asset loader and installed.
 pending: [arbor_count * 2 + 1]Pending = undefined,
 pending_count: usize = 0,
+/// The world's caves (`procedural/Caves.zig`), and their meshes plus the mountain ranges' far
+/// panorama: reserved at load and built only by the application's asset loader (`landscape`),
+/// never by `loadSeeded`, so tools and tests stay fast. Unbuilt handles draw nothing.
+caves: Caves.Layout = undefined,
+cave_meshes: [Caves.max_systems]MeshHandle = @splat(.none),
+ranges: MeshHandle = .none,
+cave_jobs: [Caves.max_systems]CaveJob = undefined,
+landscape: [Caves.max_systems + 1]Pending = undefined,
+landscape_count: usize = 0,
 /// GUID → content for everything above: the build manifest's compiled assets plus
 /// engine-generated meshes under GUIDs derived from "generated:<name>".
 registry: Registry = .{},
@@ -108,6 +119,7 @@ pub fn load(self: *Catalog, allocator: std.mem.Allocator) !void {
 }
 
 pub const Pending = struct { handle: MeshHandle, generator: @import("Loader.zig").Generator };
+pub const CaveJob = struct { caves: *const Caves.Layout, index: u8 };
 
 /// Loads everything now (tests and tools).
 pub fn loadSeeded(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void {
@@ -125,6 +137,14 @@ const Build = struct {
     fn arborProxy(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
         const tree: *const Arbor.Tree = @ptrCast(@alignCast(context));
         return Model.fromMesh(allocator, try Arbor.mesh(allocator, tree, .proxy), .named("arbor proxy", .{ 1, 1, 1, 1 }));
+    }
+    fn cave(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
+        const job: *const CaveJob = @ptrCast(@alignCast(context));
+        return Model.fromMesh(allocator, try Caves.mesh(allocator, job.caves, job.index), .named("cave", .{ 1, 1, 1, 1 }));
+    }
+    fn ranges(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
+        const seed: *const u64 = @ptrCast(@alignCast(context));
+        return Model.fromMesh(allocator, try Mountains.panorama(allocator, seed.*), .named("mountain panorama", .{ 1, 1, 1, 1 }));
     }
     fn district(context: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
         const layout: *const District.Layout = @ptrCast(@alignCast(context));
@@ -228,6 +248,16 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.content.district = try self.reserve();
     self.pending[self.pending_count] = .{ .handle = self.content.district, .generator = .{ .context = &self.district, .build = Build.district } };
     self.pending_count += 1;
+    self.caves = Caves.layout(seed);
+    for (0..self.caves.count) |i| {
+        self.cave_meshes[i] = try self.reserve();
+        self.cave_jobs[i] = .{ .caves = &self.caves, .index = @intCast(i) };
+        self.landscape[self.landscape_count] = .{ .handle = self.cave_meshes[i], .generator = .{ .context = &self.cave_jobs[i], .build = Build.cave } };
+        self.landscape_count += 1;
+    }
+    self.ranges = try self.reserve();
+    self.landscape[self.landscape_count] = .{ .handle = self.ranges, .generator = .{ .context = &self.caves.seed, .build = Build.ranges } };
+    self.landscape_count += 1;
     // Generated meshes have no sidecar: their GUIDs derive from fixed names.
     const generated = [_]struct { name: []const u8, handle: MeshHandle }{
         .{ .name = "relic", .handle = self.content.relic },           .{ .name = "plant", .handle = self.content.plant },

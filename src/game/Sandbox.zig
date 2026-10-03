@@ -45,6 +45,7 @@ const Hangar = @import("Hangar.zig");
 const Skies = @import("Skies.zig");
 const Rig = @import("Rig.zig");
 const Specials = @import("Specials.zig");
+pub const Caves = @import("../procedural/Caves.zig");
 /// `closing`: removed from the road graph, standing until the traffic on it has crossed.
 pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
@@ -180,7 +181,7 @@ const machine_flag: u32 = 1 << 31;
 const part_flag: u32 = 1 << 30;
 const chassis_flag: u32 = 1 << 29;
 /// Arbor geometry: occludes picking, never a removable target.
-const world_flag: u32 = 1 << 28;
+pub const world_flag: u32 = 1 << 28;
 const bridge_flag: u32 = 1 << 27;
 /// Test Arbor placement relative to the spawn point.
 pub const arbor_offset: [2]f32 = .{ 60, 80 };
@@ -248,6 +249,12 @@ player: Player = .{},
 guests: [max_players - 1]Guest = @splat(.{}),
 /// Class specials: energy, cooldowns, grenades and sentries (session-only, like vitals).
 specials: Specials = .{},
+/// The caves in the mountain ranges (layout from the seed), and each system's collider, built
+/// when a player first comes near it.
+caves: Caves.Layout = undefined,
+cave_colliders: [Caves.max_systems]Physics.MeshCollider = @splat(.none),
+/// The cave system each local player stands in, for arrival notices.
+cave_inside: [max_players]?u8 = @splat(null),
 /// Each player's skeleton in the simulation (built on first use), for where blades are.
 rigs: [max_players]?Rig = @splat(null),
 /// Traffic and pedestrians; off until `enableLife` (the application enables it).
@@ -318,10 +325,11 @@ notice: [64]u8 = undefined,
 notice_len: usize = 0,
 notice_until: u64 = 0,
 
-/// Initializes in place: physics keeps a pointer to `seed` for terrain queries.
+/// Initializes in place: physics keeps a pointer to `caves` (and its seed) for terrain queries.
 pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
     self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined, .scripts = .init(allocator) };
-    self.physics = .init(.{ .context = &self.seed, .sample = groundSample });
+    self.caves = Caves.layout(seed);
+    self.physics = .init(.{ .context = &self.caves, .sample = groundSample, .hollow = groundHollow });
     errdefer self.physics.deinit();
     self.dialogue = try Dialogue.load(allocator, Dialogue.builtin);
     errdefer self.dialogue.deinit();
@@ -744,9 +752,20 @@ pub fn halve(size: [3]f32) Physics.Vec3 {
 }
 
 fn groundSample(context: ?*const anyopaque, x: f32, z: f32) Physics.GroundSample {
-    const seed: *const u64 = @ptrCast(@alignCast(context.?));
-    const s = Terrain.surface(seed.*, x, z);
+    const caves: *const Caves.Layout = @ptrCast(@alignCast(context.?));
+    const s = Terrain.surface(caves.seed, x, z);
     return .{ .height = s.height, .normal = s.normal };
+}
+
+fn groundHollow(context: ?*const anyopaque, p: Physics.Vec3) bool {
+    const caves: *const Caves.Layout = @ptrCast(@alignCast(context.?));
+    return Caves.hollow(caves, p);
+}
+
+/// The terrain height under a point, or null inside a cave (where it is overhead, not below).
+pub fn groundBelow(self: *const Sandbox, p: Physics.Vec3) ?f32 {
+    if (Caves.hollow(&self.caves, p)) return null;
+    return Terrain.surface(self.seed, p[0], p[2]).height;
 }
 
 pub fn resetPlayer(self: *Sandbox, camera: *Camera) void {
@@ -804,8 +823,8 @@ pub fn guestCount(self: *const Sandbox) usize {
 pub fn respawnGuest(self: *Sandbox, index: usize) void {
     const g = &self.guests[index];
     var feet = R.add(self.player.feet, R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), guest_offsets[index]));
-    const terrain = Terrain.surface(self.seed, feet[0], feet[2]).height;
-    feet[1] = if (self.physics.castRay(R.add(feet, .{ 0, 2, 0 }), .{ 0, -1, 0 }, 8, .none)) |hit| @max(hit.point[1], terrain) + 0.01 else terrain;
+    const terrain = self.groundBelow(R.add(feet, .{ 0, 1, 0 })) orelse -std.math.inf(f32);
+    feet[1] = if (self.physics.castRay(R.add(feet, .{ 0, 2, 0 }), .{ 0, -1, 0 }, 8, .none)) |hit| @max(hit.point[1], terrain) + 0.01 else if (std.math.isFinite(terrain)) terrain else self.player.feet[1];
     g.player = .{ .feet = feet };
     g.camera = .{ .yaw = self.body_yaw, .pitch = -0.2 };
     g.body_yaw = self.body_yaw;
@@ -1021,6 +1040,14 @@ fn placeCamera(self: *const Sandbox, camera: *Camera) void {
 fn chase(self: *const Sandbox, eye: math.Vec3, camera: *Camera) void {
     const f = camera.forward();
     var p = math.vec3(eye.x() - f.x() * third_person_distance, eye.y() + 0.3 - f.y() * third_person_distance, eye.z() - f.z() * third_person_distance);
+    if (Caves.hollow(&self.caves, .{ eye.x(), eye.y(), eye.z() })) {
+        // Underground: stop short of the cave walls behind.
+        const from: Physics.Vec3 = .{ eye.x(), eye.y() + 0.3, eye.z() };
+        const back = R.normalize(.{ p.x() - from[0], p.y() - from[1], p.z() - from[2] });
+        const room = if (self.physics.castRay(from, back, third_person_distance, .none)) |hit| @max(0.3, hit.distance - 0.4) else third_person_distance;
+        camera.position = math.vec3(from[0] + back[0] * room, from[1] + back[1] * room, from[2] + back[2] * room);
+        return;
+    }
     const ground = Terrain.surface(self.seed, p.x(), p.z()).height + 0.4;
     if (p.y() < ground) p = math.vec3(p.x(), ground, p.z());
     camera.position = p;
@@ -1578,7 +1605,8 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distan
 fn terrainDistance(self: *const Sandbox, origin: Physics.Vec3, dir: Physics.Vec3, max_distance: f32) f32 {
     var t: f32 = 0;
     while (t < max_distance) : (t += 0.1) {
-        if (origin[1] + dir[1] * t < Terrain.surface(self.seed, origin[0] + dir[0] * t, origin[2] + dir[2] * t).height) return t;
+        const p: Physics.Vec3 = .{ origin[0] + dir[0] * t, origin[1] + dir[1] * t, origin[2] + dir[2] * t };
+        if (self.groundBelow(p)) |ground| if (p[1] < ground) return t;
     }
     return max_distance;
 }
@@ -1981,6 +2009,38 @@ pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void 
 fn run(sandbox: *Sandbox, camera: *Camera, input: Input, actions: Actions, steps: usize) !void {
     try sandbox.step(camera, input, actions, 1.0 / 60.0);
     for (1..steps) |_| try sandbox.step(camera, input, .{}, 1.0 / 60.0);
+}
+
+test "a player walks in through a cave mouth and stays underground on the cave floor" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const sys = &sandbox.caves.systems[0];
+    // Ten metres outside the mouth, facing in.
+    const start = R.add(sys.entrance, R.scale(sys.inward, -10));
+    sandbox.player = .{ .feet = .{ start[0], Terrain.surface(sandbox.seed, start[0], start[2]).height, start[2] }, .mode = .walk };
+    camera.yaw = std.math.atan2(sys.inward[0], sys.inward[2]);
+    camera.pitch = 0;
+    var underground = false;
+    for (0..60 * 8) |_| {
+        try run(&sandbox, &camera, .{ .forward = 1 }, .{}, 1);
+        const f = sandbox.player.feet;
+        if (Caves.systemAt(&sandbox.caves, R.add(f, .{ 0, 1, 0 })) == 0 and f[1] < Terrain.surface(sandbox.seed, f[0], f[2]).height - 4) underground = true;
+        // Never lifted onto the mountainside above the cave.
+        if (underground) try std.testing.expect(f[1] < Terrain.surface(sandbox.seed, f[0], f[2]).height - 1);
+    }
+    try std.testing.expect(underground);
+    try std.testing.expect(!sandbox.cave_colliders[0].eql(.none));
+    try std.testing.expect(sandbox.progress.hasFlag("cave_0_found"));
+    // Standing on the cave's floor, well inside, near the first chamber's floor height.
+    try run(&sandbox, &camera, .{}, .{}, 30);
+    try std.testing.expect(sandbox.player.grounded);
+    const into = R.dot(R.sub(sandbox.player.feet, sys.entrance), sys.inward);
+    try std.testing.expect(into > 12);
+    try std.testing.expect(@abs(sandbox.player.feet[1] - sys.rooms[0].floor) < 3);
 }
 
 test "walk to a crate, carry it, drop it, save, disturb, and reload the modification" {
