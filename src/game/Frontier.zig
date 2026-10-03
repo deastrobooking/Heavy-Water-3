@@ -8,6 +8,7 @@ const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const District = @import("../procedural/District.zig");
+const Market = @import("../city/Market.zig");
 const Material = @import("../render/Material.zig");
 const Input = @import("../engine/Input.zig");
 const Sandbox = @import("Sandbox.zig");
@@ -61,6 +62,7 @@ pub fn init(sb: *Sandbox) void {
     var nest_sites: [Enemies.max_nests]V = undefined;
     for (sb.enemies.nests[0..surface], 0..) |nest, i| nest_sites[i] = nest.position;
     sb.skies = Skies.init(sb.seed, Sandbox.spawn, nest_sites[0..surface]);
+    for (&sb.skies.market_plazas, 0..) |*plaza, i| plaza.* = sb.catalog.district.nodes[Market.stall_plazas[i]].position;
 
     var plazas: [District.node_count]Collectibles.Plaza = undefined;
     for (sb.catalog.district.nodes, &plazas) |node, *p| p.* = .{ .position = node.position, .arbor = node.kind == .arbor };
@@ -180,6 +182,10 @@ pub fn refresh(sb: *Sandbox) void {
         var flag: [20]u8 = undefined;
         c.alive = !sb.progress.hasFlag(std.fmt.bufPrint(&flag, "carrier_{d}_down", .{i}) catch unreachable);
         c.health = Skies.carrier_health;
+        c.turret_health = @splat(Skies.tuning.carrier_turret_health);
+        c.bay_health = @splat(Skies.tuning.carrier_bay_health);
+        c.crashing = false;
+        c.crash_time = 0;
     }
     sb.skies.wasps = @splat(null);
     sb.skies.shots = @splat(null);
@@ -378,6 +384,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .alt = armed and sb.trigger.alt,
         .cycle = armed and actions.next_item,
     }, dt, &out);
+    rangerAirShots(sb, .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() }, .{ f.x(), f.y(), f.z() }, out[0..@min(fought, out.len)]);
     arsenalEvents(sb, 0, out[0..@min(fought, out.len)], camera);
     for (&sb.guests, 1..) |*g, p| {
         defer g.next_weapon = false;
@@ -397,9 +404,21 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .alt = g.alt and g.trading == null,
             .cycle = g.next_weapon and g.trading == null,
         }, dt, &out);
+        rangerAirShots(sb, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, out[0..@min(n, out.len)]);
         arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
     }
     stepSpecials(sb, camera, actions, frozen, dt);
+}
+
+fn rangerAirShots(sb: *Sandbox, origin: V, direction: V, events: []const Combat.Event) void {
+    for (events) |event| if (event == .fired) switch (event.fired) {
+        .blaster => sb.skies.fireRanger(origin, direction, 22),
+        .sniper_rifle => sb.skies.fireRanger(origin, direction, 95),
+        .machine_gun => sb.skies.fireRanger(origin, direction, 9),
+        .heavy_rifle => sb.skies.fireRanger(origin, direction, 55),
+        .energy_bazooka => sb.skies.fireRanger(origin, direction, 90),
+        else => {},
+    };
 }
 
 /// Class specials for every local player (P1 on foot, active guests), then grenades and
@@ -484,6 +503,14 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
             sb.cuePitch(.hurt, null, 0.8);
             if (f.hull <= 0) wreck(sb, camera);
         },
+        .jet_collision => |hit| if (sb.hangar.fighter) |*f| {
+            f.resolveCollision(.{ .x = hit.normal[0], .y = hit.normal[1], .z = hit.normal[2] }, hit.penetration, .{ .x = hit.other_velocity[0], .y = hit.other_velocity[1], .z = hit.other_velocity[2] }, hit.damage);
+            if (hit.damage > 0) {
+                sb.combat.vitals[0].hurt = 0.25;
+                sb.cuePitch(.impact, null, 0.8);
+                if (f.hull <= 0) wreck(sb, camera);
+            }
+        },
         .player_hit => |hit| hive(sb, .{ .player_hit = .{ .player = hit.player, .damage = hit.damage, .from = sb.player.feet } }, camera),
         .wasp_down => |at| {
             burst(sb, at, 5, .{ 1, 0.3, 0.15 });
@@ -491,6 +518,32 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
             dropBelow(sb, .hive_alloy, at);
             sb.progress.setFlag("wasp_down");
         },
+        .raid_started => |raid| sb.say("beetle bomber inbound: market plaza {d} — defend it", .{raid.plaza + 1}),
+        .raid_bomb => |raid| {
+            burst(sb, raid.position, 4 + @as(f32, @floatFromInt(raid.hit)), .{ 0.7, 0.32, 0.08 });
+            sb.cue(.boom, raid.position);
+            sb.say("market plaza {d} hit ({d}/3)", .{ raid.plaza + 1, raid.hit });
+        },
+        .raid_repelled => |plaza| {
+            sb.progress.setFlag("bomber_raid_defended");
+            sb.say("market plaza {d} defended — bomber destroyed", .{plaza + 1});
+            sb.cue(.vault, null);
+        },
+        .raid_lost => |plaza| {
+            sb.progress.setFlag("bomber_raid_lost");
+            if (plaza < sb.market.stalls.len) sb.market.stalls[plaza].stock = @splat(0);
+            sb.say("market plaza {d} damaged — stock lost until dawn", .{plaza + 1});
+        },
+        .carrier_stage => |change| switch (change.stage) {
+            .bays => sb.say("carrier {d}: flak turrets down — destroy the launch bays", .{change.carrier + 1}),
+            .core => sb.say("carrier {d}: launch bays destroyed — core exposed", .{change.carrier + 1}),
+            .crashing => {
+                sb.say("carrier {d}: core breached — impact imminent", .{change.carrier + 1});
+                sb.cue(.boom, sb.skies.carriers[change.carrier].position());
+            },
+            .turrets => {},
+        },
+        .carrier_debris => |at| burst(sb, at, 2.2, .{ 1, 0.38, 0.08 }),
         .carrier_down => |c| {
             var flag: [20]u8 = undefined;
             sb.progress.setFlag(std.fmt.bufPrint(&flag, "carrier_{d}_down", .{c.carrier}) catch unreachable);
@@ -709,9 +762,24 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     for (sb.skies.wasps) |slot| if (slot) |w| {
         if (!room(out, n, 6)) break;
         const q = m.Quat.fromTo(m.Vec3.unit_z, m.Vec3.init(w.forward[0], w.forward[1], w.forward[2]).normalizeOr(m.Vec3.unit_z));
-        const tint: [4]f32 = if (w.flash > 0) .{ 1.6, 1.4, 1.4, 1 } else .{ 1, 1, 1, 1 };
-        out[n] = .{ .mesh = c.wasp, .transform = .{ .position = w.position }, .tint = tint, .rotation = quat(q) };
-        out[n + 1] = .{ .mesh = c.wasp_glow, .transform = .{ .position = w.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, if (w.state == .attack) 1 else 0.6), .rotation = quat(q) };
+        const wing_tint: [4]f32 = if (w.flash > 0) .{ 1.6, 1.4, 1.4, 1 } else switch (w.kind) {
+            .wasp => .{ 1, 1, 1, 1 },
+            .dragonfly => .{ 0.45, 1.1, 1.5, 1 },
+            .beetle_bomber => .{ 1.45, 0.78, 0.35, 1 },
+        };
+        const tint = wing_tint;
+        const hull = switch (w.kind) {
+            .wasp => c.wasp,
+            .dragonfly => c.dragonfly,
+            .beetle_bomber => c.beetle_bomber,
+        };
+        const lights = switch (w.kind) {
+            .wasp => c.wasp_glow,
+            .dragonfly => c.dragonfly_glow,
+            .beetle_bomber => c.beetle_bomber_glow,
+        };
+        out[n] = .{ .mesh = hull, .transform = .{ .position = w.position }, .tint = tint, .rotation = quat(q) };
+        out[n + 1] = .{ .mesh = lights, .transform = .{ .position = w.position }, .tint = Material.emissive(if (w.kind == .dragonfly) .{ 0.2, 0.75, 1, 1 } else if (w.kind == .beetle_bomber) .{ 1, 0.32, 0.08, 1 } else .{ 1, 1, 1, 1 }, if (w.state == .attack) 1 else 0.6), .rotation = quat(q) };
         n += 2;
         for (ShipMeshes.wasp_wings, 0..) |root, k| {
             const side: f32 = if (root.x > 0) 1 else -1;
@@ -727,8 +795,32 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         const q = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, carrier.yaw()));
         const at = carrier.position();
         out[n] = .{ .mesh = c.carrier, .transform = .{ .position = at }, .tint = if (carrier.flash > 0) .{ 1.4, 1.2, 1.2, 1 } else .{ 1, 1, 1, 1 }, .rotation = q };
-        out[n + 1] = .{ .mesh = c.carrier_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, 0.55 + 0.35 * @sin(t * 1.3)), .rotation = q };
+        const glow = if (carrier.crashing) 1.2 else switch (carrier.stage()) {
+            .turrets => @as(f32, 0.35),
+            .bays => 0.65,
+            .core => 0.95,
+            .crashing => 1.2,
+        };
+        out[n + 1] = .{ .mesh = c.carrier_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, glow + 0.2 * @sin(t * 1.3)), .rotation = q };
         n += 2;
+        if (!carrier.crashing) switch (carrier.stage()) {
+            .turrets => for (ShipMeshes.carrier_turrets, carrier.turret_health) |p, health| if (health > 0 and room(out, n, 1)) {
+                const target = carrier.point(p);
+                out[n] = .{ .mesh = c.gem, .transform = .{ .position = target }, .tint = Material.emissive(.{ 1, 0.12, 0.06, 1 }, 1.4), .size = @splat(3.4) };
+                n += 1;
+            },
+            .bays => for (ShipMeshes.carrier_bays, carrier.bay_health) |p, health| if (health > 0 and room(out, n, 1)) {
+                const target = carrier.point(p);
+                out[n] = .{ .mesh = c.gem, .transform = .{ .position = target }, .tint = Material.emissive(.{ 1, 0.55, 0.08, 1 }, 1.5), .size = @splat(4.2) };
+                n += 1;
+            },
+            .core => if (room(out, n, 1)) {
+                const target = carrier.point(m.Vec3.init(0, -10, -4));
+                out[n] = .{ .mesh = c.gem, .transform = .{ .position = .{ target[0], target[1], target[2] } }, .tint = Material.emissive(.{ 0.1, 0.9, 1, 1 }, 1.7), .size = @splat(8) };
+                n += 1;
+            },
+            .crashing => {},
+        };
     };
     for (sb.skies.shots) |slot| if (slot) |s| if (room(out, n, 1)) {
         out[n] = switch (s.kind) {

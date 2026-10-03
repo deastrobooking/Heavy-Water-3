@@ -28,8 +28,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 ## Known gaps from review
 
 - **Missile lock on a reused slot:** fixed by giving each spawned ground Hive unit a generation number and checking `(slot, generation)` when resolving missile and HUD targets.
-- **No ship collisions:** the Kestrel passes through wasps and carriers, and wasps pass through each other.
-- **Reticle side unconfirmed:** confirm the HUD lock reticle's side with a capture during a live lock.
+- **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
 - **Frontier frame cost unmeasured:** the standard renderer streaming route is measured, but there is no `--frontier` benchmark yet for simulation time, CPU skinning of 24 characters, and audio-thread load under the full Hive and four-player workload.
 - **Guests:** they can't pilot, talk, or open the fabricator.
 - **Save versioning:** saves grew through optional fields under format v11. When a field changes meaning, bump the format and say so in the migration notes.
@@ -56,18 +55,18 @@ The game has had no hands-on pass since vehicles and the Hive arrived. Everythin
    - car and jet handling.
 
    Keep the values in one tuning table per module.
-4. **Correctness fixes:** generation-checked missile locks, and a capture test for the lock reticle.
+4. **Correctness fixes — complete:** generation-checked missile locks with regression coverage, and a repeatable `-Dshowcase=45` capture of the live lock reticle.
 
 Acceptance: the benchmark meets its budgets on the M3 Pro; the playtest checklist is complete with every issue fixed or filed; no known correctness bugs remain open.
 
 ### B. Air war depth
 
-1. **Collisions:** the Kestrel against wasps and carriers (hull spheres; ramming damages both), and wasps keep apart (separation steering).
-2. **Carrier assault:**
+1. **Collisions — complete:** the Kestrel collides with wasps and carrier hull spheres; ramming damages both sides and resolves aircraft penetration. Wasps steer apart at close range. Regression tests and a Metal smoke are recorded in validation.
+2. **Carrier assault — complete:**
    - Destroying its four flak turrets exposes the bays.
    - Destroying the bays opens the core.
    - Each stage shows on the HUD, and the carrier falls in a scripted crash with debris.
-3. **Hive wing variety:** dragonfly interceptors (fast, fragile, missile-dodging) and beetle bombers that raid the market plazas, which rangers on foot and in the air defend.
+3. **Hive wing variety — complete:** dragonfly interceptors (fast, fragile, missile-dodging) and beetle bombers that raid the market plazas, which rangers on foot and in the air defend. Ground and air weapons can shoot them; three successful bomb drops drain the plaza's stock until dawn, while destroying the bomber defends the market.
 4. **Kestrel progression:** fabricator upgrades (armor, a bigger missile rack, engine, gun cooling) and paint schemes in customization, plus landing pads on tower roofs.
 
 Acceptance: tests for collisions and assault stages; a bomber raid can be won and lost; upgrades change the flight model measurably in tests.

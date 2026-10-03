@@ -118,6 +118,13 @@ Apple M3 Pro / Metal, ReleaseFast, seed 310399555161; each canopy run has 60 war
 | `--arbor 1` narrow crown | 0.561 / 0.744 / **0.868** | 20.987 | 174 / 126 | 14 | 95 / 70 |
 | `--arbor 2` spreading crown | 0.580 / 0.789 / **0.898** | 20.976 | 174 / 126 | 16 | 102 / 77 |
 
+## Hive air-wing variety (step 7)
+
+- Added distinct dragonfly interceptor and beetle bomber meshes, type-specific speed, turn rate, hull strength and missile jinking. Carriers now launch a varied wing; bombers select the three market plazas as raid targets.
+- Rangers on foot can hit flyers with their aimed blaster and firearm shots; the Kestrel retains its cannon and missile defense. Three successful bomb drops clear that stall's stock until dawn; destroying the bomber records a defended raid.
+- Debug unit suite: **295/295 passed**. The focused Skies cases cover interceptor fragility, a ranger projectile defending a bomber raid, and the raid's three-hit loss condition.
+- `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=300`: passed on Apple M3 Pro / Metal with no validation errors. All 300 frames completed; the smoke exercised the existing flight, four-player split-screen, market, and world-rendering paths with the new ship meshes registered.
+
 Both reports pass all checks, including both LODs, the 16.667 ms render CPU budget, active-ring coverage (zero underfilled frames), and unthrottled presentation. Peak upload remains 284,204 B within 327,680 B; peak GPU terrain residency remains 25 chunks; terrain pools stay at 2 CPU and 50 GPU allocations. Reports are `.tools/canopy-1-benchmark.json` and `.tools/canopy-2-benchmark.json`.
 
 These are submission and presentation measurements, not GPU execution timings or an art review. The three trees and both of their mesh detail levels remain resident; terrain-pool counters do not represent total process/GPU memory. No screenshot or manual visual approval was performed. Runtime grafting/growth, tree eviction, and allocation of unused flow after branch bottlenecks remain deferred. See [Arbor genomes and sap](arbors.md) for controls and content-v4 save compatibility.
@@ -468,6 +475,30 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 
 - Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 300 frames with audio enabled: clean completion, no Metal validation messages, 395 simulation ticks. The run fabricated and flew the Skimmer 18.7 m; fabricated the Kestrel, lifted off and downed a wasp with its cannon; exercised saber, sniper, grenade and slam combat; and ran four local players through split-screen and co-op movement.
 - This smoke did not fly all three car types, dogfight and land the Kestrel, exercise every firearm and guard/parry action, use a physical controller, or listen through the sound set. Those hands-on checks remain open; audio-device startup is verified, sound quality is not.
+
+## Balance tuning foundation — 2026-10-03
+
+- Gathered the current encounter and balance values into named module tables: Hive stats and spawn pacing (`Enemies`), wasp/carrier/Kestrel combat (`Skies`), player damage and survivability (`Combat`, `Weapon`, `Firearms`), pickup placement counts (`Collectibles`), per-car handling (`Designs`), and Kestrel mass/camera values (`Hangar`). Fabricator recipes were already a single table; hover and jet flight parameters remain grouped in their `Config` structs.
+- No numeric balance values changed. The deterministic tests and scripted smoke verify actions complete, but cannot tell whether wasps feel fair, handling is satisfying, or recipe pacing is too long. Actual balance edits remain pending the hands-on checklist above.
+- Debug suite: **290/290 tests pass**. ReleaseSafe 300-frame smoke with Metal validation and audio also passed after the refactor.
+
+## Missile lock reticle capture — 2026-10-03
+
+- Added `-Dshowcase=45`, which stages the Kestrel above the canopy, spawns a ground drone ahead, holds missile lock, and captures the normal flight HUD. Reproduce with `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=45 -Dcapture-frame=120 -Doptimize=ReleaseSafe`.
+- The captured frame shows the red target box and `LOCK` label on the target inside the flight view. The generation-checked lock lifecycle is covered by the 290-test suite above; the showcase verifies the reticle projection in a live render.
+
+## Kestrel ramming and wasp spacing — 2026-10-03
+
+- Kestrel contact uses the carrier's hull spheres and a 5 m aircraft collision radius; wasps use their 3.2 m hit radius. Impact damage scales with relative speed above 18 m/s and has a short repeat-hit cooldown. Contacts move the Kestrel clear and rebound only inward velocity. Wasps steer away inside 16 m.
+- Regression tests cover aircraft separation/rebound and hull loss, deterministic close-range separation vectors, and ram damage to both the Kestrel and each target type.
+- Debug suite: **293/293 tests pass**. ReleaseSafe application check passes. Native Apple M3 Pro, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 300-frame smoke completed with all stages passing and no Metal validation messages.
+
+## Brood carrier assault — 2026-10-03
+
+- Carrier damage now advances through four flak turrets, four launch bays, and an exposed underside core. Cannons and lock-on missiles target the active stage's individual hit volumes; intact stages shield later parts. The flight HUD reports the nearest carrier objective, active weak points receive bright target markers, and destroyed turrets stop firing.
+- Core failure starts a scripted descent with a tumbling carrier and repeated debris bursts. The carrier defeat flag and reward cache trigger when it reaches the ground; the event remains deterministic and testable.
+- Debug suite: **294/294 tests pass**, including the complete turret → bay → core → impact sequence. ReleaseSafe app check passes. Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, 300-frame smoke completed with all stages passing and no validation messages.
+- Visual review: `-Dshowcase=34` at frame 120 shows the Kestrel, active turret markers, and persistent `BROOD 1 FLAK TURRETS 4/4` HUD objective.
 
 ## Development asset reload (phase 13, slice 3) — 2026-10-01
 

@@ -17,6 +17,36 @@ const ProjectileKind = @import("Projectile.zig").ProjectileKind;
 
 pub const Kind = enum { sniper_rifle, machine_gun, heavy_rifle, energy_bazooka };
 
+/// Fire cadence, heat, charge and projectile values for the energy firearms.
+pub const tuning = .{
+    .sniper_hold = 1.5,
+    .sniper_cycle = 1.1,
+    .sniper_range = 450.0,
+    .sniper_scope_bonus = 0.5,
+    .machine_gun_rate = 14.0,
+    .machine_gun_heat_per_shot = 3.5,
+    .machine_gun_heat_cool_rate = 30.0,
+    .machine_gun_overheat = 100.0,
+    .machine_gun_resume_heat = 30.0,
+    .machine_gun_spread_base = 0.008,
+    .machine_gun_spread_heat = 0.045,
+    .machine_gun_speed = 140.0,
+    .machine_gun_lifetime = 1.6,
+    .heavy_charge_time = 0.8,
+    .heavy_cycle = 0.5,
+    .heavy_charged_cycle = 0.9,
+    .heavy_charged_multiplier = 2.5,
+    .heavy_quick_multiplier = 1.2,
+    .heavy_speed = 95.0,
+    .heavy_lifetime = 2.5,
+    .heavy_quick_pierce = 2,
+    .heavy_charged_pierce = 4,
+    .bazooka_cycle = 2.2,
+    .bazooka_speed = 48.0,
+    .bazooka_lifetime = 4.0,
+    .bazooka_gravity = 6.0,
+};
+
 pub fn of(w: Weapon.WeaponKind) ?Kind {
     return switch (w) {
         .sniper_rifle => .sniper_rifle,
@@ -53,10 +83,10 @@ pub const State = struct {
     /// Charge or steadiness for the HUD (0–1), or heat for the machine gun.
     pub fn meter(self: State, kind: Kind) f32 {
         return switch (kind) {
-            .sniper_rifle => @min(1, self.hold / 1.5),
-            .heavy_rifle => @min(1, self.hold / 0.8),
-            .machine_gun => self.heat / 100,
-            .energy_bazooka => 1 - @min(1, self.cooldown / 2.2),
+            .sniper_rifle => @min(1, self.hold / tuning.sniper_hold),
+            .heavy_rifle => @min(1, self.hold / tuning.heavy_charge_time),
+            .machine_gun => self.heat / tuning.machine_gun_overheat,
+            .energy_bazooka => 1 - @min(1, self.cooldown / tuning.bazooka_cycle),
         };
     }
 
@@ -67,44 +97,45 @@ pub const State = struct {
         const alt_released = !alt and self.was_alt;
         // The cooldown runs below zero within a step so held fire keeps an exact rate.
         self.cooldown -= dt;
-        self.heat = @max(0, self.heat - 30 * dt);
-        if (self.overheated and self.heat < 30) self.overheated = false;
+        self.heat = @max(0, self.heat - tuning.machine_gun_heat_cool_rate * dt);
+        if (self.overheated and self.heat < tuning.machine_gun_resume_heat) self.overheated = false;
         const base = slot.baseDamage();
         switch (kind) {
             .sniper_rifle => {
-                self.hold = if (alt) @min(1.5, self.hold + dt) else 0;
+                self.hold = if (alt) @min(tuning.sniper_hold, self.hold + dt) else 0;
                 if (pressed and self.cooldown <= 0) {
-                    self.cooldown = 1.1;
-                    out[n] = .{ .beam = .{ .damage = base * (1 + self.hold / 3), .range = 450, .pierce = 1 } };
+                    self.cooldown = tuning.sniper_cycle;
+                    out[n] = .{ .beam = .{ .damage = base * (1 + self.hold * tuning.sniper_scope_bonus / tuning.sniper_hold), .range = tuning.sniper_range, .pierce = 1 } };
                     n += 1;
                 }
             },
             .machine_gun => if (fire and !self.overheated and self.cooldown <= 0) {
-                self.cooldown = @max(self.cooldown, -dt) + 1.0 / 14.0;
-                self.heat += 3.5;
-                if (self.heat >= 100) self.overheated = true;
-                out[n] = .{ .bolt = .{ .kind = .mg_bolt, .speed = 140, .damage = base, .life = 1.6, .spread = 0.008 + 0.045 * self.heat / 100 } };
+                self.cooldown = @max(self.cooldown, -dt) + 1.0 / tuning.machine_gun_rate;
+                self.heat += tuning.machine_gun_heat_per_shot;
+                if (self.heat >= tuning.machine_gun_overheat) self.overheated = true;
+                out[n] = .{ .bolt = .{ .kind = .mg_bolt, .speed = tuning.machine_gun_speed, .damage = base, .life = tuning.machine_gun_lifetime, .spread = tuning.machine_gun_spread_base + tuning.machine_gun_spread_heat * self.heat / tuning.machine_gun_overheat } };
                 n += 1;
             },
             .heavy_rifle => {
-                if (alt) self.hold = @min(0.8, self.hold + dt);
+                if (alt) self.hold = @min(tuning.heavy_charge_time, self.hold + dt);
                 if (alt_released and self.cooldown <= 0) {
-                    const full = self.hold >= 0.8;
-                    self.cooldown = 0.9;
-                    out[n] = .{ .bolt = .{ .kind = .heavy_bolt, .speed = 95, .damage = base * (if (full) @as(f32, 2.5) else 1.2), .life = 2.5, .pierce = if (full) 4 else 2 } };
+                    const full = self.hold >= tuning.heavy_charge_time;
+                    self.cooldown = tuning.heavy_charged_cycle;
+                    const multiplier: f32 = if (full) tuning.heavy_charged_multiplier else tuning.heavy_quick_multiplier;
+                    out[n] = .{ .bolt = .{ .kind = .heavy_bolt, .speed = tuning.heavy_speed, .damage = base * multiplier, .life = tuning.heavy_lifetime, .pierce = if (full) tuning.heavy_charged_pierce else tuning.heavy_quick_pierce } };
                     n += 1;
                     self.hold = 0;
                 } else if (pressed and !alt and self.cooldown <= 0) {
-                    self.cooldown = 0.5;
-                    out[n] = .{ .bolt = .{ .kind = .heavy_bolt, .speed = 95, .damage = base, .life = 2.5, .pierce = 2 } };
+                    self.cooldown = tuning.heavy_cycle;
+                    out[n] = .{ .bolt = .{ .kind = .heavy_bolt, .speed = tuning.heavy_speed, .damage = base, .life = tuning.heavy_lifetime, .pierce = tuning.heavy_quick_pierce } };
                     n += 1;
                 }
                 if (!alt) self.hold = 0;
             },
             .energy_bazooka => {
                 if (pressed and self.cooldown <= 0) {
-                    self.cooldown = 2.2;
-                    out[n] = .{ .bolt = .{ .kind = .bazooka_orb, .speed = 48, .damage = base, .life = 4, .gravity = 6 } };
+                    self.cooldown = tuning.bazooka_cycle;
+                    out[n] = .{ .bolt = .{ .kind = .bazooka_orb, .speed = tuning.bazooka_speed, .damage = base, .life = tuning.bazooka_lifetime, .gravity = tuning.bazooka_gravity } };
                     n += 1;
                 }
                 if (alt and !self.was_alt) {

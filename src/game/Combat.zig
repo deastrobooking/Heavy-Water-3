@@ -36,20 +36,28 @@ const Combat = @This();
 pub const WeaponKind = Weapon.WeaponKind;
 pub const max_players = 4;
 pub const max_effects = 40;
-pub const regen_delay: f32 = 5;
-pub const regen_rate: f32 = 10;
+/// Player survivability and saber timing values. Keep combat pacing edits together.
+pub const tuning = .{
+    .player_health = 100.0,
+    .regen_delay = 5.0,
+    .regen_rate = 10.0,
+    .parry_window = 0.3,
+    .blade_length = 1.35,
+    .blade_radius = 0.4,
+};
+pub const regen_delay: f32 = tuning.regen_delay;
+pub const regen_rate: f32 = tuning.regen_rate;
 
 /// `shield` is an overshield over health (a Ranger special) that lasts `shield_time`.
-pub const Vitals = struct { health: f32 = 100, max: f32 = 100, quiet: f32 = 0, hurt: f32 = 0, shield: f32 = 0, shield_time: f32 = 0 };
+pub const Vitals = struct { health: f32 = tuning.player_health, max: f32 = tuning.player_health, quiet: f32 = 0, hurt: f32 = 0, shield: f32 = 0, shield_time: f32 = 0 };
 pub const EffectKind = enum { slash, beam, burst, spark, muzzle, trail };
 /// `length` is a beam's or trail's length (0: the default long beam).
 pub const Effect = struct { kind: EffectKind, position: V, dir: V = .{ 0, 0, 1 }, age: f32 = 0, life: f32, size: f32 = 1, length: f32 = 0, color: [3]f32 };
 
-pub const blade_length: f32 = 1.35;
-pub const blade_radius: f32 = 0.4;
+pub const blade_length: f32 = tuning.blade_length;
+pub const blade_radius: f32 = tuning.blade_radius;
 /// The saber guard parries for this long after it is raised.
-pub const parry_window: f32 = 0.3;
-
+pub const parry_window: f32 = tuning.parry_window;
 
 /// What an arsenal needs from its player this step.
 pub const Aim = struct {

@@ -718,7 +718,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 44)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 45)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -795,7 +795,7 @@ fn showcase(self: *App) void {
 /// 27 four-player split screen with a guest trading, 28 controls while rebinding,
 /// 29 the garage with all three hover cars, 30 a Hive nest under attack, 31 the fabricator,
 /// 32 the Skimmer in flight, 33 the Kestrel on its pad, 34 a dogfight by a Brood carrier,
-/// 35 the carrier from above.
+/// 35 the carrier from above, 45 a live missile lock for HUD capture.
 fn guiShowcase(self: *App, v: u32) void {
     const sb = &self.sandbox;
     self.engine.input = .{};
@@ -814,6 +814,13 @@ fn guiShowcase(self: *App, v: u32) void {
         self.engine.camera.yaw = std.math.atan2(d[0], d[2]);
         self.engine.camera.pitch = std.math.asin(d[1]);
         self.engine.input.fast = true;
+    }
+    // 45 holds a target directly in front of the Kestrel and keeps the missile lock live.
+    if (v == 45 and self.gui_showcase_ready) {
+        const f = sb.hangar.fighter.?;
+        const target = f.body.pos.add(f.forward().scale(220));
+        if (sb.enemies.units[0]) |*u| u.position = .{ target.x, target.y, target.z };
+        sb.trigger = .{ .alt = true };
     }
     // 32: fly the Skimmer forward, boosting, from the garage toward the city.
     if (v == 32 and self.gui_showcase_ready) {
@@ -1005,6 +1012,25 @@ fn guiShowcase(self: *App, v: u32) void {
                 },
             }
             sb.player.velocity = @splat(0);
+        },
+        45 => {
+            sb.progress.fighter = true;
+            @import("game/Frontier.zig").refresh(sb);
+            for (&sb.skies.carriers) |*c| c.alive = false;
+            sb.skies.wasps = @splat(null);
+            const pad = @import("game/Hangar.zig").padPosition(sb.seed, Sandbox.spawn);
+            // Stage above the canopy so it cannot obscure the lock target in
+            // the chase-camera capture.
+            const entry: [3]f32 = .{ pad[0] + 180, pad[1] + 1000, pad[2] - 100 };
+            sb.hangar.place(sb.seed, Sandbox.spawn, entry, 0);
+            sb.hangar.fighter.?.body.vel = @import("character/math.zig").Vec3.zero;
+            sb.hangar.fighter.?.throttle = 0;
+            sb.hangar.fighter.?.grounded = false;
+            sb.hangar.board(&self.engine.camera);
+            const f = sb.hangar.fighter.?;
+            const target = f.body.pos.add(f.forward().scale(220));
+            sb.enemies.units[0] = .{ .generation = 1, .kind = .drone, .nest = 0, .position = .{ target.x, target.y, target.z }, .health = 1000, .orbit = 0 };
+            sb.player.mode = .walk;
         },
         31 => {
             sb.progress.inventory = .{ 14, 3, 9, 2 };
@@ -1632,6 +1658,31 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     if (sandbox.tools.tool == .wire and Build.pendingWire(sandbox) != null) renderer.hud_lines[1].set("{s}", .{hint});
     renderer.hud_lines[2] = if (self.engine.time.tick < self.status_until) self.status else .{};
     if (renderer.hud_lines[2].len == 0 and sandbox.noticeText().len > 0) renderer.hud_lines[2].set("{s}", .{sandbox.noticeText()});
+    if (renderer.hud_lines[2].len == 0 and sandbox.hangar.piloting) {
+        const f = sandbox.hangar.fighter.?;
+        var nearest: ?usize = null;
+        var nearest_distance: f32 = 1400;
+        for (sandbox.skies.carriers, 0..) |carrier, i| if (carrier.alive) {
+            const p = carrier.position();
+            const dx = p[0] - f.body.pos.x;
+            const dy = p[1] - f.body.pos.y;
+            const dz = p[2] - f.body.pos.z;
+            const distance = @sqrt(dx * dx + dy * dy + dz * dz);
+            if (distance < nearest_distance) {
+                nearest = i;
+                nearest_distance = distance;
+            }
+        };
+        if (nearest) |i| {
+            const carrier = sandbox.skies.carriers[i];
+            switch (carrier.stage()) {
+                .turrets => renderer.hud_lines[2].set("BROOD {d}  FLAK TURRETS {d}/4", .{ i + 1, carrier.activeTurrets() }),
+                .bays => renderer.hud_lines[2].set("BROOD {d}  LAUNCH BAYS {d}/4", .{ i + 1, carrier.activeBays() }),
+                .core => renderer.hud_lines[2].set("BROOD {d}  CORE EXPOSED — DESTROY CORE", .{i + 1}),
+                .crashing => renderer.hud_lines[2].set("BROOD {d}  CORE BREACHED — CLEAR IMPACT ZONE", .{i + 1}),
+            }
+        }
+    }
     self.publishGui(renderer, minutes);
 }
 

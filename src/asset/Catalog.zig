@@ -76,6 +76,10 @@ pub const Content = struct {
     kestrel_glow: MeshHandle,
     wasp: MeshHandle,
     wasp_glow: MeshHandle,
+    dragonfly: MeshHandle,
+    dragonfly_glow: MeshHandle,
+    beetle_bomber: MeshHandle,
+    beetle_bomber_glow: MeshHandle,
     wasp_wing: MeshHandle,
     carrier: MeshHandle,
     carrier_glow: MeshHandle,
@@ -234,7 +238,7 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         }
         self.content.gem = try self.register(allocator, try Model.fromMesh(allocator, try H.gem(allocator), .named("gem", white)));
         const S = @import("../vehicle/ShipMeshes.zig");
-        inline for (.{ .{ "kestrel", S.kestrel }, .{ "wasp", S.wasp }, .{ "carrier", S.carrier } }) |entry| {
+        inline for (.{ .{ "kestrel", S.kestrel }, .{ "wasp", S.wasp }, .{ "dragonfly", S.dragonfly }, .{ "beetle_bomber", S.beetleBomber }, .{ "carrier", S.carrier } }) |entry| {
             const pair = try entry[1](allocator);
             var glow_owned = true;
             errdefer if (glow_owned) pair.glow.deinit(allocator);

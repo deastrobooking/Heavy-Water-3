@@ -19,11 +19,26 @@ const Collectibles = @This();
 
 pub const Kind = enum { lumen_shard, rotor_core, hive_alloy, vital_cell };
 pub const kind_count = @typeInfo(Kind).@"enum".fields.len;
-pub const max_items = 128;
-pub const max_drops = 32;
-pub const radius: f32 = 1.6;
+/// Placement counts, collection distance and temporary drop lifetime.
+pub const tuning = .{
+    .max_items = 128,
+    .max_drops = 32,
+    .pickup_radius = 1.6,
+    .drop_lifetime = 90.0,
+    .lumen_per_plaza = 3,
+    .lumen_per_road = 1,
+    .meadow_lumen = 10,
+    .meadow_radius_min = 22.0,
+    .meadow_radius_spread = 45.0,
+    .rotor_roofs = 4,
+    .alloy_caches_per_nest = 3,
+    .vital_cells_at_shrines = 1,
+};
+pub const max_items = tuning.max_items;
+pub const max_drops = tuning.max_drops;
+pub const radius: f32 = tuning.pickup_radius;
 /// Seconds a drop lies before fading.
-pub const drop_lifetime: f32 = 90;
+pub const drop_lifetime: f32 = tuning.drop_lifetime;
 
 pub const Item = struct { kind: Kind, position: V };
 pub const Drop = struct { kind: Kind, position: V, age: f32 = 0 };
@@ -80,19 +95,19 @@ pub fn generate(sites: Sites) Collectibles {
     var rng = std.Random.DefaultPrng.init(Seed.mix(sites.seed ^ 0x434f4c4c454354));
     const random = rng.random();
     // Lumen shards: three per plaza away from the trunk or tower, two per road, a meadow ring.
-    for (sites.plazas) |p| for (0..3) |k| {
+    for (sites.plazas) |p| for (0..tuning.lumen_per_plaza) |k| {
         const angle = (@as(f32, @floatFromInt(k)) + random.float(f32) * 0.6) * 2 * std.math.pi / 3;
         const r: f32 = if (p.arbor) 15 else 11;
         self.add(.lumen_shard, R.add(p.position, .{ @sin(angle) * r, 1, @cos(angle) * r }));
     };
-    for (sites.roads) |p| self.add(.lumen_shard, R.add(p, .{ 0, 1, 0 }));
-    for (0..10) |k| {
+    for (sites.roads) |p| for (0..tuning.lumen_per_road) |_| self.add(.lumen_shard, R.add(p, .{ 0, 1, 0 }));
+    for (0..tuning.meadow_lumen) |k| {
         const angle = @as(f32, @floatFromInt(k)) * 0.63 + random.float(f32) * 0.4;
-        const r = 22 + random.float(f32) * 45;
+        const r = tuning.meadow_radius_min + random.float(f32) * tuning.meadow_radius_spread;
         self.add(.lumen_shard, R.add(sites.spawn, .{ @sin(angle) * r, 1, @cos(angle) * r }));
     }
     // Rotor cores on the four tallest roofs, by the shrines, and at the nests.
-    var tallest: [4]?usize = @splat(null);
+    var tallest: [tuning.rotor_roofs]?usize = @splat(null);
     for (sites.roofs, 0..) |roof, i| {
         for (&tallest, 0..) |*slot, s| if (slot.* == null or roof.position[1] > sites.roofs[slot.*.?].position[1]) {
             var k = tallest.len - 1;
@@ -108,13 +123,13 @@ pub fn generate(sites: Sites) Collectibles {
     for (sites.shrines) |s| self.add(.rotor_core, R.add(s, .{ 6, 1, 0 }));
     for (sites.nests) |n| self.add(.rotor_core, R.add(n, .{ 0, 1, 7 }));
     // Hive alloy caches at the nests.
-    for (sites.nests) |n| for (0..3) |k| {
+    for (sites.nests) |n| for (0..tuning.alloy_caches_per_nest) |k| {
         const angle = @as(f32, @floatFromInt(k)) * 2.1;
         self.add(.hive_alloy, R.add(n, .{ @sin(angle) * 9, 1, @cos(angle) * 9 }));
     };
     // Vital cells: the tallest roof, every shrine, the first nest.
     if (tallest[0]) |i| self.add(.vital_cell, R.add(sites.roofs[i].position, .{ -sites.roofs[i].half[0] * 0.5, 1, sites.roofs[i].half[1] * 0.5 }));
-    for (sites.shrines) |s| self.add(.vital_cell, R.add(s, .{ -6, 1, 3 }));
+    for (sites.shrines) |s| for (0..tuning.vital_cells_at_shrines) |_| self.add(.vital_cell, R.add(s, .{ -6, 1, 3 }));
     if (sites.nests.len > 0) self.add(.vital_cell, R.add(sites.nests[0], .{ 0, 1, -8 }));
     return self;
 }
@@ -184,7 +199,7 @@ pub fn remaining(self: *const Collectibles, picked: *const Picked, kind: Kind) u
 test "placement is deterministic and covers every kind" {
     const plazas = [_]Plaza{ .{ .position = .{ 0, 40, 0 }, .arbor = true }, .{ .position = .{ 100, 30, 0 }, .arbor = false } };
     const roofs = [_]Roof{ .{ .position = .{ 50, 120, 50 }, .half = .{ 10, 12 } }, .{ .position = .{ -50, 90, 50 }, .half = .{ 8, 8 } } };
-    const sites: Sites = .{ .seed = 7, .spawn = .{ 0, 0, -58 }, .plazas = &plazas, .roads = &.{ .{ 50, 35, 0 }, .{ 60, 35, 0 } }, .roofs = &roofs, .shrines = &.{ .{ -80, 0, -120 }, .{ -100, 0, -20 } }, .nests = &.{ .{ 300, 0, 300 } } };
+    const sites: Sites = .{ .seed = 7, .spawn = .{ 0, 0, -58 }, .plazas = &plazas, .roads = &.{ .{ 50, 35, 0 }, .{ 60, 35, 0 } }, .roofs = &roofs, .shrines = &.{ .{ -80, 0, -120 }, .{ -100, 0, -20 } }, .nests = &.{.{ 300, 0, 300 }} };
     const a = generate(sites);
     const b = generate(sites);
     try std.testing.expectEqual(a.count, b.count);

@@ -36,14 +36,22 @@ pub const WeaponKind = enum(u8) {
     energy_bazooka,
 };
 
+/// Base damage by `WeaponKind` tag order. Keep weapon power edits in this table.
+pub const tuning = .{
+    .base_damage = [_]f32{ 45, 22, 65, 80, 0, 180, 140, 9, 55, 160 },
+    .damage_per_level = 0.25,
+    .plasma_edge_multiplier = 1.5,
+    .quantum_warp_multiplier = 1.3,
+};
+
 pub const CoreUpgrade = enum(u8) {
     none = 0,
-    plasma_edge,        // Increases saber slash reach and damage
-    accelerator,        // Cuts blaster charge time by 40%
-    quantum_warp,       // Bow warp strike deals 3x critical damage and refreshes dash
-    hydra_swarm,        // Missile launcher fires 4 micro-missiles instead of 2
-    aegis_reflector,    // Shield parry reflects projectiles back at attackers
-    overdrive_core,     // Giant blast beam width and duration doubled
+    plasma_edge, // Increases saber slash reach and damage
+    accelerator, // Cuts blaster charge time by 40%
+    quantum_warp, // Bow warp strike deals 3x critical damage and refreshes dash
+    hydra_swarm, // Missile launcher fires 4 micro-missiles instead of 2
+    aegis_reflector, // Shield parry reflects projectiles back at attackers
+    overdrive_core, // Giant blast beam width and duration doubled
 };
 
 pub const WeaponSlot = struct {
@@ -55,22 +63,9 @@ pub const WeaponSlot = struct {
     cooldown_mult: f32 = 1.0,
 
     pub fn baseDamage(self: WeaponSlot) f32 {
-        const lvl_bonus = 1.0 + @as(f32, @floatFromInt(self.level - 1)) * 0.25;
-        const base: f32 = switch (self.kind) {
-            .beam_saber => 45.0,
-            .blaster => 22.0,
-            .energy_bow => 65.0,
-            .tracking_missile => 80.0,
-            .protective_shield => 0.0,
-            .giant_blast => 180.0,
-            .sniper_rifle => 140.0,
-            .machine_gun => 9.0,
-            .heavy_rifle => 55.0,
-            .energy_bazooka => 160.0,
-        };
-        const core_mult: f32 = if (self.core == .plasma_edge and self.kind == .beam_saber) 1.5
-            else if (self.core == .quantum_warp and self.kind == .energy_bow) 1.3
-            else 1.0;
+        const lvl_bonus = 1.0 + @as(f32, @floatFromInt(self.level - 1)) * tuning.damage_per_level;
+        const base = tuning.base_damage[@intFromEnum(self.kind)];
+        const core_mult: f32 = if (self.core == .plasma_edge and self.kind == .beam_saber) tuning.plasma_edge_multiplier else if (self.core == .quantum_warp and self.kind == .energy_bow) tuning.quantum_warp_multiplier else 1.0;
         return base * lvl_bonus * self.damage_mult * core_mult;
     }
 };

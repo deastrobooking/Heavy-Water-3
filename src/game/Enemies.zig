@@ -20,27 +20,43 @@ const V = Physics.Vec3;
 const Enemies = @This();
 
 pub const Kind = enum { drone, sentinel, trooper };
+pub const Stats = struct { health: f32, speed: f32, accel: f32, radius: f32, standoff: f32, sight: f32, cooldown: f32, burst: u8, damage: f32, bolt_speed: f32 };
+
+/// Combat and pacing values for the Hive. Keep encounter balance edits here.
+pub const tuning = .{
+    .surface_nests = 3,
+    .cave_troopers = 4,
+    .units_per_nest = 6,
+    .troopers_per_nest = 2,
+    .max_bolts = 48,
+    .nest_radius = 4.0,
+    .nest_health = 900.0,
+    .wake_distance = 170.0,
+    .first_spawn_delay = 2.0,
+    .spawn_interval = 9.0,
+    .units = [_]Stats{
+        .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 5, .bolt_speed = 34 },
+        .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 8, .bolt_speed = 28 },
+        .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32 },
+    },
+};
+
 /// Three nests on the surface, then one in the heart of each cave system.
-pub const surface_nests = 3;
+pub const surface_nests = tuning.surface_nests;
 pub const max_nests = surface_nests + @import("../procedural/Caves.zig").max_systems;
 pub const max_units = 24;
 /// Cave nests field troopers only (fliers have no room), at most this many.
-pub const cave_troopers = 4;
-pub const max_bolts = 48;
-pub const units_per_nest = 6;
-pub const troopers_per_nest = 2;
-pub const nest_radius: f32 = 4;
-pub const nest_health: f32 = 900;
+pub const cave_troopers = tuning.cave_troopers;
+pub const max_bolts = tuning.max_bolts;
+pub const units_per_nest = tuning.units_per_nest;
+pub const troopers_per_nest = tuning.troopers_per_nest;
+pub const nest_radius: f32 = tuning.nest_radius;
+pub const nest_health: f32 = tuning.nest_health;
 /// Players beyond this distance from a nest leave it dormant.
-pub const wake_distance: f32 = 170;
+pub const wake_distance: f32 = tuning.wake_distance;
 
-pub const Stats = struct { health: f32, speed: f32, accel: f32, radius: f32, standoff: f32, sight: f32, cooldown: f32, burst: u8, damage: f32, bolt_speed: f32 };
 pub fn stats(k: Kind) Stats {
-    return switch (k) {
-        .drone => .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 5, .bolt_speed = 34 },
-        .sentinel => .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 8, .bolt_speed = 28 },
-        .trooper => .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32 },
-    };
+    return tuning.units[@intFromEnum(k)];
 }
 
 pub const State = enum { patrol, hunt, retreat };
@@ -75,7 +91,7 @@ pub const Unit = struct {
     }
 };
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
-pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = 2, flash: f32 = 0, cave: bool = false };
+pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
 
 /// A player the Hive can see and shoot. A raised guard (saber or shield) facing the bolt takes a
@@ -197,7 +213,7 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         nest.spawn_timer -= dt;
         if (nest.spawn_timer <= 0 and self.unitCount(@intCast(ni)) < units_per_nest) {
             self.spawnUnit(@intCast(ni));
-            nest.spawn_timer = 9;
+            nest.spawn_timer = tuning.spawn_interval;
         }
     }
 

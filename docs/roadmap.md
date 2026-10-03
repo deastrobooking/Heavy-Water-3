@@ -79,14 +79,16 @@ A resolution-independent GUI canvas replaces the text panels: title and pause me
 
 ## Flight: the Kestrel and the air war — implemented
 
-The fabricable Kestrel VTOL fighter flies with wing aerodynamics, lift jets, and mouse-aim fly-by-wire. Two Brood carriers circle beyond the Hive nests, launching wasp fighters that dogfight with lead pursuit and strafe rangers on foot. Cannons and lock-on missiles, flak, carrier weak points and caches, a flight HUD with lock reticle, and turbine sounds complete it. Acceptance:
+The fabricable Kestrel VTOL fighter flies with wing aerodynamics, lift jets, and mouse-aim fly-by-wire. Two Brood carriers circle beyond the Hive nests, launching wasps, fast dragonfly interceptors and beetle bombers. The flyers dogfight with lead pursuit, dragonflies jink under missile lock, and bombers raid market plazas that ground rangers and Kestrel pilots can defend. Three successful drops drain a stall's stock until dawn. Cannons and lock-on missiles, flak, staged carrier weak points, crash debris and reward caches, a flight HUD with lock reticle and assault objective, and turbine sounds complete it. Acceptance:
 - **Flight tests:** vertical takeoff and resting on the gear; wingborne cruise at a small angle of attack with a capped top speed; turning to the aim and leveling; climbing on afterburner; crash damage; the hover-to-flight transition.
 - **Air war tests:** carriers launching wasps that attack and hit the jet; flak; cannons downing a wasp; a locked missile damaging a carrier.
+- **Carrier assault tests:** four turrets gate four launch bays, which gate the core; core failure starts the debris crash, and the reward is issued at impact.
+- **Collision tests:** Kestrel ramming damage and rebound against wasps/carriers; wasps steer apart at close range.
+- **Wing tests:** interceptor damage and bomber raids defended or lost after three plaza strikes; ranger and Kestrel shots share the flyer hit path.
 - **Smoke:** fabricates the Kestrel, lifts off, and downs a wasp.
 
 Next:
-- collisions between the jet and ships;
-- carrier boarding and assault events;
+- Kestrel upgrades and paint schemes, plus landing pads on tower roofs;
 - the Kestrel's upgrades and paint.
 
 ## Mountain ranges and cave dungeons — implemented
@@ -353,7 +355,7 @@ This isolated path is not yet bound through `Catalog` into the active streamer, 
 
 Phases 1–13 have runnable slices. The game layer has also grown well beyond the phases: menus and conversations, procedural audio, hover cars and the Kestrel fighter, the Hive on the ground and in the air, fabrication and progression. The ordered plan for what comes next is [next steps](plans/next-steps.md):
 1. **Play, measure and tune:** a frontier benchmark with frame budgets, a hand-play checklist, and correctness fixes.
-2. **Air war depth:** collisions, carrier assault stages, new Hive wings, Kestrel upgrades.
+2. **Air war depth:** collisions, carrier assault stages and new Hive wings are implemented; Kestrel upgrades remain.
 3. **A Hive campaign:** corruption spread, story beats and a quest log.
 4. **Engine work:** the Mach `main` evaluation, then phase 14 skeletal animation.
 5. **Co-op completeness.**

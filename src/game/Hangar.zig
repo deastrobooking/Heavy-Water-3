@@ -18,9 +18,17 @@ const Garage = @import("Garage.zig");
 const m = @import("../character/math.zig");
 const Hangar = @This();
 
-pub const chase_distance: f32 = 24;
+/// Kestrel mass, aero area, camera and parked height; handling edits stay in one place.
+pub const tuning = .{
+    .chase_distance = 24.0,
+    .rest_height = 1.45,
+    .mass = 6500.0,
+    .inertia = m.Vec3.init(32_000, 46_000, 16_000),
+    .wing_area = 3.2,
+};
+pub const chase_distance: f32 = tuning.chase_distance;
 /// The Kestrel stands this far above its pad on its gear (COM height).
-pub const rest_height: f32 = 1.45;
+pub const rest_height: f32 = tuning.rest_height;
 
 fighter: ?jet.Fighter = null,
 piloting: bool = false,
@@ -33,11 +41,11 @@ pub fn padPosition(seed: u64, spawn: Physics.Vec3) Physics.Vec3 {
 }
 
 pub fn config() jet.Config {
-    return .{ .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), 3.2) };
+    return .{ .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), tuning.wing_area) };
 }
 
 pub fn massProps() dyn.MassProps {
-    return .{ .mass = 6500, .com = m.Vec3.zero, .inertia = m.Mat3.diag(m.Vec3.init(32_000, 46_000, 16_000)) };
+    return .{ .mass = tuning.mass, .com = m.Vec3.zero, .inertia = m.Mat3.diag(tuning.inertia) };
 }
 
 /// Rolls the Kestrel out onto its pad (or puts it where it was left).

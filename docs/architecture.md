@@ -200,6 +200,8 @@ The avatar appears in your own view in third person (F2), the creator, conversat
     - use lead pursuit with stinger bursts when lined up, break off past the target, and jink when hit;
     - avoid terrain analytically (under and 40/80/120 m ahead), plus a short structure ray every fourth step.
   - **Kestrel weapons:** twin cannons (12 rounds/s alternating, limited by heat). Missiles lock onto the Hive target nearest the nose within 25° and 1 km (air or ground) while the alternate is held, fire on release, and home. A carrier's bays take 2.5× damage.
+  - **Carrier assault:** four flak turrets must be destroyed before the four launch bays can be hit; destroying all bays exposes the underside core. The flight HUD shows the current stage and active target markers identify exposed parts. Core failure starts a tumbling descent with debris; the carrier is marked down and its cache drops on impact.
+  - **Ramming:** the Kestrel resolves sphere contacts against wasps and carrier hull parts, damages both sides above the impact threshold, and separates with a rebound. Wasps steer apart inside their spacing radius.
   - **Rewards:** downed wasps drop alloy to the floor below. A downed carrier drops six alloy, two rotor cores and a vital cell, and stays down (`carrier_N_down`).
 - **HUD:** the flight HUD shows speed, height, throttle and afterburner, hull and gun heat, a nose marker, and a lock reticle that closes as the lock builds. Both marks are projected from the camera.
 - **Sound:** a turbine (the engine loop pitched with throttle) and afterburner roar, cannon, missile, flak and stinger cues.

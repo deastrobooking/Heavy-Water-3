@@ -157,6 +157,43 @@ pub fn wasp(a: Allocator) !Pair {
     return finish(a, &shell, &glow, hive_palette);
 }
 
+/// Long-bodied, four-wing Hive interceptor; the cyan eye lamps make its role readable at range.
+pub fn dragonfly(a: Allocator) !Pair {
+    var shell: cm.Mesh = .{};
+    defer shell.deinit(a);
+    var glow: cm.Mesh = .{};
+    defer glow.deinit(a);
+    const id = Quat.identity;
+    try ellipsoid(a, &shell, Vec3.init(0, 0, -0.5), Vec3.init(0.55, 0.48, 2.6), id, .paint);
+    try ellipsoid(a, &shell, Vec3.init(0, 0.1, 2), Vec3.init(0.72, 0.62, 0.86), id, .metal);
+    try ellipsoid(a, &shell, Vec3.init(0, 0, -3), Vec3.init(0.36, 0.34, 1.6), id, .paint_accent);
+    for ([_]f32{ -1, 1 }) |side| {
+        try ellipsoid(a, &glow, Vec3.init(side * 0.48, 0.32, 2.3), Vec3.init(0.22, 0.24, 0.24), id, .emissive);
+        try prims.strut(a, &shell, Vec3.init(side * 0.34, -0.3, 0.2), Vec3.init(side * 0.9, -0.8, -0.8), Vec3.unit_z, 0.08, 0.06, .metal);
+        try prims.strut(a, &shell, Vec3.init(side * 0.9, -0.8, -0.8), Vec3.init(side * 1.3, -1, -1.8), Vec3.unit_z, 0.05, 0.04, .metal);
+    }
+    return finish(a, &shell, &glow, hive_palette);
+}
+
+/// Heavy plated bomber with a wide beetle carapace, ventral bomb pods and amber warning eyes.
+pub fn beetleBomber(a: Allocator) !Pair {
+    var shell: cm.Mesh = .{};
+    defer shell.deinit(a);
+    var glow: cm.Mesh = .{};
+    defer glow.deinit(a);
+    const id = Quat.identity;
+    try ellipsoid(a, &shell, Vec3.init(0, 0.1, 0), Vec3.init(2, 1.15, 2.45), id, .paint);
+    try ellipsoid(a, &shell, Vec3.init(0, 0.62, -0.45), Vec3.init(1.65, 0.62, 1.55), id, .paint_accent);
+    try ellipsoid(a, &shell, Vec3.init(0, -0.05, 2.35), Vec3.init(1.05, 0.78, 0.92), id, .metal);
+    for ([_]f32{ -1, 1 }) |side| {
+        try ellipsoid(a, &glow, Vec3.init(side * 0.72, 0.24, 2.95), Vec3.init(0.28, 0.3, 0.26), id, .emissive);
+        try ellipsoid(a, &shell, Vec3.init(side * 1.22, -1.05, -0.4), Vec3.init(0.42, 0.56, 0.9), id, .metal);
+        try prims.strut(a, &shell, Vec3.init(side * 0.9, -0.7, -0.7), Vec3.init(side * 1.55, -1.1, -1.7), Vec3.unit_z, 0.12, 0.08, .paint);
+        try prims.strut(a, &shell, Vec3.init(side * 1.55, -1.1, -1.7), Vec3.init(side * 1.75, -1.5, -2.5), Vec3.unit_z, 0.07, 0.05, .paint);
+    }
+    return finish(a, &shell, &glow, hive_palette);
+}
+
 /// One wasp wing, rooted at the origin and reaching along +X: a thin veined membrane.
 pub fn waspWing(a: Allocator) !RenderMesh {
     var mesh: cm.Mesh = .{};

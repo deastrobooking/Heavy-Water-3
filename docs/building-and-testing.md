@@ -180,6 +180,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 42 | A cave mouth on a mountainside |
 | 43 | Inside a cave's first chamber |
 | 44 | A cave's heart chamber and its Hive nest |
+| 45 | Kestrel missile lock reticle, acquired on a ground drone |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.
 

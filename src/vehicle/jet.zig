@@ -72,6 +72,18 @@ pub const Fighter = struct {
     /// The largest impact this step (m/s), for effects and damage.
     impact: f32 = 0,
 
+    /// Resolves a ram contact against a moving target, separating the hull and reflecting only
+    /// velocity directed into the contact plane. Damage is computed by the encounter system.
+    pub fn resolveCollision(self: *Fighter, normal: Vec3, penetration: f32, other_velocity: Vec3, damage: f32) void {
+        const n = normal.normalizeOr(Vec3.unit_y);
+        self.body.pos = self.body.pos.addScaled(n, penetration + 0.03);
+        var relative = self.body.vel.sub(other_velocity);
+        const closing = relative.dot(n);
+        if (closing < 0) relative = relative.addScaled(n, -closing * 1.35);
+        self.body.vel = other_velocity.add(relative);
+        self.hull = @max(0, self.hull - damage);
+    }
+
     pub fn init(props: dyn.MassProps, cfg: Config, position: Vec3, yaw: f32) Fighter {
         var body = dyn.RigidBody.init(props);
         body.pos = position;
@@ -313,4 +325,13 @@ test "a hard crash into the ground costs hull" {
     for (0..60 * 2) |_| f.step(1.0 / 60.0, .{}, &ground, Flat.probe);
     try testing.expect(f.hull < 300);
     try testing.expect(f.body.pos.y > 0.5);
+}
+
+test "ram contact separates the Kestrel, rebounds it, and reduces hull" {
+    var f = testFighter(Vec3.zero, 0);
+    f.body.vel = Vec3.init(0, 0, 100);
+    f.resolveCollision(Vec3.init(0, 0, -1), 2, Vec3.zero, 20);
+    try testing.expect(f.body.pos.z < -2);
+    try testing.expect(f.body.vel.z < 0);
+    try testing.expectEqual(@as(f32, 280), f.hull);
 }

@@ -39,39 +39,48 @@ pub fn palette(d: Design) Palette {
     };
 }
 
+/// Handling and physical design values stay together by car so the playtest can tune each ride.
+pub const tuning = .{
+    .skimmer = car.CarSpec{},
+    .dart = blk: {
+        var s: car.CarSpec = .{};
+        s.hull.length = 4.1;
+        s.wing = null;
+        s.fan.radius = 0.26;
+        s.fan.blades = 9;
+        s.pad_pos = .{ m.Vec3.init(1.22, 0.4, 1.1), m.Vec3.init(-1.22, 0.4, 1.1), m.Vec3.init(1.22, 0.4, -1.05), m.Vec3.init(-1.22, 0.4, -1.05) };
+        s.hull_mass = 640;
+        s.fan_mass = 30;
+        s.fan_power = 260_000;
+        s.cruise_thrust = 10_500;
+        s.boost_thrust = 26_000;
+        s.ride_height = 0.8;
+        break :blk s;
+    },
+    .courier = blk: {
+        var s: car.CarSpec = .{};
+        s.hull.length = 5.4;
+        s.fan.radius = 0.36;
+        s.fan.blades = 6;
+        s.pad_pos = .{ m.Vec3.init(1.42, 0.5, 1.6), m.Vec3.init(-1.42, 0.5, 1.6), m.Vec3.init(1.42, 0.5, -1.5), m.Vec3.init(-1.42, 0.5, -1.5) };
+        s.wing.?.root_le = m.Vec3.init(0, 1.2, -2.1);
+        s.wing.?.span = 2.2;
+        s.hull_mass = 1050;
+        s.fan_mass = 46;
+        s.fan_power = 420_000;
+        s.cruise_thrust = 9_000;
+        s.boost_thrust = 15_000;
+        s.ride_height = 1.5;
+        break :blk s;
+    },
+};
+
 pub fn spec(d: Design) car.CarSpec {
-    var s: car.CarSpec = .{};
-    switch (d) {
-        .skimmer => {},
-        .dart => {
-            s.hull.length = 4.1;
-            s.wing = null;
-            s.fan.radius = 0.26;
-            s.fan.blades = 9;
-            s.pad_pos = .{ m.Vec3.init(1.22, 0.4, 1.1), m.Vec3.init(-1.22, 0.4, 1.1), m.Vec3.init(1.22, 0.4, -1.05), m.Vec3.init(-1.22, 0.4, -1.05) };
-            s.hull_mass = 640;
-            s.fan_mass = 30;
-            s.fan_power = 260_000;
-            s.cruise_thrust = 10_500;
-            s.boost_thrust = 26_000;
-            s.ride_height = 0.8;
-        },
-        .courier => {
-            s.hull.length = 5.4;
-            s.fan.radius = 0.36;
-            s.fan.blades = 6;
-            s.pad_pos = .{ m.Vec3.init(1.42, 0.5, 1.6), m.Vec3.init(-1.42, 0.5, 1.6), m.Vec3.init(1.42, 0.5, -1.5), m.Vec3.init(-1.42, 0.5, -1.5) };
-            s.wing.?.root_le = m.Vec3.init(0, 1.2, -2.1);
-            s.wing.?.span = 2.2;
-            s.hull_mass = 1050;
-            s.fan_mass = 46;
-            s.fan_power = 420_000;
-            s.cruise_thrust = 9_000;
-            s.boost_thrust = 15_000;
-            s.ride_height = 1.5;
-        },
-    }
-    return s;
+    return switch (d) {
+        .skimmer => tuning.skimmer,
+        .dart => tuning.dart,
+        .courier => tuning.courier,
+    };
 }
 
 fn color(material: cm.Material, p: Palette) [3]f32 {
