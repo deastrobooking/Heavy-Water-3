@@ -260,6 +260,9 @@ pub const Guns = struct {
     lock: ?Ref = null,
     lock_progress: f32 = 0,
     was_alt: bool = false,
+    missile_ammo: u8 = 2,
+    missile_capacity: u8 = 2,
+    missile_rearm: f32 = 0,
 };
 
 seed: u64 = 0,
@@ -312,6 +315,12 @@ pub fn waspCount(self: *const Skies, carrier: ?u8) usize {
         n += @intFromBool(carrier == null or w.carrier == carrier.?);
     };
     return n;
+}
+
+pub fn configureKestrel(self: *Skies, upgrades: [4]u8) void {
+    const capacity: u8 = 2 + upgrades[@intFromEnum(@import("Progress.zig").KestrelUpgrade.missile_rack)] * 2;
+    if (capacity > self.guns.missile_capacity) self.guns.missile_ammo += capacity - self.guns.missile_capacity;
+    self.guns.missile_capacity = capacity;
 }
 
 fn separation(self: *const Skies, index: usize, position: V) V {
@@ -799,15 +808,29 @@ pub fn fireRanger(self: *Skies, origin: V, dir: V, damage: f32) void {
 /// The Kestrel's weapons for one step: cannons while `fire` is held, missile lock while `alt`
 /// is held (fired on release). `guns` are the muzzles in the world; `nose` the jet's forward.
 pub fn fireJet(self: *Skies, enemies: *const Enemies, jet: Jet, guns: [2]V, fire: bool, alt: bool, dt: f32, out: []Event, n: *usize) void {
+    self.fireJetUpgraded(enemies, jet, guns, fire, alt, dt, @splat(0), out, n);
+}
+
+pub fn fireJetUpgraded(self: *Skies, enemies: *const Enemies, jet: Jet, guns: [2]V, fire: bool, alt: bool, dt: f32, upgrades: [4]u8, out: []Event, n: *usize) void {
     const g = &self.guns;
+    const Progress = @import("Progress.zig");
+    const rack_level = upgrades[@intFromEnum(Progress.KestrelUpgrade.missile_rack)];
+    const cooling_level = upgrades[@intFromEnum(Progress.KestrelUpgrade.gun_cooling)];
+    self.configureKestrel(upgrades);
     g.cooldown = @max(0, g.cooldown - dt);
     g.missile_cooldown = @max(0, g.missile_cooldown - dt);
-    g.heat = @max(0, g.heat - tuning.cannon_heat_cool_rate * dt);
-    if (g.overheated and g.heat < tuning.cannon_resume_heat) g.overheated = false;
+    if (g.missile_ammo == 0 and g.missile_rearm > 0) {
+        g.missile_rearm = @max(0, g.missile_rearm - dt);
+        if (g.missile_rearm == 0) g.missile_ammo = g.missile_capacity;
+    }
+    const cooling: f32 = 1 + @as(f32, @floatFromInt(cooling_level)) * 0.3;
+    const overheat_limit: f32 = tuning.cannon_overheat + @as(f32, @floatFromInt(cooling_level)) * 12;
+    g.heat = @max(0, g.heat - tuning.cannon_heat_cool_rate * cooling * dt);
+    if (g.overheated and g.heat < tuning.cannon_resume_heat * cooling) g.overheated = false;
     if (fire and !g.overheated and g.cooldown == 0) {
-        g.cooldown = 1.0 / tuning.cannon_rate;
+        g.cooldown = 1.0 / (tuning.cannon_rate * cooling);
         g.heat += tuning.cannon_heat_per_shot;
-        if (g.heat >= tuning.cannon_overheat) g.overheated = true;
+        if (g.heat >= overheat_limit) g.overheated = true;
         const muzzle = guns[g.side];
         g.side +%= 1;
         self.addShot(.{ .kind = .cannon, .position = muzzle, .velocity = R.add(R.scale(jet.forward, tuning.cannon_speed), jet.velocity), .damage = tuning.cannon_damage, .life = tuning.cannon_lifetime });
@@ -823,8 +846,10 @@ pub fn fireJet(self: *Skies, enemies: *const Enemies, jet: Jet, guns: [2]V, fire
             g.lock_progress = 0;
         }
     }
-    if (!alt and g.was_alt and g.missile_cooldown == 0) {
+    if (!alt and g.was_alt and g.missile_cooldown == 0 and g.missile_ammo > 0) {
         g.missile_cooldown = tuning.missile_reload;
+        g.missile_ammo -= 1;
+        if (g.missile_ammo == 0) g.missile_rearm = 10 / (1 + @as(f32, @floatFromInt(rack_level)) * 0.15);
         const homing = if (g.lock_progress >= 1) g.lock else null;
         const launch = R.scale(R.add(guns[0], guns[1]), 0.5);
         self.addShot(.{ .kind = .missile, .position = R.add(launch, .{ 0, -0.6, 0 }), .velocity = R.add(R.scale(jet.forward, tuning.missile_speed), jet.velocity), .damage = tuning.missile_damage, .life = tuning.missile_lifetime, .homing = homing });
@@ -1117,4 +1142,26 @@ test "dragonflies are fragile interceptors and bomber raids can be defended or l
         if (lost) break;
     }
     try std.testing.expect(lost);
+}
+
+test "Kestrel missile rack capacity and cannon cooling scale with upgrades" {
+    const Progress = @import("Progress.zig");
+    var sky = Skies.init(91, .{ 0, 0, 0 }, &.{});
+    var levels: [Progress.kestrel_upgrade_count]u8 = @splat(0);
+    levels[@intFromEnum(Progress.KestrelUpgrade.missile_rack)] = 2;
+    levels[@intFromEnum(Progress.KestrelUpgrade.gun_cooling)] = 2;
+    sky.configureKestrel(levels);
+    try std.testing.expectEqual(@as(u8, 6), sky.guns.missile_capacity);
+    try std.testing.expectEqual(@as(u8, 6), sky.guns.missile_ammo);
+
+    var enemies: Enemies = .{};
+    const jet: Jet = .{ .position = .{ 0, 300, 0 }, .velocity = .{ 0, 0, 0 }, .forward = .{ 0, 0, 1 }, .airborne = true };
+    var events: [8]Event = undefined;
+    var n: usize = 0;
+    sky.guns.heat = 80;
+    sky.fireJetUpgraded(&enemies, jet, .{ .{ 0, 300, 0 }, .{ 0, 300, 0 } }, false, false, 1, levels, &events, &n);
+    const upgraded_heat = sky.guns.heat;
+    sky.guns.heat = 80;
+    sky.fireJet(&enemies, jet, .{ .{ 0, 300, 0 }, .{ 0, 300, 0 } }, false, false, 1, &events, &n);
+    try std.testing.expect(upgraded_heat < sky.guns.heat);
 }

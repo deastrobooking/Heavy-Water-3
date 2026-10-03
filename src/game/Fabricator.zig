@@ -10,13 +10,13 @@ const Market = @import("../city/Market.zig");
 const Designs = @import("../vehicle/Designs.zig");
 const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 
-pub const Tab = enum { vehicles, suits, armor, weapons };
+pub const Tab = enum { vehicles, suits, armor, weapons, aircraft };
 pub const tab_count = @typeInfo(Tab).@"enum".fields.len;
-pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind };
+pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
 pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
-pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap };
+pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, NoFighter };
 
 pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
@@ -39,6 +39,14 @@ pub const recipes = [_]Recipe{
     .{ .tab = .weapons, .output = .{ .weapon = .sniper_rifle }, .cost = .{ .lumen = 12, .rotor = 1, .alloy = 8 }, .about = "Instant beam that pierces one. The alternate scopes; a steady scope hits harder." },
     .{ .tab = .weapons, .output = .{ .weapon = .energy_bazooka }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 12 }, .about = "Arcing plasma orb that bursts, stuns and throws. The alternate detonates it." },
     .{ .tab = .weapons, .output = .{ .weapon = .giant_blast }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 16 }, .about = "Charge a beam that cuts through anything." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .armor }, .cost = .{}, .about = "Layered plating increases the Kestrel's maximum hull." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .missile_rack }, .cost = .{}, .about = "Expand the rack by two missiles per level." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .engine }, .cost = .{}, .about = "Increase engine and afterburner thrust." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .gun_cooling }, .cost = .{}, .about = "Cool the cannon assembly faster and delay overheat." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_paint = .ivory }, .cost = .{}, .about = "Standard ceramic-white service finish." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_paint = .azure }, .cost = .{}, .about = "Deep ocean-blue flightline finish." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_paint = .ember }, .cost = .{}, .about = "High-visibility ember-orange finish." },
+    .{ .tab = .aircraft, .output = .{ .kestrel_paint = .moss }, .cost = .{}, .about = "Arbor-green field camouflage." },
 };
 
 pub fn name(output: Output, buffer: []u8) []const u8 {
@@ -48,6 +56,18 @@ pub fn name(output: Output, buffer: []u8) []const u8 {
         .suit => |c| @tagName(c),
         .armor => |a| @tagName(a),
         .weapon => |w| @tagName(w),
+        .kestrel_upgrade => |u| return switch (u) {
+            .armor => "KESTREL ARMOR",
+            .missile_rack => "MISSILE RACK",
+            .engine => "ENGINE",
+            .gun_cooling => "GUN COOLING",
+        },
+        .kestrel_paint => |p| return switch (p) {
+            .ivory => "IVORY PAINT",
+            .azure => "AZURE PAINT",
+            .ember => "EMBER PAINT",
+            .moss => "MOSS PAINT",
+        },
     };
     const n = @min(buffer.len, tag.len);
     for (buffer[0..n], tag[0..n]) |*o, ch| o.* = if (ch == '_') ' ' else std.ascii.toUpper(ch);
@@ -71,6 +91,27 @@ pub fn made(p: *const Progress, output: Output) bool {
         .suit => |c| p.owns(c),
         .armor => |a| p.ownsArmor(a),
         .weapon => |w| p.ownsWeapon(w),
+        .kestrel_upgrade => |u| p.kestrelLevel(u) >= Progress.max_level,
+        .kestrel_paint => |paint| p.ownsKestrelPaint(paint),
+    };
+}
+
+pub fn status(p: *const Progress, output: Output) ?[]const u8 {
+    return switch (output) {
+        .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
+            .kestrel_upgrade => |u| if (p.kestrelLevel(u) >= Progress.max_level) "MAX LEVEL" else null,
+            .kestrel_paint => |paint| if (p.ownsKestrelPaint(paint)) (if (p.kestrel_paint == paint) "EQUIPPED" else "OWNED") else null,
+            else => unreachable,
+        },
+        else => if (made(p, output)) "MADE" else null,
+    };
+}
+
+pub fn progressCost(p: *const Progress, output: Output) ?Progress.Cost {
+    return switch (output) {
+        .kestrel_upgrade => |u| p.kestrelUpgradeCost(u),
+        .kestrel_paint => |paint| Progress.kestrelPaintCost(paint),
+        else => null,
     };
 }
 
@@ -85,7 +126,37 @@ pub fn affordable(p: *const Progress, wallet: Market.Wallet, c: Cost) ?Error {
 /// Pays for and makes recipe `index`.
 pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
     const r = recipes[index];
+    if ((r.output == .kestrel_upgrade or r.output == .kestrel_paint) and !p.fighter) return error.NoFighter;
+    if (r.output == .kestrel_upgrade and p.kestrelLevel(r.output.kestrel_upgrade) >= Progress.max_level) return error.MaxLevel;
+    if (r.output == .kestrel_paint) {
+        const paint = r.output.kestrel_paint;
+        if (p.ownsKestrelPaint(paint)) {
+            p.selectKestrelPaint(paint) catch return error.NotOwned;
+            return r.output;
+        }
+    }
     if (made(p, r.output)) return error.AlreadyMade;
+    switch (r.output) {
+        .kestrel_upgrade => |u| {
+            p.buyKestrelUpgrade(u, wallet) catch |err| return switch (err) {
+                error.NotEnoughScrap => error.NotEnoughScrap,
+                error.NotEnoughParts => error.NotEnoughParts,
+                error.MaxLevel => error.MaxLevel,
+                else => error.AlreadyMade,
+            };
+            return r.output;
+        },
+        .kestrel_paint => |paint| {
+            p.buyKestrelPaint(paint, wallet) catch |err| return switch (err) {
+                error.NotEnoughScrap => error.NotEnoughScrap,
+                error.NotEnoughParts => error.NotEnoughParts,
+                error.AlreadyOwned => error.AlreadyOwned,
+                else => error.AlreadyMade,
+            };
+            return r.output;
+        },
+        else => {},
+    }
     if (affordable(p, wallet.*, r.cost)) |err| return err;
     p.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] -= r.cost.lumen;
     p.inventory[@intFromEnum(Collectibles.Kind.rotor_core)] -= r.cost.rotor;
@@ -97,6 +168,7 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
         .suit => |c| p.suits |= Progress.bit(c),
         .armor => |a| p.armors |= Progress.armorBit(a),
         .weapon => |w| p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),
+        .kestrel_upgrade, .kestrel_paint => unreachable,
     }
     return r.output;
 }
@@ -120,4 +192,23 @@ test "recipes pay exactly, make once, and refuse what cannot be paid" {
     for (onTab(.weapons, &weapons_tab)[0..2]) |i| try std.testing.expectEqual(@as(u32, 0), recipes[i].cost.alloy);
     var buffer: [24]u8 = undefined;
     try std.testing.expectEqualStrings("TRACKING MISSILE", name(.{ .weapon = .tracking_missile }, &buffer));
+}
+
+test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint" {
+    var progress: Progress = .{};
+    var wallet: Market.Wallet = .{ .scrap = 5000, .parts = 100 };
+    var rows: [recipes.len]u8 = undefined;
+    const aircraft = onTab(.aircraft, &rows);
+    try std.testing.expectEqual(@as(usize, 8), aircraft.len);
+    try std.testing.expectError(error.NoFighter, make(&progress, &wallet, aircraft[2]));
+    progress.fighter = true;
+    _ = try make(&progress, &wallet, aircraft[2]); // engine level 1
+    try std.testing.expectEqual(@as(u8, 1), progress.kestrelLevel(.engine));
+    _ = try make(&progress, &wallet, aircraft[2]); // engine level 2 costs more
+    try std.testing.expectEqual(@as(u8, 2), progress.kestrelLevel(.engine));
+    _ = try make(&progress, &wallet, aircraft[5]); // buy and equip azure
+    try std.testing.expectEqual(Progress.Paint.azure, progress.kestrel_paint);
+    _ = try make(&progress, &wallet, aircraft[4]); // reselect the free ivory finish
+    try std.testing.expectEqual(Progress.Paint.ivory, progress.kestrel_paint);
+    try std.testing.expectEqualStrings("EQUIPPED", status(&progress, recipes[aircraft[4]].output).?);
 }

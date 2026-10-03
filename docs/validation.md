@@ -125,6 +125,13 @@ Apple M3 Pro / Metal, ReleaseFast, seed 310399555161; each canopy run has 60 war
 - Debug unit suite: **295/295 passed**. The focused Skies cases cover interceptor fragility, a ranger projectile defending a bomber raid, and the raid's three-hit loss condition.
 - `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=300`: passed on Apple M3 Pro / Metal with no validation errors. All 300 frames completed; the smoke exercised the existing flight, four-player split-screen, market, and world-rendering paths with the new ship meshes registered.
 
+## Kestrel progression (step 8)
+
+- Aircraft tab adds three-level armor, missile rack, engine and gun-cooling upgrades, plus four paint finishes. Upgrade tiers cost shared scrap and parts; finishes save with player progress. Marked landing pads are published on each tower roof.
+- Focused progression suite: 169/169 passed before the Aircraft-tab bounds case was added. Coverage includes purchase/refusal behavior, paint selection and save round trips, measurable hull/thrust changes, missile capacity, and cannon heat recovery.
+- ReleaseSafe application compile and 300-frame Metal smoke pass on Apple M3 Pro with MTL_DEBUG_LAYER=1; no validation errors. The updated 300-frame smoke completed with 1,295 submitted objects and 394 simulation ticks.
+- Debug unit suite: **299/299 passed**, including the Aircraft-tab bounds assertion.
+
 Both reports pass all checks, including both LODs, the 16.667 ms render CPU budget, active-ring coverage (zero underfilled frames), and unthrottled presentation. Peak upload remains 284,204 B within 327,680 B; peak GPU terrain residency remains 25 chunks; terrain pools stay at 2 CPU and 50 GPU allocations. Reports are `.tools/canopy-1-benchmark.json` and `.tools/canopy-2-benchmark.json`.
 
 These are submission and presentation measurements, not GPU execution timings or an art review. The three trees and both of their mesh detail levels remain resident; terrain-pool counters do not represent total process/GPU memory. No screenshot or manual visual approval was performed. Runtime grafting/growth, tree eviction, and allocation of unused flow after branch bottlenecks remain deferred. See [Arbor genomes and sap](arbors.md) for controls and content-v4 save compatibility.

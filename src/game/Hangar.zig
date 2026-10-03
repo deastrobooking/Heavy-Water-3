@@ -15,6 +15,7 @@ const airfoil = @import("../vehicle/airfoil.zig");
 const dyn = @import("../vehicle/dynamics.zig");
 const ShipMeshes = @import("../vehicle/ShipMeshes.zig");
 const Garage = @import("Garage.zig");
+const Progress = @import("Progress.zig");
 const m = @import("../character/math.zig");
 const Hangar = @This();
 
@@ -40,8 +41,15 @@ pub fn padPosition(seed: u64, spawn: Physics.Vec3) Physics.Vec3 {
     return .{ x, Terrain.surface(seed, x, z).height, z };
 }
 
-pub fn config() jet.Config {
-    return .{ .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), tuning.wing_area) };
+pub fn config(levels: [Progress.kestrel_upgrade_count]u8) jet.Config {
+    const engine: f32 = @floatFromInt(levels[@intFromEnum(Progress.KestrelUpgrade.engine)]);
+    const armor: f32 = @floatFromInt(levels[@intFromEnum(Progress.KestrelUpgrade.armor)]);
+    return .{
+        .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), tuning.wing_area),
+        .thrust = 58_000 * (1 + engine * 0.12),
+        .afterburner = 95_000 * (1 + engine * 0.12),
+        .hull_max = 300 + armor * 75,
+    };
 }
 
 pub fn massProps() dyn.MassProps {
@@ -50,10 +58,22 @@ pub fn massProps() dyn.MassProps {
 
 /// Rolls the Kestrel out onto its pad (or puts it where it was left).
 pub fn place(self: *Hangar, seed: u64, spawn: Physics.Vec3, at: ?Physics.Vec3, yaw: f32) void {
+    self.placeWithLevels(seed, spawn, at, yaw, @splat(0));
+}
+
+pub fn placeWithLevels(self: *Hangar, seed: u64, spawn: Physics.Vec3, at: ?Physics.Vec3, yaw: f32, levels: [Progress.kestrel_upgrade_count]u8) void {
     const pad = padPosition(seed, spawn);
     const p = at orelse Physics.Vec3{ pad[0], pad[1] + rest_height, pad[2] };
-    self.fighter = jet.Fighter.init(massProps(), config(), m.Vec3.init(p[0], p[1], p[2]), if (at != null) yaw else std.math.pi);
+    self.fighter = jet.Fighter.init(massProps(), config(levels), m.Vec3.init(p[0], p[1], p[2]), if (at != null) yaw else std.math.pi);
     self.piloting = false;
+}
+
+pub fn applyLevels(self: *Hangar, levels: [Progress.kestrel_upgrade_count]u8) void {
+    const f = &(self.fighter orelse return);
+    const old_max = f.hull_max;
+    f.cfg = config(levels);
+    f.hull_max = f.cfg.hull_max;
+    f.hull = @min(f.hull_max, f.hull + (f.hull_max - old_max));
 }
 
 fn probe(physics: *const Physics, from: m.Vec3, dir: m.Vec3, reach: f32) ?jet.Hit {
@@ -154,4 +174,23 @@ test "the Kestrel rests on its pad, is boarded, lifts off on its jets and flies 
     try std.testing.expect(f.airspeed() > 60 and f.body.pos.z > 100);
     try std.testing.expect(hangar.follow(0, &camera) != null);
     try std.testing.expect(hangar.leave(&physics) != null and !hangar.piloting);
+}
+
+test "Kestrel armor and engine levels measurably change hull and thrust" {
+    var levels: [Progress.kestrel_upgrade_count]u8 = @splat(0);
+    levels[@intFromEnum(Progress.KestrelUpgrade.engine)] = 2;
+    levels[@intFromEnum(Progress.KestrelUpgrade.armor)] = 1;
+    const base = config(@splat(0));
+    const tuned = config(levels);
+    try std.testing.expect(tuned.thrust > base.thrust);
+    try std.testing.expect(tuned.afterburner > base.afterburner);
+    try std.testing.expectEqual(@as(f32, 375), tuned.hull_max);
+    var hangar: Hangar = .{};
+    hangar.placeWithLevels(1, .{ 0, 0, 0 }, null, 0, levels);
+    try std.testing.expectEqual(@as(f32, 375), hangar.fighter.?.hull_max);
+    hangar.fighter.?.hull = 200;
+    levels[@intFromEnum(Progress.KestrelUpgrade.armor)] = 2;
+    hangar.applyLevels(levels);
+    try std.testing.expectEqual(@as(f32, 275), hangar.fighter.?.hull);
+    try std.testing.expectEqual(@as(f32, 450), hangar.fighter.?.hull_max);
 }

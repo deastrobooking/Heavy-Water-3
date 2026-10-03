@@ -67,7 +67,7 @@ Acceptance: the benchmark meets its budgets on the M3 Pro; the playtest checklis
    - Destroying the bays opens the core.
    - Each stage shows on the HUD, and the carrier falls in a scripted crash with debris.
 3. **Hive wing variety — complete:** dragonfly interceptors (fast, fragile, missile-dodging) and beetle bombers that raid the market plazas, which rangers on foot and in the air defend. Ground and air weapons can shoot them; three successful bomb drops drain the plaza's stock until dawn, while destroying the bomber defends the market.
-4. **Kestrel progression:** fabricator upgrades (armor, a bigger missile rack, engine, gun cooling) and paint schemes in customization, plus landing pads on tower roofs.
+4. **Kestrel progression — complete:** fabricator upgrades (armor, a bigger missile rack, engine, gun cooling), selectable paint schemes in the Aircraft tab, and marked landing pads on all three tower roofs. Upgrade levels persist and change hull capacity, thrust, missile capacity and gun cooling.
 
 Acceptance: tests for collisions and assault stages; a bomber raid can be won and lost; upgrades change the flight model measurably in tests.
 

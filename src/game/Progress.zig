@@ -16,6 +16,10 @@ pub const max_level = 3;
 pub const max_flags = 48;
 pub const flag_capacity = 24;
 pub const Cost = struct { scrap: u32, parts: u32 };
+pub const KestrelUpgrade = enum { armor, missile_rack, engine, gun_cooling };
+pub const kestrel_upgrade_count = @typeInfo(KestrelUpgrade).@"enum".fields.len;
+pub const Paint = enum { ivory, azure, ember, moss };
+pub const paint_count = @typeInfo(Paint).@"enum".fields.len;
 pub const Error = error{ MaxLevel, NotEnoughScrap, NotEnoughParts, AlreadyOwned, NotOwned };
 
 pub const Info = struct { name: []const u8, summary: []const u8 };
@@ -42,6 +46,9 @@ armors: u8 = free_armors,
 weapons: u16 = 0,
 /// The Kestrel fighter has been fabricated.
 fighter: bool = false,
+kestrel_levels: [kestrel_upgrade_count]u8 = @splat(0),
+kestrel_paints: u8 = 1,
+kestrel_paint: Paint = .ivory,
 flag_names: [max_flags][flag_capacity]u8 = undefined,
 flag_lens: [max_flags]u8 = @splat(0),
 flag_count: usize = 0,
@@ -97,6 +104,48 @@ pub fn buy(self: *Progress, u: Upgrade, wallet: *Market.Wallet) Error!void {
     if (self.level(u) >= max_level) return error.MaxLevel;
     try pay(wallet, self.cost(u));
     self.levels[@intFromEnum(u)] += 1;
+}
+
+pub fn kestrelLevel(self: *const Progress, upgrade: KestrelUpgrade) u8 {
+    return self.kestrel_levels[@intFromEnum(upgrade)];
+}
+
+pub fn kestrelUpgradeCost(self: *const Progress, upgrade: KestrelUpgrade) Cost {
+    const base = ([_]Cost{ .{ .scrap = 60, .parts = 2 }, .{ .scrap = 70, .parts = 2 }, .{ .scrap = 80, .parts = 3 }, .{ .scrap = 60, .parts = 2 } })[@intFromEnum(upgrade)];
+    const scale = ([_]u32{ 1, 2, 3 })[@min(self.kestrelLevel(upgrade), 2)];
+    return .{ .scrap = base.scrap * scale, .parts = base.parts * scale };
+}
+
+pub fn buyKestrelUpgrade(self: *Progress, upgrade: KestrelUpgrade, wallet: *Market.Wallet) Error!void {
+    const current_level = self.kestrelLevel(upgrade);
+    if (current_level >= max_level) return error.MaxLevel;
+    try pay(wallet, self.kestrelUpgradeCost(upgrade));
+    self.kestrel_levels[@intFromEnum(upgrade)] += 1;
+}
+
+pub fn ownsKestrelPaint(self: *const Progress, paint: Paint) bool {
+    return (self.kestrel_paints & (@as(u8, 1) << @intCast(@intFromEnum(paint)))) != 0;
+}
+
+pub fn kestrelPaintCost(paint: Paint) Cost {
+    return switch (paint) {
+        .ivory => .{ .scrap = 0, .parts = 0 },
+        .azure => .{ .scrap = 45, .parts = 0 },
+        .ember => .{ .scrap = 65, .parts = 1 },
+        .moss => .{ .scrap = 55, .parts = 1 },
+    };
+}
+
+pub fn buyKestrelPaint(self: *Progress, paint: Paint, wallet: *Market.Wallet) Error!void {
+    if (self.ownsKestrelPaint(paint)) return error.AlreadyOwned;
+    try pay(wallet, kestrelPaintCost(paint));
+    self.kestrel_paints |= @as(u8, 1) << @intCast(@intFromEnum(paint));
+    self.kestrel_paint = paint;
+}
+
+pub fn selectKestrelPaint(self: *Progress, paint: Paint) Error!void {
+    if (!self.ownsKestrelPaint(paint)) return error.NotOwned;
+    self.kestrel_paint = paint;
 }
 
 /// The suit tuning every player wears.
@@ -169,6 +218,9 @@ pub const Doc = struct {
     armors: []const Profile.Armor = &.{},
     weapons: []const WeaponKind = &.{},
     fighter: bool = false,
+    kestrel_levels: []const u8 = &.{},
+    kestrel_paints: u8 = 1,
+    kestrel_paint: Paint = .ivory,
     suits: []const Profile.Clothing = &.{},
     flags: []const []const u8 = &.{},
 };
@@ -187,7 +239,7 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     inline for (@typeInfo(Profile.Armor).@"enum".fields) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
     var weapons: std.ArrayList(WeaponKind) = .empty;
     inline for (@typeInfo(WeaponKind).@"enum".fields) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
-    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .fighter = self.fighter };
+    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
@@ -206,6 +258,12 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     for (doc.armors) |a| result.armors |= armorBit(a);
     for (doc.weapons) |w| result.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w));
     result.fighter = doc.fighter;
+    if (doc.kestrel_levels.len > kestrel_upgrade_count) return error.InvalidProgress;
+    for (doc.kestrel_levels) |l| if (l > max_level) return error.InvalidProgress;
+    @memcpy(result.kestrel_levels[0..doc.kestrel_levels.len], doc.kestrel_levels);
+    if (doc.kestrel_paints == 0 or doc.kestrel_paints >> paint_count != 0 or (doc.kestrel_paints & (@as(u8, 1) << @intCast(@intFromEnum(doc.kestrel_paint)))) == 0) return error.InvalidProgress;
+    result.kestrel_paints = doc.kestrel_paints;
+    result.kestrel_paint = doc.kestrel_paint;
     if (doc.flags.len > max_flags) return error.InvalidProgress;
     for (doc.flags) |name| {
         if (name.len == 0 or name.len > flag_capacity) return error.InvalidProgress;
@@ -280,4 +338,26 @@ test "suits are bought once, and progress round-trips through its save shape" {
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));
     // A save without progress starts fresh with the free suits.
     try std.testing.expectEqual(free_suits, (try fromDoc(.{})).suits);
+}
+
+test "Kestrel upgrades change owned loadout and paint selection persists" {
+    var p: Progress = .{};
+    var wallet: Market.Wallet = .{ .scrap = 10_000, .parts = 100 };
+    const first_cost = p.kestrelUpgradeCost(.engine);
+    try p.buyKestrelUpgrade(.engine, &wallet);
+    try std.testing.expectEqual(@as(u8, 1), p.kestrelLevel(.engine));
+    try std.testing.expectEqual(@as(u32, 10_000 - first_cost.scrap), wallet.scrap);
+    try p.buyKestrelPaint(.azure, &wallet);
+    try std.testing.expectEqual(Paint.azure, p.kestrel_paint);
+    try p.selectKestrelPaint(.ivory);
+    try std.testing.expectError(error.NotOwned, p.selectKestrelPaint(.ember));
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const doc = try p.toDoc(arena.allocator());
+    const restored = try fromDoc(doc);
+    try std.testing.expectEqual(p.kestrel_levels, restored.kestrel_levels);
+    try std.testing.expectEqual(p.kestrel_paints, restored.kestrel_paints);
+    try std.testing.expectEqual(p.kestrel_paint, restored.kestrel_paint);
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .kestrel_levels = &.{4} }));
 }

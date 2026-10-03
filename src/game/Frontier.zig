@@ -191,7 +191,8 @@ pub fn refresh(sb: *Sandbox) void {
     sb.skies.shots = @splat(null);
     sb.skies.guns = .{};
     sb.hangar = .{};
-    if (sb.progress.fighter) sb.hangar.place(sb.seed, Sandbox.spawn, null, 0);
+    if (sb.progress.fighter) sb.hangar.placeWithLevels(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels);
+    sb.skies.configureKestrel(sb.progress.kestrel_levels);
     sb.garage = .{};
     for (0..Designs.count) |d| if (sb.progress.ownsVehicle(@enumFromInt(d))) sb.garage.park(sb.seed, Sandbox.spawn, sb.catalog, @enumFromInt(d));
     sb.collectibles.drops = @splat(null);
@@ -483,7 +484,7 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
     for (sb.guests, 1..) |g, i| on_foot[i] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active };
     var events: [64]Skies.Event = undefined;
     var n: usize = 0;
-    if (jet) |j| if (!frozen) sb.skies.fireJet(&sb.enemies, j, sb.hangar.guns(), sb.trigger.fire, sb.trigger.alt, dt, &events, &n);
+    if (jet) |j| if (!frozen) sb.skies.fireJetUpgraded(&sb.enemies, j, sb.hangar.guns(), sb.trigger.fire, sb.trigger.alt, dt, sb.progress.kestrel_levels, &events, &n);
     const fired = @min(n, events.len);
     const count = sb.skies.step(&sb.physics, &sb.enemies, jet, &on_foot, dt, events[fired..]);
     for (events[0..@min(fired + count, events.len)]) |e| switch (e) {
@@ -595,7 +596,7 @@ fn wreck(sb: *Sandbox, camera: *Camera) void {
     var events: [4]Combat.Event = undefined;
     var n: usize = 0;
     if (sb.combat.hurt(0, 40, &events, &n)) down(sb, 0, camera);
-    sb.hangar.place(sb.seed, Sandbox.spawn, null, 0);
+    sb.hangar.placeWithLevels(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels);
     sb.say("the kestrel went down: a new one waits on its pad", .{});
 }
 
@@ -698,6 +699,16 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(kiosk, .{ 0, 1.56, -0.01 }) }, .tint = Material.emissive(.{ 0.3, 0.95, 0.85, 1 }, 0.6 + 0.3 * @sin(t * 2)), .size = .{ 1.3, 0.62, 0.04 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_x, -0.35)) };
         n += 3;
     }
+    // Tower roof pads sit on the existing plaza decks: their wide, lit H-marking identifies
+    // flat landing and boarding surfaces for the Kestrel at all three market towers.
+    for (sb.catalog.district.nodes) |node| if (node.kind == .tower and room(out, n, 4)) {
+        const at = node.position;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 0.08, 0 }) }, .tint = .{ 0.12, 0.17, 0.2, 1 }, .size = .{ 15, 0.12, 15 } };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ -3.4, 0.16, 0 }) }, .tint = Material.emissive(.{ 0.25, 0.85, 0.78, 1 }, 0.8), .size = .{ 0.75, 0.05, 8 } };
+        out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 3.4, 0.16, 0 }) }, .tint = Material.emissive(.{ 0.25, 0.85, 0.78, 1 }, 0.8), .size = .{ 0.75, 0.05, 8 } };
+        out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 0.16, 0 }) }, .tint = Material.emissive(.{ 0.25, 0.85, 0.78, 1 }, 0.8), .size = .{ 7.5, 0.05, 0.75 } };
+        n += 4;
+    };
     // Pickups: gems that bob and spin.
     for (sb.collectibles.items[0..sb.collectibles.count], 0..) |item, i| {
         if (sb.progress.picked.isSet(i) or !room(out, n, 1)) continue;
@@ -755,8 +766,14 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     if (sb.hangar.fighter) |f| if (room(out, n, 2)) {
         const rot = quat(f.body.rot);
         const at: V = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z };
-        out[n] = .{ .mesh = c.kestrel, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .rotation = rot };
-        out[n + 1] = .{ .mesh = c.kestrel_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, 0.25 + 0.75 * f.burn), .rotation = rot };
+        const paint: [4]f32 = switch (sb.progress.kestrel_paint) {
+            .ivory => .{ 1, 1, 1, 1 },
+            .azure => .{ 0.42, 0.72, 1, 1 },
+            .ember => .{ 1, 0.48, 0.16, 1 },
+            .moss => .{ 0.48, 0.82, 0.38, 1 },
+        };
+        out[n] = .{ .mesh = c.kestrel, .transform = .{ .position = at }, .tint = paint, .rotation = rot };
+        out[n + 1] = .{ .mesh = c.kestrel_glow, .transform = .{ .position = at }, .tint = Material.emissive(paint, 0.25 + 0.75 * f.burn), .rotation = rot };
         n += 2;
     };
     for (sb.skies.wasps) |slot| if (slot) |w| {

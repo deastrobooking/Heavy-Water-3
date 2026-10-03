@@ -649,8 +649,12 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
         c.hit(row, hitId(.shop_row, i));
         var buffer: [24]u8 = undefined;
         c.text(row.x + 14, row.y + 10, Fabricator.name(recipe.output, &buffer), 1.1, if (shop.row == i) accent else ink);
-        if (Fabricator.made(&sb.progress, recipe.output)) {
-            c.text(row.x + row.w - 250, row.y + 10, "MADE", 1, good);
+        if (Fabricator.status(&sb.progress, recipe.output)) |status| {
+            const state_color = if (std.mem.eql(u8, status, "FABRICATE KESTREL FIRST")) bad else good;
+            c.text(row.x + row.w - 250, row.y + 10, status, 1, state_color);
+        } else if (Fabricator.progressCost(&sb.progress, recipe.output)) |cost| {
+            var text_buffer: [40]u8 = undefined;
+            c.text(row.x + row.w - 250, row.y + 10, costText(&text_buffer, cost), 1, if (affordable(sb.wallet, cost)) gold else bad);
         } else {
             // Cost chips, red where short.
             var cx = row.x + row.w - 250;
@@ -677,7 +681,7 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
     }
     const selected = Fabricator.recipes[rows[@min(shop.row, rows.len - 1)]];
     c.text(r.x + 18, r.y + r.h - 50, selected.about, 1, ink);
-    c.text(r.x + 18, r.y + r.h - 28, "LEFT RIGHT TAB  ENTER FABRICATE  ESC CLOSE  FIND PICKUPS IN THE WORLD", 0.9, alpha(dim, 0.8));
+    c.text(r.x + 18, r.y + r.h - 28, if (@as(Fabricator.Tab, @enumFromInt(shop.tab)) == .aircraft) "LEFT RIGHT TAB  ENTER INSTALL / SELECT  ESC CLOSE" else "LEFT RIGHT TAB  ENTER FABRICATE  ESC CLOSE  FIND PICKUPS IN THE WORLD", 0.9, alpha(dim, 0.8));
 }
 
 // ---------------------------------------------------------------- conversations
@@ -807,6 +811,11 @@ test "every screen lays out inside the window and records hits" {
         draw(&c, &m, &sb, hud);
         try expectInside(&c);
     }
+    sb.shop = .{ .kind = .fabricate, .tab = @intFromEnum(Fabricator.Tab.aircraft) };
+    c.reset(1280, 720);
+    draw(&c, &m, &sb, hud);
+    try expectInside(&c);
+    try std.testing.expect(c.hit_len >= 8);
     // Four-player split screen: three guest views, one trading.
     sb.shop = null;
     for (0..3) |i| sb.joinGuest(i);

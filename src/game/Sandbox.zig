@@ -1344,6 +1344,8 @@ fn reason(err: anyerror) []const u8 {
     return switch (err) {
         error.NotEnoughScrap => "not enough scrap",
         error.NotEnoughParts => "not enough parts",
+        error.NotOwned => "paint scheme is not owned",
+        error.NoFighter => "fabricate the Kestrel first",
         error.MaxLevel => "already fully tuned",
         error.AlreadyOwned => "already owned",
         error.SoldOut => "sold out until dawn",
@@ -1413,6 +1415,14 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
                     .weapon => |w| {
                         self.combat.arsenals[0].active = w;
                         self.say("{s} ready: tool 5 to wield", .{name});
+                    },
+                    .kestrel_upgrade => |upgrade| {
+                        self.hangar.applyLevels(self.progress.kestrel_levels);
+                        self.skies.configureKestrel(self.progress.kestrel_levels);
+                        self.say("Kestrel {s}: level {d}", .{ @tagName(upgrade), self.progress.kestrelLevel(upgrade) });
+                    },
+                    .kestrel_paint => |paint| {
+                        self.say("Kestrel paint set to {s}", .{@tagName(paint)});
                     },
                 }
                 self.progress.setFlag("fabricated");
@@ -1997,7 +2007,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.tap_links = @splat(@splat(null));
     Frontier.refresh(self);
     for (doc.cars) |c| if (self.progress.ownsVehicle(c.design)) self.garage.place(self.seed, spawn, self.catalog, c.design, c.position, c.yaw);
-    if (doc.fighter) |f| if (self.progress.fighter) self.hangar.place(self.seed, spawn, f.position, f.yaw);
+    if (doc.fighter) |f| if (self.progress.fighter) self.hangar.placeWithLevels(self.seed, spawn, f.position, f.yaw, self.progress.kestrel_levels);
+    self.skies.configureKestrel(self.progress.kestrel_levels);
 }
 
 pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void {

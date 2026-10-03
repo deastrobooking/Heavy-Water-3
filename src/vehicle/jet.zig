@@ -44,6 +44,7 @@ pub const Config = struct {
     /// Gear contact points (body frame, from the COM) and the hull's horizontal half length.
     gear: [3]Vec3 = .{ Vec3.init(0, -1.4, 3.2), Vec3.init(1.6, -1.4, -1.2), Vec3.init(-1.6, -1.4, -1.2) },
     half_length: f32 = 7,
+    hull_max: f32 = 300,
 };
 
 pub const Input = struct {
@@ -67,6 +68,7 @@ pub const Fighter = struct {
     grounded: bool = true,
     /// Hull integrity; hard landings and crashes cost it.
     hull: f32 = 300,
+    hull_max: f32 = 300,
     /// Engine nozzle glow (0–1), for effects.
     burn: f32 = 0,
     /// The largest impact this step (m/s), for effects and damage.
@@ -88,7 +90,7 @@ pub const Fighter = struct {
         var body = dyn.RigidBody.init(props);
         body.pos = position;
         body.rot = Quat.fromAxisAngle(Vec3.unit_y, yaw);
-        return .{ .body = body, .cfg = cfg };
+        return .{ .body = body, .cfg = cfg, .hull = cfg.hull_max, .hull_max = cfg.hull_max };
     }
 
     pub fn forward(self: *const Fighter) Vec3 {

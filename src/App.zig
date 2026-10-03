@@ -1595,9 +1595,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.wallet.scrap, sandbox.wallet.parts });
     if (sandbox.hangar.piloting) {
         const f = &sandbox.hangar.fighter.?;
-        const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, f.body.pos.x, f.body.pos.z).height;
         const g = &sandbox.skies.guns;
-        renderer.hud_lines[1].set("KESTREL  {d:.0} M/S  {d:.0} M  THR {d:.0}%{s}  HULL {d:.0}  GUNS {s}  CLICK GUNS  RMB LOCK  F OUT", .{ f.airspeed(), f.body.pos.y - ground, f.throttle * 100, if (self.engine.input.fast) " BURN" else "", @max(0, f.hull), if (g.overheated) "HOT" else "OK" });
+        renderer.hud_lines[1].set("KESTREL  {d:.0} M/S  THR {d:.0}%{s}  HULL {d:.0}/{d:.0}  MSL {d}/{d}  GUNS {s}  CLICK FIRE  RMB LOCK  F OUT", .{ f.airspeed(), f.throttle * 100, if (self.engine.input.fast) " BURN" else "", @max(0, f.hull), f.hull_max, g.missile_ammo, g.missile_capacity, if (g.overheated) "HOT" else "OK" });
     } else if (sandbox.garage.piloting) |i| {
         const car = &sandbox.garage.cars[i].?.flyer;
         const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, car.body.pos.x, car.body.pos.z).height;
