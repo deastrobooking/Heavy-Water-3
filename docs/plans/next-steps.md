@@ -27,10 +27,10 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 
 ## Known gaps from review
 
-- **Missile lock on a reused slot:** a missile locked on a ground Hive unit tracks the unit's slot index. If the unit dies and the slot is reused, the missile homes on the newcomer. Give units a generation number and lock by (slot, generation).
+- **Missile lock on a reused slot:** fixed by giving each spawned ground Hive unit a generation number and checking `(slot, generation)` when resolving missile and HUD targets.
 - **No ship collisions:** the Kestrel passes through wasps and carriers, and wasps pass through each other.
 - **Reticle side unconfirmed:** confirm the HUD lock reticle's side with a capture during a live lock.
-- **Frame cost unmeasured:** no measurement of frame cost under full frontier load (12+ wasps, 2 carriers, 6 troopers, 4 players, CPU skinning of up to 24 characters).
+- **Frontier frame cost unmeasured:** the standard renderer streaming route is measured, but there is no `--frontier` benchmark yet for simulation time, CPU skinning of 24 characters, and audio-thread load under the full Hive and four-player workload.
 - **Guests:** they can't pilot, talk, or open the fabricator.
 - **Save versioning:** saves grew through optional fields under format v11. When a field changes meaning, bump the format and say so in the migration notes.
 

@@ -457,6 +457,18 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - ReleaseSafe tests and app checks: **276/276 pass**. New coverage checks waterfall drop height, river mesh indices, snow coloration, terrain sampling against the rendered ground mesh, and existing district/building/bridge clearances.
 - Four-player native Metal smoke passed with terrain streaming, save/restore, construction and rover checks. `-Dshowcase=36` captures the river and waterfall viewpoint for visual review.
 
+## Frontier correctness and renderer baseline — 2026-10-03
+
+- Ground Hive missile and HUD references now include a per-spawn generation. Replacing a dead unit in the same slot invalidates its old lock instead of redirecting the missile to the replacement. Regression coverage checks slot generation increments, stale HUD lock rejection, new candidate identity, and a missile retaining its course after its target slot is reused.
+- Debug suite: **290/290 tests pass**.
+- Native Apple M3 Pro / Metal, ReleaseFast streaming benchmark, 600 measured frames: all checks pass. Render CPU P50/P95/P99 **5.87/6.44/6.85 ms**; 40 chunk crossings, 225 uploads, 200 evictions; peak terrain upload **299.4 KiB / 320 KiB**; peak 25 resident chunks; **0 underfilled frames**.
+- This route does not stress the full frontier encounter. Simulation, 24-character skinning, and audio-thread costs remain unmeasured; the documented `--frontier` benchmark and hands-on flight/combat/audio checklist are still outstanding.
+
+## Playtest checklist, automated smoke — 2026-10-03
+
+- Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 300 frames with audio enabled: clean completion, no Metal validation messages, 395 simulation ticks. The run fabricated and flew the Skimmer 18.7 m; fabricated the Kestrel, lifted off and downed a wasp with its cannon; exercised saber, sniper, grenade and slam combat; and ran four local players through split-screen and co-op movement.
+- This smoke did not fly all three car types, dogfight and land the Kestrel, exercise every firearm and guard/parry action, use a physical controller, or listen through the sound set. Those hands-on checks remain open; audio-device startup is verified, sound quality is not.
+
 ## Development asset reload (phase 13, slice 3) — 2026-10-01
 
 - Baseline review: 159 ReleaseSafe tests and the application compile passed. Fixed index-only loader tickets that could access reused slots, checked pack indices before worker access, and replaced an unlocked telemetry read with a mutex-protected snapshot.

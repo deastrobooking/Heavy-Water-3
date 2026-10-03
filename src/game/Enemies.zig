@@ -45,6 +45,8 @@ pub fn stats(k: Kind) Stats {
 
 pub const State = enum { patrol, hunt, retreat };
 pub const Unit = struct {
+    /// Changes each time a unit slot is occupied, so external references survive slot reuse safely.
+    generation: u32 = 0,
     kind: Kind,
     nest: u8,
     position: V,
@@ -93,6 +95,7 @@ seed: u64 = 0,
 nests: [max_nests]Nest = undefined,
 nest_count: usize = 0,
 units: [max_units]?Unit = @splat(null),
+unit_generations: [max_units]u32 = @splat(0),
 bolts: [max_bolts]?Bolt = @splat(null),
 rng: std.Random.DefaultPrng = .init(0),
 
@@ -147,10 +150,14 @@ fn spawnUnit(self: *Enemies, nest: u8) void {
     if (n.cave and troopers >= cave_troopers) return;
     const kind: Kind = if (n.cave) .trooper else if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else .drone;
     const spread: f32 = if (n.cave) 3.5 else 7;
-    for (&self.units) |*slot| if (slot.* == null) {
+    for (&self.units, 0..) |*slot, i| if (slot.* == null) {
+        self.unit_generations[i] +%= 1;
+        // Reserve zero for units created directly by tests/tools without a spawn lifecycle.
+        if (self.unit_generations[i] == 0) self.unit_generations[i] = 1;
         // Fliers launch from the spire tip; troopers march out of its foot.
         const angle = random.float(f32) * 2 * std.math.pi;
         slot.* = .{
+            .generation = self.unit_generations[i],
             .kind = kind,
             .nest = nest,
             .position = if (kind == .trooper) R.add(n.position, .{ @sin(angle) * spread, 0.5, @cos(angle) * spread }) else R.add(n.position, .{ 0, 24, 0 }),
@@ -422,6 +429,19 @@ pub fn segmentSphere(origin: V, dir: V, length: f32, center: V, radius: f32) ?f3
     if (disc < 0) return null;
     const t = -b - @sqrt(disc);
     return if (t >= 0 and t <= length) t else null;
+}
+
+test "reused Hive unit slots get a new generation" {
+    var enemies: Enemies = .{};
+    enemies.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    enemies.nest_count = 1;
+    enemies.spawnUnit(0);
+    const first = enemies.units[0].?.generation;
+    enemies.units[0] = null;
+    enemies.spawnUnit(0);
+    const second = enemies.units[0].?.generation;
+    try std.testing.expect(first != 0);
+    try std.testing.expect(second != first);
 }
 
 /// Damage to whatever a player attack hits: the nearest unit or nest along a segment (radius

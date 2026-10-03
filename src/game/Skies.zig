@@ -104,8 +104,12 @@ pub const Shot = struct {
     /// Missiles: what they home on.
     homing: ?Ref = null,
 };
-/// Something a missile can lock: a wasp, a carrier, or a ground Hive unit (by slot).
-pub const Ref = union(enum) { wasp: u8, carrier: u8, ground: u8 };
+/// Something a missile can lock: a wasp, a carrier, or a specific ground Hive unit lifetime.
+pub const Ref = union(enum) {
+    wasp: u8,
+    carrier: u8,
+    ground: struct { slot: u8, generation: u32 },
+};
 
 /// The jet as the Hive sees it.
 pub const Jet = struct { position: V, velocity: V, forward: V, airborne: bool };
@@ -394,7 +398,10 @@ fn refPosition(self: *const Skies, enemies: *const Enemies, r: Ref) ?V {
     return switch (r) {
         .wasp => |i| if (self.wasps[i]) |w| w.position else null,
         .carrier => |i| if (self.carriers[i].alive) self.carriers[i].point(m.Vec3.init(0, 0, 6)) else null,
-        .ground => |i| if (enemies.units[i]) |u| u.center() else null,
+        .ground => |target| if (enemies.units[target.slot]) |u|
+            if (u.generation == target.generation) u.center() else null
+        else
+            null,
     };
 }
 
@@ -522,7 +529,7 @@ pub fn lockCandidate(self: *const Skies, enemies: *const Enemies, jet: Jet) ?Ref
     }.f;
     for (self.wasps, 0..) |slot, i| if (slot) |w| consider(w.position, jet, .{ .wasp = @intCast(i) }, &best, &best_cos);
     for (self.carriers, 0..) |c, i| if (c.alive) consider(c.position(), jet, .{ .carrier = @intCast(i) }, &best, &best_cos);
-    for (enemies.units, 0..) |slot, i| if (slot) |u| consider(u.center(), jet, .{ .ground = @intCast(i) }, &best, &best_cos);
+    for (enemies.units, 0..) |slot, i| if (slot) |u| consider(u.center(), jet, .{ .ground = .{ .slot = @intCast(i), .generation = u.generation } }, &best, &best_cos);
     return best;
 }
 
@@ -537,6 +544,37 @@ fn testPhysics() Physics {
             return .{ .height = 0, .normal = .{ 0, 1, 0 } };
         }
     }.f });
+}
+
+test "a ground lock and missile never follow a replacement enemy in the same slot" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var enemies: Enemies = .{};
+    enemies.units[0] = .{ .generation = 7, .kind = .drone, .nest = 0, .position = .{ 0, 100, 100 }, .health = 60, .orbit = 0 };
+    var sky = Skies.init(12, .{ 0, 0, 0 }, &.{});
+    sky.carriers[0].alive = false;
+    sky.carriers[1].alive = false;
+
+    const jet: Jet = .{ .position = .{ 0, 100, 0 }, .velocity = @splat(0), .forward = .{ 0, 0, 1 }, .airborne = true };
+    const old_target: Ref = .{ .ground = .{ .slot = 0, .generation = 7 } };
+    try std.testing.expectEqual(@as(?V, .{ 0, 100, 100 }), sky.refPosition(&enemies, old_target));
+    try std.testing.expect(std.meta.eql(old_target, sky.lockCandidate(&enemies, jet).?));
+    sky.guns.lock = old_target;
+    sky.guns.lock_progress = 1;
+    sky.shots[0] = .{ .kind = .missile, .position = .{ 0, 100, 0 }, .velocity = .{ 0, 0, 60 }, .damage = 150, .life = 5, .homing = old_target };
+
+    // The former unit dies and another unit takes slot zero at a different location.
+    enemies.units[0] = .{ .generation = 8, .kind = .drone, .nest = 0, .position = .{ 100, 100, 0 }, .health = 60, .orbit = 0 };
+    try std.testing.expect(sky.refPosition(&enemies, old_target) == null);
+    try std.testing.expect(sky.lockPosition(&enemies) == null);
+    const new_jet: Jet = .{ .position = .{ 100, 100, -100 }, .velocity = @splat(0), .forward = .{ 0, 0, 1 }, .airborne = true };
+    const new_target = sky.lockCandidate(&enemies, new_jet).?;
+    try std.testing.expect(std.meta.eql(new_target, Ref{ .ground = .{ .slot = 0, .generation = 8 } }));
+
+    var events: [16]Event = undefined;
+    _ = sky.step(&physics, &enemies, null, &.{}, 1.0 / 60.0, &events);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), sky.shots[0].?.velocity[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 60), sky.shots[0].?.velocity[2], 0.001);
 }
 
 test "carriers circle, launch wasps near a player, and the wasps attack and hit" {
