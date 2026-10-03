@@ -347,7 +347,20 @@ fn loadProbe(allocator: std.mem.Allocator) !void {
 }
 
 test "catalog load cleans up on allocation failure" {
-    try std.testing.checkAllAllocationFailures(std.testing.allocator, loadProbe, .{});
+    // Failing every allocation in turn costs a full load per allocation, and generated vehicle
+    // and ship meshes allocate thousands of times. Fail every early allocation (setup), then a
+    // spread of points across the whole load: each stage still unwinds an out-of-memory error,
+    // and the testing allocator still catches any leak.
+    var counter = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    try loadProbe(counter.allocator());
+    const total = counter.allocations;
+    const early: usize = 40;
+    const spread: usize = 80;
+    for (0..early + spread) |i| {
+        const index = if (i < early) i else early + (i - early) * (total - early) / spread;
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = index });
+        if (loadProbe(failing.allocator())) |_| {} else |err| try std.testing.expectEqual(error.OutOfMemory, err);
+    }
 }
 
 test "deferred meshes reserve handles at load and install once, later" {

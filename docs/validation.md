@@ -240,6 +240,32 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Fighting, energy firearms and classes — 2026-10-02
+
+- Debug suite: **282/282 tests pass** (about 3 minutes). New tests:
+  - The rig's hand sweeps across the front through a forehand and comes forward to aim.
+  - A cut hits a trooper exactly once (forehand + backhand damage to 0.01), a mid-cut press queues the backhand, a full hold releases a charged wave, and the guard parries for 0.3 s and then blocks.
+  - Blades cut each unit once per swing with knockback and stun; guards turn bolts into `deflected` events.
+  - A sniper beam pierces exactly one unit and scopes to 0.3×; a bazooka orb bursts and stuns the unit beside its target.
+  - Firearm rhythms: machine gun 13–15 shots a second until it overheats, sniper steadiness, heavy-rifle charge, bazooka detonation.
+  - Specials: overshield soak, refusal while cooling down, grenade burst and stun, sentry zaps, phase-dash blink and stun, slam throw, lance damage and cast pose.
+  - The profile class round-trips and defaults to Ranger for older documents. An old settings file with culling on C loads with special 2 moved to F7.
+- Fixes found while testing:
+  - The machine gun fired 12 a second, not 14, because the cooldown clamped to zero inside a step. It now carries the remainder.
+  - Piercing shots hit the same unit again because they resumed inside its sphere; they now skip the unit slots they have passed.
+  - The combat showcases first took the existing river viewpoint `-Dshowcase=36`; they are now 37–40.
+- Native Metal smoke, ReleaseSafe, `MTL_DEBUG_LAYER=1`, 300 frames: `Smoke combat: saber and sniper made=true, saber cuts=3 trooper health 1616 stunned=true, sniper pierced=true, grenade burst=true, slam threw=true`. Every other stage was unchanged, with no validation messages. That run, unlocked, took 394 simulation ticks. Reruns after the screen locked took about 6,330, because macOS throttles presentation and each frame catches up more fixed steps; their results were otherwise the same.
+- The Debug executable starts and runs, with no stack overflow from the new module state.
+- Captures:
+  - `-Dshowcase=37`: the forehand cut and overhead raise with blade trails, the blade leaving the right hand.
+  - `-Dshowcase=38` and `40`: the first-person rifle and the lumen lance from the hand. The beams were first far too wide near the camera and were narrowed.
+  - `-Dcharacter-showcase=5`: a Synthetic with lit eyes, collar, core and cheek seams. The cheek seams can read as tear streaks; art direction is yours.
+- Not measured or checked by hand:
+  - feel and balance (damage, energy, cooldowns, lunge strength);
+  - the guest controls on a real controller;
+  - the cost of posing a rig per armed player per step (one skeleton pose each, plus three per step while swinging);
+  - the held weapons and slam or lance effects are block-and-gem placeholders.
+
 ## Debug executable stack overflow — 2026-10-01
 
 - **Report:** running `zig-out/bin/heavy-water` (a Debug build) crashed at startup with a segmentation fault in Mach's `Modules.init`, at a stack address.

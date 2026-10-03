@@ -97,6 +97,10 @@ window_height: f32 = 800,
 seconds: f32 = 0,
 /// The P1 pad's Menu button was pressed (opens or closes the pause menu).
 pad_menu: bool = false,
+/// Frames since a combat showcase was set up (its trigger rhythm).
+showcase_frame: u32 = 0,
+/// Where a combat showcase holds the player (saber lunges would carry them off).
+showcase_feet: [3]f32 = @splat(0),
 gui_showcase_ready: bool = false,
 settings_dirty: bool = false,
 /// Sound output; null when disabled (`-Daudio=false`), benchmarking, or without a device.
@@ -129,11 +133,17 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         self.sandbox.profile.presentation = if (options.character_showcase == 4) .feminine else .masculine;
         self.sandbox.profile.armor = switch (options.character_showcase) {
             2 => .sentinel,
-            3, 4 => .none,
+            3, 4, 5 => .none,
             else => .scout,
         };
         self.sandbox.profile.helmet = if (options.character_showcase == 2) .sealed else .open;
         self.sandbox.profile.outfit = 2;
+        if (options.character_showcase == 5) {
+            self.sandbox.profile.class = .synthetic;
+            self.sandbox.profile.presentation = .feminine;
+            self.sandbox.profile.clothing = .undersuit;
+            self.sandbox.profile.accent = 0;
+        }
         self.sandbox.creator.begin(self.sandbox.profile);
         self.sandbox.player.mode = .walk;
     }
@@ -521,6 +531,9 @@ pub fn update(self: *App, core: *mach.Core) void {
             .grapple => self.engine.input.grapple = true,
             .traversal => self.engine.input.cycle_mode = true,
             .add_guest => self.toggleGuest(),
+            .special_1 => self.actions.special_1 = true,
+            .special_2 => self.actions.special_2 = true,
+            .special_3 => self.actions.special_3 = true,
         },
         .mouse_release => |mouse| switch (mouse.button) {
             .left => self.fire_held = false,
@@ -574,8 +587,9 @@ pub fn update(self: *App, core: *mach.Core) void {
     }
     if (self.interactive) {
         const fov = self.menu.settings.fovRadians();
-        self.engine.camera.fov = fov;
-        for (&self.sandbox.guests) |*g| g.camera.fov = fov;
+        // A raised sniper scope narrows the player's view.
+        self.engine.camera.fov = fov * self.sandbox.combat.arsenals[0].zoom;
+        for (&self.sandbox.guests, 1..) |*g, p| g.camera.fov = fov * self.sandbox.combat.arsenals[p].zoom;
     }
     if (self.uiActive()) self.engine.input = .{};
     self.sandbox.trigger = .{ .fire = self.fire_held and self.captured and !self.uiActive(), .alt = self.alt_held and self.captured and !self.uiActive() };
@@ -669,6 +683,12 @@ fn routePads(self: *App) void {
         g.trade_up = g.trade_up or cmd.up;
         g.trade_down = g.trade_down or cmd.down;
         g.fire = cmd.fire;
+        g.alt = cmd.alt;
+        if (g.trading == null) {
+            g.special[0] = g.special[0] or (cmd.up and !cmd.alt);
+            g.special[1] = g.special[1] or cmd.down;
+            g.special[2] = g.special[2] or (cmd.up and cmd.alt);
+        }
         g.next_weapon = g.next_weapon or cmd.left or cmd.right;
     }
 }
@@ -693,7 +713,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if (v >= 18 and v <= 35) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 40)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -796,6 +816,34 @@ fn guiShowcase(self: *App, v: u32) void {
         self.engine.input.fast = true;
         self.engine.input.jump = sb.garage.cars[0] != null and sb.garage.cars[0].?.flyer.ride < 4;
     }
+    // 37–40: combat, held every frame: a trooper (or a squad) stays in front of the player.
+    if (v >= 37 and self.gui_showcase_ready) {
+        const fwd: [3]f32 = .{ @sin(self.engine.camera.yaw), 0, @cos(self.engine.camera.yaw) };
+        sb.player.feet = self.showcase_feet;
+        const feet = sb.player.feet;
+        const near: f32 = if (v == 37) 2.3 else 14;
+        for (0..3) |i| {
+            if (v == 37 and i > 0) break;
+            const side: f32 = if (v == 37) 0 else (@as(f32, @floatFromInt(i)) - 1) * 3;
+            const at: [3]f32 = .{ feet[0] + fwd[0] * near - fwd[2] * side, feet[1], feet[2] + fwd[2] * near + fwd[0] * side };
+            if (sb.enemies.units[i]) |*u| {
+                u.position = at;
+                u.velocity = @splat(0);
+                u.health = 5000;
+            } else sb.enemies.units[i] = .{ .kind = .trooper, .nest = 0, .position = at, .health = 5000, .orbit = 0 };
+        }
+        sb.enemies.bolts = @splat(null);
+        self.showcase_frame += 1;
+        const f = self.showcase_frame;
+        sb.trigger = switch (v) {
+            37 => .{ .fire = (f / 8) % 2 == 0 },
+            38 => .{ .fire = f % 70 < 2 },
+            39 => .{ .fire = true },
+            else => .{},
+        };
+        if (v == 40) sb.specials.players[0].lance = 2.5;
+        return;
+    }
     if (self.gui_showcase_ready) return;
     self.gui_showcase_ready = true;
     // Stand on the south market plaza, facing Maro's counter.
@@ -879,6 +927,29 @@ fn guiShowcase(self: *App, v: u32) void {
             sb.trigger = .{ .fire = v == 34 };
             for (0..5) |k| sb.skies.wasps[k] = .{ .position = R3.add(c, .{ -60 + @as(f32, @floatFromInt(k)) * 20, -25, -90 + @as(f32, @floatFromInt(k)) * 6 }), .forward = .{ -0.5, 0, -0.85 }, .carrier = 0, .state = .attack };
         },
+        37, 38, 39, 40 => {
+            const kind: @import("game/Combat.zig").WeaponKind = switch (v) {
+                37 => .beam_saber,
+                38 => .sniper_rifle,
+                39 => .machine_gun,
+                else => .heavy_rifle,
+            };
+            sb.progress.weapons = @as(u16, 1) << @intCast(@intFromEnum(kind));
+            sb.combat.arsenals[0].active = kind;
+            sb.tools.tool = .weapon;
+            // The saber reads from behind; guns and powers from the eyes, as a viewmodel.
+            sb.view = if (v == 37) .third else .first;
+            if (v == 40) {
+                sb.profile.class = .synthetic;
+                sb.profile.clothing = .undersuit;
+                sb.profile.armor = .none;
+                sb.profile.helmet = .open;
+                sb.profile.presentation = .feminine;
+            }
+            if (v == 37) self.engine.camera.yaw += 0.6;
+            self.showcase_feet = sb.player.feet;
+            self.engine.camera.pitch = -0.05;
+        },
         31 => {
             sb.progress.inventory = .{ 14, 3, 9, 2 };
             sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 0 };
@@ -886,7 +957,7 @@ fn guiShowcase(self: *App, v: u32) void {
         28 => {
             self.menu.open(.pause);
             self.menu.open(.controls);
-            _ = self.menu.settings.bindings.bind(.stomp, .z) catch {};
+            _ = self.menu.settings.bindings.bind(.stomp, .k) catch {};
             self.menu.row = @intFromEnum(@import("game/Bindings.zig").Action.grapple);
             self.menu.capturing = true;
         },
@@ -1159,10 +1230,72 @@ fn smokeFrontier(self: *App) void {
     }
     _ = sb.hangar.leave(&sb.physics);
     std.log.info("Smoke flight: kestrel fabricated={any}, lifted off={any}, wasp downed={any}; carriers at {d:.0} and {d:.0} m up", .{ sb.progress.fighter, lifted, wasp_down, sb.skies.carriers[0].altitude, sb.skies.carriers[1].altitude });
+    self.smokeCombat();
     // Leave the run's progress as it was (later stages log the market and wallet).
     sb.progress = keep;
     sb.wallet = wallet;
     @import("game/Frontier.zig").refresh(sb);
+}
+
+/// The saber and a sniper rifle fabricated through the panel, a saber combo on a trooper with
+/// P1's rig, a piercing sniper beam, and each class's specials.
+fn smokeCombat(self: *App) void {
+    const sb = &self.sandbox;
+    const Combat = @import("game/Combat.zig");
+    const Specials = @import("game/Specials.zig");
+    const Fabricator = @import("game/Fabricator.zig");
+    sb.progress.inventory = .{ 30, 4, 30, 0 };
+    sb.wallet.scrap += 100;
+    var list: [Fabricator.recipes.len]u8 = undefined;
+    for (Fabricator.onTab(.weapons, &list), 0..) |index, row| {
+        const w = Fabricator.recipes[index].output.weapon;
+        if (w != .beam_saber and w != .sniper_rifle) continue;
+        sb.shop = .{ .kind = .fabricate, .tab = 3, .row = @intCast(row) };
+        self.uiNav(.confirm);
+        self.uiNav(.back);
+    }
+    const made = sb.progress.ownsWeapon(.beam_saber) and sb.progress.ownsWeapon(.sniper_rifle);
+    const dt = 1.0 / 60.0;
+    var events: [32]Combat.Event = undefined;
+    const feet: [3]f32 = .{ 0, 298.4, 0 };
+    sb.enemies.units = @splat(null);
+    sb.enemies.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 298.4, 1.7 }, .health = 2000, .orbit = 0 };
+    const saber: u16 = @as(u16, 1) << @intFromEnum(Combat.WeaponKind.beam_saber);
+    var aim: Combat.Aim = .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .rig = @import("game/Frontier.zig").rigFor(sb, 0, sb.profile) };
+    var cuts: usize = 0;
+    var stunned = false;
+    for (0..60) |k| {
+        if (sb.enemies.units[0]) |*u| u.position = .{ 0, 298.4, 1.7 };
+        aim.fire = k == 0 or k == 12 or k == 24;
+        const n = sb.combat.step(0, &sb.physics, &sb.enemies, saber, aim, dt, &events);
+        for (events[0..@min(n, events.len)]) |e| cuts += @intFromBool(e == .cut);
+        if (sb.enemies.units[0]) |u| stunned = stunned or u.stun > 0;
+    }
+    const cut_health = if (sb.enemies.units[0]) |u| u.health else 0;
+    // A sniper beam through two drones.
+    sb.enemies.units[0] = .{ .kind = .drone, .nest = 0, .position = .{ 0, 300, 30 }, .health = 1000, .orbit = 0 };
+    sb.enemies.units[1] = .{ .kind = .drone, .nest = 0, .position = .{ 0, 300, 50 }, .health = 1000, .orbit = 0 };
+    const sniper: u16 = @as(u16, 1) << @intFromEnum(Combat.WeaponKind.sniper_rifle);
+    aim = .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .fire = true };
+    _ = sb.combat.step(0, &sb.physics, &sb.enemies, sniper, aim, dt, &events);
+    const pierced = sb.enemies.units[0].?.health < 1000 and sb.enemies.units[1].?.health < 1000;
+    // Specials: a ranger's arc grenade, a synthetic's kinetic slam.
+    var special_events: [32]Specials.Event = undefined;
+    sb.enemies.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 298.4, 7 }, .health = 1000, .orbit = 0 };
+    sb.specials = .{};
+    _ = sb.specials.step(0, .ranger, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .pressed = .{ true, false, false } }, dt, &special_events);
+    var grenade = false;
+    for (0..90) |_| {
+        const n = sb.specials.stepWorld(&sb.physics, &sb.enemies, &sb.combat, dt, &special_events);
+        for (special_events[0..@min(n, special_events.len)]) |e| grenade = grenade or e == .burst;
+    }
+    sb.enemies.units[1] = .{ .kind = .drone, .nest = 0, .position = .{ 3, 299.5, 0 }, .health = 1000, .orbit = 0 };
+    _ = sb.specials.step(1, .synthetic, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .pressed = .{ false, true, false } }, dt, &special_events);
+    const slammed = sb.enemies.units[1].?.velocity[0] > 3;
+    std.log.info("Smoke combat: saber and sniper made={any}, saber cuts={d} trooper health {d:.0} stunned={any}, sniper pierced={any}, grenade burst={any}, slam threw={any}", .{ made, cuts, cut_health, stunned, pierced, grenade, slammed });
+    sb.enemies.units = @splat(null);
+    sb.specials = .{};
+    sb.combat.arsenals = @splat(.{});
 }
 
 fn smokeSap(self: *App) void {
@@ -1444,6 +1577,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
             mark_count += 1;
         };
     }
+    var special_keys: [3][12]u8 = undefined;
     // Guest views follow P1 in join order, as published above.
     var guests: [Sandbox.max_players - 1]Screens.Hud.Guest = undefined;
     var guest_count: usize = 0;
@@ -1463,6 +1597,11 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         .seed = sandbox.seed,
         .guests = guests[0..guest_count],
         .marks = marks[0..mark_count],
+        .special_keys = .{
+            @import("game/Bindings.zig").keyName(self.menu.settings.bindings.key(.special_1), &special_keys[0]),
+            @import("game/Bindings.zig").keyName(self.menu.settings.bindings.key(.special_2), &special_keys[1]),
+            @import("game/Bindings.zig").keyName(self.menu.settings.bindings.key(.special_3), &special_keys[2]),
+        },
     });
     self.hit_len = ui.hit_len;
     @memcpy(self.hits[0..ui.hit_len], ui.hits[0..ui.hit_len]);

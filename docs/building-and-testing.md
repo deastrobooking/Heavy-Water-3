@@ -56,7 +56,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dscale-objects=N` | 0 | Scale workload of N field objects. |
 | `-Dpack-stress=N` | 0 | Write and stream a pack of N meshes during the benchmark. |
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
-| `-Dcharacter-showcase=1..3` | 0 | Character look (scout, sentinel, unarmored) in the creator, front view. |
+| `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |
 | `-Dhot-reload=true` | false | Watch model, blueprint and mod script sources and reload them live. |
 | `-Dreload-smoke=true` | false | Reload test: edits an isolated crate fixture under `zig-out/reload-smoke` and checks the swap. |
@@ -78,8 +78,8 @@ Options are compiled in, so changing one rebuilds.
 python3 tools/zig.py build test --summary all
 ```
 
-- **Scope:** the suite (270 tests at the last count) is deterministic and headless. It covers the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight and the Hive. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
-- **Time:** expect about 2 minutes, most of it the catalog allocation-failure test (it loads the whole catalog 500 times with injected failures). If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
+- **Scope:** the suite (282 tests at the last count) is deterministic and headless. It covers the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee and class specials. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
+- **Time:** expect about 3 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
 - **Release mode:** `-Doptimize=ReleaseSafe` runs the same suite optimized.
 
 ## Smoke runs
@@ -95,6 +95,7 @@ Over the frame budget it steps through ten stages, logging `Smoke …` lines:
 - **Menus and panels:** pause, settings and a conversation, through the real input paths (`Smoke GUI`).
 - **Frontier:** fabricating a car and a blaster, flying the car, downing a drone (`Smoke frontier`).
 - **Flight:** fabricating the Kestrel, lifting off, downing a wasp (`Smoke flight`).
+- **Combat:** fabricating the saber and sniper rifle, a three-cut saber combo with P1's rig, a piercing sniper beam, an arc grenade and a kinetic slam (`Smoke combat`).
 - **Character:** character creation.
 - **Building:** crate carrying, machine building and wiring, prefab capture.
 - **Saves:** in-memory save and restore. User save files are never touched.
@@ -102,7 +103,7 @@ Over the frame budget it steps through ten stages, logging `Smoke …` lines:
 - **Vehicles:** the rover drive.
 - **World:** sap flow, a bridge build, traffic and markets.
 
-A good run ends with `Smoke complete: … frames` and no Metal validation messages. Check the `Smoke …` lines for the expected values (for example `drone downed=true`, `wasp downed=true`).
+A good run ends with `Smoke complete: … frames` and no Metal validation messages. Check the `Smoke …` lines for the expected values (for example `drone downed=true`, `wasp downed=true`, `sniper pierced=true`).
 
 The development reload smoke:
 
@@ -169,6 +170,11 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 33 | The Kestrel on its pad |
 | 34 | A dogfight beside a Brood carrier |
 | 35 | The carrier from above |
+| 36 | A river and waterfall viewpoint |
+| 37 | Saber combo on a trooper (third person) |
+| 38 | Sniper rifle, first person |
+| 39 | Machine gun firing, first person |
+| 40 | A Synthetic channelling the lumen lance |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.
 

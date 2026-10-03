@@ -87,6 +87,8 @@ test {
     _ = @import("game/Skies.zig");
     _ = @import("game/Hangar.zig");
     _ = @import("game/Rig.zig");
+    _ = @import("game/Specials.zig");
+    _ = @import("combat/Firearms.zig");
     _ = @import("render/Overlay.zig");
     _ = @import("machine/Device.zig");
     _ = @import("machine/Blueprint.zig");

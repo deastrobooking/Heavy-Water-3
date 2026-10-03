@@ -77,6 +77,10 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
     const p = self.draft;
     return switch (field) {
         .name => std.fmt.bufPrint(buffer, "{s}_", .{p.name()}) catch buffer,
+        .class => switch (p.class) {
+            .ranger => "ranger: tech",
+            .synthetic => "synthetic: powers",
+        },
         .presentation => @tagName(p.presentation),
         .height => std.fmt.bufPrint(buffer, "{d:.2} M", .{1.8 * p.height}) catch buffer,
         .build => std.fmt.bufPrint(buffer, "{d:.0}%", .{p.build * 100}) catch buffer,
@@ -120,8 +124,8 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     while (c.draft.name_len > 0) _ = c.key(.backspace);
     try std.testing.expect(c.key(.enter) == .editing);
     for ("Mira-7") |ch| _ = c.key(.{ .char = ch });
-    _ = c.key(.down);
-    _ = c.key(.down);
+    // Name, class, presentation, height.
+    for (0..3) |_| _ = c.key(.down);
     _ = c.key(.right);
     c.field = .accent;
     try std.testing.expectEqual(Profile.Field.accent, c.field);
@@ -140,7 +144,7 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     var panel: [16]Line = undefined;
     c.begin(result.confirmed);
     const count = c.lines(&panel);
-    try std.testing.expectEqual(@as(usize, 15), count);
+    try std.testing.expectEqual(@as(usize, 16), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
 }
 

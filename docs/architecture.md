@@ -209,11 +209,31 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   - **Fire:** units shoot bolts with lead and spread. Drones fire single bolts (5 damage), troopers pairs (6), and sentinels three-bolt bursts (8). The spread is wide enough that a moving ranger dodges much of a volley.
   - **Destruction:** a destroyed nest stops spawning, drops alloy and a rotor core, and stays destroyed (story flag `nest_N_down`).
 - **Combat:** `game/Combat.zig` connects the existing `combat/` weapons to the world. Each local player has an `Arsenal` (selection, charges, cooldowns, projectiles) over the party's fabricated weapons. Guests fire with the right trigger and switch with the D-pad, and their weapons share every rule below.
-  - **Weapon tool (5):** the left mouse button is the primary trigger and the right is the alternate (both tracked as held buttons); Tab cycles the fabricated weapons.
-  - **Weapons:** the blaster charges while held. The saber does a combo, plus a charged slash on the alternate, and cuts only in front. The bow draws, and its alternate fires a warp arrow that carries the archer to where it lands. Missiles home on the nearest unit. The shield absorbs damage while raised, and a timely raise parries. The giant blast charges, then burns a beam.
-  - **Hits:** player shots sweep through units and nests before meeting the world; charged plasma and missiles burst on impact.
+  - **Weapon tool (5):** the left mouse button is the primary trigger and the right is the alternate (both tracked as held buttons); Tab cycles the fabricated weapons. Guests use the right trigger and hold the right stick click for the alternate.
+  - **Weapons:** the blaster charges while held. The bow draws, and its alternate fires a warp arrow that carries the archer to where it lands. Missiles home on the nearest unit. The shield absorbs damage while raised, and a timely raise parries. The giant blast charges, then burns a beam.
+  - **Beam saber:** timed cuts rather than an instant area.
+    - **Combo:** the primary cuts forehand, backhand, then an overhead finisher; it cuts while dashing and spins in the air. A press in the second half of a cut queues the next.
+    - **Charged wave:** holding the primary after a cut charges it, and a full release (1.2 s) throws a piercing wave.
+    - **Guard:** the alternate raises a guard. In its first 0.3 s it parries Hive bolts straight back as the player's shots (`Enemies.Event.deflected`); after that it blocks three quarters of a bolt's damage from the front.
+    - **Blade hits:** each step samples the blade three times along a segment from the player's `Rig` (`game/Rig.zig`). The rig is a mesh-less copy of the drawn skeleton, posed by the same `Ranger.poseSkeleton`. Every unit the blade passes is cut once per swing (`Enemies.strikeBlade`), with knockback by mass and a stun; heavy cuts stun for 1.5 s. The blade also cuts bolts out of the air.
+    - **Lunge:** a cut started near a unit ahead lunges toward it.
+  - **Energy firearms** (`combat/Firearms.zig`, trigger logic only; Combat makes the shots):
+    - **Sniper rifle:** an instant beam, 450 m, that pierces one unit; the alternate scopes (P1's view narrows to 0.3×), and a steady scope adds up to 50%.
+    - **Machine gun:** 14 bolts a second, with spread growing with heat; it locks at full heat until it cools.
+    - **Heavy rifle:** slow bolts that pierce two; holding the alternate charges a 2.5× bolt that pierces four.
+    - **Energy bazooka:** an arcing orb (projectile gravity) that bursts for area damage, a stun and a throw; the alternate detonates it early.
+  - **Hits:** player shots sweep through units and nests before meeting the world; charged plasma and missiles burst on impact. Piercing shots remember which unit slots they passed (`Enemies.strikeThrough`), so they never hit the same unit twice.
+  - **Poses and held weapons:** each arsenal reports a stance (aim, swing with its arc and progress, guard, cast) that the player's drawn pose takes, and a grip (hand and direction) where its weapon is drawn from block parts. Shots leave the held weapon. In first person the held weapon is the viewmodel.
   - **Health:** players have health, which recovers after 5 quiet seconds. A downed P1 is restored at the spawn, and a downed guest beside P1.
-- **HUD:** health, fuel and stamina bars; the weapon and its charge; collectible counts; and a red edge flash when hurt, for P1 and each guest. In a car, the HUD shows speed, height above the ground, and the controls.
+- **Classes and specials:** a profile is a Ranger (human, tech) or a Synthetic (engineered human, powers), chosen in the creator and saved (`Profile.class`, defaulting to Ranger for older saves). `game/Specials.zig` gives each player energy (100, regenerating at 10/s for Rangers and 7/s for Synthetics) and three specials with costs and cooldowns:
+
+  | Class | Special 1 | Special 2 | Special 3 |
+  | --- | --- | --- | --- |
+  | Ranger | Arc grenade: thrown; 60 damage and a 2 s stun within 5 m (30 energy, 4 s) | Sentry turret: zaps the nearest unit in sight 4×/s for 20 s (50, 15 s) | Overshield: 80 points over health for 8 s (40, 12 s) |
+  | Synthetic | Phase dash: a 14 m blink that cuts and stuns along its path (25, 2.5 s) | Kinetic slam: 70 damage, a throw and a 1.5 s stun within 8 m (40, 6 s) | Lumen lance: a 2.5 s channelled beam, 90 damage a second (60, 10 s) |
+
+  Synthetics also have 30 more maximum health and cut 25% harder. They are drawn with a porcelain sheen, eyes in the accent colour, and lit seams (collar, sternum core, cheek lines). Specials are session state, like vitals.
+- **HUD:** health, fuel and stamina bars; the weapon and its charge (or heat); the overshield over the health bar; energy and the three specials with their keys and cooldowns; collectible counts; and a red edge flash when hurt, for P1 and each guest. In a car, the HUD shows speed, height above the ground, and the controls.
 
 ## Audio
 

@@ -30,10 +30,14 @@ pub const recipes = [_]Recipe{
     .{ .tab = .armor, .output = .{ .armor = .rootweave }, .cost = .{ .lumen = 12 }, .about = "Living bark weave grown from Arbor sap." },
     .{ .tab = .armor, .output = .{ .armor = .skyguard }, .cost = .{ .rotor = 1, .alloy = 6 }, .about = "Wind-cut plates for high flyers." },
     .{ .tab = .weapons, .output = .{ .weapon = .blaster }, .cost = .{ .lumen = 6, .scrap = 20 }, .about = "Buster blaster. Charges while the trigger is held." },
-    .{ .tab = .weapons, .output = .{ .weapon = .beam_saber }, .cost = .{ .lumen = 4, .scrap = 15 }, .about = "Lumen blade: a three-hit combo, stronger while dashing." },
+    .{ .tab = .weapons, .output = .{ .weapon = .beam_saber }, .cost = .{ .lumen = 4, .scrap = 15 }, .about = "Lumen blade: a three-cut combo, a dash cut, a held wave cut; alternate guards and parries." },
     .{ .tab = .weapons, .output = .{ .weapon = .energy_bow }, .cost = .{ .lumen = 8, .alloy = 6 }, .about = "Draw to power up. Alternate fire shoots a warp arrow." },
     .{ .tab = .weapons, .output = .{ .weapon = .tracking_missile }, .cost = .{ .rotor = 1, .alloy = 10 }, .about = "A salvo of homing missiles at the nearest Hive unit." },
     .{ .tab = .weapons, .output = .{ .weapon = .protective_shield }, .cost = .{ .lumen = 4, .alloy = 8 }, .about = "Hold to block; a timed raise parries." },
+    .{ .tab = .weapons, .output = .{ .weapon = .machine_gun }, .cost = .{ .lumen = 6, .scrap = 30, .alloy = 4 }, .about = "Fourteen bolts a second. Spread grows with heat; it locks when it overheats." },
+    .{ .tab = .weapons, .output = .{ .weapon = .heavy_rifle }, .cost = .{ .lumen = 8, .alloy = 10 }, .about = "Heavy bolts that pierce two. Hold the alternate to charge one through four." },
+    .{ .tab = .weapons, .output = .{ .weapon = .sniper_rifle }, .cost = .{ .lumen = 12, .rotor = 1, .alloy = 8 }, .about = "Instant beam that pierces one. The alternate scopes; a steady scope hits harder." },
+    .{ .tab = .weapons, .output = .{ .weapon = .energy_bazooka }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 12 }, .about = "Arcing plasma orb that bursts, stuns and throws. The alternate detonates it." },
     .{ .tab = .weapons, .output = .{ .weapon = .giant_blast }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 16 }, .about = "Charge a beam that cuts through anything." },
 };
 
@@ -92,7 +96,7 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
         .fighter => p.fighter = true,
         .suit => |c| p.suits |= Progress.bit(c),
         .armor => |a| p.armors |= Progress.armorBit(a),
-        .weapon => |w| p.weapons |= @as(u8, 1) << @intCast(@intFromEnum(w)),
+        .weapon => |w| p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),
     }
     return r.output;
 }

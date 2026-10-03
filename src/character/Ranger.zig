@@ -47,10 +47,13 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     var garments: [16]spec.GarmentSpec = undefined;
     const outfit_len = outfit(profile, &garments);
     const feminine = profile.presentation == .feminine;
+    // Synthetics: a cool porcelain sheen over the chosen tone, and eyes lit in the accent.
+    const synthetic = profile.class == .synthetic;
+    const lumen = Profile.accent_colors[profile.accent];
     var ch = try gen.Character.build(a, .{
         .body = bodySpec(profile),
-        .skin = rgb(Profile.skin_tones[profile.skin], 1),
-        .eyes = .{ .size = if (feminine) 0.18 else 0.15, .aspect = if (feminine) 0.82 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = spec.Rgb.hex(0x213946), .pupil_size = if (feminine) 0.35 else 0.31, .highlight_count = 1 },
+        .skin = if (synthetic) mix(Profile.skin_tones[profile.skin], spec.Rgb.hex(0xe4eaef), 0.6) else rgb(Profile.skin_tones[profile.skin], 1),
+        .eyes = .{ .size = if (feminine) 0.18 else 0.15, .aspect = if (feminine) 0.82 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946), .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31, .highlight_count = 1 },
         .hair = .{ .style = switch (profile.hair_style) {
             .short, .crest => .short_spiky,
             .ponytail => .twin_tails,
@@ -326,6 +329,16 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
             try plate(a, ch, .chest, chest.add(V.init(side * 0.105 * h, -0.105 * h, 0.145 * h)), V.init(0.040 * h, 0.052 * h, 0.018 * h), pocket);
             try plate(a, ch, .chest, chest.add(V.init(side * 0.105 * h, -0.066 * h, 0.160 * h)), V.init(0.027 * h, 0.004 * h, 0.006 * h), accent);
         }
+    }
+    if (p.class == .synthetic) {
+        // Lit seams: a collar ring, a core light over the sternum and cheek lines.
+        const seam = rgb(Profile.accent_colors[p.accent], 1.45);
+        const neck = s.worldPos(.neck);
+        try plate(a, ch, .neck, neck.add(V.init(0, 0.01 * h, 0.004 * h)), V.init(0.052 * w * h, 0.006 * h, 0.05 * h), seam);
+        try plate(a, ch, .chest, s.worldPos(.chest).add(V.init(0, -0.02 * h, 0.178 * h)), V.init(0.02 * h, 0.02 * h, 0.008 * h), seam);
+        if (p.helmet != .sealed) for ([_]f32{ -1, 1 }) |side| {
+            try plate(a, ch, .head, V.init(side * 0.056 * h, lm.chin_y + 0.25 * lm.H, 0.084 * h), V.init(0.0035 * h, 0.028 * h, 0.004 * h), seam);
+        };
     }
     // A full armor suit already plates the limbs and torso; only its chest lights are added.
     const suited = p.clothing == .hardsuit or p.clothing == .vanguard;

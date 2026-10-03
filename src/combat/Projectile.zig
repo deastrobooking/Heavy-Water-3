@@ -11,6 +11,11 @@ pub const ProjectileKind = enum(u8) {
     energy_arrow,
     warp_arrow,
     tracking_missile,
+    /// Energy firearms and the saber's charged wave.
+    mg_bolt,
+    heavy_bolt,
+    bazooka_orb,
+    saber_wave,
 };
 
 pub const Projectile = struct {
@@ -27,6 +32,12 @@ pub const Projectile = struct {
     homing_turn_rate: f32 = 12.0,
     homing_speed: f32 = 38.0,
     owner_is_player: bool = true,
+    /// Targets it may pass through after the first (heavy bolts, saber waves).
+    pierce: u8 = 0,
+    /// Downward acceleration (m/s²) for arcing shots (bazooka orbs).
+    gravity: f32 = 0,
+    /// Units this shot has already passed through (bit per Hive unit slot).
+    hit_units: u32 = 0,
 };
 
 pub const HitEvent = struct {
@@ -68,7 +79,14 @@ pub const ProjectilePool = struct {
                     .element = element,
                     .lifetime = lifetime,
                     .max_lifetime = lifetime,
-                    .radius = if (kind == .charged_plasma) 0.8 else if (kind == .tracking_missile) 0.4 else 0.2,
+                    .radius = switch (kind) {
+                        .charged_plasma => 0.8,
+                        .tracking_missile => 0.4,
+                        .heavy_bolt => 0.35,
+                        .bazooka_orb => 0.7,
+                        .saber_wave => 1.3,
+                        else => 0.2,
+                    },
                     .homing_target = target,
                     .homing_turn_rate = 14.0,
                     .homing_speed = speed,
@@ -105,6 +123,8 @@ pub const ProjectilePool = struct {
                     p.velocity = R.scale(new_dir, p.homing_speed);
                 }
             }
+
+            p.velocity[1] -= p.gravity * dt;
 
             // Physics raycast along trajectory
             const step_vec = R.scale(p.velocity, dt);

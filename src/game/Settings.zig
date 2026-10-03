@@ -151,7 +151,7 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     try std.testing.expectEqual(@as(u8, 50), s.master_volume);
     for (0..20) |_| s.adjust(.effects_volume, 1);
     try std.testing.expectEqual(@as(u8, 100), s.effects_volume);
-    _ = try s.bindings.bind(.stomp, .z);
+    _ = try s.bindings.bind(.stomp, .k);
     const json = try s.toJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     const back = try parse(std.testing.allocator, json);

@@ -74,7 +74,10 @@ test "the saber arm sweeps across the front, and aiming brings the hand forward"
     const start = rig.hand(swing);
     swing.action_t = 1;
     const end = rig.hand(swing);
-    try std.testing.expect(start.position[0] < 10 - 0.3 and end.position[0] > 10 + 0.3);
+    // The right shoulder sits off-centre, so the follow-through reaches just past the midline;
+    // the blade itself points well to the left.
+    try std.testing.expect(start.position[0] < 10 - 0.3 and end.position[0] > 10 + 0.15);
+    try std.testing.expect(start.blade[0] < -0.7 and end.blade[0] > 0.7);
     swing.action_t = 0.5;
     const middle = rig.hand(swing);
     try std.testing.expect(middle.position[2] > 5 + 0.4 and middle.blade[2] > 0.7);

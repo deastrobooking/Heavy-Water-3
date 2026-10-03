@@ -20,7 +20,8 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 | GUI and conversations | Title, pause, settings, rebindable keys, customization, shops, three keepers, pedestrians. |
 | Vehicles | Three hover cars and the Kestrel, from the procedural vehicle generator. Flying has not been checked by hand. |
 | The Hive | Three nests (drones, sentinels, troopers), two Brood carriers with wasp swarms. Difficulty only roughly tuned. |
-| Progression | 62 pickups, fabricator (cars, the fighter, suits, armor, weapons), suit upgrades, vital cells, story flags. |
+| Progression | 62 pickups, fabricator (cars, the fighter, suits, armor, ten weapons), suit upgrades, vital cells, story flags. |
+| Fighting | Timed saber combos with guard and parry, four energy firearms, Ranger and Synthetic classes with three specials each. Untuned by hand. |
 | Audio | Synthesized sounds and loops, positional cues, four volume buses. Nobody has listened to it yet. |
 | Engine phases | 1–13 done; 14 (skeletal animation), 15 (scenes), 16 (networking) planned. |
 
@@ -44,7 +45,7 @@ The game has had no hands-on pass since vehicles and the Hive arrived. Everythin
    - **Budgets:** the simulation step under 4 ms and skinning under 3 ms in ReleaseFast.
 2. **Hand-play checklist (yours):**
    - fly each car and the Kestrel (takeoff, transition, dogfight, landing);
-   - fight at a nest with each weapon;
+   - fight at a nest with each weapon, the saber combo and guard, and both classes' specials;
    - play co-op with a controller;
    - listen through every sound.
 

@@ -37,7 +37,8 @@ The planned Hive conflict, recruitable synthetic allies and bio-synth companions
 | V | Toggle walking and free-flight modes |
 | F2 / F4 | Change camera view / customize your ranger |
 | 1 / 2 / 3 / 4 / 5 | Hands / build / wire / bridge / weapon tools |
-| Weapon tool | Left button fires (hold to charge or draw), right button is the alternate (warp arrow, charged slash, shield), Tab switches weapons |
+| Weapon tool | Left button fires (hold to charge or draw), right button is the alternate, Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), hold after a cut to charge a wave, right button guards (parries bolts at first). Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
+| Z / C / H | Class specials. Ranger: arc grenade, sentry turret, overshield. Synthetic: phase dash, kinetic slam, lumen lance |
 | Left click a hover car, hands | Board it. W / S thrust, A / D turn, Space or E climb, Q descend, Shift boost, click to leave |
 | Left click the fabricator kiosk | Fabricate cars, suits, armor, weapons and the Kestrel fighter from pickups |
 | Left click the Kestrel, hands | Board it. Mouse aims (the jet flies where you point), W / S throttle, A / D roll, Space or E climb and Q sink while hovering, Shift afterburner, left button cannons, hold right button to lock and release to fire a missile, F climbs out |
@@ -58,7 +59,7 @@ The planned Hive conflict, recruitable synthetic allies and bio-synth companions
 | F5 / F9 | Quicksave / quickload |
 | R | Return to spawn |
 | Escape | Pause menu: resume, customize, save, load, settings, controls, quit. Every key in this table except Escape and Enter can be rebound under Controls |
-| C / F1 | Toggle culling / toggle metrics |
+| F7 / F1 | Toggle culling / toggle metrics |
 | Window close | Quit |
 
 ## Local Co-op
@@ -71,8 +72,9 @@ Up to four players share one window in split screen. On macOS, supported extende
 | A | Jump |
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
 | X | Press the aimed button or open a stall; hold to hang and mantle |
-| D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons |
+| D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons; away from a stall, up and down use specials 1 and 2 (up with the right stick held: special 3) |
 | Right trigger | Fire the party's selected weapon (hold to charge or draw) |
+| Right stick click (held) | The weapon's alternate: saber guard, scope, charge |
 | Menu (P1's controller) | Open or close the pause menu |
 | Y | First- / third-person view |
 | LB / RB | Grapple / cycle traversal kit |

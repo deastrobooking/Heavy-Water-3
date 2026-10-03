@@ -6,9 +6,9 @@ const mach = @import("mach");
 const Bindings = @This();
 
 pub const Key = mach.Core.KeyButtonID;
-pub const Action = enum { forward, back, left, right, jump, sprint, roll, stomp, grapple, traversal, mantle, ascend, descend, walk_fly, reset, camera_view, customize, inspect, capture_prefab, rotate, next_item, tool_hands, tool_build, tool_wire, tool_bridge, channel_down, channel_up, quicksave, quickload, add_guest, metrics, culling, tool_weapon };
+pub const Action = enum { forward, back, left, right, jump, sprint, roll, stomp, grapple, traversal, mantle, ascend, descend, walk_fly, reset, camera_view, customize, inspect, capture_prefab, rotate, next_item, tool_hands, tool_build, tool_wire, tool_bridge, channel_down, channel_up, quicksave, quickload, add_guest, metrics, culling, tool_weapon, special_1, special_2, special_3 };
 pub const count = @typeInfo(Action).@"enum".fields.len;
-pub const defaults = [count]Key{ .w, .s, .a, .d, .space, .left_shift, .left_control, .x, .g, .b, .f, .e, .q, .v, .r, .f2, .f4, .i, .p, .t, .tab, .one, .two, .three, .four, .left_bracket, .right_bracket, .f5, .f9, .f6, .f1, .c, .five };
+pub const defaults = [count]Key{ .w, .s, .a, .d, .space, .left_shift, .left_control, .x, .g, .b, .f, .e, .q, .v, .r, .f2, .f4, .i, .p, .t, .tab, .one, .two, .three, .four, .left_bracket, .right_bracket, .f5, .f9, .f6, .f1, .f7, .five, .z, .c, .h };
 pub const reserved = [_]Key{ .escape, .enter, .kp_enter };
 
 keys: [count]Key = defaults,
@@ -70,6 +70,9 @@ pub fn label(a: Action) []const u8 {
         .metrics => "PERFORMANCE",
         .culling => "CULLING",
         .tool_weapon => "TOOL: WEAPON",
+        .special_1 => "SPECIAL 1",
+        .special_2 => "SPECIAL 2",
+        .special_3 => "SPECIAL 3",
     };
 }
 
@@ -110,14 +113,18 @@ test "binding swaps conflicts, refuses reserved keys, and round-trips by name" {
     try std.testing.expectEqual(Key.g, b.key(.jump));
     try std.testing.expectEqual(Key.space, b.key(.grapple));
     try std.testing.expectError(error.Reserved, b.bind(.jump, .escape));
-    try std.testing.expectEqual(@as(?Action, null), try b.bind(.stomp, .z));
+    try std.testing.expectEqual(@as(?Action, null), try b.bind(.stomp, .k));
     // Every action still has a distinct key.
     for (b.keys, 0..) |k, i| for (b.keys[0..i]) |o| try std.testing.expect(k != o);
     var entries: [count]Entry = undefined;
     const back = fromEntries(b.toEntries(&entries));
     try std.testing.expectEqual(b.keys, back.keys);
-    const partial = fromEntries(&.{ .{ .action = "stomp", .key = "z" }, .{ .action = "nonsense", .key = "q" }, .{ .action = "jump", .key = "escape" } });
-    try std.testing.expectEqual(Key.z, partial.key(.stomp));
+    const partial = fromEntries(&.{ .{ .action = "stomp", .key = "k" }, .{ .action = "nonsense", .key = "q" }, .{ .action = "jump", .key = "escape" } });
+    try std.testing.expectEqual(Key.k, partial.key(.stomp));
+    // Settings saved before the specials kept culling on C: loading them swaps special 2 away.
+    const old = fromEntries(&.{.{ .action = "culling", .key = "c" }});
+    try std.testing.expectEqual(Key.c, old.key(.culling));
+    try std.testing.expectEqual(Key.f7, old.key(.special_2));
     try std.testing.expectEqual(Key.space, partial.key(.jump));
     var buffer: [24]u8 = undefined;
     try std.testing.expectEqualStrings("LEFT SHIFT", keyName(.left_shift, &buffer));

@@ -23,15 +23,20 @@ pub const accent_colors = [_][4]f32{
 };
 pub const HairStyle = enum { short, ponytail, long, crest, hood };
 pub const Presentation = enum { masculine, feminine };
+/// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
+/// Synthetics are engineered humans with powers (phase dash, kinetic slam, lumen lance): a
+/// porcelain sheen, eyes and seams lit in the accent colour, more health, harder cuts.
+pub const Class = enum { ranger, synthetic };
 /// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
 /// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
 pub const Armor = enum { none, scout, sentinel, rootweave, skyguard };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, presentation, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
+pub const Field = enum { name, class, presentation, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
+class: Class = .ranger,
 presentation: Presentation = .masculine,
 /// Relative to the 1.8 m reference: 0.9–1.1.
 height: f32 = 1,
@@ -80,6 +85,7 @@ pub fn backspace(self: *Profile) void {
 pub fn adjust(self: *Profile, field: Field, delta: i32) void {
     switch (field) {
         .name => {},
+        .class => self.class = @enumFromInt(cycle(@intFromEnum(self.class), delta, @typeInfo(Class).@"enum".fields.len)),
         .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, @typeInfo(Presentation).@"enum".fields.len)),
         .height => self.height = std.math.clamp(self.height + @as(f32, @floatFromInt(delta)) * 0.02, 0.9, 1.1),
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
@@ -102,6 +108,7 @@ fn cycle(value: anytype, delta: i32, count: usize) @TypeOf(value) {
 /// JSON shape stored in saves.
 pub const Doc = struct {
     name: []const u8,
+    class: Class = .ranger,
     presentation: Presentation = .masculine,
     height: f32,
     build: f32,
@@ -116,7 +123,7 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
+    return .{ .name = self.name(), .class = self.class, .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -126,6 +133,7 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
     result.height = doc.height;
     result.build = doc.build;
+    result.class = doc.class;
     result.presentation = doc.presentation;
     result.skin = doc.skin;
     result.hair_style = doc.hair_style;
@@ -171,6 +179,9 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     defer arena.deinit();
     const legacy = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0}", .{});
     try std.testing.expectEqual(Presentation.masculine, legacy.value.presentation);
+    try std.testing.expectEqual(Class.ranger, legacy.value.class);
+    p.adjust(.class, 1);
+    try std.testing.expectEqual(Class.synthetic, (try fromDoc(p.toDoc())).class);
     var bad = p.toDoc();
     bad.accent = accent_colors.len;
     try std.testing.expectError(error.InvalidProfile, fromDoc(bad));

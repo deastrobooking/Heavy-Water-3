@@ -56,6 +56,8 @@ pub const Hud = struct {
 
     /// Flight marks on P1's view: the Kestrel's nose, and the missile lock (with progress).
     marks: []const Mark = &.{},
+    /// P1's keys for class specials 1–3.
+    special_keys: [3][]const u8 = .{ "Z", "C", "H" },
 
     pub const Guest = struct { index: u8, view: Rect, prompt: []const u8 = "" };
     pub const Mark = struct { x: f32, y: f32, kind: enum { nose, lock }, progress: f32 = 0 };
@@ -256,6 +258,7 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     // Vitals, bottom left (hidden under conversation and shop panels).
     if (sb.seated == null and !panels) {
         vitals(c, v, sb.player, sb.profile, sb.combat.vitals[0]);
+        specials(c, v, sb, 0, sb.profile, hud.special_keys);
         if (sb.tools.tool == .weapon) weaponLine(c, v, sb, 0);
     }
     // Wallet and clock, top right.
@@ -295,10 +298,35 @@ fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profil
     c.text(r.x + 14 + Canvas.textWidth(profile.name(), 1.2) + 12, r.y + 12, pretty(&name_buffer, motion), 1, dim);
     c.text(r.x + 14, r.y + 32, "HEALTH", 0.9, dim);
     bar(c, .{ .x = r.x + 66, .y = r.y + 32, .w = 166, .h = 8 }, health.health / health.max, .{ 0.95, 0.32, 0.32, 1 });
+    // An overshield shows as a bright band over the health bar.
+    if (health.shield > 0) c.rect(.{ .x = r.x + 66, .y = r.y + 29, .w = 166 * @min(1, health.shield / 80), .h = 3 }, .{ 0.45, 0.9, 1, 1 });
     c.text(r.x + 14, r.y + 50, "FUEL", 0.9, dim);
     bar(c, .{ .x = r.x + 66, .y = r.y + 50, .w = 166, .h = 8 }, p.fuel / p.suit.fuel_max, accent);
     c.text(r.x + 14, r.y + 68, "STAMINA", 0.9, dim);
     bar(c, .{ .x = r.x + 66, .y = r.y + 68, .w = 166, .h = 8 }, p.stamina / 100, good);
+}
+
+/// Energy and the class's three specials (key, name, cooldown), beside the vitals.
+fn specials(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8, profile: Profile, keys: [3][]const u8) void {
+    const Specials = @import("../game/Specials.zig");
+    const s = sb.specials.players[player];
+    const w: f32 = @min(230, v.w - 290);
+    if (w < 150) return;
+    const r: Rect = .{ .x = v.x + 280, .y = v.y + v.h - 110, .w = w, .h = 90 };
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+    const lumen = Profile.accent_colors[profile.accent];
+    c.text(r.x + 12, r.y + 10, if (profile.class == .synthetic) "POWERS" else "TECH", 0.9, lumen);
+    bar(c, .{ .x = r.x + 70, .y = r.y + 11, .w = r.w - 82, .h = 7 }, s.energy / Specials.max_energy, lumen);
+    for (Specials.kit(profile.class), 0..) |kind, i| {
+        const about = Specials.info(kind);
+        const y = r.y + 30 + @as(f32, @floatFromInt(i)) * 19;
+        const ready = s.cooldowns[i] == 0 and s.energy >= about.cost;
+        c.rect(.{ .x = r.x + 10, .y = y - 2, .w = 20, .h = 15 }, if (ready) alpha(lumen, 0.35) else .{ 1, 1, 1, 0.08 });
+        c.centered(r.x + 20, y + 2, keys[i], 0.8, ink);
+        c.text(r.x + 38, y + 2, about.label, 0.85, if (ready) ink else dim);
+        // The cooldown drains away to the right.
+        if (s.cooldowns[i] > 0) c.rect(.{ .x = r.x + 38, .y = y + 12, .w = (r.w - 50) * s.cooldowns[i] / about.cooldown, .h = 2 }, alpha(lumen, 0.7));
+    }
 }
 
 /// The selected weapon and its charge, above the vitals (weapon tool only).
@@ -329,6 +357,7 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const v = guest.view;
     const tint = Profile.accent_colors[g.profile.accent];
     vitals(c, v, g.player, g.profile, sb.combat.vitals[guest.index + 1]);
+    specials(c, v, sb, guest.index + 1, g.profile, .{ "UP", "DN", "R3+UP" });
     if (sb.progress.weapons != 0) weaponLine(c, v, sb, guest.index + 1);
     const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
     const w = @min(v.w - 40, 460);

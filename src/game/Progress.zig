@@ -39,7 +39,7 @@ picked: Collectibles.Picked = .initEmpty(),
 /// Fabricated hover car designs, armor accents and weapons (bit per enum value).
 vehicles: u8 = 0,
 armors: u8 = free_armors,
-weapons: u8 = 0,
+weapons: u16 = 0,
 /// The Kestrel fighter has been fabricated.
 fighter: bool = false,
 flag_names: [max_flags][flag_capacity]u8 = undefined,
@@ -61,7 +61,7 @@ pub fn ownsVehicle(self: *const Progress, d: Designs.Design) bool {
     return self.vehicles & (@as(u8, 1) << @intCast(@intFromEnum(d))) != 0;
 }
 pub fn ownsWeapon(self: *const Progress, w: WeaponKind) bool {
-    return self.weapons & (@as(u8, 1) << @intCast(@intFromEnum(w))) != 0;
+    return self.weapons & (@as(u16, 1) << @intCast(@intFromEnum(w))) != 0;
 }
 pub fn count(self: *const Progress, k: Collectibles.Kind) u32 {
     return self.inventory[@intFromEnum(k)];
@@ -204,7 +204,7 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     }
     for (doc.vehicles) |d| result.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d));
     for (doc.armors) |a| result.armors |= armorBit(a);
-    for (doc.weapons) |w| result.weapons |= @as(u8, 1) << @intCast(@intFromEnum(w));
+    for (doc.weapons) |w| result.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w));
     result.fighter = doc.fighter;
     if (doc.flags.len > max_flags) return error.InvalidProgress;
     for (doc.flags) |name| {

@@ -43,6 +43,8 @@ const Fabricator = @import("Fabricator.zig");
 const Frontier = @import("Frontier.zig");
 const Hangar = @import("Hangar.zig");
 const Skies = @import("Skies.zig");
+const Rig = @import("Rig.zig");
+const Specials = @import("Specials.zig");
 /// `closing`: removed from the road graph, standing until the traffic on it has crossed.
 pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
 pub const sap_tree_count = 1 + Catalog.arbor_count;
@@ -132,6 +134,10 @@ pub const Actions = packed struct {
     select_tool: u3 = 0,
     /// Climb out of the Kestrel (its primary button fires).
     leave_jet: bool = false,
+    /// Class specials 1–3 (Z, C, H).
+    special_1: bool = false,
+    special_2: bool = false,
+    special_3: bool = false,
 };
 const NearbyChunk = struct { key: Key, count: usize, objects: [Scatter.capacity]Scatter.Object };
 /// A machine slot: its own editable blueprint copy, runtime, placement, and bodies.
@@ -207,7 +213,11 @@ pub const Guest = struct {
     trade_down: bool = false,
     /// Right trigger held (fire the party's selected weapon) and a weapon-switch edge (D-pad).
     fire: bool = false,
+    /// Right stick click held: the weapon's alternate (saber guard, scope, charge).
+    alt: bool = false,
     next_weapon: bool = false,
+    /// Class special press edges (D-pad up and down; up with the right stick held is the third).
+    special: [3]bool = @splat(false),
 };
 /// Where guests appear relative to P1's facing: left, right, and behind.
 const guest_offsets = [_]Physics.Vec3{ .{ -1.6, 0, -0.6 }, .{ 1.6, 0, -0.6 }, .{ 0, 0, -2 } };
@@ -236,6 +246,10 @@ walk_amount: f32 = 0,
 physics: Physics,
 player: Player = .{},
 guests: [max_players - 1]Guest = @splat(.{}),
+/// Class specials: energy, cooldowns, grenades and sentries (session-only, like vitals).
+specials: Specials = .{},
+/// Each player's skeleton in the simulation (built on first use), for where blades are.
+rigs: [max_players]?Rig = @splat(null),
 /// Traffic and pedestrians; off until `enableLife` (the application enables it).
 life: Life = .{},
 /// Bumped whenever the road graph changes, so traffic replans.
@@ -541,6 +555,7 @@ fn checkShrines(self: *Sandbox) void {
 pub fn deinit(self: *Sandbox) void {
     self.dialogue.deinit();
     self.scripts.deinit();
+    for (&self.rigs) |*slot| if (slot.*) |*r| r.deinit(self.allocator);
     self.physics.deinit();
 }
 
@@ -1647,7 +1662,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and self.player.mode == .walk and n < out.len) {
-        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, 1, self.catalog.content.block, out, n);
+        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);
@@ -1709,14 +1724,14 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion }, @intCast(i + 2), self.catalog.content.block, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog.content.block, out, n);
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);
 }
 
-fn avatar(profile: Profile, pose: Avatar.Pose, owner: u8, block: Catalog.MeshHandle, out: []World.Prop, start: usize) usize {
-    const end = start + Avatar.build(profile, pose, block, out[start..]);
+fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8, block: Catalog.MeshHandle, out: []World.Prop, start: usize) usize {
+    const end = start + Avatar.build(profile, stance.apply(pose), block, out[start..]);
     for (out[start..end]) |*part| {
         part.owner = owner;
         part.character.?.id = owner - 1;

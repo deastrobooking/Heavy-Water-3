@@ -29,6 +29,11 @@ pub const WeaponKind = enum(u8) {
     tracking_missile,
     protective_shield,
     giant_blast,
+    /// Energy firearms (`Firearms.zig`).
+    sniper_rifle,
+    machine_gun,
+    heavy_rifle,
+    energy_bazooka,
 };
 
 pub const CoreUpgrade = enum(u8) {
@@ -58,6 +63,10 @@ pub const WeaponSlot = struct {
             .tracking_missile => 80.0,
             .protective_shield => 0.0,
             .giant_blast => 180.0,
+            .sniper_rifle => 140.0,
+            .machine_gun => 9.0,
+            .heavy_rifle => 55.0,
+            .energy_bazooka => 160.0,
         };
         const core_mult: f32 = if (self.core == .plasma_edge and self.kind == .beam_saber) 1.5
             else if (self.core == .quantum_warp and self.kind == .energy_bow) 1.3

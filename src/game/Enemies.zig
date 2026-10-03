@@ -57,6 +57,8 @@ pub const Unit = struct {
     state_timer: f32 = 0,
     /// Seconds of hit flash left (rendering).
     flash: f32 = 0,
+    /// Seconds stunned (by a saber finisher, an arc grenade or a slam): no thinking or shooting.
+    stun: f32 = 0,
     /// Troopers: stride phase and amount for the walk animation.
     walk_phase: f32 = 0,
     walk_amount: f32 = 0,
@@ -69,13 +71,17 @@ pub const Unit = struct {
 pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = 2, flash: f32 = 0 };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
 
-/// A player the Hive can see and shoot.
-pub const Target = struct { chest: V, velocity: V, alive: bool = true };
+/// A player the Hive can see and shoot. A raised guard (saber or shield) facing the bolt takes a
+/// quarter of its damage; a guard raised just in time parries it straight back.
+pub const Target = struct { chest: V, velocity: V, alive: bool = true, guard: Guard = .none, facing: V = .{ 0, 0, 1 } };
+pub const Guard = enum { none, guard, parry };
 pub const Event = union(enum) {
     shot: V,
     player_hit: struct { player: u8, damage: f32, from: V },
     unit_down: struct { kind: Kind, position: V },
     nest_down: struct { nest: u8, position: V },
+    /// A parried bolt flies back (the caller turns it into a player shot).
+    deflected: struct { player: u8, position: V, velocity: V },
 };
 
 seed: u64 = 0,
@@ -181,6 +187,18 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         // Dormant when no player is anywhere near (keeps distant nests free).
         if (!nearAny(players, u.position, wake_distance + 40)) continue;
         u.flash = @max(0, u.flash - dt);
+        if (u.stun > 0) {
+            // Reeling: carried by the knockback, slowing, no thought or fire.
+            u.stun = @max(0, u.stun - dt);
+            u.burst_left = 0;
+            u.position = R.add(u.position, R.scale(u.velocity, dt));
+            u.velocity = R.scale(u.velocity, 1 / (1 + 3 * dt));
+            if (u.kind == .trooper) {
+                if (physics.castRay(R.add(u.position, .{ 0, 1.2, 0 }), .{ 0, -1, 0 }, 30, .none)) |floor| u.position[1] = floor.point[1];
+                u.walk_amount = 0;
+            }
+            continue;
+        }
         u.cooldown = @max(0, u.cooldown - dt);
         u.state_timer = @max(0, u.state_timer - dt);
 
@@ -264,7 +282,15 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         }
         const wall = physics.castRay(b.position, dir, best, .none);
         if (wall == null) if (hit_player) |pi| {
-            push(out, &n, .{ .player_hit = .{ .player = pi, .damage = b.damage, .from = R.sub(b.position, R.scale(dir, 5)) } });
+            const p = players[pi];
+            const facing_bolt = R.dot(R.scale(dir, -1), p.facing) > 0.2;
+            if (p.guard == .parry and facing_bolt) {
+                // Straight back the way it came.
+                push(out, &n, .{ .deflected = .{ .player = pi, .position = R.sub(b.position, R.scale(dir, 0.5)), .velocity = R.scale(b.velocity, -1.2) } });
+            } else {
+                const damage = if (p.guard == .guard and facing_bolt) b.damage * 0.25 else b.damage;
+                push(out, &n, .{ .player_hit = .{ .player = pi, .damage = damage, .from = R.sub(b.position, R.scale(dir, 5)) } });
+            }
             slot.* = null;
             continue;
         };
@@ -387,33 +413,108 @@ pub fn segmentSphere(origin: V, dir: V, length: f32, center: V, radius: f32) ?f3
 /// Damage to whatever a player attack hits: the nearest unit or nest along a segment (radius
 /// `pad` widens it, for big shots). Returns the distance hit, or null.
 pub fn strikeAlong(self: *Enemies, origin: V, dir: V, length: f32, pad: f32, damage: f32, out: []Event, n: *usize) ?f32 {
-    var best = length;
-    var unit: ?usize = null;
-    var nest: ?usize = null;
-    for (self.units, 0..) |slot, i| if (slot) |u| {
-        if (segmentSphere(origin, dir, best, u.center(), stats(u.kind).radius + pad)) |t| {
-            best = t;
-            unit = i;
+    var done: u32 = 0;
+    return self.strikeThrough(origin, dir, length, pad, damage, 1, &done, out, n);
+}
+
+/// A piercing attack: damage to the first `count` units along the segment, skipping those in
+/// `done` (and adding the ones it hits); a nest stops it. Returns the distance of the last hit.
+pub fn strikeThrough(self: *Enemies, origin: V, dir: V, length: f32, pad: f32, damage: f32, count: u8, done: *u32, out: []Event, n: *usize) ?f32 {
+    var last: ?f32 = null;
+    for (0..count) |_| {
+        var best = length;
+        var unit: ?usize = null;
+        var nest: ?usize = null;
+        for (self.units, 0..) |slot, i| if (slot) |u| {
+            if (done.* & (@as(u32, 1) << @intCast(i)) != 0) continue;
+            if (segmentSphere(origin, dir, best, u.center(), stats(u.kind).radius + pad)) |t| {
+                best = t;
+                unit = i;
+            }
+        };
+        for (self.nests[0..self.nest_count], 0..) |nst, i| {
+            if (!nst.alive) continue;
+            // The spire as a stack of spheres up its lower half.
+            var k: f32 = 0;
+            while (k < 3) : (k += 1) {
+                const c = R.add(nst.position, .{ 0, 3 + k * 4, 0 });
+                if (segmentSphere(origin, dir, best, c, nest_radius - k + pad)) |t| {
+                    best = t;
+                    nest = i;
+                    unit = null;
+                }
+            }
+        }
+        if (unit == null and nest == null) break;
+        last = best;
+        if (nest) |i| {
+            self.damageNest(@intCast(i), damage, out, n);
+            break;
+        }
+        done.* |= @as(u32, 1) << @intCast(unit.?);
+        self.damageUnit(unit.?, damage, out, n);
+    }
+    return last;
+}
+
+/// A blade: damage, knockback and stun to every unit (and nest) within `radius` of the segment,
+/// each at most once per swing (`units_hit`/`nests_hit` remember who was cut).
+pub fn strikeBlade(self: *Enemies, origin: V, dir: V, length: f32, radius: f32, damage: f32, knock: V, stun: f32, units_hit: *u32, nests_hit: *u8, out: []Event, n: *usize) usize {
+    var hits: usize = 0;
+    for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
+        const bit = @as(u32, 1) << @intCast(i);
+        if (units_hit.* & bit != 0) continue;
+        if (distanceToSegment(u.center(), origin, dir, length) > radius + stats(u.kind).radius) continue;
+        units_hit.* |= bit;
+        hits += 1;
+        self.damageUnit(i, damage, out, n);
+        if (slot.*) |*alive| {
+            // Heavier units are pushed less.
+            const mass: f32 = switch (alive.kind) {
+                .drone => 1,
+                .trooper => 1.6,
+                .sentinel => 4,
+            };
+            alive.velocity = R.add(alive.velocity, R.scale(knock, 1 / mass));
+            alive.stun = @max(alive.stun, stun / mass);
         }
     };
     for (self.nests[0..self.nest_count], 0..) |nst, i| {
-        if (!nst.alive) continue;
-        // The spire as a stack of spheres up its lower half.
-        var k: f32 = 0;
-        while (k < 3) : (k += 1) {
-            const c = R.add(nst.position, .{ 0, 3 + k * 4, 0 });
-            if (segmentSphere(origin, dir, best, c, nest_radius - k + pad)) |t| {
-                best = t;
-                nest = i;
-                unit = null;
-            }
-        }
-    }
-    if (unit == null and nest == null) return null;
-    if (nest) |i| {
+        const bit = @as(u8, 1) << @intCast(i);
+        if (!nst.alive or nests_hit.* & bit != 0) continue;
+        if (distanceToSegment(R.add(nst.position, .{ 0, 3, 0 }), origin, dir, length) > radius + nest_radius) continue;
+        nests_hit.* |= bit;
+        hits += 1;
         self.damageNest(@intCast(i), damage, out, n);
-    } else self.damageUnit(unit.?, damage, out, n);
-    return best;
+    }
+    return hits;
+}
+
+/// Bolts within `radius` of a swinging blade are cut out of the air. Returns how many.
+pub fn cutBolts(self: *Enemies, origin: V, dir: V, length: f32, radius: f32) usize {
+    var cut: usize = 0;
+    for (&self.bolts) |*slot| if (slot.*) |b| {
+        if (distanceToSegment(b.position, origin, dir, length) <= radius) {
+            slot.* = null;
+            cut += 1;
+        }
+    };
+    return cut;
+}
+
+/// Stun (and push away from `center`) every unit within `radius`: arc grenades and slams.
+pub fn shock(self: *Enemies, center: V, radius: f32, stun: f32, push_speed: f32) usize {
+    var n: usize = 0;
+    for (&self.units) |*slot| if (slot.*) |*u| {
+        const d = R.sub(u.center(), center);
+        const dist = R.length(d);
+        if (dist > radius) continue;
+        const away = if (dist > 0.1) R.scale(d, 1 / dist) else @as(V, .{ 0, 1, 0 });
+        u.velocity = R.add(u.velocity, R.scale(R.add(away, .{ 0, 0.4, 0 }), push_speed * (1 - dist / radius)));
+        u.stun = @max(u.stun, stun);
+        n += 1;
+    };
+    return n;
 }
 
 /// Damage to everything within `half_width` of the segment from `origin` along `dir` (beams).
@@ -583,6 +684,43 @@ test "troopers march out of the nest, keep to the ground, and hunt" {
         try std.testing.expect(horizontal(R.sub(u.position, .{ 25, 0, 0 })) < 30);
     };
     try std.testing.expectEqual(@as(usize, troopers_per_nest), troopers);
+}
+
+test "a blade cuts each unit once per swing, knocks it back and stuns it; guards parry bolts" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{};
+    e.units[0] = .{ .kind = .drone, .nest = 0, .position = .{ 0, 1, 1 }, .health = 200, .orbit = 0 };
+    var events: [8]Event = undefined;
+    var n: usize = 0;
+    var hit: u32 = 0;
+    var nests: u8 = 0;
+    try std.testing.expectEqual(@as(usize, 1), e.strikeBlade(.{ -1, 1, 1 }, .{ 1, 0, 0 }, 2, 0.3, 40, .{ 0, 0, 8 }, 1, &hit, &nests, &events, &n));
+    try std.testing.expectEqual(@as(usize, 0), e.strikeBlade(.{ -1, 1, 1 }, .{ 1, 0, 0 }, 2, 0.3, 40, .{ 0, 0, 8 }, 1, &hit, &nests, &events, &n));
+    const u = e.units[0].?;
+    try std.testing.expectEqual(@as(f32, 160), u.health);
+    try std.testing.expect(u.velocity[2] > 5 and u.stun > 0.5);
+    // A stunned unit does not shoot.
+    e.units[0].?.state = .hunt;
+    e.units[0].?.cooldown = 0;
+    const player: Target = .{ .chest = .{ 0, 1.4, 6 }, .velocity = @splat(0), .guard = .parry, .facing = .{ 0, 0, -1 } };
+    var shots: usize = 0;
+    for (0..30) |_| {
+        const c = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+        for (events[0..@min(c, events.len)]) |ev| shots += @intFromBool(ev == .shot);
+    }
+    try std.testing.expectEqual(@as(usize, 0), shots);
+    // A bolt into a parrying player comes back.
+    e.bolts[0] = .{ .position = .{ 0, 1.4, 2 }, .velocity = .{ 0, 0, 30 }, .damage = 6, .life = 2 };
+    var deflected = false;
+    for (0..20) |_| {
+        const c = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+        for (events[0..@min(c, events.len)]) |ev| deflected = deflected or ev == .deflected;
+    }
+    try std.testing.expect(deflected);
+    // A swinging blade cuts bolts.
+    e.bolts[1] = .{ .position = .{ 0.5, 1, 1 }, .velocity = .{ 0, 0, -30 }, .damage = 6, .life = 2 };
+    try std.testing.expectEqual(@as(usize, 1), e.cutBolts(.{ -1, 1, 1 }, .{ 1, 0, 0 }, 2, 0.4));
 }
 
 test "segment-sphere and line strikes find the nearest target" {

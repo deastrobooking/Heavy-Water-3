@@ -23,6 +23,9 @@ const Skies = @import("Skies.zig");
 const ShipMeshes = @import("../vehicle/ShipMeshes.zig");
 const HiveMeshes = @import("../vehicle/HiveMeshes.zig");
 const m = @import("../character/math.zig");
+const Rig = @import("Rig.zig");
+const Profile = @import("Profile.zig");
+const Specials = @import("Specials.zig");
 const R = Physics.Rotation;
 const V = Physics.Vec3;
 
@@ -112,7 +115,9 @@ pub fn refresh(sb: *Sandbox) void {
     sb.garage = .{};
     for (0..Designs.count) |d| if (sb.progress.ownsVehicle(@enumFromInt(d))) sb.garage.park(sb.seed, Sandbox.spawn, sb.catalog, @enumFromInt(d));
     sb.collectibles.drops = @splat(null);
+    sb.specials = .{};
     sb.combat.setMaxHealth(sb.progress.maxHealth());
+    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + Specials.healthBonus(sb.profile.class));
     for (&sb.combat.vitals) |*v| v.health = v.max;
     // Whatever the loaded ranger already wears stays available.
     sb.progress.suits |= Progress.bit(sb.profile.clothing);
@@ -140,7 +145,7 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
 
 /// Chest positions the Hive aims at: P1 (or P1's car) and active guests.
 fn targets(sb: *const Sandbox, out: *[Sandbox.max_players]Enemies.Target) []const Enemies.Target {
-    var p1: Enemies.Target = .{ .chest = R.add(sb.player.feet, .{ 0, 1.3, 0 }), .velocity = sb.player.velocity };
+    var p1: Enemies.Target = .{ .chest = R.add(sb.player.feet, .{ 0, 1.3, 0 }), .velocity = sb.player.velocity, .guard = sb.combat.arsenals[0].guard(), .facing = facingOf(sb.body_yaw) };
     if (sb.garage.piloting) |i| {
         const car = sb.garage.cars[i].?.flyer.body;
         p1 = .{ .chest = .{ car.pos.x, car.pos.y, car.pos.z }, .velocity = .{ car.vel.x, car.vel.y, car.vel.z } };
@@ -148,10 +153,25 @@ fn targets(sb: *const Sandbox, out: *[Sandbox.max_players]Enemies.Target) []cons
     out[0] = p1;
     var n: usize = 1;
     for (sb.guests) |g| {
-        out[n] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active };
+        out[n] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active, .guard = sb.combat.arsenals[n].guard(), .facing = facingOf(g.body_yaw) };
         n += 1;
     }
     return out[0..n];
+}
+
+fn facingOf(yaw: f32) V {
+    return .{ @sin(yaw), 0, @cos(yaw) };
+}
+
+/// Player `p`'s simulation skeleton, built or rebuilt for its body; null if memory runs out
+/// (blades then follow an approximate arm).
+pub fn rigFor(sb: *Sandbox, p: usize, profile: Profile) ?*Rig {
+    if (sb.rigs[p]) |*r| {
+        r.refresh(sb.allocator, profile) catch {};
+        return r;
+    }
+    sb.rigs[p] = Rig.init(sb.allocator, profile) catch return null;
+    return &sb.rigs[p].?;
 }
 
 fn nestFlag(buffer: []u8, nest: u8) []const u8 {
@@ -185,6 +205,11 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             sb.cue(.boom, u.position);
             sb.progress.setFlag("hive_fought");
             sb.say("hive {s} down", .{@tagName(u.kind)});
+        },
+        .deflected => |d| {
+            sb.combat.deflect(d.player, d.position, d.velocity);
+            sb.cuePitch(.slash, d.position, 1.5);
+            if (d.player == 0) sb.say("parried!", .{});
         },
         .nest_down => |n| {
             var flag: [16]u8 = undefined;
@@ -258,6 +283,9 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .eye = .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() },
         .forward = .{ f.x(), f.y(), f.z() },
         .feet = sb.player.feet,
+        .yaw = sb.body_yaw,
+        .rig = rigFor(sb, 0, sb.profile),
+        .armed = armed,
         .dashing = sb.player.motion == .dash or sb.player.motion == .roll,
         .airborne = !sb.player.grounded,
         .fire = armed and sb.trigger.fire,
@@ -274,13 +302,70 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .eye = .{ eye.x(), eye.y(), eye.z() },
             .forward = .{ gf.x(), gf.y(), gf.z() },
             .feet = g.player.feet,
+            .yaw = g.body_yaw,
+            .rig = rigFor(sb, p, g.profile),
+            .armed = g.trading == null,
             .dashing = g.player.motion == .dash or g.player.motion == .roll,
             .airborne = !g.player.grounded,
             .fire = g.fire and g.trading == null,
+            .alt = g.alt and g.trading == null,
             .cycle = g.next_weapon and g.trading == null,
         }, dt, &out);
         arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
     }
+    stepSpecials(sb, camera, actions, frozen, dt);
+}
+
+/// Class specials for every local player (P1 on foot, active guests), then grenades and
+/// sentries. Class passives (health, saber weight) are applied here too.
+fn stepSpecials(sb: *Sandbox, camera: *Camera, actions: Sandbox.Actions, frozen: bool, dt: f32) void {
+    var events: [32]Specials.Event = undefined;
+    const on_foot = !frozen and sb.garage.piloting == null and sb.seated == null and !sb.hangar.piloting;
+    const f = sb.aimCameraPublic(camera.*).forward();
+    const eye = sb.player.eye();
+    sb.combat.arsenals[0].melee_scale = Specials.meleeScale(sb.profile.class);
+    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + Specials.healthBonus(sb.profile.class));
+    const pressed: [3]bool = if (on_foot) .{ actions.special_1, actions.special_2, actions.special_3 } else @splat(false);
+    var n = sb.specials.step(0, sb.profile.class, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ eye.x(), eye.y(), eye.z() }, .forward = .{ f.x(), f.y(), f.z() }, .feet = sb.player.feet, .pressed = pressed }, dt, &events);
+    specialEvents(sb, events[0..@min(n, events.len)], camera);
+    for (&sb.guests, 1..) |*g, p| {
+        defer g.special = @splat(false);
+        if (!g.active) continue;
+        sb.combat.arsenals[p].melee_scale = Specials.meleeScale(g.profile.class);
+        sb.combat.setPlayerMax(p, sb.progress.maxHealth() + Specials.healthBonus(g.profile.class));
+        const ge = g.player.eye();
+        const gf = g.camera.forward();
+        n = sb.specials.step(@intCast(p), g.profile.class, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ ge.x(), ge.y(), ge.z() }, .forward = .{ gf.x(), gf.y(), gf.z() }, .feet = g.player.feet, .pressed = if (frozen) @splat(false) else g.special }, dt, &events);
+        specialEvents(sb, events[0..@min(n, events.len)], camera);
+    }
+    n = sb.specials.stepWorld(&sb.physics, &sb.enemies, &sb.combat, dt, &events);
+    specialEvents(sb, events[0..@min(n, events.len)], camera);
+}
+
+fn specialEvents(sb: *Sandbox, events: []const Specials.Event, camera: *Camera) void {
+    for (events) |e| switch (e) {
+        .used => |u| {
+            const at: ?V = if (u.player == 0) null else R.add(sb.guests[u.player - 1].player.feet, .{ 0, 1.2, 0 });
+            switch (u.kind) {
+                .arc_grenade, .sentry => sb.cuePitch(.grapple, at, 1.3),
+                .overshield => sb.cuePitch(.restock, at, 1.2),
+                .phase_dash => sb.cuePitch(.dash, at, 1.5),
+                .kinetic_slam => sb.cuePitch(.boom, at, 0.7),
+                .lumen_lance => sb.cuePitch(.zap, at, 0.45),
+            }
+            if (u.player == 0) sb.say("{s}", .{Specials.info(u.kind).label});
+        },
+        .denied => |p| if (p == 0) sb.cue(.ui_error, null),
+        .burst => |at| sb.cue(.boom, at),
+        .zap => |at| sb.cuePitch(.zap, at, 1.8),
+        .blink => |b| {
+            const player = if (b.player == 0) &sb.player else &sb.guests[b.player - 1].player;
+            player.feet = b.to;
+            player.velocity = .{ 0, 0, 0 };
+            if (b.player == 0) camera.position = sb.player.eye();
+        },
+        .hive => |h| hive(sb, h, camera),
+    };
 }
 
 fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
@@ -379,13 +464,27 @@ fn wreck(sb: *Sandbox, camera: *Camera) void {
 fn arsenalEvents(sb: *Sandbox, p: u8, events: []const Combat.Event, camera: *Camera) void {
     const at: ?V = if (p == 0) null else R.add(sb.guests[p - 1].player.feet, .{ 0, 1.2, 0 });
     for (events) |e| switch (e) {
-        .fired => |w| sb.cue(switch (w) {
+        .fired => |w| sb.cuePitch(switch (w) {
             .blaster, .energy_bow => .zap,
             .tracking_missile => .dash,
             .giant_blast => .boom,
+            .energy_bazooka => .dash,
             else => .zap,
-        }, at),
+        }, at, switch (w) {
+            .sniper_rifle => 0.55,
+            .machine_gun => 1.6,
+            .heavy_rifle => 0.8,
+            .beam_saber => 0.7,
+            else => 1,
+        }),
         .slash => sb.cue(.slash, at),
+        .cut => |spot| sb.cuePitch(.impact, spot, 1.3),
+        .blast => |spot| sb.cue(.boom, spot),
+        .lunge => |v| {
+            const player = if (p == 0) &sb.player else &sb.guests[p - 1].player;
+            player.velocity[0] = v[0];
+            player.velocity[2] = v[2];
+        },
         .impact => |spot| sb.cue(.impact, spot),
         .parried => sb.cue(.ui_confirm, null),
         .warp => |to| {
@@ -551,6 +650,22 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         };
         n += 1;
     };
+    // Held weapons, at each armed player's right hand.
+    for (&sb.combat.arsenals) |*arsenal| if (arsenal.grip) |g| if (arsenal.active) |kind| if (room(out, n, max_weapon_parts)) {
+        n += heldWeapon(out[n..], c.block, kind, g, arsenal, t);
+    };
+    // Ranger sentries (a squat body, a head turned toward its target) and arc grenades.
+    for (sb.specials.sentries) |slot| if (slot) |s| if (room(out, n, 3)) {
+        const head = facing(s.aim);
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(s.position, .{ 0, 0.35, 0 }) }, .tint = .{ 0.55, 0.58, 0.62, 1 }, .size = .{ 0.55, 0.7, 0.55 } };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(s.position, .{ 0, 1.0, 0 }) }, .tint = .{ 0.3, 0.33, 0.37, 1 }, .size = .{ 0.32, 0.26, 0.6 }, .rotation = head };
+        out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(R.add(s.position, .{ 0, 1.0, 0 }), R.scale(s.aim, 0.31)) }, .tint = Material.emissive(.{ 0.4, 0.95, 1, 1 }, 0.6 + 0.4 * @min(1, s.life)), .size = .{ 0.12, 0.12, 0.03 }, .rotation = head };
+        n += 3;
+    };
+    for (sb.specials.grenades) |slot| if (slot) |g| if (room(out, n, 1)) {
+        out[n] = .{ .mesh = c.gem, .transform = .{ .position = g.position }, .tint = Material.emissive(.{ 0.45, 0.8, 1, 1 }, 0.5 + 0.5 * @abs(@sin(g.fuse * 20))), .size = @splat(0.3), .rotation = yawQuat(g.fuse * 9) };
+        n += 1;
+    };
     // Player shots and effects.
     for (sb.combat.arsenals) |arsenal| for (arsenal.system.projectiles.items) |p| if (p.active and room(out, n, 1)) {
         const color = @import("../combat/Weapon.zig").Element.color(p.element);
@@ -563,12 +678,101 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         const tint = Material.emissive(.{ e.color[0], e.color[1], e.color[2], 1 }, k);
         out[n] = switch (e.kind) {
             .slash => .{ .mesh = c.block, .transform = .{ .position = e.position }, .tint = tint, .size = .{ e.size * 1.6, 0.08, 0.35 }, .rotation = facing(e.dir) },
-            .beam => .{ .mesh = c.block, .transform = .{ .position = R.add(e.position, R.scale(e.dir, 40)) }, .tint = tint, .size = .{ e.size * 0.4, e.size * 0.4, 80 }, .rotation = facing(e.dir) },
+            .beam => blk: {
+                const length = if (e.length > 0) e.length else 80;
+                break :blk .{ .mesh = c.block, .transform = .{ .position = R.add(e.position, R.scale(e.dir, length / 2)) }, .tint = tint, .size = .{ e.size * 0.4 * k, e.size * 0.4 * k, length }, .rotation = facing(e.dir) };
+            },
+            .trail => .{ .mesh = c.block, .transform = .{ .position = e.position }, .tint = tint, .size = .{ e.size, e.size, e.length }, .rotation = facing(e.dir) },
             .burst, .spark, .muzzle => .{ .mesh = c.gem, .transform = .{ .position = e.position }, .tint = tint, .size = @splat(e.size * (1.5 - k * 0.5)) },
         };
         n += 1;
     };
     return n;
+}
+
+const max_weapon_parts = 5;
+/// A part of a held weapon: offset along the weapon's frame (+Z along the barrel or blade), size,
+/// colour, and glow (0 for plain metal).
+const Part = struct { at: [3]f32, size: [3]f32, color: [3]f32, glow: f32 = 0 };
+const gunmetal: [3]f32 = .{ 0.16, 0.17, 0.2 };
+const plate: [3]f32 = .{ 0.62, 0.64, 0.68 };
+
+/// A held weapon built from blocks: hilt and blade, or a gun's body, barrel and lumen strips.
+fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32) usize {
+    const hum = 0.85 + 0.15 * @sin(t * 30);
+    const heat = arsenal.charge();
+    const parts: []const Part = switch (kind) {
+        .beam_saber => &.{
+            .{ .at = .{ 0, 0, -0.02 }, .size = .{ 0.06, 0.06, 0.26 }, .color = gunmetal },
+            .{ .at = .{ 0, 0, 0.13 }, .size = .{ 0.09, 0.09, 0.04 }, .color = plate },
+            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.055, 0.055, 1.35 }, .color = .{ 1, 0.82, 0.35 }, .glow = hum },
+        },
+        .blaster => &.{
+            .{ .at = .{ 0, 0.03, 0.05 }, .size = .{ 0.08, 0.13, 0.32 }, .color = plate },
+            .{ .at = .{ 0, 0.05, 0.28 }, .size = .{ 0.045, 0.045, 0.2 }, .color = gunmetal },
+            .{ .at = .{ 0.042, 0.05, 0.05 }, .size = .{ 0.01, 0.03, 0.24 }, .color = .{ 0.4, 0.9, 1 }, .glow = 0.8 },
+        },
+        .sniper_rifle => &.{
+            .{ .at = .{ 0, 0.03, 0.1 }, .size = .{ 0.07, 0.12, 0.55 }, .color = gunmetal },
+            .{ .at = .{ 0, 0.05, 0.75 }, .size = .{ 0.035, 0.035, 0.8 }, .color = plate },
+            .{ .at = .{ 0, 0.14, 0.12 }, .size = .{ 0.05, 0.05, 0.3 }, .color = gunmetal },
+            .{ .at = .{ 0, 0.14, 0.275 }, .size = .{ 0.04, 0.04, 0.01 }, .color = .{ 0.35, 1, 0.6 }, .glow = 0.6 + heat * 0.4 },
+            .{ .at = .{ 0, 0.05, 1.16 }, .size = .{ 0.05, 0.05, 0.04 }, .color = .{ 0.35, 1, 0.6 }, .glow = 0.8 },
+        },
+        .machine_gun => &.{
+            .{ .at = .{ 0, 0.02, 0.12 }, .size = .{ 0.12, 0.15, 0.6 }, .color = gunmetal },
+            .{ .at = .{ 0, 0.04, 0.6 }, .size = .{ 0.06, 0.06, 0.4 }, .color = plate },
+            .{ .at = .{ 0, -0.12, 0.1 }, .size = .{ 0.1, 0.14, 0.18 }, .color = plate },
+            // The barrel shroud glows hotter as the gun heats.
+            .{ .at = .{ 0, 0.04, 0.62 }, .size = .{ 0.075, 0.075, 0.3 }, .color = .{ 1, 0.45 + 0.3 * (1 - heat), 0.15 }, .glow = heat },
+        },
+        .heavy_rifle => &.{
+            .{ .at = .{ 0, 0.03, 0.12 }, .size = .{ 0.13, 0.17, 0.7 }, .color = plate },
+            .{ .at = .{ 0, 0.05, 0.7 }, .size = .{ 0.08, 0.08, 0.5 }, .color = gunmetal },
+            .{ .at = .{ 0.07, 0.05, 0.3 }, .size = .{ 0.012, 0.06, 0.4 }, .color = .{ 0.75, 0.45, 1 }, .glow = 0.5 + heat * 0.5 },
+            .{ .at = .{ -0.07, 0.05, 0.3 }, .size = .{ 0.012, 0.06, 0.4 }, .color = .{ 0.75, 0.45, 1 }, .glow = 0.5 + heat * 0.5 },
+        },
+        .energy_bazooka => &.{
+            .{ .at = .{ 0, 0.12, 0.05 }, .size = .{ 0.2, 0.2, 1.1 }, .color = plate },
+            .{ .at = .{ 0, 0.12, 0.62 }, .size = .{ 0.24, 0.24, 0.06 }, .color = .{ 1, 0.4, 0.9 }, .glow = 0.4 + 0.6 * heat },
+            .{ .at = .{ 0, -0.02, 0 }, .size = .{ 0.05, 0.14, 0.06 }, .color = gunmetal },
+        },
+        .energy_bow => &.{
+            .{ .at = .{ 0, 0, 0.1 }, .size = .{ 0.035, 1.1, 0.04 }, .color = .{ 0.5, 0.85, 1 }, .glow = 0.6 + 0.4 * heat },
+            .{ .at = .{ 0, 0, 0.08 }, .size = .{ 0.06, 0.16, 0.06 }, .color = gunmetal },
+        },
+        .tracking_missile => &.{
+            .{ .at = .{ 0, 0.1, 0.05 }, .size = .{ 0.24, 0.2, 0.45 }, .color = plate },
+            .{ .at = .{ -0.06, 0.15, 0.28 }, .size = .{ 0.06, 0.06, 0.02 }, .color = .{ 0.6, 1, 0.5 }, .glow = 0.8 },
+            .{ .at = .{ 0.06, 0.15, 0.28 }, .size = .{ 0.06, 0.06, 0.02 }, .color = .{ 0.6, 1, 0.5 }, .glow = 0.8 },
+            .{ .at = .{ 0, 0.05, 0.28 }, .size = .{ 0.06, 0.06, 0.02 }, .color = .{ 0.6, 1, 0.5 }, .glow = 0.8 },
+        },
+        .protective_shield => if (arsenal.system.shield.active) &.{
+            .{ .at = .{ 0, 0, 0.35 }, .size = .{ 0.9, 1.1, 0.03 }, .color = .{ 0.4, 0.8, 1 }, .glow = 0.45 },
+            .{ .at = .{ 0, 0, 0.3 }, .size = .{ 0.12, 0.12, 0.08 }, .color = plate },
+        } else &.{
+            .{ .at = .{ 0, 0, 0.05 }, .size = .{ 0.12, 0.12, 0.08 }, .color = plate },
+        },
+        .giant_blast => &.{
+            .{ .at = .{ 0, 0, 0.25 }, .size = .{ 0.18, 0.18, 0.18 }, .color = .{ 1, 0.85, 0.35 }, .glow = 0.4 + 0.6 * heat },
+        },
+    };
+    // The weapon frame: +Z along `dir`, kept upright about it.
+    const z = R.normalize(grip.dir);
+    const side = if (@abs(z[1]) > 0.98) @as(V, .{ 1, 0, 0 }) else R.normalize(R.cross(.{ 0, 1, 0 }, z));
+    const up = R.cross(z, side);
+    const aim = m.Quat.fromTo(m.Vec3.unit_z, m.Vec3.init(z[0], z[1], z[2]));
+    // fromTo leaves the roll free; turn about the barrel so the weapon's +Y is up.
+    const rolled = aim.rotate(m.Vec3.unit_y);
+    const rolled_y: V = .{ rolled.x, rolled.y, rolled.z };
+    const roll = std.math.atan2(R.dot(R.cross(rolled_y, up), z), R.dot(rolled_y, up));
+    const rotation = quat(aim.mul(m.Quat.fromAxisAngle(m.Vec3.unit_z, roll)));
+    for (parts, 0..) |part, i| {
+        const at = R.add(grip.base, R.add(R.add(R.scale(side, part.at[0]), R.scale(up, part.at[1])), R.scale(z, part.at[2])));
+        const color: [4]f32 = .{ part.color[0], part.color[1], part.color[2], 1 };
+        out[i] = .{ .mesh = block, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = rotation };
+    }
+    return parts.len;
 }
 
 /// Hive troopers: dark red heavy plate, sealed helmets, magenta lumen.

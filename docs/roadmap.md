@@ -89,6 +89,20 @@ Next:
 - carrier boarding and assault events;
 - the Kestrel's upgrades and paint.
 
+## Fighting, energy firearms and classes — implemented
+
+The beam saber is a melee weapon: timed combo cuts that land where the drawn blade passes (a simulation rig shares the renderer's poser), queued presses, a charged wave, a guard that parries bolts back, knockback, stun, lunges, and bolts cut from the air. Four energy firearms join the fabricator: the sniper rifle (scoped, piercing beam), the machine gun (heat), the heavy rifle (piercing, charged) and the energy bazooka (arcing orb, burst, detonation). Players are Rangers (tech specials) or Synthetics (powers), each with energy and three specials. Bodies take aim, swing, guard and cast poses, and weapons are drawn in hand.
+
+Acceptance:
+- **Tests:** one hit per unit per cut, a queued backhand, a charged wave and a parry window; a sniper beam that pierces exactly one unit and scopes; machine-gun rate and overheat, heavy-rifle charge and bazooka burst; each class's specials, their energy and cooldowns, and the overshield soaking damage; the rig's hand sweeping across the front.
+- **Smoke:** fabricates the saber and sniper through the panel, lands a three-cut combo with P1's rig, pierces two drones, and throws a grenade and a slam.
+- **Captures:** `-Dshowcase=37` to `40` (saber, sniper, machine gun, lumen lance) and `-Dcharacter-showcase=5` (a Synthetic).
+
+Next:
+- hand-play tuning of damage, energy costs and cooldowns;
+- dedicated weapon meshes (the held weapons are block assemblies) and a lance and slam effect pass;
+- per-bone hitboxes for the Hive (the blade tests unit spheres).
+
 ## Frontier: vehicles, pickups, the Hive and weapons — implemented
 
 Hover cars built by your generator (`src/vehicle/`) fly on momentum-theory fans with a ride-height flight computer, and three designs are fabricable. 62 seeded pickups (lumen shards, rotor cores, Hive alloy, vital cells) feed a fabricator for cars, suits, armor accents and weapons. Three Hive nests in new outskirts send drones and sentinels that patrol, hunt with line of sight, and shoot back. The `combat/` weapons are connected through a weapon tool, and players have health and respawns.
