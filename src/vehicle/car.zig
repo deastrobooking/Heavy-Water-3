@@ -107,6 +107,36 @@ pub fn build(gpa: Allocator, spec: CarSpec) !Parts {
         mass = mass.combine(partMass(body, start, spec.wing_mass));
     }
 
+    // Supercar aero detailing: a swept front splitter, floating side blades around the
+    // intake panels, twin canopy spines, and a three-fin rear diffuser. These hard edges make
+    // the low wedge read as a track racer instead of a smooth generic hover pod.
+    const nose_l = Vec3.init(-0.92, 0.17, spec.hull.length * 0.5 - 0.08);
+    const nose_r = Vec3.init(0.92, 0.17, spec.hull.length * 0.5 - 0.08);
+    try prims.strut(gpa, body, nose_l, nose_r, Vec3.unit_y, 0.11, 0.075, .carbon);
+    for ([_]f32{ -1, 1 }) |side| {
+        try prims.strut(gpa, body, Vec3.init(side * 0.82, 0.2, spec.hull.length * 0.5 - 0.1), Vec3.init(side * 1.16, 0.24, spec.hull.length * 0.5 - 0.52), Vec3.unit_y, 0.07, 0.055, .paint_accent);
+        // Two recessed louvers follow each flank and frame the fan ducts.
+        for (0..2) |louver| {
+            const u = 0.56 + @as(f32, @floatFromInt(louver)) * 0.055;
+            const p0 = hull.surfacePoint(spec.hull, u, side, 3, 0.72);
+            const p1 = hull.surfacePoint(spec.hull, u + 0.035, side, 3, 0.72);
+            const normal = hull.surfaceNormal(spec.hull, u, side, 3);
+            try prims.strut(gpa, body, p0.add(normal.scale(0.018)), p1.add(normal.scale(0.018)), Vec3.unit_y, 0.035, 0.025, .carbon);
+        }
+    }
+    // Paired centerline blades sharpen the glass canopy and carry the paint accent rearward.
+    for ([_]f32{ -0.12, 0.12 }) |x| {
+        var spine: [5]Vec3 = undefined;
+        for (&spine, 0..) |*p, i| {
+            const u = 0.42 + 0.14 * @as(f32, @floatFromInt(i)) / 4;
+            const roof = hull.section(spec.hull, u)[6];
+            p.* = Vec3.init(x, roof.y + 0.012, roof.z);
+        }
+        try prims.lightStrip(gpa, body, &spine, Vec3.unit_y, 0.025, 0.012, .paint_accent);
+    }
+    const tail = -spec.hull.length * 0.5 + 0.12;
+    for ([_]f32{ -0.44, 0, 0.44 }) |x| try prims.strut(gpa, body, Vec3.init(x, 0.17, tail), Vec3.init(x, 0.39, tail), Vec3.unit_z, 0.035, 0.04, .carbon);
+
     // Twin nozzles at the tail, exhausting backward (lathe +Y upstream → car +Z).
     const tail_z = -spec.hull.length * 0.5;
     for ([_]f32{ 1, -1 }) |side| {

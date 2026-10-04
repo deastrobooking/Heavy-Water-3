@@ -19,10 +19,12 @@
 //! - **Hits:** shots strike wasps, carriers, ground Hive units (through `Enemies`) and the
 //!   world.
 const std = @import("std");
+const mach = @import("mach");
 const Physics = @import("../physics/Physics.zig");
 const Seed = @import("../procedural/Seed.zig");
 const Enemies = @import("Enemies.zig");
 const Terrain = @import("../procedural/Terrain.zig");
+const Mountains = @import("../procedural/Mountains.zig");
 const ShipMeshes = @import("../vehicle/ShipMeshes.zig");
 const m = @import("../character/math.zig");
 const R = Physics.Rotation;
@@ -131,6 +133,9 @@ pub const Wasp = struct {
     jink: V = @splat(0),
     /// Staggers the structure ray.
     check: u8 = 0,
+    ground_sampled: bool = false,
+    ground_here: f32 = 0,
+    ground_ahead: f32 = 0,
     raid_target: V = @splat(0),
     bomb_timer: f32 = 2.5,
 };
@@ -250,6 +255,9 @@ pub const Event = union(enum) {
     hive: Enemies.Event,
 };
 
+pub const StepProfile = struct { carriers_ms: f32 = 0, wasps_ms: f32 = 0, projectiles_ms: f32 = 0 };
+pub const ProfiledStep = struct { events: usize, timing: StepProfile };
+
 /// The Kestrel's guns and missile lock (P1).
 pub const Guns = struct {
     cooldown: f32 = 0,
@@ -352,9 +360,30 @@ fn turnToward(forward: V, desired: V, rate: f32, dt: f32) V {
     return R.normalize(R.add(R.scale(forward, 1 - t), R.scale(d, t)));
 }
 
+fn segmentAboveHubTerrain(origin: V, travel: V) bool {
+    const end = R.add(origin, travel);
+    const safe_radius = Mountains.inner_clearance - 25;
+    const safe_radius_sq = safe_radius * safe_radius;
+    const start_radius_sq = origin[0] * origin[0] + origin[2] * origin[2];
+    const end_radius_sq = end[0] * end[0] + end[2] * end[2];
+    return @max(start_radius_sq, end_radius_sq) < safe_radius_sq and
+        @min(origin[1], end[1]) > Terrain.hub_height_upper_bound;
+}
+
 /// One fixed step of the Hive's air forces and every airborne shot.
 /// `players` are chest positions of local players on foot (alive or not).
 pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event) usize {
+    return stepInner(self, physics, enemies, jet, players, dt, out, null, null);
+}
+
+pub fn stepProfiled(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event, io: std.Io) ProfiledStep {
+    var timing: StepProfile = .{};
+    const count = stepInner(self, physics, enemies, jet, players, dt, out, io, &timing);
+    return .{ .events = count, .timing = timing };
+}
+
+fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event, io: ?std.Io, profile: ?*StepProfile) usize {
+    var profile_timer = if (profile != null) mach.time.Timer.start(io.?) else undefined;
     var n: usize = 0;
     const random = self.rng.random();
     var anyone: bool = jet != null;
@@ -422,8 +451,10 @@ pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet,
             push(out, &n, .{ .sound = .{ .kind = .flak, .position = muzzle } });
         };
     }
+    if (profile) |p| p.carriers_ms = profile_timer.lap() * 1000;
 
     // Wasps.
+    if (profile != null) profile_timer.reset();
     for (&self.wasps, 0..) |*slot, wi| {
         const w = &(slot.* orelse continue);
         const home = self.carriers[w.carrier];
@@ -512,14 +543,22 @@ pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet,
         desired = R.add(desired, R.scale(separation(self, wi, w.position), 2.5));
         // Ground avoidance, cheaply: the terrain under and ahead of the wasp (analytic), and a
         // short ray for structures every fourth step (staggered across wasps).
-        const here = Terrain.surface(self.seed, w.position[0], w.position[2]).height;
-        var floor = here;
-        for ([_]f32{ 40, 80, 120 }) |d| {
-            const p = R.add(w.position, R.scale(w.forward, d));
-            floor = @max(floor, Terrain.surface(self.seed, p[0], p[2]).height);
-        }
         var blocked = false;
         w.check +%= 1;
+        // Terrain sampling evaluates several procedural noise fields per point. Refresh the
+        // under-flight and look-ahead heights every other fixed step; at wasp speed this moves
+        // the sample by at most ~1.5 m, while retaining the 40/80/120 m terrain look-ahead.
+        if (!w.ground_sampled or w.check % 2 == 0) {
+            w.ground_here = Terrain.surface(self.seed, w.position[0], w.position[2]).height;
+            w.ground_ahead = w.ground_here;
+            for ([_]f32{ 40, 80, 120 }) |d| {
+                const p = R.add(w.position, R.scale(w.forward, d));
+                w.ground_ahead = @max(w.ground_ahead, Terrain.surface(self.seed, p[0], p[2]).height);
+            }
+            w.ground_sampled = true;
+        }
+        const here = w.ground_here;
+        const floor = w.ground_ahead;
         if (w.check % 4 == 0) blocked = physics.castRay(w.position, w.forward, 40, .none) != null;
         if (blocked or w.position[1] < floor + 24) desired = R.add(R.normalize(desired), .{ 0, 2.5, 0 });
         const turn_scale: f32 = switch (w.kind) {
@@ -547,7 +586,9 @@ pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet,
             }
         }
     }
+    if (profile) |p| p.wasps_ms = profile_timer.lap() * 1000;
 
+    if (profile != null) profile_timer.reset();
     if (jet) |j| self.collideJet(j, dt, out, &n);
 
     // Shots.
@@ -594,7 +635,11 @@ pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet,
                 }
             };
         }
-        if (!consumed) if (physics.castRay(s.position, dir, length, .none)) |hit| {
+        if (!consumed) if (if (segmentAboveHubTerrain(s.position, travel))
+            physics.castRayObjects(s.position, dir, length, .none)
+        else
+            physics.castRay(s.position, dir, length, .none)) |hit|
+        {
             if (s.kind == .missile) {
                 push(out, &n, .{ .burst = hit.point });
                 var hn: usize = 0;
@@ -610,6 +655,7 @@ pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet,
         }
         s.position = R.add(s.position, travel);
     }
+    if (profile) |p| p.projectiles_ms = profile_timer.lap() * 1000;
     return n;
 }
 
@@ -941,6 +987,13 @@ test "nearby wasps steer away from each other" {
     const exact_b = separation(&sky, 1, sky.wasps[1].?.position);
     try std.testing.expectEqual(@as(f32, 1), exact_a[0]);
     try std.testing.expectEqual(@as(f32, -1), exact_b[0]);
+}
+
+test "air projectile terrain bypass stays above bounded hub ground only" {
+    try std.testing.expect(segmentAboveHubTerrain(.{ 0, 60, 0 }, .{ 10, -5, 10 }));
+    try std.testing.expect(!segmentAboveHubTerrain(.{ 0, 42, 0 }, .{ 10, 0, 10 }));
+    try std.testing.expect(!segmentAboveHubTerrain(.{ @floatCast(Mountains.inner_clearance), 60, 0 }, .{ 0, 0, 0 }));
+    try std.testing.expect(!segmentAboveHubTerrain(.{ 0, 60, 0 }, .{ 1000, 0, 0 }));
 }
 
 test "ramming a wasp and carrier damages both sides of the collision" {

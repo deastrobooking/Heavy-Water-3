@@ -9,6 +9,7 @@ const Synth = @import("Synth.zig");
 const Mixer = @import("Mixer.zig");
 pub const Director = @import("Director.zig");
 const Settings = @import("../game/Settings.zig");
+const FrameStats = @import("../engine/FrameStats.zig");
 const Audio = @This();
 
 /// Frames rendered per mixer call inside the device callback.
@@ -16,6 +17,10 @@ const chunk = 256;
 const max_channels = 8;
 
 allocator: std.mem.Allocator,
+io: std.Io,
+measure_callbacks: bool = false,
+callback_times: FrameStats = .{},
+callback_utilization: FrameStats = .{},
 clips: [Synth.sound_count][]const f32,
 mixer: Mixer,
 director: Director = .{},
@@ -27,7 +32,7 @@ stereo: [chunk * 2]f32 = undefined,
 spread: [chunk * max_channels]f32 = undefined,
 
 /// Synthesizes the clips (a few milliseconds) and opens the default playback device.
-pub fn create(allocator: std.mem.Allocator) !*Audio {
+pub fn create(allocator: std.mem.Allocator, io: std.Io, measure_callbacks: bool) !*Audio {
     const self = try allocator.create(Audio);
     errdefer allocator.destroy(self);
     var made: usize = 0;
@@ -40,7 +45,7 @@ pub fn create(allocator: std.mem.Allocator) !*Audio {
     errdefer ctx.deinit();
     try ctx.refresh();
     const device = ctx.defaultDevice(.playback) orelse return error.NoAudioDevice;
-    self.* = .{ .allocator = allocator, .clips = self.clips, .mixer = undefined, .ctx = ctx, .player = undefined, .channels = 0, .format = .f32 };
+    self.* = .{ .allocator = allocator, .io = io, .measure_callbacks = measure_callbacks, .clips = self.clips, .mixer = undefined, .ctx = ctx, .player = undefined, .channels = 0, .format = .f32 };
     self.mixer = .{ .clips = &self.clips };
     self.player = try ctx.createPlayer(device, write, .{ .user_data = self, .sample_rate = Synth.rate, .media_role = .game });
     errdefer self.player.deinit();
@@ -56,6 +61,20 @@ pub fn create(allocator: std.mem.Allocator) !*Audio {
 pub fn destroy(self: *Audio) void {
     // Stops the device thread before the mixer it reads goes away.
     self.player.deinit();
+    if (self.measure_callbacks) {
+        const elapsed = self.callback_times.summary();
+        const utilization = self.callback_utilization.summary();
+        std.log.info("AUDIOBENCH {{\"callbacks\":{d},\"callback_p50_ms\":{d:.3},\"callback_p95_ms\":{d:.3},\"callback_p99_ms\":{d:.3},\"budget_utilization_p50_pct\":{d:.2},\"budget_utilization_p95_pct\":{d:.2},\"budget_utilization_p99_pct\":{d:.2},\"sample_rate\":{d}}}", .{
+            self.callback_times.total,
+            elapsed.p50,
+            elapsed.p95,
+            elapsed.p99,
+            utilization.p50,
+            utilization.p95,
+            utilization.p99,
+            self.mixer.rate,
+        });
+    }
     self.ctx.deinit();
     for (self.clips) |c| self.allocator.free(c);
     self.allocator.destroy(self);
@@ -82,6 +101,7 @@ pub fn setVolumes(self: *Audio, s: Settings) void {
 /// convert to its sample format.
 fn write(user: ?*anyopaque, output: []u8) void {
     const self: *Audio = @ptrCast(@alignCast(user));
+    var callback_timer = if (self.measure_callbacks) mach.time.Timer.start(self.io) else undefined;
     const sample_size: usize = self.format.size();
     const frame_bytes = sample_size * self.channels;
     const frames = output.len / frame_bytes;
@@ -102,4 +122,9 @@ fn write(user: ?*anyopaque, output: []u8) void {
     }
     // Any partial frame left over stays silent.
     @memset(output[frames * frame_bytes ..], 0);
+    if (self.measure_callbacks and frames > 0) {
+        const seconds = callback_timer.lap();
+        self.callback_times.record(seconds * 1000);
+        self.callback_utilization.record(seconds / (@as(f32, @floatFromInt(frames)) / @as(f32, @floatFromInt(self.mixer.rate))) * 100);
+    }
 }

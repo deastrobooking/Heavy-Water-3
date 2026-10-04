@@ -4,6 +4,9 @@ const Chunk = @import("Chunk.zig");
 
 /// Distance between terrain vertices. Chunk grids align to even world coordinates.
 pub const spacing: f32 = Chunk.extent / Chunk.cells;
+/// Strict upper bound for procedural ground inside Mountains.inner_clearance: broad noise
+/// contributes at most 11 m, detail 4 m, and ridges 39 m, before the -11 m offset.
+pub const hub_height_upper_bound: f32 = 44;
 pub const Surface = struct { height: f32, normal: [3]f32 };
 
 /// Height and face normal of the rendered triangle under (x, z), matching Chunk.fill's

@@ -14,6 +14,7 @@ const Modifications = @import("../world/Modifications.zig");
 const options = @import("options");
 const Renderer = @This();
 const Characters = @import("Characters.zig");
+const Ranger = @import("../character/Ranger.zig");
 
 pub const mach_module = .renderer;
 pub const mach_systems = .{ .init, .render, .deinit };
@@ -73,6 +74,8 @@ io: std.Io = undefined,
 seed: u64 = 0,
 intervals: FrameStats = .{},
 cpu_times: FrameStats = .{},
+character_prepare_times: FrameStats = .{},
+character_skin_times: FrameStats = .{},
 percentiles: FrameStats.Summary = .{ .p50 = 0, .p95 = 0, .p99 = 0, .worst = 0, .mean = 0 },
 pipeline: ?*gpu.RenderPipeline = null,
 overlay_pipeline: ?*gpu.RenderPipeline = null,
@@ -313,7 +316,8 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         return;
     };
     var cpu_timer = mach.time.Timer.start(self.timer.io);
-    if (options.benchmark_frames > 0) {
+    const warmup_frames: u64 = if (options.benchmark_frontier) Flythrough.frontier_warmup_frames else Flythrough.warmup_frames;
+    if (options.benchmark_frames > 0 and !options.benchmark_frontier) {
         const frame = self.frames -| Flythrough.warmup_frames;
         self.view_count = 1;
         self.views[0].camera = Flythrough.camera(frame, options.benchmark_frames);
@@ -343,10 +347,29 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const light = Sky.at(sky_time);
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
     defer encoder.release();
-    try self.characters.prepare(self.allocator, window.device, encoder, self.props[0..self.prop_count]);
+    const measure_character_prepare = options.benchmark_frontier and self.frames >= warmup_frames and self.frames < warmup_frames + options.benchmark_frames;
+    var character_timer: mach.time.Timer = undefined;
+    if (measure_character_prepare) character_timer = mach.time.Timer.start(self.timer.io);
+    const character_views = @max(1, @min(self.view_count, max_views));
+    var character_visible = [_]bool{false} ** Ranger.capacity;
+    for (self.props[0..self.prop_count]) |prop| {
+        const descriptor = prop.character orelse continue;
+        if (descriptor.id >= Ranger.capacity) continue;
+        for (0..character_views) |i| {
+            const view = self.views[i];
+            if (view.hide_owner != 0 and view.hide_owner == prop.owner) continue;
+            const rect = viewRect(i, character_views);
+            if (characterInView(view.camera, rect.w / rect.h, descriptor.pose.feet)) {
+                character_visible[descriptor.id] = true;
+                break;
+            }
+        }
+    }
+    try self.characters.prepare(self.allocator, self.timer.io, window.device, encoder, self.props[0..self.prop_count], character_visible, if (measure_character_prepare) &self.character_skin_times else null);
+    if (measure_character_prepare) self.character_prepare_times.record(character_timer.lap() * 1000);
     // Catalog meshes installed after startup (deferred builds, reloads) upload under a budget.
     const late = self.scene.uploadMeshes(window.device, window.queue, options.asset_upload);
-    if (options.benchmark_frames == 0 or self.frames >= Flythrough.warmup_frames) {
+    if (options.benchmark_frames == 0 or self.frames >= warmup_frames) {
         self.peak_late_upload = @max(self.peak_late_upload, late);
         self.total_late_uploads += self.scene.late_uploads;
         if (self.scene.late_uploads == 1) self.largest_late_mesh = @max(self.largest_late_mesh, late);
@@ -471,7 +494,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             }
         }.done);
     }
-    if (options.benchmark_frames == 0 or self.frames >= Flythrough.warmup_frames) {
+    if (options.benchmark_frames == 0 or self.frames >= warmup_frames) {
         self.intervals.record(elapsed * 1000);
         self.cpu_times.record(cpu_timer.read() * 1000);
         if (self.scene.active_missing > 0) self.underfilled_frames += 1;
@@ -491,7 +514,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     }
     if (self.frames % 30 == 0) self.percentiles = self.intervals.summary();
     self.frames += 1;
-    if (options.benchmark_frames > 0 and self.frames >= options.benchmark_frames + Flythrough.warmup_frames) {
+    if (options.benchmark_frames > 0 and self.frames >= options.benchmark_frames + warmup_frames) {
         self.reportBenchmark();
         core.exit();
     }
@@ -500,6 +523,38 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         std.log.info("Smoke complete: {d} frames, {d} submitted objects, {d} simulation ticks", .{ self.frames, objects, self.tick });
         core.exit();
     }
+}
+
+/// Coarse skinned-character visibility shared across every split-screen view. Character meshes
+/// are deformable CPU buffers, so reject off-screen actors before spending time skinning them.
+fn characterInView(camera: Camera, aspect: f32, feet: [3]f32) bool {
+    const eye = camera.position;
+    const dx = feet[0] - eye.x();
+    const dy = feet[1] + 1.0 - eye.y();
+    const dz = feet[2] - eye.z();
+    const f = camera.forward();
+    const z = dx * f.x() + dy * f.y() + dz * f.z();
+    if (z < -1.5) return false;
+    const right_x = @cos(camera.yaw);
+    const right_z = -@sin(camera.yaw);
+    const x = dx * right_x + dz * right_z;
+    const up_x = f.y() * right_z;
+    const up_y = f.z() * right_x - f.x() * right_z;
+    const up_z = -f.y() * right_x;
+    const y = dx * up_x + dy * up_y + dz * up_z;
+    const depth = @max(z, 0.1);
+    const half_y = depth * @tan(camera.fov / 2);
+    const half_x = half_y * aspect;
+    return @abs(x) <= half_x + 1.1 and @abs(y) <= half_y + 1.35;
+}
+
+test "character visibility includes body bounds and respects camera direction" {
+    const camera: Camera = .{ .position = mach.math.vec3(0, 1, -10), .yaw = 0, .pitch = 0 };
+    try std.testing.expect(characterInView(camera, 1, .{ 0, 0, 0 }));
+    try std.testing.expect(!characterInView(camera, 1, .{ 0, 0, -20 }));
+    try std.testing.expect(!characterInView(camera, 1, .{ 40, 0, 0 }));
+    const turned = Camera{ .position = mach.math.vec3(0, 1, -10), .yaw = std.math.pi / 2, .pitch = 0 };
+    try std.testing.expect(characterInView(turned, 1, .{ 10, 0, -10 }));
 }
 
 fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usize) void {
@@ -616,10 +671,11 @@ fn reportBenchmark(self: *Renderer) void {
         self.pack_installed,
         self.pack_ready_frame,
     });
-    std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d},\"arbor_detail_frames\":{d},\"arbor_proxy_frames\":{d}}}", .{
-        self.seed,                         Seed.generator_version,          self.intervals.total,           interval.p50,            interval.p95,              interval.p99,                 cpu.p50,               cpu.p95,                    cpu.p99,
-        self.scene.stats.generated,        self.scene.stats.canceled,       self.scene.uploads,             self.scene.evictions,    self.scene.center_changes, self.scene.peak_upload_bytes, options.upload_budget, self.scene.stats.cpu_bytes, Scene.gpu_pool_bytes,
-        self.scene.stats.pool_allocations, self.scene.gpu_pool_allocations, self.scene.peak_resident_count, self.underfilled_frames, self.arbor_detail_frames,  self.arbor_proxy_frames,
+    const character = self.character_prepare_times.summary();
+    const skin = self.character_skin_times.summary();
+    std.log.info("BENCHMARK {{\"seed\":{d},\"generator\":{d},\"frames\":{d},\"views\":{d},\"frontier\":{s},\"interval_p50_ms\":{d:.3},\"interval_p95_ms\":{d:.3},\"interval_p99_ms\":{d:.3},\"cpu_p50_ms\":{d:.3},\"cpu_p95_ms\":{d:.3},\"cpu_p99_ms\":{d:.3},\"character_prepare_p50_ms\":{d:.3},\"character_prepare_p95_ms\":{d:.3},\"character_prepare_p99_ms\":{d:.3},\"character_skin_p50_ms\":{d:.3},\"character_skin_p95_ms\":{d:.3},\"character_skin_p99_ms\":{d:.3},\"generated\":{d},\"canceled\":{d},\"uploads\":{d},\"evictions\":{d},\"chunk_crossings\":{d},\"peak_upload_bytes\":{d},\"upload_budget_bytes\":{d},\"cpu_pool_bytes\":{d},\"gpu_terrain_pool_bytes\":{d},\"pool_allocations\":{d},\"gpu_pool_allocations\":{d},\"peak_resident_chunks\":{d},\"underfilled_frames\":{d},\"arbor_detail_frames\":{d},\"arbor_proxy_frames\":{d}}}", .{
+        self.seed,                  Seed.generator_version,    self.intervals.total, self.view_count,      if (options.benchmark_frontier) "true" else "false", interval.p50,                 interval.p95,          interval.p99,               cpu.p50,              cpu.p95,                           cpu.p99,                         character.p50,                  character.p95,           character.p99,            skin.p50,                skin.p95, skin.p99,
+        self.scene.stats.generated, self.scene.stats.canceled, self.scene.uploads,   self.scene.evictions, self.scene.center_changes,                           self.scene.peak_upload_bytes, options.upload_budget, self.scene.stats.cpu_bytes, Scene.gpu_pool_bytes, self.scene.stats.pool_allocations, self.scene.gpu_pool_allocations, self.scene.peak_resident_count, self.underfilled_frames, self.arbor_detail_frames, self.arbor_proxy_frames,
     });
 }
 

@@ -73,6 +73,9 @@ pub const Config = struct {
     /// Rear nozzle thrust (N) at full forward, and with boost.
     cruise_thrust: f32 = 9_000,
     boost_thrust: f32 = 18_000,
+    /// A full capacitor sustains boost for this long; passive recharge is slower than pad recharge.
+    boost_duration: f32 = 2.8,
+    boost_recharge_time: f32 = 7.0,
     ride_height: f32 = 1.1,
     min_ride: f32 = 0.5,
     max_ride: f32 = 6,
@@ -123,6 +126,8 @@ pub const HoverCar = struct {
     /// Rotor angle (rad) for rendering spinning blades.
     rotor_angle: f32 = 0,
     grounded: bool = false,
+    boost_charge: f32 = 1,
+    boost_active: bool = false,
     /// Integrated attitude error (trim), clamped.
     trim_x: f32 = 0,
     trim_z: f32 = 0,
@@ -240,7 +245,13 @@ pub const HoverCar = struct {
 
         // Propulsion: rear nozzles push along the heading, flattened to the horizontal.
         const flat_fwd = Vec3.init(fwd.x, 0, fwd.z).normalizeOr(Vec3.unit_z);
-        const thrust = if (input.boost and input.forward > 0) cfg.boost_thrust else cfg.cruise_thrust;
+        self.boost_active = input.boost and input.forward > 0 and self.boost_charge > 0;
+        if (self.boost_active) {
+            self.boost_charge = @max(0, self.boost_charge - dt / cfg.boost_duration);
+        } else if (!input.boost or input.forward <= 0) {
+            self.boost_charge = @min(1, self.boost_charge + dt / cfg.boost_recharge_time);
+        }
+        const thrust = if (self.boost_active) cfg.boost_thrust else cfg.cruise_thrust;
         b.addForce(flat_fwd.scale(input.forward * thrust));
         b.addForce(right.scale(input.strafe * cfg.cruise_thrust * 0.5));
 
@@ -393,10 +404,13 @@ test "drag caps cruise and boost speeds" {
     const ground: Flat = .{ .height = 0 };
     for (0..60 * 20) |_| car.step(1.0 / 60.0, .{ .forward = 1 }, &ground, Flat.probe);
     const cruise = car.body.vel.length();
-    for (0..60 * 20) |_| car.step(1.0 / 60.0, .{ .forward = 1, .boost = true }, &ground, Flat.probe);
+    for (0..60 * 3) |_| car.step(1.0 / 60.0, .{ .forward = 1, .boost = true }, &ground, Flat.probe);
     const boost = car.body.vel.length();
     try testing.expect(cruise > 20 and cruise < 35);
     try testing.expect(boost > cruise + 5 and boost < 50);
+    try testing.expectEqual(@as(f32, 0), car.boost_charge);
+    for (0..60 * 7) |_| car.step(1.0 / 60.0, .{ .forward = 1 }, &ground, Flat.probe);
+    try testing.expect(car.boost_charge > 0.95);
 }
 
 test "a fast car follows rolling ground without losing it" {

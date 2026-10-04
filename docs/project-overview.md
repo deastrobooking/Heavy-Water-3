@@ -16,11 +16,12 @@ See [World and Systems](world.md), [Arbor Genomes and Sap](arbors.md), [Canopy C
 
 - Explore on foot, climb, wall-jump, grapple, hover, fly, glide, dash, swim, and ride a hoverboard.
 - Create and customize a ranger, switch between first- and third-person views, and play local split-screen with up to four players.
+- Fabricate one of three hover racers and run the elevated sprint loop, chaining its ramps, jump gaps, checkpoints, and charge pads.
 - Build and wire machines, ride a powered rover, place sap beacons, add bridges, and capture machine circuits as reusable prefabs.
 - Solve shrines, salvage relics, trade at markets, and save or restore your constructed world.
 - Grow the district through procedural Arbors, powered Rootsong networks, and player-built connections.
 
-The planned Hive conflict, recruitable synthetic allies and bio-synth companions, loot progression, and full combat campaign are design work in progress. Isolated combat and faction prototypes are not yet connected to the playable Sandbox encounter loop. See [The Hive War: Gameplay Direction](gameplay_and_hive_war.md) for the concept and [the roadmap](roadmap.md) for implementation status.
+The Hive conflict is connected to the playable campaign: nests spread corruption, ground units and air wings attack, carriers can be assaulted in stages, and story flags drive the quest log through the end state. Combat pacing, balance, and four-player combat readability still need hands-on playtesting. Recruitable bio-synth companions and the broader loot progression remain future work. See [The Hive War: Gameplay Direction](gameplay_and_hive_war.md) and [the roadmap](roadmap.md) for current limits.
 
 ## Controls
 

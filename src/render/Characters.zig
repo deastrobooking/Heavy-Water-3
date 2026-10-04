@@ -1,11 +1,13 @@
 //! One persistent CPU skinning/GPU vertex buffer per character, shared by all local views.
 const std = @import("std");
+const mach = @import("mach");
 const gpu = @import("mach").gpu;
 const Ranger = @import("../character/Ranger.zig");
 const World = @import("../world/World.zig");
 const GpuMesh = @import("GpuMesh.zig");
 const Instance = @import("StreamingScene.zig").Instance;
 const R = @import("../physics/Rotation.zig");
+const FrameStats = @import("../engine/FrameStats.zig");
 const Characters = @This();
 const Slot = struct { ranger: Ranger, gpu_mesh: GpuMesh };
 slots: [Ranger.capacity]?Slot = @splat(null),
@@ -13,13 +15,16 @@ visible: [Ranger.capacity]bool = @splat(false),
 owners: [Ranger.capacity]u8 = @splat(0),
 instances: ?*gpu.Buffer = null,
 
-pub fn prepare(self: *Characters, a: std.mem.Allocator, device: *gpu.Device, encoder: *gpu.CommandEncoder, props: []const World.Prop) !void {
+pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu.Device, encoder: *gpu.CommandEncoder, props: []const World.Prop, visible_ids: [Ranger.capacity]bool, skin_times: ?*FrameStats) !void {
     self.visible = @splat(false);
+    var skin_timer = if (skin_times != null) mach.time.Timer.start(io) else undefined;
+    var skin_ns: u64 = 0;
     var transforms: [Ranger.capacity]Instance = @splat(.{ .translation_scale = .{ 0, 0, 0, 1 }, .tint = .{ 1, 1, 1, 1 } });
     for (props) |prop| {
         const descriptor = prop.character orelse continue;
         const i = descriptor.id;
-        if (i >= Ranger.capacity) continue;
+        if (i >= Ranger.capacity or !visible_ids[i]) continue;
+        var upload_vertices = false;
         if (self.slots[i] == null or !Ranger.sameAppearance(self.slots[i].?.ranger.profile, descriptor.profile)) {
             // Finish the replacement before releasing the live appearance.
             const ranger = try Ranger.init(a, descriptor.profile);
@@ -30,16 +35,20 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, device: *gpu.Device, enc
                 old.ranger.deinit(a);
             }
             self.slots[i] = .{ .ranger = ranger, .gpu_mesh = mesh };
+            upload_vertices = true;
         }
         const slot = &self.slots[i].?;
-        slot.ranger.update(descriptor.pose);
-        encoder.writeBuffer(slot.gpu_mesh.vertices, 0, slot.ranger.mesh.vertices);
+        if (skin_times != null) skin_timer.reset();
+        upload_vertices = slot.ranger.update(descriptor.pose) or upload_vertices;
+        if (skin_times != null) skin_ns += skin_timer.lapPrecise();
+        if (upload_vertices) encoder.writeBuffer(slot.gpu_mesh.vertices, 0, slot.ranger.mesh.vertices);
         self.visible[i] = true;
         self.owners[i] = prop.owner;
         transforms[i] = .{ .translation_scale = descriptor.pose.feet ++ [_]f32{1}, .tint = .{ 1, 1, 1, 1 }, .rotation = R.axisAngle(.{ 0, 1, 0 }, descriptor.pose.yaw) };
     }
     if (self.instances == null) self.instances = device.createBuffer(&.{ .label = "character transforms", .size = @sizeOf(@TypeOf(transforms)), .usage = .{ .vertex = true, .copy_dst = true } });
     encoder.writeBuffer(self.instances.?, 0, &transforms);
+    if (skin_times) |stats| stats.record(@as(f32, @floatFromInt(skin_ns)) / 1_000_000);
 }
 pub fn draw(self: *const Characters, pass: *gpu.RenderPassEncoder, hide_owner: u8) void {
     const instances = self.instances orelse return;

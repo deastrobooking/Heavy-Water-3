@@ -1,4 +1,5 @@
 const std = @import("std");
+const mach = @import("mach");
 const math = @import("mach").math;
 const Physics = @import("../physics/Physics.zig");
 const Terrain = @import("../procedural/Terrain.zig");
@@ -41,10 +42,29 @@ const Enemies = @import("Enemies.zig");
 const Combat = @import("Combat.zig");
 const Fabricator = @import("Fabricator.zig");
 const Frontier = @import("Frontier.zig");
+const Racing = @import("Racing.zig");
 const Hangar = @import("Hangar.zig");
 const Skies = @import("Skies.zig");
 const Rig = @import("Rig.zig");
 const Specials = @import("Specials.zig");
+pub const BenchmarkStage = enum { players, machines, city_life, frontier, frontier_setup, air_war, carriers, wasps, air_projectiles, hive_ai, arsenal, physics, post_step };
+pub const BenchmarkMetric = struct {
+    total: u64 = 0,
+    sum_ms: f64 = 0,
+    worst_ms: f32 = 0,
+    fn record(self: *BenchmarkMetric, ms: f32) void {
+        self.total += 1;
+        self.sum_ms += ms;
+        self.worst_ms = @max(self.worst_ms, ms);
+    }
+};
+pub const BenchmarkMetrics = struct {
+    stages: [@typeInfo(BenchmarkStage).@"enum".fields.len]BenchmarkMetric = @splat(.{}),
+    pub fn record(self: *BenchmarkMetrics, stage: BenchmarkStage, ms: f32) void {
+        self.stages[@intFromEnum(stage)].record(ms);
+    }
+};
+pub const BenchmarkTiming = struct { io: std.Io, metrics: *BenchmarkMetrics };
 pub const Caves = @import("../procedural/Caves.zig");
 /// `closing`: removed from the road graph, standing until the traffic on it has crossed.
 pub const PlacedBridge = struct { edge: District.Edge, parts: District.BridgeParts, collider: Physics.MeshCollider, closing: bool = false };
@@ -347,6 +367,7 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.root_groups = Rootsong.groups(sap_tree_count, roots);
     const city = try District.geometry(&catalog.district);
     self.district_collider = try District.collider(allocator, &self.physics, city.slice(), world_flag);
+    _ = try Racing.Course.init(seed).createCollider(allocator, &self.physics);
     const half = self.crateHalf();
     for (crate_offsets) |offset| {
         const x = spawn[0] + offset[0];
@@ -877,6 +898,15 @@ fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
 }
 
 pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Actions, dt: f32) !void {
+    try self.stepTimed(camera, raw_input, raw_actions, dt, null);
+}
+
+pub fn stepMeasured(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Actions, dt: f32, io: std.Io, metrics: *BenchmarkMetrics) !void {
+    try self.stepTimed(camera, raw_input, raw_actions, dt, .{ .io = io, .metrics = metrics });
+}
+
+fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Actions, dt: f32, timing: ?BenchmarkTiming) !void {
+    var stage_timer = if (timing) |profile| mach.time.Timer.start(profile.io) else undefined;
     if (raw_actions.open_creator and self.seated == null and !self.creator.open) self.creator.begin(self.profile);
     if (raw_actions.toggle_view) self.view = if (self.view == .first) .third else .first;
     // The creator, conversations and tinker panels freeze the character and every tool.
@@ -908,14 +938,22 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
         if (actions.leave_jet) Frontier.leaveJet(self, camera);
         primary = false;
     }
+    if (timing != null) stage_timer.reset();
     if (self.seated == null and self.garage.piloting == null and !self.hangar.piloting) self.player.step(&self.physics, camera, input, dt);
     if (!frozen) self.body_yaw = camera.yaw;
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
     for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);
+    if (timing) |profile| profile.metrics.record(.players, stage_timer.lap() * 1000);
+    if (timing != null) stage_timer.reset();
     self.stepMachines(dt);
     self.checkShrines();
+    if (timing) |profile| profile.metrics.record(.machines, stage_timer.lap() * 1000);
+    if (timing != null) stage_timer.reset();
     self.stepLife(dt);
-    Frontier.step(self, camera, input, actions, frozen, dt);
+    if (timing) |profile| profile.metrics.record(.city_life, stage_timer.lap() * 1000);
+    if (timing != null) stage_timer.reset();
+    Frontier.step(self, camera, input, actions, frozen, dt, timing);
+    if (timing) |profile| profile.metrics.record(.frontier, stage_timer.lap() * 1000);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
         // Spring the held crate toward a point in front of the eye; physics still resolves contacts.
@@ -931,7 +969,10 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
         const gap = goal.sub(&math.vec3(p[0], p[1], p[2]));
         if (gap.dot(&gap) > 4 * 4) self.release();
     }
+    if (timing != null) stage_timer.reset();
     self.physics.step(dt);
+    if (timing) |profile| profile.metrics.record(.physics, stage_timer.lap() * 1000);
+    if (timing != null) stage_timer.reset();
     self.tick += 1;
     if (self.market.update(self.tick)) {
         const beat = Frontier.marketDay(self);
@@ -1012,6 +1053,7 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
         // The arsenal fires from `Frontier.step`, from the held triggers.
         .weapon => {},
     }
+    if (timing) |profile| profile.metrics.record(.post_step, stage_timer.lap() * 1000);
 }
 
 /// Creator: face the character from the front. Third person: behind and above the eyes,
@@ -1648,6 +1690,10 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     if (out.len == 0) return 0;
     out[0] = .{ .mesh = self.catalog.content.district, .transform = .{}, .tint = .{ 1, 1, 1, 1 } };
     var n: usize = 1;
+    if (n < out.len) {
+        out[n] = .{ .mesh = self.catalog.content.raceway, .transform = .{}, .tint = .{ 1, 1, 1, 1 } };
+        n += 1;
+    }
     for (self.bridges) |maybe| if (maybe) |bridge| {
         for (bridge.parts.slice()) |p| {
             if (n == out.len) return n;

@@ -2,6 +2,7 @@
 //! (`Collectibles`), the fabricator kiosk, the Hive (`Enemies`) and the arsenal (`Combat`). The
 //! Sandbox owns the state; these functions run inside its step, publish and restore.
 const std = @import("std");
+const mach = @import("mach");
 const math = @import("mach").math;
 const Physics = @import("../physics/Physics.zig");
 const Camera = @import("../world/Camera.zig");
@@ -412,7 +413,8 @@ fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
 }
 
 /// The frontier part of a fixed step. `frozen` (menus, talks) pauses triggers, not the world.
-pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Actions, frozen: bool, dt: f32) void {
+pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Actions, frozen: bool, dt: f32, timing: ?Sandbox.BenchmarkTiming) void {
+    var phase_timer = if (timing) |profile| mach.time.Timer.start(profile.io) else undefined;
     stepCaves(sb);
     // Hover cars: the piloted one takes P1's movement keys; parked ones idle.
     sb.garage.step(&sb.physics, if (frozen) .{} else Garage.controls(input), dt);
@@ -439,18 +441,24 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         } else sb.say("+1 {s} ({d})", .{ Collectibles.label(p.kind), sb.progress.count(p.kind) });
         sb.progress.setFlag("collected");
     }
+    if (timing) |profile| profile.metrics.record(.frontier_setup, phase_timer.lap() * 1000);
 
     // The Kestrel and the air war.
+    if (timing != null) phase_timer.reset();
     sb.hangar.step(&sb.physics, if (sb.hangar.piloting and !frozen) Hangar.controls(input, camera.*) else .{}, dt);
-    stepSkies(sb, camera, frozen, dt);
+    stepSkies(sb, camera, frozen, dt, timing);
+    if (timing) |profile| profile.metrics.record(.air_war, phase_timer.lap() * 1000);
 
     // The Hive.
+    if (timing != null) phase_timer.reset();
     var who: [Sandbox.max_players]Enemies.Target = undefined;
     var events: [32]Enemies.Event = undefined;
     const count = sb.enemies.step(&sb.physics, targets(sb, &who), dt, &events);
     for (events[0..@min(count, events.len)]) |e| hive(sb, e, camera);
+    if (timing) |profile| profile.metrics.record(.hive_ai, phase_timer.lap() * 1000);
 
     // Arsenals: P1 with the weapon tool on foot, guests with the right trigger.
+    if (timing != null) phase_timer.reset();
     sb.combat.tick(dt);
     const armed = !frozen and sb.tools.tool == .weapon and sb.garage.piloting == null and sb.seated == null;
     const aim_camera = sb.aimCameraPublic(camera.*);
@@ -493,6 +501,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
     }
     stepSpecials(sb, camera, actions, frozen, dt);
+    if (timing) |profile| profile.metrics.record(.arsenal, phase_timer.lap() * 1000);
 }
 
 fn rangerAirShots(sb: *Sandbox, origin: V, direction: V, events: []const Combat.Event) void {
@@ -558,7 +567,7 @@ fn specialEvents(sb: *Sandbox, events: []const Specials.Event, camera: *Camera) 
     };
 }
 
-fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
+fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sandbox.BenchmarkTiming) void {
     var jet: ?Skies.Jet = null;
     if (sb.hangar.fighter) |f| if (sb.hangar.piloting) {
         jet = .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .velocity = .{ f.body.vel.x, f.body.vel.y, f.body.vel.z }, .forward = .{ f.forward().x, f.forward().y, f.forward().z }, .airborne = !f.grounded };
@@ -570,7 +579,16 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
     var n: usize = 0;
     if (jet) |j| if (!frozen) sb.skies.fireJetUpgraded(&sb.enemies, j, sb.hangar.guns(), sb.trigger.fire, sb.trigger.alt, dt, sb.progress.kestrel_levels, &events, &n);
     const fired = @min(n, events.len);
-    const count = sb.skies.step(&sb.physics, &sb.enemies, jet, &on_foot, dt, events[fired..]);
+    var count: usize = 0;
+    if (timing) |profile| {
+        const measured = sb.skies.stepProfiled(&sb.physics, &sb.enemies, jet, &on_foot, dt, events[fired..], profile.io);
+        count = measured.events;
+        profile.metrics.record(.carriers, measured.timing.carriers_ms);
+        profile.metrics.record(.wasps, measured.timing.wasps_ms);
+        profile.metrics.record(.air_projectiles, measured.timing.projectiles_ms);
+    } else {
+        count = sb.skies.step(&sb.physics, &sb.enemies, jet, &on_foot, dt, events[fired..]);
+    }
     for (events[0..@min(fired + count, events.len)]) |e| switch (e) {
         .sound => |s| switch (s.kind) {
             .cannon => sb.cuePitch(.zap, null, 1.7),

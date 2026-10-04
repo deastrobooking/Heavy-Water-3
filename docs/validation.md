@@ -506,6 +506,13 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - Native Apple M3 Pro / Metal, `MTL_DEBUG_LAYER=1`, ReleaseSafe, 300 frames with audio enabled: clean completion, no Metal validation messages, 395 simulation ticks. The run fabricated and flew the Skimmer 18.7 m; fabricated the Kestrel, lifted off and downed a wasp with its cannon; exercised saber, sniper, grenade and slam combat; and ran four local players through split-screen and co-op movement.
 - This smoke did not fly all three car types, dogfight and land the Kestrel, exercise every firearm and guard/parry action, use a physical controller, or listen through the sound set. Those hands-on checks remain open; audio-device startup is verified, sound quality is not.
 
+## Four-player frontier combat and performance — 2026-10-04
+
+- `tools/benchmark.py --frontier --frames 600` now runs four local players, scripts 360 ground-fight and 390 air-combat simulation ticks, records weapon-fire and target counts, and measures simulation stages, character skinning, rendering, presentation, and CoreAudio callbacks.
+- Apple M3 Pro / Metal, ReleaseFast: render CPU P50/P95/P99 **1.76 / 2.72 / 3.03 ms**; character skinning **0.86 / 1.79 / 2.05 ms**; simulation **3.55 / 6.27 / 6.72 ms**; presentation interval **20.85 / 20.91 / 20.93 ms**. Four views remained covered, with zero underfilled frames and peak terrain upload **299.4 KiB / 320 KiB**.
+- Audio callback P99 was **0.197 ms**, or **1.85%** of its real-time budget. All render, character, streaming, combat-coverage, and audio checks pass. The 4 ms simulation P99 target still fails.
+- Profiling isolated terrain queries in projectile raycasts as a repeated air-war cost. Airborne segments proven above the hub's conservative height bound now raycast bodies and meshes without marching the terrain; ground-level and mountain-region shots retain full terrain collision. The detailed projectile-stage mean fell from **1.37 ms** in the 240-frame profile to **0.91 ms** in its 240-frame comparison; the full 600-frame run measured **0.70 ms** mean and **2.25 ms** maximum. Wasp terrain look-ahead also reuses its samples for one fixed step.
+
 ## Balance tuning foundation — 2026-10-03
 
 - Gathered the current encounter and balance values into named module tables: Hive stats and spawn pacing (`Enemies`), wasp/carrier/Kestrel combat (`Skies`), player damage and survivability (`Combat`, `Weapon`, `Firearms`), pickup placement counts (`Collectibles`), per-car handling (`Designs`), and Kestrel mass/camera values (`Hangar`). Fabricator recipes were already a single table; hover and jet flight parameters remain grouped in their `Config` structs.
@@ -548,3 +555,10 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 
 - Ranger profiles now select masculine or feminine presentation in the creator. The game bakes analytic eye, iris, brow, and mouth decals into a denser face mesh, while head and body proportions vary with the selected presentation. Legacy profile JSON without the new field defaults to masculine.
 - Skyline towers add inset glass bays and open observatory crowns. District generator version 3 records the updated architecture rules. Tests assert glass detailing, deterministic placement, and district clearance. The ReleaseSafe 273-test run and four-player runtime smoke above passed with this upgrade.
+
+## Hover racer and elevated sprint circuit — 2026-10-04
+
+- The seeded elevated circuit uses the same generated route for its render mesh, ordered checkpoint gates, charge pads, and static physics collider. The road includes ramp grades and two mesh gaps; racers carry a finite boost capacitor that recharges over time and at pads. The garage HUD reports charge, gate progress, and lap time.
+- Racer meshes add a front splitter, side intake louvers, canopy spines, and a three-fin diffuser. The course and collider raycast, checkpoint order, boost depletion/recharge, and app integration are covered by the test suite.
+- Full Debug test suite passed. `python3 tools/zig.py build check --cache-dir .zig-cache-racer-check` passed. A ReleaseSafe 180-frame smoke run on Apple M3 Pro completed all stages, including hover-car fabrication and driving, four-player split-screen, save/restore, and city traffic.
+- True driveable vertical loops still need surface adhesion and gravity transitions; the current loop is a closed elevated sprint course.

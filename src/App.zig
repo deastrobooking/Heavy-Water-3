@@ -28,6 +28,7 @@ const Screens = @import("ui/Screens.zig");
 const Settings = @import("game/Settings.zig");
 const Dialogue = @import("game/Dialogue.zig");
 const Audio = @import("audio/Audio.zig");
+const FrameStats = @import("engine/FrameStats.zig");
 const App = @This();
 const R3 = @import("physics/Rotation.zig");
 
@@ -50,6 +51,15 @@ allocator: std.mem.Allocator = undefined,
 io: std.Io = undefined,
 thread: mach.Thread = undefined,
 timer: mach.time.Timer = undefined,
+benchmark_sim: FrameStats = .{},
+benchmark_substeps: Sandbox.BenchmarkMetrics = .{},
+benchmark_tick: u64 = 0,
+benchmark_ground_steps: u64 = 0,
+benchmark_air_steps: u64 = 0,
+benchmark_ground_fire_steps: u64 = 0,
+benchmark_air_fire_steps: u64 = 0,
+benchmark_ground_targets: u64 = 0,
+benchmark_air_targets: u64 = 0,
 window: mach.ObjectID = undefined,
 show_metrics: bool = true,
 culling: bool = true,
@@ -132,6 +142,11 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     if (options.pack_stress > 0) try self.writeStressPack(&world.catalog);
     if (options.hot_reload or options.reload_smoke) try self.setupReload();
     self.sandbox.enableLife();
+    if (options.benchmark_frontier) {
+        // Keep all local-player rigs, cameras, simulation, and combat active in the benchmark.
+        for (0..3) |i| self.sandbox.joinGuest(i);
+        self.setupFrontierBenchmark();
+    }
     self.importPrefabs();
     self.loadMods();
     if (options.character_showcase > 0) {
@@ -155,8 +170,8 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     // A person playing starts at the title screen (not in unattended smoke, benchmark, or
     // showcase runs); "new game" then opens the character creator.
     self.interactive = options.smoke_frames == 0 and options.benchmark_frames == 0 and options.showcase == 0 and options.character_showcase == 0;
-    if (options.audio and options.benchmark_frames == 0) {
-        self.audio = Audio.create(allocator) catch |err| blk: {
+    if (options.audio and (options.benchmark_frames == 0 or options.benchmark_frontier)) {
+        self.audio = Audio.create(allocator, io, options.benchmark_frontier) catch |err| blk: {
             std.log.warn("Audio unavailable ({s}); running silent", .{@errorName(err)});
             break :blk null;
         };
@@ -172,6 +187,142 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
 
 fn uiSound(self: *App, event: Audio.Director.Ui) void {
     if (self.audio) |a| Audio.Director.ui(a, event);
+}
+
+fn setupFrontierBenchmark(self: *App) void {
+    const sb = &self.sandbox;
+    const Combat = @import("game/Combat.zig");
+    sb.progress.fighter = true;
+    sb.progress.weapons = (@as(u16, 1) << @intFromEnum(Combat.WeaponKind.blaster)) |
+        (@as(u16, 1) << @intFromEnum(Combat.WeaponKind.machine_gun));
+    @import("game/Frontier.zig").refresh(sb);
+    const carrier = sb.skies.carriers[0].position();
+    sb.enemies.nests[0].position = .{ carrier[0], @import("procedural/Terrain.zig").surface(sb.seed, carrier[0], carrier[2]).height, carrier[2] };
+    sb.combat.arsenals[0].active = .machine_gun;
+    sb.tools.tool = .weapon;
+    sb.player.mode = .walk;
+    sb.view = .first;
+}
+
+/// Alternates a stationary ranger fight at a seeded nest with a scripted Kestrel attack run.
+/// Each section drives the production Sandbox step, enemy AI, weapons, aircraft and audio cues.
+fn driveFrontierBenchmark(self: *App) void {
+    const period: u64 = 360;
+    const section: u64 = 180;
+    const cycle = self.benchmark_tick % period;
+    if (cycle == 0) self.setupFrontierGround();
+    if (cycle == section) self.setupFrontierAir();
+
+    self.engine.input = .{};
+    const warmup: u64 = if (options.benchmark_frontier) @import("engine/Flythrough.zig").frontier_warmup_frames else @import("engine/Flythrough.zig").warmup_frames;
+    const measuring = self.rendered_frames_seen >= warmup and self.rendered_frames_seen < warmup + options.benchmark_frames;
+    if (cycle < section) {
+        const fire = cycle % 36 < 26;
+        self.sandbox.trigger = .{ .fire = fire };
+        if (measuring) {
+            self.benchmark_ground_steps += 1;
+            self.benchmark_ground_fire_steps += @intFromBool(fire);
+        }
+    } else {
+        const phase_tick = cycle - section;
+        self.engine.input.forward = 1;
+        self.engine.input.fast = false;
+        self.engine.input.jump = phase_tick < 24;
+        const fire = phase_tick % 40 < 32;
+        const alt = phase_tick % 120 < 75;
+        self.sandbox.trigger = .{ .fire = fire, .alt = alt };
+        if (measuring) {
+            self.benchmark_air_steps += 1;
+            self.benchmark_air_fire_steps += @intFromBool(fire);
+        }
+    }
+    self.benchmark_tick += 1;
+}
+
+fn setupFrontierGround(self: *App) void {
+    const sb = &self.sandbox;
+    if (sb.hangar.piloting) @import("game/Frontier.zig").leaveJet(sb, &self.engine.camera);
+    const nest = sb.enemies.nests[0].position;
+    const toward: [3]f32 = @import("physics/Rotation.zig").normalize(.{ nest[0] - Sandbox.spawn[0], 0, nest[2] - Sandbox.spawn[2] });
+    const x = nest[0] - toward[0] * 38;
+    const z = nest[2] - toward[2] * 38;
+    const y = @import("procedural/Terrain.zig").surface(sb.seed, x, z).height;
+    sb.player.mode = .walk;
+    sb.player.feet = .{ x, y, z };
+    sb.player.velocity = .{ 0, 0, 0 };
+    sb.body_yaw = std.math.atan2(toward[0], toward[2]);
+    self.engine.camera.yaw = sb.body_yaw;
+    self.engine.camera.pitch = -0.015;
+    self.engine.camera.position = mach.math.vec3(x, y + 1.6, z);
+    sb.view = .first;
+    sb.combat.arsenals[0].active = .machine_gun;
+    sb.enemies.units = @splat(null);
+    for (0..6) |i| {
+        const side = (@as(f32, @floatFromInt(i % 3)) - 1) * 3.5;
+        const distance: f32 = 15 + @as(f32, @floatFromInt(i / 3)) * 5;
+        const px = x + toward[0] * distance - toward[2] * side;
+        const pz = z + toward[2] * distance + toward[0] * side;
+        const py = @import("procedural/Terrain.zig").surface(sb.seed, px, pz).height;
+        sb.enemies.units[i] = .{
+            .kind = if (i < 3) .trooper else .drone,
+            .nest = 0,
+            .position = .{ px, py + (if (i < 3) @as(f32, 0) else 8), pz },
+            .health = if (i < 3) 220 else 120,
+            .state = .hunt,
+            .target = 0,
+            .cooldown = 0.2,
+            .orbit = @as(f32, @floatFromInt(i)) * 1.2,
+        };
+    }
+    self.benchmark_ground_targets += 6;
+}
+
+fn setupFrontierAir(self: *App) void {
+    const sb = &self.sandbox;
+    const carrier = sb.skies.carriers[0].position();
+    const nest = sb.enemies.nests[0].position;
+    const forward = @import("physics/Rotation.zig").normalize(R3.sub(carrier, nest));
+    const entry = R3.add(nest, .{ -forward[0] * 34, 55, -forward[2] * 34 });
+    const yaw = std.math.atan2(forward[0], forward[2]);
+    sb.hangar.place(sb.seed, Sandbox.spawn, .{ entry[0], entry[1], entry[2] }, yaw);
+    const fighter = &sb.hangar.fighter.?;
+    fighter.body.vel = @import("character/math.zig").Vec3.init(forward[0] * 38, forward[1] * 38, forward[2] * 38);
+    fighter.throttle = 0.45;
+    fighter.grounded = false;
+    sb.hangar.board(&self.engine.camera);
+    self.engine.camera.yaw = yaw;
+    self.engine.camera.pitch = std.math.asin(std.math.clamp(forward[1], -1, 1));
+    const right: [3]f32 = .{ forward[2], 0, -forward[0] };
+    for (0..5) |i| {
+        const distance: f32 = 28 + @as(f32, @floatFromInt(i % 3)) * 18;
+        const lateral = (@as(f32, @floatFromInt(i)) - 2) * 13;
+        const at = R3.add(entry, .{ forward[0] * distance + right[0] * lateral, 8 + @as(f32, @floatFromInt(i % 2)) * 10, forward[2] * distance + right[2] * lateral });
+        sb.skies.wasps[i] = .{ .position = at, .forward = forward, .carrier = 0, .health = 95, .state = .attack };
+    }
+    self.benchmark_air_targets += 5;
+}
+
+fn reportFrontierBenchmark(self: *App) void {
+    const sim = self.benchmark_sim.summary();
+    std.log.info("APPBENCH {{\"sim_steps\":{d},\"sim_p50_ms\":{d:.3},\"sim_p95_ms\":{d:.3},\"sim_p99_ms\":{d:.3},\"ground_steps\":{d},\"ground_fire_steps\":{d},\"ground_targets_spawned\":{d},\"air_steps\":{d},\"air_fire_steps\":{d},\"air_targets_spawned\":{d},\"audio_device\":{s}}}", .{
+        self.benchmark_sim.total,
+        sim.p50,
+        sim.p95,
+        sim.p99,
+        self.benchmark_ground_steps,
+        self.benchmark_ground_fire_steps,
+        self.benchmark_ground_targets,
+        self.benchmark_air_steps,
+        self.benchmark_air_fire_steps,
+        self.benchmark_air_targets,
+        if (self.audio != null) "true" else "false",
+    });
+    inline for (@typeInfo(Sandbox.BenchmarkStage).@"enum".fields) |field| {
+        const stage: Sandbox.BenchmarkStage = @enumFromInt(field.value);
+        const sample = self.benchmark_substeps.stages[field.value];
+        const mean = if (sample.total == 0) 0 else sample.sum_ms / @as(f64, @floatFromInt(sample.total));
+        std.log.info("SIMSTAGE {{\"stage\":\"{s}\",\"samples\":{d},\"mean_ms\":{d:.3},\"max_ms\":{d:.3}}}", .{ @tagName(stage), sample.total, mean, sample.worst_ms });
+    }
 }
 
 fn saveExists(self: *App) bool {
@@ -611,9 +762,20 @@ pub fn update(self: *App, core: *mach.Core) void {
     self.seconds += lap;
     const steps = self.engine.advance(lap);
     for (0..steps) |_| {
+        if (options.benchmark_frontier) self.driveFrontierBenchmark();
         self.routePads();
         // The pause menu stops the world; the title keeps it alive behind the menu.
-        if (!paused) self.sandbox.step(&self.engine.camera, if (title) .{} else self.engine.input, if (title) .{} else self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
+        if (!paused) {
+            const warmup: u64 = @import("engine/Flythrough.zig").frontier_warmup_frames;
+            const measuring = options.benchmark_frontier and self.rendered_frames_seen >= warmup and self.rendered_frames_seen < warmup + options.benchmark_frames;
+            if (measuring) {
+                var timer = mach.time.Timer.start(self.io);
+                self.sandbox.stepMeasured(&self.engine.camera, if (title) .{} else self.engine.input, if (title) .{} else self.actions, Time.fixed_dt, self.io, &self.benchmark_substeps) catch |err| self.report("ERROR {s}", .{@errorName(err)});
+                self.benchmark_sim.record(timer.lap() * 1000);
+            } else {
+                self.sandbox.step(&self.engine.camera, if (title) .{} else self.engine.input, if (title) .{} else self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
+            }
+        }
         self.actions = .{};
         self.engine.input.clearEdges();
         self.pads.consume();
@@ -1603,7 +1765,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     } else if (sandbox.garage.piloting) |i| {
         const car = &sandbox.garage.cars[i].?.flyer;
         const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, car.body.pos.x, car.body.pos.z).height;
-        renderer.hud_lines[1].set("{s}  {d:.0} M/S  {d:.0} M UP  W/S THRUST  A/D TURN  SPACE/Q RIDE  SHIFT BOOST  CLICK LEAVE", .{ @import("vehicle/Designs.zig").name(@enumFromInt(i)), car.body.vel.length(), car.body.pos.y - ground });
+        const race = sandbox.garage.race;
+        renderer.hud_lines[1].set("{s}  {d:.0} M/S  BOOST {d:.0}%  {s} {d}/{d} {d:.1}s  {d:.0} M UP", .{ @import("vehicle/Designs.zig").name(@enumFromInt(i)), car.body.vel.length(), car.boost_charge * 100, if (race.active) "GATE" else if (race.finished) "FINISH" else "START", if (race.active) race.gate + 1 else 0, @import("game/Racing.zig").node_count, race.elapsed, car.body.pos.y - ground });
     } else if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;
@@ -1756,6 +1919,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
 
 pub fn stop(self: *App) void {
     self.thread.join();
+    if (options.benchmark_frontier) self.reportFrontierBenchmark();
     if (self.audio) |a| a.destroy();
     if (self.loader) |l| l.destroy();
     if (self.reload) |r| r.destroy();

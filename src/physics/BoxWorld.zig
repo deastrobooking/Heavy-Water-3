@@ -190,6 +190,15 @@ pub fn raycast(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
 /// Nearest solid surface along a ray: terrain, any box, or any rigid body except `ignore`.
 /// Reports the surface's velocity at the hit so wheels can drive on moving platforms.
 pub fn castRay(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Physics.Rigid) ?Physics.SurfaceHit {
+    return self.castRayImpl(origin, direction, max_distance, ignore, true);
+}
+
+/// Raycast bodies and static meshes without walking the terrain heightfield.
+pub fn castRayObjects(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Physics.Rigid) ?Physics.SurfaceHit {
+    return self.castRayImpl(origin, direction, max_distance, ignore, false);
+}
+
+fn castRayImpl(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Physics.Rigid, include_ground: bool) ?Physics.SurfaceHit {
     var best: ?Physics.SurfaceHit = null;
     // Terrain: march in 5 cm steps, then bisect the crossing.
     const below = struct {
@@ -198,22 +207,24 @@ pub fn castRay(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
             return p[1] < g.height;
         }
     }.f;
-    var t: f32 = 0;
-    if (!below(self, origin)) while (t < max_distance) {
-        const next = @min(max_distance, t + 0.05);
-        if (below(self, R.add(origin, R.scale(direction, next)))) {
-            var lo = t;
-            var hi = next;
-            for (0..8) |_| {
-                const mid = (lo + hi) / 2;
-                if (below(self, R.add(origin, R.scale(direction, mid)))) hi = mid else lo = mid;
+    if (include_ground) {
+        var t: f32 = 0;
+        if (!below(self, origin)) while (t < max_distance) {
+            const next = @min(max_distance, t + 0.05);
+            if (below(self, R.add(origin, R.scale(direction, next)))) {
+                var lo = t;
+                var hi = next;
+                for (0..8) |_| {
+                    const mid = (lo + hi) / 2;
+                    if (below(self, R.add(origin, R.scale(direction, mid)))) hi = mid else lo = mid;
+                }
+                const point = R.add(origin, R.scale(direction, hi));
+                best = .{ .distance = hi, .point = point, .normal = self.ground.sample(self.ground.context, point[0], point[2]).normal, .velocity = .{ 0, 0, 0 } };
+                break;
             }
-            const point = R.add(origin, R.scale(direction, hi));
-            best = .{ .distance = hi, .point = point, .normal = self.ground.sample(self.ground.context, point[0], point[2]).normal, .velocity = .{ 0, 0, 0 } };
-            break;
-        }
-        t = next;
-    };
+            t = next;
+        };
+    }
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = self.bodies.items[i];
@@ -466,6 +477,19 @@ test "raycast finds the nearest box face and respects ignore and range" {
     try std.testing.expectEqual(@as(f32, -1), hit.normal[2]);
     try std.testing.expectEqual(@as(u32, 8), physics.raycast(.{ 0, 1, 0 }, .{ 0, 0, 1 }, 20, near).?.user);
     try std.testing.expect(physics.raycast(.{ 0, 1, 0 }, .{ 0, 0, 1 }, 4, .none) == null);
+}
+
+test "object-only raycast skips terrain and still hits bodies" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    const body = try physics.createBody(.{ .half_extents = .{ 1, 1, 1 }, .position = .{ 0, 5, 0 }, .motion = .static });
+    const ray_origin: Vec3 = .{ 0, 10, 0 };
+    const down: Vec3 = .{ 0, -1, 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 4), physics.castRay(ray_origin, down, 12, .none).?.distance, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), physics.castRayObjects(ray_origin, down, 12, .none).?.distance, 0.001);
+    physics.destroyBody(body);
+    try std.testing.expect(physics.castRay(ray_origin, down, 12, .none) != null);
+    try std.testing.expect(physics.castRayObjects(ray_origin, down, 12, .none) == null);
+    physics.deinit();
 }
 
 test "character is blocked by static boxes, steps onto low ones, and pushes dynamic props" {

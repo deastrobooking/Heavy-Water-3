@@ -2,6 +2,8 @@ const std = @import("std");
 const Camera = @import("../world/Camera.zig");
 const math = @import("mach").math;
 pub const warmup_frames = 60;
+/// The four-view frontier route moves between a seeded nest and an air encounter before timing.
+pub const frontier_warmup_frames = 180;
 
 /// A frame-indexed outbound/return route crosses positive and negative chunk boundaries.
 pub fn camera(frame: u64, length: u32) Camera {

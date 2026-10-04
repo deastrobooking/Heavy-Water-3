@@ -63,6 +63,8 @@ pub const Content = struct {
     district: MeshHandle,
     /// Hover car designs (see `vehicle/Designs.zig`), in `Design` order.
     cars: [Designs.count]CarAsset,
+    /// Elevated sprint circuit, with animated race state owned by `Garage`.
+    raceway: MeshHandle,
     /// Hive units and nests (dark shell + emissive glow), and the pickup gem.
     drone: MeshHandle,
     drone_glow: MeshHandle,
@@ -224,6 +226,10 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         self.pending_count += 2;
     }
     for (&self.content.cars, 0..) |*asset, i| asset.* = try self.registerCar(allocator, @enumFromInt(i));
+    {
+        const course = @import("../game/Racing.zig").Course.init(seed);
+        self.content.raceway = try self.register(allocator, try Model.fromMesh(allocator, try course.mesh(allocator), .named("sprint raceway", .{ 1, 1, 1, 1 })));
+    }
     {
         const H = @import("../vehicle/HiveMeshes.zig");
         const white: [4]f32 = .{ 1, 1, 1, 1 };

@@ -9,7 +9,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "reload_smoke", b.option(bool, "reload-smoke", "Exercise model reload using an isolated source fixture") orelse false);
     options.addOption(u64, "seed", b.option(u64, "seed", "World seed") orelse 0x4845415659);
     options.addOption(u32, "smoke_frames", b.option(u32, "smoke-frames", "Exit after N rendered frames (0 = interactive)") orelse 0);
-    options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run the streaming route for N measured frames, after 60 warm-up frames") orelse 0);
+    options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run a measured renderer route for N frames, after 60 warm-up frames") orelse 0);
+    options.addOption(bool, "benchmark_frontier", b.option(bool, "benchmark-frontier", "Benchmark four-player split-screen with the live frontier simulation") orelse false);
     const benchmark_arbor = b.option(u8, "benchmark-arbor", "Arbor to view on the canopy route: 0 test, 1 narrow genome, 2 spreading genome") orelse 0;
     if (benchmark_arbor > 2) @panic("benchmark-arbor must be 0, 1, or 2");
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);

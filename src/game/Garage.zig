@@ -14,6 +14,7 @@ const Terrain = @import("../procedural/Terrain.zig");
 const Material = @import("../render/Material.zig");
 const Designs = @import("../vehicle/Designs.zig");
 const hover = @import("../vehicle/hover.zig");
+const Racing = @import("Racing.zig");
 const m = @import("../character/math.zig");
 const Input = @import("../engine/Input.zig");
 const R = Physics.Rotation;
@@ -26,6 +27,8 @@ pub const Car = struct { design: Designs.Design, flyer: hover.HoverCar };
 cars: [max_cars]?Car = @splat(null),
 /// The car P1 is flying.
 piloting: ?u8 = null,
+course: ?Racing.Course = null,
+race: Racing.State = .{},
 
 /// Garage pads: a row beside the spawn, one per design.
 pub fn padPosition(seed: u64, spawn: Physics.Vec3, design: Designs.Design) Physics.Vec3 {
@@ -41,6 +44,7 @@ pub fn park(self: *Garage, seed: u64, spawn: Physics.Vec3, catalog: *const Catal
 
 /// Puts `design` where it was left (its COM at `at`, facing `yaw`), or on its pad.
 pub fn place(self: *Garage, seed: u64, spawn: Physics.Vec3, catalog: *const Catalog, design: Designs.Design, at: ?Physics.Vec3, yaw: f32) void {
+    if (self.course == null) self.course = Racing.Course.init(seed);
     const i = @intFromEnum(design);
     if (self.piloting == @as(?u8, @intCast(i))) self.piloting = null;
     const asset = catalog.content.cars[i];
@@ -89,6 +93,10 @@ pub fn step(self: *Garage, physics: *const Physics, pilot: hover.Input, dt: f32)
     for (&self.cars, 0..) |*slot, i| if (slot.*) |*c| {
         const input: hover.Input = if (self.piloting == @as(?u8, @intCast(i))) pilot else .{};
         c.flyer.step(dt, input, physics, probe);
+        if (self.piloting == @as(?u8, @intCast(i))) if (self.course) |course| {
+            _ = self.race.step(course, .{ c.flyer.body.pos.x, c.flyer.body.pos.y, c.flyer.body.pos.z }, dt);
+            if (course.onChargePad(.{ c.flyer.body.pos.x, c.flyer.body.pos.y, c.flyer.body.pos.z })) c.flyer.boost_charge = @min(1, c.flyer.boost_charge + dt * 0.9);
+        };
     };
 }
 
@@ -172,6 +180,7 @@ pub fn publish(self: *const Garage, catalog: *const Catalog, out: []World.Prop) 
         const o = origin(&c, catalog);
         out[n] = .{ .mesh = asset.body, .transform = .{ .position = .{ o.x, o.y, o.z } }, .tint = .{ 1, 1, 1, 1 }, .rotation = quat(body.rot) };
         out[n + 1] = .{ .mesh = asset.lights, .transform = .{ .position = .{ o.x, o.y, o.z } }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, 0.9), .rotation = quat(body.rot) };
+        if (c.flyer.boost_active) out[n + 1].tint = Material.emissive(.{ 0.28, 0.9, 1, 1 }, 1.5);
         n += 2;
         for (asset.physical.pivots, 0..) |pivot, k| {
             const p = body.pointWorld(pivot.sub(asset.physical.mass.com));

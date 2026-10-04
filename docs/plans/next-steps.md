@@ -29,7 +29,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 
 - **Missile lock on a reused slot:** fixed by giving each spawned ground Hive unit a generation number and checking `(slot, generation)` when resolving missile and HUD targets.
 - **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
-- **Frontier frame cost unmeasured:** the standard renderer streaming route is measured, but there is no `--frontier` benchmark yet for simulation time, CPU skinning of 24 characters, and audio-thread load under the full Hive and four-player workload.
+- **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. The M3 Pro ReleaseFast run meets render, skinning, and audio budgets; simulation P99 improved from 7.11 ms to 6.72 ms but still exceeds its 4 ms target. Projectile terrain raycasts are optimized; the next profile pass should target remaining wasp and Hive AI spikes.
 - **Guests:** they can't pilot, talk, or open the fabricator.
 - **Save versioning:** saves grew through optional fields under format v11. When a field changes meaning, bump the format and say so in the migration notes.
 
@@ -40,8 +40,8 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 The game has had no hands-on pass since vehicles and the Hive arrived. Everything after this depends on what that reveals.
 
 1. **Frontier benchmark:** `tools/benchmark.py --frontier` flies a scripted Kestrel run past a carrier with wasps up, a ground fight at a nest, and four players.
-   - **Reports:** render CPU P50/P95/P99, simulation step time, skinning time, and audio-thread load.
-   - **Budgets:** the simulation step under 4 ms and skinning under 3 ms in ReleaseFast.
+   - **Reports:** frontier route reports simulation stages, character skinning, audio callbacks, render CPU and presentation P50/P95/P99, and active combat counts.
+   - **Budgets:** simulation P99 under 4 ms and character skinning P99 under 3 ms in ReleaseFast; renderer under 16.667 ms; audio callback below its real-time budget.
 2. **Hand-play checklist (yours):**
    - fly each car and the Kestrel (takeoff, transition, dogfight, landing);
    - fight at a nest with each weapon, the saber combo and guard, and both classes' specials;

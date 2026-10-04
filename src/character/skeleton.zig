@@ -198,6 +198,34 @@ pub fn skinLinear(verts: []const mesh_mod.Vertex, mats: []const Mat4, out_pos: [
 /// Dual quaternion skinning with antipodality correction.
 pub fn skinDualQuat(verts: []const mesh_mod.Vertex, dqs: []const DualQuat, out_pos: []Vec3, out_nrm: []Vec3) void {
     for (verts, 0..) |v, i| {
+        // Rigid armor plates, facial details and most interior vertices have one joint.
+        // Avoid a four-slot blend, normalization and square root for this common case.
+        if (v.weights[1] == 0 and v.weights[2] == 0 and v.weights[3] == 0) {
+            const dq = dqs[v.joints[0]];
+            out_pos[i] = dq.real.rotate(v.pos).add(DualQuat.translation(dq));
+            out_nrm[i] = dq.real.rotate(v.normal);
+            continue;
+        }
+        if (v.weights[2] == 0 and v.weights[3] == 0) {
+            const pivot = dqs[v.joints[0]].real;
+            var w1 = v.weights[1];
+            const second = dqs[v.joints[1]];
+            if (pivot.dot(second.real) < 0) w1 = -w1;
+            const w0 = v.weights[0];
+            var real = quatScaleAdd(.{ .w = 0 }, pivot, w0);
+            real = quatScaleAdd(real, second.real, w1);
+            var dual = quatScaleAdd(.{ .w = 0 }, dqs[v.joints[0]].dual, w0);
+            dual = quatScaleAdd(dual, second.dual, w1);
+            const len = @sqrt(real.dot(real));
+            const inv = if (len < m.eps) 1.0 else 1.0 / len;
+            const blended: DualQuat = .{
+                .real = .{ .x = real.x * inv, .y = real.y * inv, .z = real.z * inv, .w = real.w * inv },
+                .dual = .{ .x = dual.x * inv, .y = dual.y * inv, .z = dual.z * inv, .w = dual.w * inv },
+            };
+            out_pos[i] = blended.transformPoint(v.pos);
+            out_nrm[i] = blended.real.rotate(v.normal);
+            continue;
+        }
         const pivot = dqs[v.joints[0]].real;
         var real: Quat = .{ .w = 0 };
         var dual: Quat = .{ .w = 0 };

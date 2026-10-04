@@ -246,6 +246,12 @@ pub fn castRay(self: *const Physics, origin: Vec3, direction: Vec3, max_distance
     return self.backend.castRay(origin, direction, max_distance, ignore);
 }
 
+/// Raycast dynamic and mesh geometry without sampling the terrain heightfield.
+/// Use only when the caller has a conservative proof that the segment stays above ground.
+pub fn castRayObjects(self: *const Physics, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Rigid) ?SurfaceHit {
+    return self.backend.castRayObjects(origin, direction, max_distance, ignore);
+}
+
 pub fn step(self: *Physics, dt: f32) void {
     self.backend.step(dt);
 }

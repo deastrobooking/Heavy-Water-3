@@ -40,6 +40,8 @@ instance: gen.Instance,
 mesh: Mesh,
 profile: Profile,
 controller: Animation.Controller = .{},
+last_pose: ?Pose = null,
+last_blend: ?Animation.Blend = null,
 
 fn rgb(c: [4]f32, factor: f32) spec.Rgb {
     return .{ .r = c[0] * factor, .g = c[1] * factor, .b = c[2] * factor };
@@ -84,7 +86,7 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
         // the world checker texture is not sampled across skin and facial colors.
         v.* = .{ .position = .{ source.pos.x, source.pos.y, source.pos.z }, .normal = .{ source.normal.x, source.normal.y, source.normal.z }, .uv = .{ 0, 0 }, .color = .{ c.r, c.g, c.b } };
     }
-    self.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0 });
+    _ = self.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0 });
     return self;
 }
 pub fn deinit(self: *Ranger, a: std.mem.Allocator) void {
@@ -102,15 +104,29 @@ pub fn sameAppearance(a: Profile, b: Profile) bool {
     y.name_len = 0;
     return std.meta.eql(x, y);
 }
-pub fn update(self: *Ranger, state: Pose) void {
+pub fn update(self: *Ranger, state: Pose) bool {
     const p = &self.instance.pose;
     const blend = self.controller.update(clipFor(state.motion, state.walk_amount), state.time);
-    poseSkeletonBlended(p, &self.character.skeleton, state, blend);
+    var key = state;
+    const timed_pose = state.motion == .climb or state.motion == .hang or state.motion == .mantle or state.motion == .wall_slide;
+    if (state.motion == .idle and state.action == .none) {
+        // Keep the subtle idle breath while avoiding a full mesh skin on every 60 Hz frame.
+        key.time = @floor(state.time * 12) / 12;
+    } else if (!timed_pose) {
+        key.time = 0;
+    }
+    if (self.last_pose) |previous| if (self.last_blend) |old_blend| {
+        if (std.meta.eql(previous, key) and std.meta.eql(old_blend, blend)) return false;
+    };
+    poseSkeletonBlended(p, &self.character.skeleton, key, blend);
     self.instance.skin(&self.character);
     for (self.mesh.vertices, self.instance.pos, self.instance.nrm) |*v, pos, normal| {
         v.position = .{ pos.x, pos.y, pos.z };
         v.normal = .{ normal.x, normal.y, normal.z };
     }
+    self.last_pose = key;
+    self.last_blend = blend;
+    return true;
 }
 
 /// Turns `joint` so the bone toward `child` points along `dir` (model frame).
@@ -483,7 +499,7 @@ test "ranger meshes are smooth, layered, weighted and animate without allocation
     defer ranger.deinit(a);
     try std.testing.expect(ranger.mesh.vertices.len > 2000);
     const hand = ranger.character.skeleton.worldPos(.hand_l);
-    ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.2 });
+    _ = ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.2 });
     try std.testing.expect(ranger.instance.pose.global[sk.Joint.hand_l.idx()].translation.sub(hand).length() > 0.1);
     for (ranger.mesh.vertices) |v| for (v.position ++ v.normal) |value| try std.testing.expect(std.math.isFinite(value));
     for (ranger.character.mesh.vertices.items) |v| {
@@ -512,11 +528,11 @@ test "trooper strike and cover actions drive the skinned skeleton" {
     defer ranger.deinit(a);
     const skel = &ranger.character.skeleton;
     const rest_hand = skel.worldPos(.hand_r);
-    ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .action = .strike, .action_t = 0.5 });
+    _ = ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .action = .strike, .action_t = 0.5 });
     const strike_hand = ranger.instance.pose.global[sk.Joint.hand_r.idx()].translation;
     try std.testing.expect(strike_hand.sub(rest_hand).length() > 0.2);
     const strike_hips = ranger.instance.pose.global[sk.Joint.hips.idx()].translation;
-    ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 0.4, .walk_phase = 1, .action = .cover });
+    _ = ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 0.4, .walk_phase = 1, .action = .cover });
     const cover_hips = ranger.instance.pose.global[sk.Joint.hips.idx()].translation;
     const cover_hand = ranger.instance.pose.global[sk.Joint.hand_r.idx()].translation;
     try std.testing.expect(cover_hips.y < strike_hips.y - 0.1);
@@ -595,7 +611,7 @@ test "armor suits are rigid, segmented plates that never stretch and grow with t
             const p0 = r.mesh.vertices[first.?].position;
             const p1 = r.mesh.vertices[second.?].position;
             const before = V.init(p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]).length();
-            r.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.3 });
+            _ = r.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.3 });
             const q0 = r.mesh.vertices[first.?].position;
             const q1 = r.mesh.vertices[second.?].position;
             try std.testing.expect(@abs(q0[1] - p0[1]) > 0.01); // the forearm moved

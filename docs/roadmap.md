@@ -137,12 +137,14 @@ Acceptance:
 - **Gameplay tests:** pickups collected once, recipes paid exactly, nests that wake, spawn, hunt, shoot and fall, and shots that destroy drones. The saber cuts only in front, and the shield absorbs.
 - **Smoke:** fabricates a car and a blaster through the panel, flies the car, and downs a drone, under Metal validation.
 
-Since then: guests carry the party's weapons on their controllers, saves keep car positions, and Hive troopers on foot join each nest.
+Since then: guests carry the party's weapons on their controllers, saves keep car positions, and Hive troopers on foot join each nest. The racer pass adds a seeded elevated sprint circuit with ramped deck sections, two jump gaps, eight ordered gates, two charge pads, a finite boost capacitor, and a static collider shared by the road mesh. Vehicle silhouettes now include a splitter, side-intake louvers, canopy spines, and a rear diffuser. The first full lap is playable when piloting a fabricated car.
 
 Next:
 - guests' conversations and car piloting;
 - nest assault events and a Hive progression across the map;
-- texture and material polish for the cars.
+- hand-tune the three racer silhouettes, paint and lighting in the running game;
+- add wall adhesion and gravity transitions before building driveable vertical loops;
+- split-screen race HUD, multiplayer starts, and persistent best-lap records.
 
 ## Traversal and local co-op — implemented
 
