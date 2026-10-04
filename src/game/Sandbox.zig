@@ -933,7 +933,14 @@ pub fn step(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Acti
     }
     self.physics.step(dt);
     self.tick += 1;
-    if (self.market.update(self.tick)) self.say("markets restocked for day {d}", .{self.market.day});
+    if (self.market.update(self.tick)) {
+        const beat = Frontier.marketDay(self);
+        if (beat.seeded_nest != null) {
+            self.say("markets restocked for day {d}; a new Hive spire has seeded", .{self.market.day});
+        } else if (beat.corruption_started) {
+            self.say("markets restocked for day {d}; the Hive stain is spreading", .{self.market.day});
+        } else self.say("markets restocked for day {d}", .{self.market.day});
+    }
     if (self.trading) |stall| {
         const d = R.sub(self.stallPosition(stall), self.player.feet);
         if (self.seated != null or @sqrt(d[0] * d[0] + d[2] * d[2]) > reach + 4) self.trading = null;
@@ -1346,6 +1353,7 @@ fn reason(err: anyerror) []const u8 {
         error.NotEnoughParts => "not enough parts",
         error.NotOwned => "paint scheme is not owned",
         error.NoFighter => "fabricate the Kestrel first",
+        error.NoBlueprint => "ask Maro for the Kestrel blueprint",
         error.MaxLevel => "already fully tuned",
         error.AlreadyOwned => "already owned",
         error.SoldOut => "sold out until dawn",
@@ -1762,7 +1770,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog.content.block, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog.content.block, out, n);
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);
@@ -2893,6 +2901,21 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
     try std.testing.expectEqual(@as(u64, 1), sb.market.day);
     try std.testing.expectEqual(Market.init(sb.seed, dawn).stalls, sb.market.stalls);
     try std.testing.expect(std.mem.indexOf(u8, sb.noticeText(), "restocked") != null);
+
+    // A later dawn seeds a combat spire. Its parent link and destroyed state rebuild from progress.
+    sb.tick = @import("../engine/Sky.zig").day_ticks * 2;
+    try std.testing.expect(sb.market.update(sb.tick));
+    const beat = Frontier.marketDay(&sb);
+    const seeded = beat.seeded_nest.?;
+    const site = sb.enemies.nests[seeded].position;
+    var down_flag: [16]u8 = undefined;
+    sb.progress.setFlag(std.fmt.bufPrint(&down_flag, "nest_{d}_down", .{seeded}) catch unreachable);
+    const campaign_save = try sb.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(campaign_save);
+    sb.enemies.nest_count -= 1; // simulate rebuilding the world before loading its saved flags
+    try sb.restore(std.testing.allocator, campaign_save, &camera);
+    try std.testing.expectEqual(site, sb.enemies.nests[seeded].position);
+    try std.testing.expect(!sb.enemies.nests[seeded].alive);
 }
 
 test "Rootsong carries a channel only between Arbors that share roots, and only from rooted devices" {

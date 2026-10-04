@@ -13,6 +13,7 @@ pub const math = @import("math.zig");
 pub const curve = @import("curve.zig");
 pub const mesh = @import("mesh.zig");
 pub const skeleton = @import("skeleton.zig");
+pub const Animation = @import("Animation.zig");
 pub const spec = @import("spec.zig");
 pub const body = @import("body.zig");
 pub const clothing = @import("clothing.zig");
@@ -44,6 +45,7 @@ test {
     _ = curve;
     _ = mesh;
     _ = skeleton;
+    _ = Animation;
     _ = spec;
     _ = body;
     _ = clothing;

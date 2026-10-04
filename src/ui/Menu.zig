@@ -6,7 +6,7 @@ const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
 const Menu = @This();
 
-pub const Screen = enum { none, title, pause, settings, controls, confirm_quit };
+pub const Screen = enum { none, title, pause, settings, controls, quest_log, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
 pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
@@ -21,6 +21,7 @@ pub const title_items = [_]Item{
 pub const pause_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
     .{ .label = "CUSTOMIZE RANGER", .command = .character },
+    .{ .label = "QUEST LOG", .opens = .quest_log },
     .{ .label = "SAVE GAME", .command = .save },
     .{ .label = "LOAD GAME", .command = .load },
     .{ .label = "SETTINGS", .opens = .settings },
@@ -31,6 +32,7 @@ pub const confirm_items = [_]Item{
     .{ .label = "QUIT TO DESKTOP", .command = .quit },
     .{ .label = "CANCEL" },
 };
+pub const quest_items = [_]Item{.{ .label = "BACK" }};
 /// Settings rows are the fields, then "BACK".
 pub const settings_rows = Settings.field_count + 1;
 /// Controls rows are the actions (two columns of `controls_column`), then "RESET", then "BACK".
@@ -67,6 +69,7 @@ pub fn items(self: *const Menu) []const Item {
         .title => &title_items,
         .pause => &pause_items,
         .confirm_quit => &confirm_items,
+        .quest_log => &quest_items,
         else => &.{},
     };
 }
@@ -75,6 +78,7 @@ pub fn rows(self: *const Menu) u8 {
     return switch (self.screen) {
         .settings => settings_rows,
         .controls => controls_rows,
+        .quest_log => 1,
         .none => 0,
         else => @intCast(self.items().len),
     };
@@ -106,6 +110,7 @@ pub fn select(self: *Menu, row: u8) void {
 pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .none) return .none;
     if (self.screen == .controls) return self.controlsKey(k);
+    if (self.screen == .quest_log and k == .confirm) return self.back();
     switch (k) {
         .up => self.step(-1),
         .down => self.step(1),
@@ -181,7 +186,7 @@ pub fn bindKey(self: *Menu, k: Bindings.Key) Command {
 /// Back out one level: sub-screens return to their base; pause resumes; the title stays.
 fn back(self: *Menu) Command {
     switch (self.screen) {
-        .settings, .controls, .confirm_quit => {
+        .settings, .controls, .quest_log, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.
@@ -218,6 +223,17 @@ test "title skips continue without a save, and sub-screens return to their entry
     try std.testing.expectEqual(Command.continue_game, m.key(.confirm));
 }
 
+test "quest log opens from pause and returns to its menu row" {
+    var m: Menu = .{};
+    m.open(.pause);
+    m.row = 2;
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.quest_log, m.screen);
+    try std.testing.expectEqual(Command.none, m.key(.back));
+    try std.testing.expectEqual(Screen.pause, m.screen);
+    try std.testing.expectEqual(@as(u8, 2), m.row);
+}
+
 test "controls rebind by capture, swap conflicts, cancel, and reset" {
     var m: Menu = .{};
     m.open(.pause);
@@ -245,18 +261,18 @@ test "pause resumes on back, confirms quit, and cancels back to pause" {
     var m: Menu = .{};
     m.open(.pause);
     try std.testing.expectEqual(Command.@"resume", m.key(.back));
-    m.row = 6;
+    m.row = 7;
     _ = m.key(.confirm);
     try std.testing.expectEqual(Screen.confirm_quit, m.screen);
     m.select(1);
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 6), m.row);
+    try std.testing.expectEqual(@as(u8, 7), m.row);
     _ = m.key(.confirm);
     try std.testing.expectEqual(Command.quit, m.key(.confirm));
     // LOAD is skipped without a save.
     m.open(.pause);
-    m.row = 2;
+    m.row = 4;
     _ = m.key(.down);
-    try std.testing.expectEqual(@as(u8, 4), m.row);
+    try std.testing.expectEqual(@as(u8, 5), m.row);
 }

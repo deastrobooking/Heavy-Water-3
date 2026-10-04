@@ -90,7 +90,7 @@ The fabricable Kestrel VTOL fighter flies with wing aerodynamics, lift jets, and
 
 Next:
 - continue air-war playtesting and tuning;
-- proceed with the Hive campaign: corruption spread, story beats and a quest log.
+- extend phase 14 with clips for the remaining traversal states, glTF animation import, named attachments and GPU skinning; tune trooper pacing in the planned hand-play pass.
 
 ## Mountain ranges and cave dungeons — implemented
 

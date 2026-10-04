@@ -273,6 +273,48 @@ test "conversations branch on flags, reveal text, give scrap once, and end in pa
     try std.testing.expect(d.key(&s, .back, &progress, &wallet) == .ended);
 }
 
+test "Hive story beats gate Tavi, Ines and Maro in campaign order" {
+    var d = try load(std.testing.allocator, builtin);
+    defer d.deinit();
+    var progress: Progress = .{};
+    var wallet: Market.Wallet = .{};
+
+    const tavi = d.find("keeper_2").?;
+    var session = d.begin(tavi, .{ .keeper = 2 }, &progress).?;
+    _ = d.key(&session, .back, &progress, &wallet);
+    progress.setFlag("corruption_seen");
+    session = d.begin(tavi, .{ .keeper = 2 }, &progress).?;
+    try chooseNext(&d, &session, &progress, &wallet, "scout_mark");
+    try std.testing.expect(progress.hasFlag("tavi_scouted"));
+
+    progress.setFlag("met_ines");
+    const ines = d.find("keeper_1").?;
+    session = d.begin(ines, .{ .keeper = 1 }, &progress).?;
+    try chooseNext(&d, &session, &progress, &wallet, "hive_sap");
+    try std.testing.expect(progress.hasFlag("ines_sap_warned"));
+
+    progress.setFlag("met_maro");
+    progress.setFlag("carrier_seen");
+    const maro = d.find("keeper_0").?;
+    session = d.begin(maro, .{ .keeper = 0 }, &progress).?;
+    try chooseNext(&d, &session, &progress, &wallet, "carrier_blueprint");
+    try std.testing.expect(progress.hasFlag("kestrel_blueprint"));
+}
+
+fn chooseNext(d: *const Dialogue, session: *Session, progress: *Progress, wallet: *Market.Wallet, target: []const u8) !void {
+    session.reveal = 1000;
+    var visible: [max_choices]u8 = undefined;
+    const count = d.visibleChoices(session.*, progress, &visible);
+    const choice = for (0..count) |i| {
+        const row = visible[i];
+        const ch = d.node(session.*).choices[row];
+        if (std.mem.eql(u8, ch.next, target)) break i;
+    } else return error.ChoiceNotVisible;
+    session.choice = @intCast(choice);
+    _ = d.key(session, .confirm, progress, wallet);
+    try std.testing.expectEqualStrings(target, d.node(session.*).id);
+}
+
 test "invalid dialogue is rejected with a reason" {
     const a = std.testing.allocator;
     const speaker_json = "{\"speakers\":[{\"id\":\"a\",\"name\":\"A\"}],\"conversations\":[";

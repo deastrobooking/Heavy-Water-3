@@ -14,6 +14,7 @@ const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
 const Fabricator = @import("../game/Fabricator.zig");
 const Collectibles = @import("../game/Collectibles.zig");
+const QuestLog = @import("../game/QuestLog.zig");
 const Market = @import("../city/Market.zig");
 pub const Rect = Canvas.Rect;
 const Color = Canvas.Color;
@@ -187,8 +188,37 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
         },
         .settings => drawSettings(c, menu),
         .controls => drawControls(c, menu),
+        .quest_log => if (sb) |s| drawQuestLog(c, menu, s),
         else => {},
     }
+}
+
+fn drawQuestLog(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const r = menuRect(c, 620, 370);
+    panel(c, r, "THE HIVE CAMPAIGN");
+    const objective = QuestLog.current(&sb.progress, &sb.enemies, &sb.skies);
+    c.text(r.x + 24, r.y + 54, "NEXT OBJECTIVE", 1, dim);
+    c.text(r.x + 24, r.y + 76, objective.title, 1.65, gold);
+    var wrapped: [4][]const u8 = undefined;
+    const lines = Canvas.wrap(objective.detail, 69, &wrapped);
+    for (wrapped[0..lines], 0..) |line, i| c.text(r.x + 24, r.y + 106 + @as(f32, @floatFromInt(i)) * 17, line, 1, ink);
+
+    const story = [_]struct { label: []const u8, flag: []const u8 }{
+        .{ .label = "TAVI'S SCOUTING MARK", .flag = "tavi_scouted" },
+        .{ .label = "INES'S SAP WARNING", .flag = "ines_sap_warned" },
+        .{ .label = "BROOD CARRIER SIGHTED", .flag = "carrier_seen" },
+        .{ .label = "MARO'S KESTREL BLUEPRINT", .flag = "kestrel_blueprint" },
+    };
+    var y = r.y + 188;
+    for (story) |beat| {
+        const complete = sb.progress.hasFlag(beat.flag);
+        c.text(r.x + 24, y, if (complete) "[x]" else "[ ]", 1, if (complete) good else dim);
+        c.text(r.x + 58, y, beat.label, 1, if (complete) dim else ink);
+        y += 21;
+    }
+    c.print(r.x + 24, y + 3, 1, dim, "NESTS {d}   CARRIERS {d}", .{ objective.nests_left, objective.carriers_left });
+    const back: Rect = .{ .x = r.x + r.w - 136, .y = r.y + r.h - 48, .w = 112, .h = 30 };
+    button(c, back, "BACK", hitId(.menu, 0), menu.row == 0);
 }
 
 fn drawSettings(c: *Canvas, menu: *const Menu) void {
@@ -772,7 +802,7 @@ test "every screen lays out inside the window and records hits" {
     var c: Canvas = .{};
     var m: Menu = .{};
     const Case = struct { screen: Menu.Screen, base: Menu.Screen };
-    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
+    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
         m.open(case.base);
         m.screen = case.screen;
         c.reset(1280, 720);

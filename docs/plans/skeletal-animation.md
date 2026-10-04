@@ -4,11 +4,15 @@
 
 ## Today
 
-- **Avatars:** `game/Avatar.zig` builds characters from up to 16 scaled blocks, swinging limbs by a walk phase.
-- **Motion states:** `Player.Motion` already names every state the animation must cover: idle, run, sprint, jump, fall, roll, stomp, wall slide, climb, hang, mantle, jet, hover, glide, dash, board, grapple zip, grapple swing, and swim.
+- **Characters:** `character/Ranger.zig` builds weighted humanoid geometry, applies profile clothing and armor, and CPU-skins it from a fixed humanoid skeleton. Player, keeper, pedestrian and Hive trooper rendering already uses this path.
+- **Procedural poses:** traversal uses walk phase and motion state; combat maps aim, saber swing, guard, cast and throw actions onto joints. Troopers now add tactical cover, timed melee strike and grenade-throw poses on the same rig.
 - **Importer:** the glTF importer rejects skins and animations.
-- **Renderer:** draws rigid instances only, and the vertex layout has no joints or weights.
-- **Other users:** another agent's combat work (`src/combat/`) will want per-bone hitboxes and weapon sockets.
+- **Renderer:** character vertices are CPU-skinned into per-character meshes; the main instance pipeline has no GPU joint palette.
+- **Still needed:** reusable sampled clips and blending, a motion controller, glTF skin/animation import, GPU skinning, named attachments, and per-bone combat hitboxes.
+
+## Progress
+
+The first gameplay slice reuses the established skeleton and renderer: a wounded trooper crouches behind cover, melee timing drives a shoulder/elbow/chest/hip strike, and the arm throw pose follows grenade launch progress. An allocation-free rotation-track sampler drives keyed walk, run and climb cycles; a per-character fixed-step controller maps traversal states and crossfades between clip groups. Headless tests verify action poses, key interpolation, loop seams, blend weights, traversal mapping and transitions. The `HWAN` format and glTF animation import are still pending.
 
 ## Design
 

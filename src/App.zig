@@ -1283,6 +1283,9 @@ fn smokeFrontier(self: *App) void {
     std.log.info("Smoke frontier: skimmer parked={any} flew {d:.1} m, blaster={any}, drone downed={any}; {d} nests, {d} pickups", .{ cars, flown, blaster, downed, sb.enemies.nest_count, sb.collectibles.count });
     // The Kestrel: fabricate it through the panel, lift off on its jets, and gun down a wasp.
     sb.progress.inventory = .{ 20, 8, 20, 0 };
+    // The smoke stages vehicle handling directly, so provide the story reward normally earned
+    // by asking Maro after spotting a carrier.
+    sb.progress.setFlag("kestrel_blueprint");
     sb.wallet.scrap += 200;
     sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 3 };
     self.uiNav(.confirm);

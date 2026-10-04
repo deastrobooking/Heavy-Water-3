@@ -132,6 +132,29 @@ Apple M3 Pro / Metal, ReleaseFast, seed 310399555161; each canopy run has 60 war
 - ReleaseSafe application compile and 300-frame Metal smoke pass on Apple M3 Pro with MTL_DEBUG_LAYER=1; no validation errors. The updated 300-frame smoke completed with 1,295 submitted objects and 394 simulation ticks.
 - Debug unit suite: **299/299 passed**, including the Aircraft-tab bounds assertion.
 
+## Hive campaign: corruption spread and seeded spires (step 9)
+
+- Living surface nests spread a purple terrain stain that expands with the saved market day and stops at a fixed radius. Destroyed nests no longer spread corruption.
+- The first new market day records the `corruption_seen` story flag. Up to three combat nests seed beyond a living surface nest on later market days; parent links, seeded locations and destroyed states rebuild from saved progression flags.
+- Regression tests cover spread timing and cap, deterministic seed locations, seeded-nest population cap and market restock notice behavior. Debug unit suite: **301/301 passed**.
+- `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=120`: passed on Apple M3 Pro / Metal with no validation errors; 120 frames completed with 862 submitted objects and 170 simulation ticks. This smoke starts on market day 0 and does not exercise later corruption growth.
+
+## Hive campaign: story beats and quest log (step 10)
+
+- Tavi's scout mark unlocks after corruption appears; a surface-nest kill advances that lead. Ines's Hive-sap warning follows the scout flag. A nearby Brood carrier records the sighting; Maro then grants the saved Kestrel blueprint. The fabricator refuses the Kestrel until that blueprint is received.
+- The pause menu's Quest Log shows the active objective, saved story milestones and remaining nests/carriers. A saved campaign-complete flag is set when every nest and both carriers are destroyed.
+- Regression tests cover keeper dialogue gates, Kestrel blueprint gating, objective progression (including saves that already own the Kestrel), quest-menu navigation, and screen bounds. Debug unit suite: **306/306 passed**.
+- `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=120`: passed on Apple M3 Pro / Metal with no validation errors; 120 frames completed with 862 submitted objects and 169 simulation ticks. The staged Kestrel flight fixture supplies the blueprint reward directly. The smoke covers startup and split-screen, not a manual campaign play-through.
+
+## Trooper tactics and skeletal actions (step 11)
+
+- Wounded troopers search 16 grounded positions around their target and hold the nearest point whose line of sight is blocked by world geometry. If no cover is found, they keep advancing.
+- Troopers close inside 2.5 m for a committed melee strike; a facing guard reduces its damage. At 7–24 m they throw a magenta grenade toward the player's predicted position. It has a 1.25 s fuse and 4.2 m blast radius; solid geometry blocks blast damage.
+- The renderer maps cover, melee wind-up/strike, and grenade launch to dedicated poses on the existing skinned rig. Strike timing drives shoulder, elbow, chest and hip joints; cover folds the legs and guards the torso.
+- Regression tests cover obstruction-based cover selection, the close-range attack, grenade launch and blast, dodging, skinned strike/cover poses, key interpolation and loop seams, weighted clip blending, traversal-state mapping, and walk/run/climb crossfades. Debug unit suite: **313/313 passed**.
+- `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=120`: clean exit on Apple M3 Pro / Metal with no validation errors; 120 frames, 862 submitted objects. This smoke covers general character rendering and split-screen but does not stage trooper tactics. Manual combat balance and animation readability still need a hands-on playtest.
+- Controller smoke after the walk/run/climb crossfade change: same command, clean Metal validation, 120 frames, 862 submitted objects and 172 simulation ticks, including four-player split-screen.
+
 Both reports pass all checks, including both LODs, the 16.667 ms render CPU budget, active-ring coverage (zero underfilled frames), and unthrottled presentation. Peak upload remains 284,204 B within 327,680 B; peak GPU terrain residency remains 25 chunks; terrain pools stay at 2 CPU and 50 GPU allocations. Reports are `.tools/canopy-1-benchmark.json` and `.tools/canopy-2-benchmark.json`.
 
 These are submission and presentation measurements, not GPU execution timings or an art review. The three trees and both of their mesh detail levels remain resident; terrain-pool counters do not represent total process/GPU memory. No screenshot or manual visual approval was performed. Runtime grafting/growth, tree eviction, and allocation of unused flow after branch bottlenecks remain deferred. See [Arbor genomes and sap](arbors.md) for controls and content-v4 save compatibility.

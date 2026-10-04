@@ -14,6 +14,7 @@
 const std = @import("std");
 const Physics = @import("../physics/Physics.zig");
 const Seed = @import("../procedural/Seed.zig");
+const Corruption = @import("Corruption.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const R = Physics.Rotation;
 const V = Physics.Vec3;
@@ -43,7 +44,8 @@ pub const tuning = .{
 
 /// Three nests on the surface, then one in the heart of each cave system.
 pub const surface_nests = tuning.surface_nests;
-pub const max_nests = surface_nests + @import("../procedural/Caves.zig").max_systems;
+pub const max_seeded_nests = 3;
+pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems;
 pub const max_units = 24;
 /// Cave nests field troopers only (fliers have no room), at most this many.
 pub const cave_troopers = tuning.cave_troopers;
@@ -60,6 +62,7 @@ pub fn stats(k: Kind) Stats {
 }
 
 pub const State = enum { patrol, hunt, retreat };
+pub const Tactic = enum { advance, cover, melee };
 pub const Unit = struct {
     /// Changes each time a unit slot is occupied, so external references survive slot reuse safely.
     generation: u32 = 0,
@@ -70,6 +73,7 @@ pub const Unit = struct {
     yaw: f32 = 0,
     health: f32,
     state: State = .patrol,
+    tactic: Tactic = .advance,
     /// Player index being hunted.
     target: u8 = 0,
     orbit: f32,
@@ -77,6 +81,12 @@ pub const Unit = struct {
     burst_left: u8 = 0,
     burst_timer: f32 = 0,
     state_timer: f32 = 0,
+    melee_cooldown: f32 = 0,
+    melee_anim: f32 = 0,
+    grenade_cooldown: f32 = 2,
+    throw_anim: f32 = 0,
+    cover_goal: ?V = null,
+    cover_timer: f32 = 0,
     /// Seconds of hit flash left (rendering).
     flash: f32 = 0,
     /// Seconds stunned (by a saber finisher, an arc grenade or a slam): no thinking or shooting.
@@ -91,8 +101,9 @@ pub const Unit = struct {
     }
 };
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
-pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false };
+pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false, seeded: bool = false };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
+pub const Grenade = struct { position: V, velocity: V = @splat(0), fuse: f32 = 1.25, damage: f32 = 24, radius: f32 = 4.2 };
 
 /// A player the Hive can see and shoot. A raised guard (saber or shield) facing the bolt takes a
 /// quarter of its damage; a guard raised just in time parries it straight back.
@@ -105,6 +116,8 @@ pub const Event = union(enum) {
     nest_down: struct { nest: u8, position: V },
     /// A parried bolt flies back (the caller turns it into a player shot).
     deflected: struct { player: u8, position: V, velocity: V },
+    grenade_thrown: V,
+    grenade_blast: V,
 };
 
 seed: u64 = 0,
@@ -113,6 +126,7 @@ nest_count: usize = 0,
 units: [max_units]?Unit = @splat(null),
 unit_generations: [max_units]u32 = @splat(0),
 bolts: [max_bolts]?Bolt = @splat(null),
+grenades: [16]?Grenade = @splat(null),
 rng: std.Random.DefaultPrng = .init(0),
 
 /// Picks nest sites on the terrain at least `clear` metres from every point in `avoid`
@@ -144,6 +158,23 @@ pub fn addCaveNest(self: *Enemies, floor: V) void {
     if (self.nest_count == max_nests) return;
     self.nests[self.nest_count] = .{ .position = floor, .cave = true, .health = nest_health * 0.7 };
     self.nest_count += 1;
+}
+
+/// A campaign spore site is stable across loads: it is a fixed distance and angle from its
+/// recorded parent and samples the same seeded terrain height.
+pub fn addSeededNest(self: *Enemies, parent: u8, serial: u8, spread_day: u64) ?u8 {
+    if (serial >= max_seeded_nests or self.nest_count == max_nests or parent >= self.nest_count) return null;
+    const source = self.nests[parent];
+    if (source.cave) return null;
+    const hash = Seed.mix(self.seed ^ 0x53504f5245534954 ^ (@as(u64, serial) *% 0x9e3779b97f4a7c15) ^ @as(u64, parent));
+    const angle = Seed.unit(hash) * 2 * std.math.pi;
+    const distance = Corruption.radius(spread_day) + 28 + Seed.unit(Seed.mix(hash)) * 20;
+    const x = source.position[0] + @sin(angle) * distance;
+    const z = source.position[2] + @cos(angle) * distance;
+    const id: u8 = @intCast(self.nest_count);
+    self.nests[self.nest_count] = .{ .position = .{ x, Terrain.surface(self.seed, x, z).height, z }, .seeded = true, .spawn_timer = tuning.first_spawn_delay };
+    self.nest_count += 1;
+    return id;
 }
 
 pub fn unitCount(self: *const Enemies, nest: ?u8) usize {
@@ -224,6 +255,9 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         // Dormant when no player is anywhere near (keeps distant nests free).
         if (!nearAny(players, u.position, wake_distance + 40)) continue;
         u.flash = @max(0, u.flash - dt);
+        // Action clips keep advancing through knockback and stun instead of sticking on a pose.
+        u.melee_anim = @max(0, u.melee_anim - dt);
+        u.throw_anim = @max(0, u.throw_anim - dt);
         if (u.stun > 0) {
             // Reeling: carried by the knockback, slowing, no thought or fire.
             u.stun = @max(0, u.stun - dt);
@@ -238,6 +272,9 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         }
         u.cooldown = @max(0, u.cooldown - dt);
         u.state_timer = @max(0, u.state_timer - dt);
+        u.melee_cooldown = @max(0, u.melee_cooldown - dt);
+        u.grenade_cooldown = @max(0, u.grenade_cooldown - dt);
+        u.cover_timer = @max(0, u.cover_timer - dt);
 
         // Senses: the nearest visible living player within sight.
         var seen: ?u8 = null;
@@ -287,6 +324,59 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
             },
         }
         if (u.kind == .trooper) {
+            if (u.state == .hunt) {
+                const target = players[u.target];
+                const distance = horizontal(R.sub(target.chest, u.position));
+                if (distance < 2.5) {
+                    u.tactic = .melee;
+                    u.cover_goal = null;
+                    goal = target.chest;
+                    if (u.melee_cooldown == 0) {
+                        const toward = R.normalize(R.sub(target.chest, u.center()));
+                        const faces_attacker = R.dot(target.facing, R.scale(toward, -1)) > 0.2;
+                        const damage: f32 = if (target.guard != .none and faces_attacker) 9 else 18;
+                        push(out, &n, .{ .player_hit = .{ .player = u.target, .damage = damage, .from = u.center() } });
+                        u.melee_cooldown = 1.15;
+                        u.melee_anim = 0.62;
+                    }
+                } else {
+                    u.tactic = .advance;
+                    // Wounded troopers take a moment to find a real obstruction, then hold
+                    // that position while they recover their ranged attack.
+                    if (u.health < s.health * 0.65 and (u.cover_goal == null or u.cover_timer == 0)) {
+                        u.cover_goal = findCover(physics, u.position, target.chest);
+                        u.cover_timer = 2.5;
+                    }
+                    if (u.cover_goal) |cover| {
+                        u.tactic = .cover;
+                        goal = cover;
+                        if (horizontal(R.sub(u.position, cover)) < 1.4) {
+                            u.velocity[0] = 0;
+                            u.velocity[2] = 0;
+                        }
+                    }
+                    // Grenades are lobbed at the player's current position, so movement after
+                    // the throw can beat the fixed 1.25 second fuse and 4.2 m blast radius.
+                    if (distance > 7 and distance < 24 and u.grenade_cooldown == 0) {
+                        var grenade = Grenade{ .position = R.add(u.center(), .{ 0, 0.4, 0 }) };
+                        const predicted = R.add(target.chest, R.scale(target.velocity, 0.45));
+                        var direction = R.normalize(R.sub(predicted, grenade.position));
+                        direction[1] = @max(direction[1], 0.16);
+                        direction = R.normalize(direction);
+                        grenade.velocity = R.add(R.scale(direction, 13), .{ 0, 4.5, 0 });
+                        for (&self.grenades) |*g| if (g.* == null) {
+                            g.* = grenade;
+                            push(out, &n, .{ .grenade_thrown = grenade.position });
+                            u.throw_anim = 0.72;
+                            break;
+                        };
+                        u.grenade_cooldown = 7;
+                    }
+                }
+            } else {
+                u.tactic = .advance;
+                u.cover_goal = null;
+            }
             walkGround(physics, u, goal, s, dt);
         } else {
             flyToward(physics, u, goal, s, dt);
@@ -337,7 +427,56 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         }
         b.position = R.add(b.position, travel);
     }
+    // Grenades have a short visible arc, then blast only nearby players not shielded by a wall.
+    for (&self.grenades) |*slot| {
+        const grenade = &(slot.* orelse continue);
+        grenade.fuse -= dt;
+        grenade.velocity[1] += Physics.gravity * dt;
+        const travel = R.scale(grenade.velocity, dt);
+        const length = R.length(travel);
+        const direction = R.scale(travel, 1 / @max(length, 1e-4));
+        const collision = physics.castRay(grenade.position, direction, length, .none);
+        if (collision) |hit| grenade.position = R.add(hit.point, R.scale(hit.normal, 0.08)) else grenade.position = R.add(grenade.position, travel);
+        if (grenade.fuse > 0 and collision == null) continue;
+        const at = grenade.position;
+        push(out, &n, .{ .grenade_blast = at });
+        for (players, 0..) |player, pi| {
+            if (!player.alive) continue;
+            const offset = R.sub(player.chest, at);
+            const distance = R.length(offset);
+            if (distance > grenade.radius or !sees(physics, at, player.chest)) continue;
+            const facing_blast = R.dot(player.facing, R.scale(offset, -1 / @max(distance, 0.01))) > 0.2;
+            const scale = 1 - distance / grenade.radius;
+            const damage = grenade.damage * scale * (if (player.guard != .none and facing_blast) @as(f32, 0.25) else 1);
+            push(out, &n, .{ .player_hit = .{ .player = @intCast(pi), .damage = damage, .from = at } });
+        }
+        slot.* = null;
+    }
     return n;
+}
+
+/// Select an exposed-to-player point behind a nearby wall, preferring a short run from the
+/// trooper. Ground is sampled through the same physics path used by the movement controller.
+fn findCover(physics: *const Physics, from: V, target: V) ?V {
+    var best: ?V = null;
+    var best_distance = std.math.inf(f32);
+    for (0..16) |i| {
+        const angle = @as(f32, @floatFromInt(i)) * (2 * std.math.pi / 16.0);
+        const candidate = R.add(target, .{ @sin(angle) * 8, 0, @cos(angle) * 8 });
+        const eye = R.add(candidate, .{ 0, 1.2, 0 });
+        const delta = R.sub(target, eye);
+        const distance = R.length(delta);
+        if (physics.castRay(eye, R.scale(delta, 1 / @max(distance, 0.01)), distance - 0.8, .none) == null) continue;
+        const floor = physics.castRay(R.add(candidate, .{ 0, 4, 0 }), .{ 0, -1, 0 }, 20, .none) orelse continue;
+        var grounded = candidate;
+        grounded[1] = floor.point[1];
+        const run = horizontal(R.sub(grounded, from));
+        if (run < best_distance) {
+            best = grounded;
+            best_distance = run;
+        }
+    }
+    return best;
 }
 
 /// Fliers: steer toward the goal within their acceleration and speed, keep clear of the ground,
@@ -678,6 +817,22 @@ test "nest sites avoid landmarks and sleep until a player comes near" {
     try std.testing.expectEqual(@as(usize, 0), far.unitCount(null));
 }
 
+test "campaign spore nests use stable seeded positions and respect the hard cap" {
+    var first = Enemies.init(0x53494f5245, .{ 0, 0, 0 }, &.{}, 0);
+    const source: u8 = 1;
+    const child = first.addSeededNest(source, 0, 2).?;
+    try std.testing.expect(first.nests[child].seeded);
+    try std.testing.expect(!first.nests[child].cave);
+    try std.testing.expect(horizontal(R.sub(first.nests[child].position, first.nests[source].position)) >= Corruption.radius(2) + 28);
+
+    var restored = Enemies.init(0x53494f5245, .{ 0, 0, 0 }, &.{}, 0);
+    const same_child = restored.addSeededNest(source, 0, 2).?;
+    try std.testing.expectEqual(first.nests[child].position, restored.nests[same_child].position);
+    for (1..max_seeded_nests) |serial| _ = first.addSeededNest(source, @intCast(serial), (@as(u64, @intCast(serial)) + 1) * 2).?;
+    try std.testing.expect(first.addSeededNest(source, max_seeded_nests, 8) == null);
+    try std.testing.expectEqual(@as(usize, surface_nests + max_seeded_nests), first.nest_count);
+}
+
 test "a woken nest fabricates units that hunt, shoot, and can be destroyed" {
     var physics = testPhysics();
     defer physics.deinit();
@@ -734,6 +889,74 @@ test "troopers march out of the nest, keep to the ground, and hunt" {
         try std.testing.expect(horizontal(R.sub(u.position, .{ 25, 0, 0 })) < 30);
     };
     try std.testing.expectEqual(@as(usize, troopers_per_nest), troopers);
+}
+
+test "wounded troopers select blocked ground as cover and rush players who close in" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    _ = try physics.createBody(.{ .half_extents = .{ 1, 2, 5 }, .position = .{ 7, 2, 0 }, .motion = .static });
+    var e: Enemies = .{ .seed = 4, .rng = .init(4) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    e.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 0, 0 }, .health = 60, .orbit = 0, .state = .hunt, .target = 0 };
+    var events: [32]Event = undefined;
+    const player: Target = .{ .chest = .{ 12, 1.4, 0 }, .velocity = @splat(0) };
+    _ = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+    const trooper = e.units[0].?;
+    try std.testing.expectEqual(Tactic.cover, trooper.tactic);
+    try std.testing.expect(trooper.cover_goal != null);
+    const cover = trooper.cover_goal.?;
+    try std.testing.expect(!sees(&physics, R.add(cover, .{ 0, 1.2, 0 }), player.chest));
+
+    // A trooper inside the saber's reach chooses melee and deals a single committed strike.
+    e.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 0, 0 }, .health = 120, .orbit = 0, .state = .hunt, .target = 0, .melee_cooldown = 0 };
+    const close: Target = .{ .chest = .{ 1.5, 1.4, 0 }, .velocity = @splat(0) };
+    const count = e.step(&physics, &.{close}, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(Tactic.melee, e.units[0].?.tactic);
+    var hits: usize = 0;
+    for (events[0..@min(count, events.len)]) |event| {
+        if (event == .player_hit) hits += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), hits);
+}
+
+test "trooper grenades have a readable fuse and a blast that moving players can dodge" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{ .seed = 5, .rng = .init(5) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    e.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 0, 0 }, .health = 120, .orbit = 0, .state = .hunt, .target = 0, .grenade_cooldown = 0, .cooldown = 100 };
+    var events: [32]Event = undefined;
+    var player: Target = .{ .chest = .{ 12, 1.4, 0 }, .velocity = .{ 0, 0, 7 } };
+    var thrown = false;
+    var blasted = false;
+    var hit = false;
+    for (0..110) |_| {
+        player.chest[2] += player.velocity[2] / 60;
+        const count = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+        for (events[0..@min(count, events.len)]) |event| {
+            thrown = thrown or event == .grenade_thrown;
+            blasted = blasted or event == .grenade_blast;
+            hit = hit or event == .player_hit;
+        }
+    }
+    try std.testing.expect(thrown);
+    try std.testing.expect(blasted);
+    try std.testing.expect(!hit);
+
+    e = .{ .seed = 6, .rng = .init(6) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    e.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 0, 0 }, .health = 120, .orbit = 0, .state = .hunt, .target = 0, .grenade_cooldown = 0, .cooldown = 100 };
+    player.chest = .{ 12, 1.4, 0 };
+    player.velocity = @splat(0);
+    e.units[0].?.grenade_cooldown = 100;
+    e.grenades[0] = .{ .position = .{ 10, 2, 0 }, .fuse = 0.01 };
+    const count = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+    hit = false;
+    for (events[0..@min(count, events.len)]) |event| hit = hit or event == .player_hit;
+    try std.testing.expect(hit);
 }
 
 test "a blade cuts each unit once per swing, knocks it back and stuns it; guards parry bolts" {

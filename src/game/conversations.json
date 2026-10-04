@@ -82,6 +82,12 @@
               "next": "fabricator"
             },
             {
+              "text": "I saw a Brood carrier. Can you build me a fighter?",
+              "requires": "carrier_seen",
+              "unless": "kestrel_blueprint",
+              "next": "carrier_blueprint"
+            },
+            {
               "text": "I salvaged a relic.",
               "requires": "salvaged",
               "unless": "maro_salvage",
@@ -162,6 +168,12 @@
           ]
         },
         {
+          "id": "carrier_blueprint",
+          "sets": "kestrel_blueprint",
+          "text": "A Brood carrier? Then the old flight plans are true. I'll leave a Kestrel blueprint at the frontier fabricator. Bring Hive alloy, rotor cores, lumen and scrap; we'll put a fighter in the sky.",
+          "next": "hello"
+        },
+        {
           "id": "rotors",
           "text": "Up high. Tower roofs, shrine steps. And the Hive hoards them by its spires. Bring a weapon if you go looking there.",
           "next": "hello"
@@ -216,6 +228,12 @@
               "next": "sap"
             },
             {
+              "text": "Tavi marked a Hive spire. What is the stain doing?",
+              "requires": "tavi_scouted",
+              "unless": "ines_sap_warned",
+              "next": "hive_sap"
+            },
+            {
               "text": "What are the Arbors, really?",
               "next": "arbors"
             },
@@ -241,6 +259,12 @@
         {
           "id": "sap",
           "text": "Every Arbor pulls water half a kilometer up its trunk and concentrates the heavy water in it. Tap a trunk and it will power your machines, as long as you don't ask more than the tree can give.",
+          "next": "hello"
+        },
+        {
+          "id": "hive_sap",
+          "sets": "ines_sap_warned",
+          "text": "That purple stain drinks the Arbors' heavy-water sap. The Hive is starving its roots to feed those carriers. Don't tap a corrupted trunk; help me keep the clean groves alive.",
           "next": "hello"
         },
         {
@@ -325,6 +349,12 @@
               "next": "nest_reward"
             },
             {
+              "text": "The stain is spreading. Mark me a spire to scout.",
+              "requires": "corruption_seen",
+              "unless": "tavi_scouted",
+              "next": "scout_mark"
+            },
+            {
               "text": "I opened a shrine.",
               "requires": "shrine_complete",
               "unless": "tavi_reward",
@@ -377,6 +407,12 @@
         {
           "id": "nest_reward",
           "text": "You did WHAT? Then it's true: the Hive is back, and it can bleed. Forty scrap, ranger. And watch the sky.",
+          "next": "hello"
+        },
+        {
+          "id": "scout_mark",
+          "sets": "tavi_scouted",
+          "text": "I'll mark the nearest surface spire on your map. Break it and the local swarm loses its anchor. Don't linger: the stain's edge is moving.",
           "next": "hello"
         }
       ]

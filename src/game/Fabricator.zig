@@ -16,7 +16,7 @@ pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
 pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
-pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, NoFighter };
+pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, NoFighter, NoBlueprint };
 
 pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
@@ -98,6 +98,7 @@ pub fn made(p: *const Progress, output: Output) bool {
 
 pub fn status(p: *const Progress, output: Output) ?[]const u8 {
     return switch (output) {
+        .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
             .kestrel_upgrade => |u| if (p.kestrelLevel(u) >= Progress.max_level) "MAX LEVEL" else null,
             .kestrel_paint => |paint| if (p.ownsKestrelPaint(paint)) (if (p.kestrel_paint == paint) "EQUIPPED" else "OWNED") else null,
@@ -126,6 +127,7 @@ pub fn affordable(p: *const Progress, wallet: Market.Wallet, c: Cost) ?Error {
 /// Pays for and makes recipe `index`.
 pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
     const r = recipes[index];
+    if (r.output == .fighter and !p.fighter and !p.hasFlag("kestrel_blueprint")) return error.NoBlueprint;
     if ((r.output == .kestrel_upgrade or r.output == .kestrel_paint) and !p.fighter) return error.NoFighter;
     if (r.output == .kestrel_upgrade and p.kestrelLevel(r.output.kestrel_upgrade) >= Progress.max_level) return error.MaxLevel;
     if (r.output == .kestrel_paint) {
@@ -192,6 +194,22 @@ test "recipes pay exactly, make once, and refuse what cannot be paid" {
     for (onTab(.weapons, &weapons_tab)[0..2]) |i| try std.testing.expectEqual(@as(u32, 0), recipes[i].cost.alloy);
     var buffer: [24]u8 = undefined;
     try std.testing.expectEqualStrings("TRACKING MISSILE", name(.{ .weapon = .tracking_missile }, &buffer));
+}
+
+test "Maro's Kestrel blueprint gates fabrication until the carrier sighting conversation" {
+    var progress: Progress = .{};
+    var wallet: Market.Wallet = .{ .scrap = 100 };
+    var rows: [recipes.len]u8 = undefined;
+    const vehicles = onTab(.vehicles, &rows);
+    try std.testing.expectEqualStrings("BLUEPRINT REQUIRED", status(&progress, .fighter).?);
+    try std.testing.expectError(error.NoBlueprint, make(&progress, &wallet, vehicles[3]));
+    progress.setFlag("carrier_seen");
+    try std.testing.expectError(error.NoBlueprint, make(&progress, &wallet, vehicles[3]));
+    progress.setFlag("kestrel_blueprint");
+    progress.inventory = .{ 12, 5, 14, 0 };
+    _ = try make(&progress, &wallet, vehicles[3]);
+    try std.testing.expect(progress.fighter);
+    try std.testing.expectEqualStrings("MADE", status(&progress, .fighter).?);
 }
 
 test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint" {

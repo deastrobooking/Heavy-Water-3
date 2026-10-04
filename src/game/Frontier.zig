@@ -15,6 +15,7 @@ const Sandbox = @import("Sandbox.zig");
 const Garage = @import("Garage.zig");
 const Collectibles = @import("Collectibles.zig");
 const Enemies = @import("Enemies.zig");
+const Corruption = @import("Corruption.zig");
 const Combat = @import("Combat.zig");
 const Fabricator = @import("Fabricator.zig");
 const Progress = @import("Progress.zig");
@@ -170,6 +171,7 @@ fn stepCaves(sb: *Sandbox) void {
 /// After a load (or a new game): nests follow their flags, owned cars park on their pads, and
 /// the party's health follows its vital cells.
 pub fn refresh(sb: *Sandbox) void {
+    restoreSeededNests(sb);
     for (sb.enemies.nests[0..sb.enemies.nest_count], 0..) |*nest, i| {
         var flag: [16]u8 = undefined;
         const destroyed = sb.progress.hasFlag(nestFlag(&flag, @intCast(i)));
@@ -203,6 +205,68 @@ pub fn refresh(sb: *Sandbox) void {
     // Whatever the loaded ranger already wears stays available.
     sb.progress.suits |= Progress.bit(sb.profile.clothing);
     sb.progress.armors |= Progress.armorBit(sb.profile.armor);
+}
+
+/// First campaign beat: corruption advances once the frontier reaches its first new market day.
+pub const MarketBeat = struct { corruption_started: bool = false, seeded_nest: ?u8 = null };
+pub fn marketDay(sb: *Sandbox) MarketBeat {
+    var beat: MarketBeat = .{};
+    if (sb.market.day >= 1 and !sb.progress.hasFlag("corruption_seen")) {
+        sb.progress.setFlag("corruption_seen");
+        sb.cue(.hive_zap, null);
+        beat.corruption_started = true;
+    }
+    beat.seeded_nest = seedNestAtMarketDay(sb);
+    return beat;
+}
+
+fn seedFlag(buffer: []u8, serial: u8, parent: u8) []const u8 {
+    return std.fmt.bufPrint(buffer, "bloom_{d}_from_{d}", .{ serial, parent }) catch unreachable;
+}
+
+fn seededCount(sb: *const Sandbox) u8 {
+    var count: u8 = 0;
+    for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| count += @intFromBool(nest.seeded);
+    return count;
+}
+
+fn savedSeedParent(sb: *const Sandbox, serial: u8) ?u8 {
+    var flag: [24]u8 = undefined;
+    for (0..sb.enemies.nest_count) |parent| if (sb.progress.hasFlag(seedFlag(&flag, serial, @intCast(parent)))) return @intCast(parent);
+    return null;
+}
+
+/// Rebuild campaign spires from the saved parent flags before applying each nest's destroyed
+/// flag. The same parent and seed always give the same surface position.
+fn restoreSeededNests(sb: *Sandbox) void {
+    var serial = seededCount(sb);
+    while (serial < Enemies.max_seeded_nests) : (serial += 1) {
+        const parent = savedSeedParent(sb, serial) orelse break;
+        const spread_day = (@as(u64, serial) + 1) * 2;
+        if (sb.enemies.addSeededNest(parent, serial, spread_day) == null) break;
+    }
+}
+
+fn seedNestAtMarketDay(sb: *Sandbox) ?u8 {
+    const serial = seededCount(sb);
+    if (serial >= Enemies.max_seeded_nests or sb.market.day < (@as(u64, serial) + 1) * 2) return null;
+    var parent: ?u8 = null;
+    var i = sb.enemies.nest_count;
+    while (i > 0) {
+        i -= 1;
+        const nest = sb.enemies.nests[i];
+        if (!nest.cave and nest.alive) {
+            parent = @intCast(i);
+            break;
+        }
+    }
+    const source = parent orelse return null;
+    const spread_day = (@as(u64, serial) + 1) * 2;
+    const child = sb.enemies.addSeededNest(source, serial, spread_day) orelse return null;
+    var flag: [24]u8 = undefined;
+    sb.progress.setFlag(seedFlag(&flag, serial, source));
+    sb.cue(.hive_zap, sb.enemies.nests[child].position);
+    return child;
 }
 
 /// Hover car, fabricator or nothing, along the hands' aim.
@@ -263,6 +327,11 @@ fn nestFlag(buffer: []u8, nest: u8) []const u8 {
 fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
     switch (e) {
         .shot => |at| sb.cue(.hive_zap, at),
+        .grenade_thrown => |at| sb.cue(.hive_zap, at),
+        .grenade_blast => |at| {
+            burst(sb, at, 4.2, .{ 0.72, 0.22, 0.9 });
+            sb.cue(.boom, at);
+        },
         .player_hit => |hit| {
             var events: [4]Combat.Event = undefined;
             var n: usize = 0;
@@ -298,22 +367,37 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             sb.progress.setFlag("nest_destroyed");
             sb.cue(.boom, n.position);
             sb.cue(.vault, null);
-            if (n.nest >= Enemies.surface_nests) {
+            if (sb.enemies.nests[n.nest].cave) {
                 // A cave's heart nest: the cave is cleared.
-                const cave = n.nest - Enemies.surface_nests;
+                var cave: usize = 0;
+                for (sb.enemies.nests[0..n.nest]) |previous| cave += @intFromBool(previous.cave);
                 var cleared: [20]u8 = undefined;
                 sb.progress.setFlag(std.fmt.bufPrint(&cleared, "cave_{d}_cleared", .{cave}) catch unreachable);
                 sb.progress.setFlag("cave_cleared");
                 for (0..2) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 0.75, 1, 3 }));
                 sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, -3 }));
-                sb.say("{s} cleared: the hive heart is broken", .{Sandbox.Caves.name(cave)});
+                sb.say("{s} cleared: the hive heart is broken", .{Sandbox.Caves.name(@intCast(cave))});
             } else {
                 for (0..4) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 2, 1, 5 }));
                 sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, 6.5 }));
                 sb.say("hive nest destroyed", .{});
             }
+            if (sb.progress.hasFlag("tavi_scouted") and !sb.enemies.nests[n.nest].cave and !sb.progress.hasFlag("nest_0_down") and !sb.progress.hasFlag("nest_1_down") and !sb.progress.hasFlag("nest_2_down")) {
+                // A non-default seeded spire may be the first one the scout marked.
+                sb.progress.setFlag("first_spire_broken");
+            }
+            checkCampaignComplete(sb);
         },
     }
+}
+
+fn checkCampaignComplete(sb: *Sandbox) void {
+    if (sb.progress.hasFlag("campaign_complete")) return;
+    for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| if (nest.alive) return;
+    for (sb.skies.carriers) |carrier| if (carrier.alive) return;
+    sb.progress.setFlag("campaign_complete");
+    sb.say("frontier secure: every Hive nest and Brood carrier has fallen", .{});
+    sb.cue(.vault, null);
 }
 
 fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
@@ -557,9 +641,38 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32) void {
             dropBelow(sb, .rotor_core, R.add(c.position, .{ 3, 0, 9 }));
             dropBelow(sb, .vital_cell, R.add(c.position, .{ -3, 0, 9 }));
             sb.say("brood carrier destroyed! its cache fell to the ground", .{});
+            checkCampaignComplete(sb);
         },
         .hive => |h| hive(sb, h, camera),
     };
+    if (!frozen and !sb.progress.hasFlag("carrier_seen")) {
+        const sight_range_sq: f32 = 1200 * 1200;
+        var sighted = false;
+        for (sb.skies.carriers) |carrier| {
+            if (!carrier.alive) continue;
+            const at = carrier.position();
+            if (jet) |j| {
+                const d = R.sub(j.position, at);
+                if (R.dot(d, d) <= sight_range_sq) {
+                    sighted = true;
+                    break;
+                }
+            }
+            for (on_foot) |player| if (player.alive) {
+                const d = R.sub(player.chest, at);
+                if (R.dot(d, d) <= sight_range_sq) {
+                    sighted = true;
+                    break;
+                }
+            };
+            if (sighted) break;
+        }
+        if (sighted) {
+            sb.progress.setFlag("carrier_seen");
+            sb.say("Brood carrier sighted above the frontier", .{});
+            sb.cue(.vault, null);
+        }
+    }
 }
 
 fn burst(sb: *Sandbox, at: V, size: f32, color: [3]f32) void {
@@ -709,6 +822,27 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 0.16, 0 }) }, .tint = Material.emissive(.{ 0.25, 0.85, 0.78, 1 }, 0.8), .size = .{ 7.5, 0.05, 0.75 } };
         n += 4;
     };
+    // The Hive stains the ground around every living surface nest. These low, terrain-following
+    // tiles expand with market days and disappear from the source when its nest is destroyed.
+    const stain_radius = Corruption.radius(sb.market.day);
+    if (stain_radius > 0) for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| {
+        if (!nest.alive or nest.cave) continue;
+        var dz: f32 = -stain_radius;
+        while (dz <= stain_radius) : (dz += Corruption.tuning.patch_spacing) {
+            var dx: f32 = -stain_radius;
+            while (dx <= stain_radius) : (dx += Corruption.tuning.patch_spacing) {
+                if (!room(out, n, 1)) break;
+                if (!Corruption.covers(sb.market.day, dx, dz)) continue;
+                const x = nest.position[0] + dx;
+                const z = nest.position[2] + dz;
+                const surface = Terrain.surface(sb.seed, x, z);
+                const fleck = @mod(@floor((x + z) * 0.07), 3);
+                const tint: [4]f32 = if (fleck == 0) .{ 0.22, 0.09, 0.25, 1 } else if (fleck == 1) .{ 0.28, 0.10, 0.22, 1 } else .{ 0.19, 0.12, 0.29, 1 };
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ x, surface.height + Corruption.tuning.patch_depth, z } }, .tint = tint, .size = .{ Corruption.tuning.patch_spacing * 0.94, Corruption.tuning.patch_depth, Corruption.tuning.patch_spacing * 0.94 } };
+                n += 1;
+            }
+        }
+    };
     // Pickups: gems that bob and spin.
     for (sb.collectibles.items[0..sb.collectibles.count], 0..) |item, i| {
         if (sb.progress.picked.isSet(i) or !room(out, n, 1)) continue;
@@ -739,9 +873,16 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         if (trooper_id >= @import("../character/Ranger.zig").capacity or !room(out, n, 1)) break;
         const d = R.sub(u.position, sb.player.feet);
         if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
+        const Ranger = @import("../character/Ranger.zig");
+        const action: Ranger.Action = if (u.throw_anim > 0) .throw else if (u.melee_anim > 0) .strike else if (u.tactic == .cover) .cover else .none;
+        const action_t: f32 = switch (action) {
+            .throw => 1 - u.throw_anim / 0.72,
+            .strike => 1 - u.melee_anim / 0.62,
+            else => 0,
+        };
         out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = .{ 1, 1, 1, 1 }, .character = .{
             .profile = trooper_profile,
-            .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t },
+            .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t, .action = action, .action_t = action_t },
             .id = trooper_id,
         } };
         trooper_id += 1;
@@ -760,6 +901,10 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     };
     for (sb.enemies.bolts) |slot| if (slot) |b| if (room(out, n, 1)) {
         out[n] = .{ .mesh = c.block, .transform = .{ .position = b.position }, .tint = Material.emissive(.{ 1, 0.15, 0.1, 1 }, 1), .size = .{ 0.07, 0.07, 0.6 }, .rotation = facing(b.velocity) };
+        n += 1;
+    };
+    for (sb.enemies.grenades) |slot| if (slot) |g| if (room(out, n, 1)) {
+        out[n] = .{ .mesh = c.gem, .transform = .{ .position = g.position }, .tint = Material.emissive(.{ 0.75, 0.2, 0.95, 1 }, 0.7 + 0.3 * @abs(@sin(g.fuse * 16))), .size = @splat(0.28) };
         n += 1;
     };
     // The Kestrel, Hive wasps (wings flapping), Brood carriers, and air shots.

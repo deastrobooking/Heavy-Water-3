@@ -73,14 +73,13 @@ Acceptance: tests for collisions and assault stages; a bomber raid can be won an
 
 ### C. The Hive as a campaign
 
-1. **Corruption:** an unbroken nest spreads tinted corruption across the terrain over market days, and new nests seed at its edge (bounded).
-2. **Story beats** through conversation flags:
+1. **Corruption — complete:** living surface nests stain a bounded area that expands each market day; destroyed nests stop spreading. Up to three combat spires seed at the advancing edge on later market days. Their parent links and destruction state survive saves, and a saved first-spread beat announces the campaign.
+2. **Story beats and quest log — complete:**
    - Tavi's scouting leads to the first nest;
    - Ines warns of the sap the Hive steals;
-   - Maro builds the Kestrel blueprint after the first carrier sighting.
-
-   Then an end state when both carriers and all nests fall, and a quest log in the pause menu.
-3. **Trooper quality:** cover-seeking, melee at close range, and grenades. They need proper animation (phase 14).
+   - Maro grants the Kestrel blueprint after the first carrier sighting.
+   - The pause-menu quest log shows the next objective and the campaign end state triggers when both carriers and every nest fall.
+3. **Trooper quality — implemented:** wounded troopers seek nearby blocked positions, close for a guard-aware melee strike, and throw dodgeable grenades. Cover, melee and throw actions drive the existing skinned rig; reusable locomotion clips and the animation asset pipeline remain in phase 14. Manual pacing and readability checks remain in milestone A.
 
 Acceptance: a new save plays from first conversation to the last carrier, with the story flags driving every step and the quest log always showing the next goal.
 

@@ -6,6 +6,7 @@ const Player = @import("../game/Player.zig");
 const gen = @import("character.zig");
 const spec = @import("spec.zig");
 const sk = @import("skeleton.zig");
+const Animation = @import("Animation.zig");
 const cm = @import("mesh.zig");
 const m = @import("math.zig");
 const toon = @import("toon.zig");
@@ -16,10 +17,9 @@ const Ranger = @This();
 /// Skinned characters drawn at once: players 0–3, keepers 4–6, pedestrians 7–14, Hive troopers
 /// 16–23.
 pub const capacity = 24;
-/// What the arms are doing on top of the gait: aiming a rifle (two hands, at `aim_pitch`),
-/// swinging the saber (`action_t` 0–1 through the arc for `combo`), guarding, casting a power
-/// (both arms forward), or throwing.
-pub const Action = enum { none, aim, swing, guard, cast, throw };
+/// What the upper body is doing on top of the gait: weapon use, throwing, a trooper's strike, or
+/// a low cover posture. `action_t` advances timed actions from 0 to 1.
+pub const Action = enum { none, aim, swing, guard, cast, throw, strike, cover };
 /// Saber arcs: forehand, backhand, overhead finisher, dash cut, aerial, charged wave.
 pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged };
 pub const Pose = struct {
@@ -39,6 +39,7 @@ character: gen.Character,
 instance: gen.Instance,
 mesh: Mesh,
 profile: Profile,
+controller: Animation.Controller = .{},
 
 fn rgb(c: [4]f32, factor: f32) spec.Rgb {
     return .{ .r = c[0] * factor, .g = c[1] * factor, .b = c[2] * factor };
@@ -103,7 +104,8 @@ pub fn sameAppearance(a: Profile, b: Profile) bool {
 }
 pub fn update(self: *Ranger, state: Pose) void {
     const p = &self.instance.pose;
-    poseSkeleton(p, &self.character.skeleton, state);
+    const blend = self.controller.update(clipFor(state.motion, state.walk_amount), state.time);
+    poseSkeletonBlended(p, &self.character.skeleton, state, blend);
     self.instance.skin(&self.character);
     for (self.mesh.vertices, self.instance.pos, self.instance.nrm) |*v, pos, normal| {
         v.position = .{ pos.x, pos.y, pos.z };
@@ -150,23 +152,53 @@ pub fn swingDirection(arc: Arc, t: f32) V {
 /// The full procedural pose: the gait, then any combat action on the arms. Shared by the
 /// renderer's skinned characters and the simulation's rigs, so blades hit where they are drawn.
 pub fn poseSkeleton(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose) void {
+    const clip = clipFor(state.motion, state.walk_amount);
+    poseSkeletonBlended(p, skel, state, .{ .from = clip, .to = clip, .alpha = 1 });
+}
+
+fn clipFor(motion: Player.Motion, amount: f32) Animation.ClipId {
+    return switch (motion) {
+        .idle => if (amount >= 0.08) .walk else .idle,
+        .run => if (amount < 0.08) .idle else if (amount >= 0.78) .run else .walk,
+        .sprint => if (amount < 0.08) .idle else .run,
+        .climb, .hang, .mantle => .climb,
+        .jump, .fall, .roll, .stomp, .wall_slide, .jet, .hover, .glide, .dash, .board, .grapple_zip, .grapple_swing, .swim => .air,
+    };
+}
+
+fn phaseFor(id: Animation.ClipId, state: Pose) f32 {
+    return if (id == .climb) state.time * 3 else state.walk_phase;
+}
+
+fn applyBlend(p: *sk.Pose, blend: Animation.Blend, state: Pose) void {
+    if (blend.from == blend.to) {
+        const id = blend.to;
+        Animation.apply(Animation.get(id), p, phaseFor(id, state), 1);
+        return;
+    }
+    const alpha = std.math.clamp(blend.alpha, 0, 1);
+    Animation.apply(Animation.get(blend.from), p, phaseFor(blend.from, state), 1 - alpha);
+    Animation.apply(Animation.get(blend.to), p, phaseFor(blend.to, state), alpha);
+}
+
+fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend: Animation.Blend) void {
     p.reset(skel);
     const amount = std.math.clamp(state.walk_amount, 0, 1);
-    const swing = @sin(state.walk_phase) * 0.65 * amount;
     const airborne = switch (state.motion) {
         .jump, .fall, .jet, .hover, .glide, .grapple_zip, .grapple_swing => true,
         else => false,
     };
     const climbing = state.motion == .climb or state.motion == .hang or state.motion == .wall_slide or state.motion == .mantle;
+    applyBlend(p, blend, state);
     inline for ([_]sk.Joint{ .upper_arm_l, .upper_arm_r }, [_]sk.Joint{ .lower_arm_l, .lower_arm_r }, [_]sk.Joint{ .thigh_l, .thigh_r }, [_]sk.Joint{ .shin_l, .shin_r }, .{ @as(f32, 1), @as(f32, -1) }) |arm, elbow, thigh, knee, side| {
         // Bring the generated A-pose down to relaxed arms beside the torso.
         p.rotateLocal(arm.idx(), Q.fromAxisAngle(V.unit_z, -side * (if (climbing) @as(f32, -1.1) else if (airborne) @as(f32, 0.35) else @as(f32, 0.76))));
-        p.rotateLocal(arm.idx(), Q.fromAxisAngle(V.unit_x, -swing * side * 0.75 - 0.08));
         p.rotateLocal(elbow.idx(), Q.fromAxisAngle(V.unit_x, -0.15 - 0.3 * amount));
-        p.rotateLocal(thigh.idx(), Q.fromAxisAngle(V.unit_x, swing * side - (if (airborne) @as(f32, 0.25) else @as(f32, 0))));
-        p.rotateLocal(knee.idx(), Q.fromAxisAngle(V.unit_x, @max(0, -swing * side) * 1.2 + (if (airborne) @as(f32, 0.5) else @as(f32, 0))));
+        if (airborne) {
+            p.rotateLocal(thigh.idx(), Q.fromAxisAngle(V.unit_x, -0.25));
+            p.rotateLocal(knee.idx(), Q.fromAxisAngle(V.unit_x, 0.5));
+        }
     }
-    p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_y, swing * 0.08));
     p.local[sk.Joint.hips.idx()].translation.y += @sin(state.time * 2) * 0.003 * (1 - amount);
     if (state.motion == .roll or state.motion == .dash or state.motion == .board) p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.35));
     const t = std.math.clamp(state.action_t, 0, 1);
@@ -200,8 +232,42 @@ pub fn poseSkeleton(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose) void {
             pointBone(p, skel, .upper_arm_r, .lower_arm_r, d);
             pointBone(p, skel, .lower_arm_r, .hand_r, d);
         },
+        .strike => {
+            // A compact wind-up, committed straight punch, then a short recovery. Curves are
+            // authored in normalized clip time and drive the shoulder, elbow, torso and hips.
+            const wind = 1 - smoothstep(0.05, 0.4, t);
+            const drive = smoothstep(0.18, 0.48, t) * (1 - smoothstep(0.62, 1, t));
+            p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_y, -0.45 * wind + 0.18 * drive));
+            p.local[sk.Joint.hips.idx()].translation.z += 0.12 * drive;
+            pointBone(p, skel, .upper_arm_r, .lower_arm_r, V.init(-0.32 + 0.36 * drive, -0.18 + 0.07 * wind, 0.76 + 0.35 * drive));
+            pointBone(p, skel, .lower_arm_r, .hand_r, V.init(-0.15 + 0.10 * drive, -0.04, 0.95));
+            // The off hand guards the chest through the entire attack.
+            pointBone(p, skel, .upper_arm_l, .lower_arm_l, V.init(0.35, -0.18, 0.76));
+            pointBone(p, skel, .lower_arm_l, .hand_l, V.init(0.12, 0.12, 0.86));
+        },
+        .cover => {
+            // Low profile behind waist-high cover, with the helmet tucked and arms protecting
+            // the core. The locomotion gait remains active while moving into the position.
+            p.local[sk.Joint.hips.idx()].translation.y -= 0.18;
+            p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.12));
+            p.rotateLocal(sk.Joint.head.idx(), Q.fromAxisAngle(V.unit_x, -0.12));
+            for ([_]sk.Joint{ .thigh_l, .thigh_r }, [_]sk.Joint{ .shin_l, .shin_r }, [_]f32{ -1, 1 }) |thigh, shin, side| {
+                p.rotateLocal(thigh.idx(), Q.fromAxisAngle(V.unit_x, 0.24));
+                p.rotateLocal(shin.idx(), Q.fromAxisAngle(V.unit_x, 0.55));
+                const arm: sk.Joint = if (side > 0) .upper_arm_l else .upper_arm_r;
+                const fore: sk.Joint = if (side > 0) .lower_arm_l else .lower_arm_r;
+                const hand: sk.Joint = if (side > 0) .hand_l else .hand_r;
+                pointBone(p, skel, arm, fore, V.init(side * 0.18, 0.4, 0.8));
+                pointBone(p, skel, fore, hand, V.init(-side * 0.1, -0.05, 0.9));
+            }
+        },
     }
     p.updateGlobal(skel);
+}
+
+fn smoothstep(edge0: f32, edge1: f32, value: f32) f32 {
+    const x = std.math.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+    return x * x * (3 - 2 * x);
 }
 
 /// The body part of a profile's character spec (everything the skeleton depends on).
@@ -438,6 +504,34 @@ test "ranger meshes are smooth, layered, weighted and animate without allocation
     var sealed = try init(a, .{ .armor = .sentinel, .helmet = .sealed });
     defer sealed.deinit(a);
     for (sealed.character.mesh.indices.items) |i| try std.testing.expect(sealed.character.mesh.vertices.items[i].material != .hair);
+}
+
+test "trooper strike and cover actions drive the skinned skeleton" {
+    const a = std.testing.allocator;
+    var ranger = try init(a, .{ .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed });
+    defer ranger.deinit(a);
+    const skel = &ranger.character.skeleton;
+    const rest_hand = skel.worldPos(.hand_r);
+    ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .action = .strike, .action_t = 0.5 });
+    const strike_hand = ranger.instance.pose.global[sk.Joint.hand_r.idx()].translation;
+    try std.testing.expect(strike_hand.sub(rest_hand).length() > 0.2);
+    const strike_hips = ranger.instance.pose.global[sk.Joint.hips.idx()].translation;
+    ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 0.4, .walk_phase = 1, .action = .cover });
+    const cover_hips = ranger.instance.pose.global[sk.Joint.hips.idx()].translation;
+    const cover_hand = ranger.instance.pose.global[sk.Joint.hand_r.idx()].translation;
+    try std.testing.expect(cover_hips.y < strike_hips.y - 0.1);
+    try std.testing.expect(cover_hand.sub(rest_hand).length() > 0.1);
+    for (ranger.mesh.vertices) |v| for (v.position ++ v.normal) |value| try std.testing.expect(std.math.isFinite(value));
+}
+
+test "locomotion controller maps run sprint climb and airborne states" {
+    try std.testing.expectEqual(Animation.ClipId.idle, clipFor(.idle, 0));
+    try std.testing.expectEqual(Animation.ClipId.walk, clipFor(.run, 0.5));
+    try std.testing.expectEqual(Animation.ClipId.run, clipFor(.run, 0.9));
+    try std.testing.expectEqual(Animation.ClipId.run, clipFor(.sprint, 1));
+    try std.testing.expectEqual(Animation.ClipId.climb, clipFor(.climb, 0));
+    try std.testing.expectEqual(Animation.ClipId.climb, clipFor(.hang, 0));
+    try std.testing.expectEqual(Animation.ClipId.air, clipFor(.fall, 0));
 }
 
 test "masculine and feminine ranger faces have fitted feature meshes and distinct proportions" {
