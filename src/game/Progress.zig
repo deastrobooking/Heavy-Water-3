@@ -265,7 +265,10 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     for (doc.armors) |a| result.armors |= armorBit(a);
     for (doc.weapons) |w| result.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w));
     if (doc.weapon_upgrades.len > result.weapon_upgrades.len) return error.InvalidProgress;
-    for (doc.weapon_upgrades) |tier| if (tier > 2) return error.InvalidProgress;
+    for (doc.weapon_upgrades, 0..) |tier, i| {
+        if (tier > 2) return error.InvalidProgress;
+        if (tier > 0 and result.weapons & (@as(u16, 1) << @intCast(i)) == 0) return error.InvalidProgress;
+    }
     @memcpy(result.weapon_upgrades[0..doc.weapon_upgrades.len], doc.weapon_upgrades);
     result.fighter = doc.fighter;
     if (doc.kestrel_levels.len > kestrel_upgrade_count) return error.InvalidProgress;
@@ -347,6 +350,7 @@ test "suits are bought once, and progress round-trips through its save shape" {
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &(.{0} ** (upgrade_count + 1)) }));
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .weapon_upgrades = &.{3} }));
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .weapon_upgrades = &.{1} }));
     // Saves made before later upgrades existed list fewer levels; the rest start at 0.
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));
     // A save without progress starts fresh with the free suits.

@@ -17,7 +17,7 @@ pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
 pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
-pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, PreviousTierRequired, NoFighter, NoBlueprint };
+pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, WeaponRequired, PreviousTierRequired, NoFighter, NoBlueprint };
 
 pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
@@ -147,7 +147,7 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
     if (r.output == .kestrel_upgrade and p.kestrelLevel(r.output.kestrel_upgrade) >= Progress.max_level) return error.MaxLevel;
     if (r.output == .weapon_upgrade) {
         const u = r.output.weapon_upgrade;
-        if (!p.ownsWeapon(u.weapon)) return error.NotOwned;
+        if (!p.ownsWeapon(u.weapon)) return error.WeaponRequired;
         if (p.weaponLevel(u.weapon) >= u.tier) return error.AlreadyMade;
         if (p.weaponLevel(u.weapon) + 1 < u.tier) return error.PreviousTierRequired;
     }
@@ -226,7 +226,7 @@ test "weapon tiers require ownership and the prior tier, then persist as install
     const tier2 = weapons[weapons.len - 6];
     const tier3 = weapons[weapons.len - 5];
     try std.testing.expectEqualStrings("FABRICATE WEAPON FIRST", status(&p, recipes[tier2].output).?);
-    try std.testing.expectError(error.NotOwned, make(&p, &wallet, tier2));
+    try std.testing.expectError(error.WeaponRequired, make(&p, &wallet, tier2));
 
     p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(WeaponKind.beam_saber));
     try std.testing.expectError(error.PreviousTierRequired, make(&p, &wallet, tier3));

@@ -30,11 +30,10 @@ To match anime-level heroism and freedom across vertical ecosystems:
 ### Signature Weapons
 1. **Beam Saber (Zero-Style):**
    - 3-hit standard slash combo; Mk II adds a heavy-finisher shockwave and Mk III enlarges it.
-   - High-speed Dash Slash and 360° Aerial Spin Slash.
-   - Chargeable wave slashes, with stronger waves at Mk III.
+   - Click to slash, press during the second half of a swing to queue the next cut, dash to perform a Dash Slash, or cut while airborne for a spin slash.
+   - Keep holding after a cut and release after 1.2 seconds to launch a piercing wave; Mk III strengthens the wave. Alternate raises the guard and parries during its first 0.3 seconds.
 2. **Energy Blasters (Mega Man Buster):**
-   - Rapid-fire kinetic bolts.
-   - 3 tiers of charge shots scaling to plasma spheres; Mk II/Mk III shorten charge time and expand the blast.
+   - Hold the primary trigger to charge, then release for a shot. Charge advances through three tiers, ending in a plasma burst; Mk II/Mk III shorten charging and enlarge charged blasts.
 3. **Energy Bow & Warp Sniping:**
    - Precision long-distance elemental archery with variable draw strength.
    - Quantum Warp arrows for instantaneous long-distance tele-frag assassinations.
@@ -44,9 +43,9 @@ To match anime-level heroism and freedom across vertical ecosystems:
    - Frontal energy barriers absorbing heavy incoming attacks.
    - Frame-perfect parries (220 ms window) reflecting enemy projectiles back at the Hive.
 6. **Giant Energy Blasts (Kamehameha / Hyper Beam):**
-   - Hold to charge through three beam strengths, then release; Mk II/Mk III increase charge speed and full-charge power.
+   - Hold primary to charge, then release to channel a beam. The charge meter has thresholds at 1.0, 1.5, and 2.2; Mk II/Mk III fill it 20% faster, and a Mk III full charge hits harder and lasts longer.
 
-Weapon upgrades are fabricated at the garage from Mk I through Mk III. They persist in the world save and apply to every local player's arsenal.
+Fabricate each base weapon at the garage before buying its upgrades. Install Mk II before Mk III; tiers cost lumen, Hive alloy, scrap, and some recipes also require rotor cores. Weapon tiers persist in the world save and apply to every local player's arsenal. The weapon HUD shows the equipped Mk tier and charge meter.
 
 ### Elemental Customization & Core Sockets
 - **Elements:** Kinetic, Solar-Lumen (fire/anti-synth), Cryo-Deuterium (freeze/slow), Rootsong (disrupt/overload).

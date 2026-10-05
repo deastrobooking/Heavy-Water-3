@@ -230,10 +230,11 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   Lumen crystals (emissive gems in each system's hue) ring every chamber, drawn within 160 m. Cave rock is drawn within 320 m. Entering a system sets `cave_N_found` and announces its name, with a chime the first time. The Hive's unit limit is now 24 and its nest limit 3 + 8.
 - **Combat:** `game/Combat.zig` connects the existing `combat/` weapons to the world. Each local player has an `Arsenal` (selection, charges, cooldowns, projectiles) over the party's fabricated weapons. Guests fire with the right trigger and switch with the D-pad, and their weapons share every rule below.
   - **Weapon tool (5):** the left mouse button is the primary trigger and the right is the alternate (both tracked as held buttons); Tab cycles the fabricated weapons. Guests use the right trigger and hold the right stick click for the alternate.
-  - **Weapons:** the blaster charges while held. The bow draws, and its alternate fires a warp arrow that carries the archer to where it lands. Missiles home on the nearest unit. The shield absorbs damage while raised, and a timely raise parries. The giant blast charges, then burns a beam.
+  - **Weapons:** hold and release the blaster for its three charge-shot tiers; charged plasma blast radius follows the projectile size. The giant blast charges while held and fires on release at three charge strengths. The bow draws, and its alternate fires a warp arrow that carries the archer to where it lands. Missiles home on the nearest unit. The shield absorbs damage while raised, and a timely raise parries.
   - **Beam saber:** timed cuts rather than an instant area.
     - **Combo:** the primary cuts forehand, backhand, then an overhead finisher; it cuts while dashing and spins in the air. A press in the second half of a cut queues the next.
-    - **Charged wave:** holding the primary after a cut charges it, and a full release (1.2 s) throws a piercing wave.
+    - **Charged wave:** continue holding primary after a cut; release after 1.2 s to throw a piercing wave.
+    - **Weapon tiers:** garage fabricator Mk II adds a damage-and-stun shockwave to the overhead finisher; Mk III enlarges it and strengthens the charged wave. Blaster tiers reduce charge time and expand charged plasma; giant-blast tiers increase charge speed and full-charge output. Progress saves the tiers and shares them across all four local arsenals.
     - **Guard:** the alternate raises a guard. In its first 0.3 s it parries Hive bolts straight back as the player's shots (`Enemies.Event.deflected`); after that it blocks three quarters of a bolt's damage from the front.
     - **Blade hits:** each step samples the blade three times along a segment from the player's `Rig` (`game/Rig.zig`). The rig is a mesh-less copy of the drawn skeleton, posed by the same `Ranger.poseSkeleton`. Every unit the blade passes is cut once per swing (`Enemies.strikeBlade`), with knockback by mass and a stun; heavy cuts stun for 1.5 s. The blade also cuts bolts out of the air.
     - **Lunge:** a cut started near a unit ahead lunges toward it.
@@ -348,7 +349,7 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 - the best completed lap time on the seeded sprint circuit.
 
 Optional fields in format 12 have defaults for documents that omit them:
-- **progress:** suit upgrade levels, owned suits, armor accents, weapons, cars and the fighter, held pickups, collected pickup IDs, and story flags (including destroyed nests and carriers);
+- **progress:** suit upgrade levels, owned suits, armor accents, weapons and their Mk II/Mk III tiers (older saves default to Mk I), cars and the fighter, held pickups, collected pickup IDs, and story flags (including destroyed nests and carriers);
 - **cars:** each hover car's pose;
 - **fighter:** the Kestrel's pose.
 - **race_best:** the saved course best, or zero until a lap is completed.

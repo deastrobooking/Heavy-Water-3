@@ -183,6 +183,7 @@ pub const Arsenal = struct {
         self.system.bow.is_drawing = false;
         self.system.saber.is_charging = false;
         self.system.saber.charge_time = 0;
+        self.system.giant_blast.cancelCharge();
         self.melee = .{};
         self.firearm.hold = 0;
     }
@@ -653,6 +654,13 @@ test "selection follows the fabricated weapons and cycles among them" {
     try std.testing.expectEqual(@as(?WeaponKind, .energy_bow), c.active);
     c.select(owned, true);
     try std.testing.expectEqual(@as(?WeaponKind, .blaster), c.active);
+
+    c.active = .giant_blast;
+    c.system.giant_blast.startCharge();
+    c.system.giant_blast.update(0.4, c.system.slots[0], true);
+    c.select(owned, true);
+    try std.testing.expect(!c.system.giant_blast.charging);
+    try std.testing.expectEqual(@as(f32, 0), c.system.giant_blast.charge);
 }
 
 test "a blaster shot flies into a drone and destroys it; the saber cuts in front only" {

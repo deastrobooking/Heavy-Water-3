@@ -1393,7 +1393,8 @@ fn reason(err: anyerror) []const u8 {
     return switch (err) {
         error.NotEnoughScrap => "not enough scrap",
         error.NotEnoughParts => "not enough parts",
-        error.NotOwned => "fabricate the base weapon first",
+        error.NotOwned => "paint scheme is not owned",
+        error.WeaponRequired => "fabricate the base weapon first",
         error.PreviousTierRequired => "install the previous weapon tier first",
         error.NoFighter => "fabricate the Kestrel first",
         error.NoBlueprint => "ask Maro for the Kestrel blueprint",
