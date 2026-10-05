@@ -90,6 +90,7 @@ test {
     _ = @import("game/Enemies.zig");
     _ = @import("game/Combat.zig");
     _ = @import("vehicle/ShipMeshes.zig");
+    _ = @import("vehicle/ScalariMeshes.zig");
     _ = @import("game/Skies.zig");
     _ = @import("game/Hangar.zig");
     _ = @import("game/Rig.zig");

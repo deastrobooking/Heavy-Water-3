@@ -958,7 +958,7 @@ fn toggleGuest(self: *App) void {
     };
 }
 
-/// `-Dshowcase=N`: a fixed viewpoint on the city for screenshots and art review.
+/// `-Dshowcase=N`: fixed city viewpoints and mesh lineups for screenshots and art review.
 fn showcase(self: *App) void {
     const District = @import("procedural/District.zig");
     const layout = &self.sandbox.catalog.district;
@@ -1017,6 +1017,10 @@ fn showcase(self: *App) void {
         const water = Hydrology.level(self.sandbox.seed, lane, fall_x + 0.02);
         target = .{ fall_x, water - 1.2, fall_z };
         eye = .{ fall_x + 130, water + 105, fall_z - 180 };
+    } else if (v == 47) {
+        // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
+        target = .{ 0, 480, -45 };
+        eye = .{ 0, 680, 470 };
     } else if (v == 9) {
         const s = District.span(layout, layout.edges[0]);
         target = s.point(0.6);
@@ -1042,7 +1046,7 @@ fn showcase(self: *App) void {
 /// 27 four-player split screen with a guest trading, 28 controls while rebinding,
 /// 29 the garage with all three hover cars, 30 a Hive nest under attack, 31 the fabricator,
 /// 32 the Skimmer in flight, 33 the Kestrel on its pad, 34 a dogfight by a Brood carrier,
-/// 35 the carrier from above, 45 a live missile lock for HUD capture.
+/// 35 the carrier from above, 45 a live missile lock for HUD capture, 47 the Scalari fleet lineup.
 fn guiShowcase(self: *App, v: u32) void {
     const sb = &self.sandbox;
     self.engine.input = .{};
@@ -1827,6 +1831,21 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.show_metrics = self.show_metrics;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
+    if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
+        const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
+            .{ .mesh = self.sandbox.catalog.content.scalari_throne_serpent, .position = .{ -120, 480, 15 }, .scale = 1 },
+            .{ .mesh = self.sandbox.catalog.content.scalari_worldcoil_ark, .position = .{ 120, 480, 15 }, .scale = 1 },
+            // Fighters are enlarged for this art-review lineup so their armor details read beside
+            // the motherships; the flight/gameplay scale remains defined by their ship specs.
+            .{ .mesh = self.sandbox.catalog.content.scalari_ember_wyrm, .position = .{ -48, 480, 110 }, .scale = 3.5 },
+            .{ .mesh = self.sandbox.catalog.content.scalari_void_lance, .position = .{ 0, 480, 110 }, .scale = 3.5 },
+            .{ .mesh = self.sandbox.catalog.content.scalari_dreadclaw, .position = .{ 48, 480, 110 }, .scale = 3.5 },
+        };
+        for (fleet) |ship| {
+            renderer.props[renderer.prop_count] = .{ .mesh = ship.mesh, .transform = .{ .position = ship.position, .scale = ship.scale }, .tint = .{ 1, 1, 1, 1 } };
+            renderer.prop_count += 1;
+        }
+    }
     // The removal set is large; copy it only when it changed.
     if (self.published_revision != self.sandbox.modifications.revision) {
         renderer.modifications = self.sandbox.modifications;
@@ -1955,7 +1974,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
     self.ui_height = 720 / self.menu.settings.ui_scale;
     renderer.ui.reset(self.ui_height * width / height, self.ui_height);
     self.hit_len = 0;
-    if (options.showcase != 0 and options.showcase < 18) return;
+    if ((options.showcase != 0 and options.showcase < 18) or options.showcase == 47) return;
     const sandbox = &self.sandbox;
     var inspect: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
     var inspect_slices: [Renderer.panel_capacity][]const u8 = undefined;

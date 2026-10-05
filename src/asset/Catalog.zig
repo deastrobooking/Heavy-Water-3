@@ -24,8 +24,8 @@ const MaterialTag = struct {};
 pub const MeshHandle = Handle.Handle(MeshTag);
 pub const MaterialHandle = Handle.Handle(MaterialTag);
 /// Bumped whenever shipped content changes meaning (IDs, dimensions); persisted in saves.
-/// v6 adds the market blueprints (proximity gate, street lamp, signal relay); v7 the Rootdeep
-/// shrines and their Rootsong reward blueprints.
+/// v6 adds market blueprints; v7 adds Rootdeep shrines and rewards. New Scalari assets are
+/// additive generated GUIDs and do not alter existing save interpretation.
 pub const content_version: u32 = 7;
 pub const max_blueprints = 12;
 
@@ -85,6 +85,17 @@ pub const Content = struct {
     wasp_wing: MeshHandle,
     carrier: MeshHandle,
     carrier_glow: MeshHandle,
+    /// Scalari dragon-armor ships; each shell and emissive layer is an independent model.
+    scalari_ember_wyrm: MeshHandle,
+    scalari_ember_wyrm_glow: MeshHandle,
+    scalari_void_lance: MeshHandle,
+    scalari_void_lance_glow: MeshHandle,
+    scalari_dreadclaw: MeshHandle,
+    scalari_dreadclaw_glow: MeshHandle,
+    scalari_throne_serpent: MeshHandle,
+    scalari_throne_serpent_glow: MeshHandle,
+    scalari_worldcoil_ark: MeshHandle,
+    scalari_worldcoil_ark_glow: MeshHandle,
 };
 /// One hover car design: its body, a rotor drawn spinning at each pivot, emissive light strips,
 /// and the mass properties the simulation flies it with.
@@ -253,6 +264,21 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
             @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
         }
         self.content.wasp_wing = try self.register(allocator, try Model.fromMesh(allocator, try S.waspWing(allocator), .named("wasp wing", white)));
+        const Scalari = @import("../vehicle/ScalariMeshes.zig");
+        inline for (.{
+            .{ "scalari_ember_wyrm", Scalari.emberWyrm },
+            .{ "scalari_void_lance", Scalari.voidLance },
+            .{ "scalari_dreadclaw", Scalari.dreadclaw },
+            .{ "scalari_throne_serpent", Scalari.throneSerpent },
+            .{ "scalari_worldcoil_ark", Scalari.worldcoilArk },
+        }) |entry| {
+            const pair = try entry[1](allocator);
+            var glow_owned = true;
+            errdefer if (glow_owned) pair.glow.deinit(allocator);
+            @field(self.content, entry[0]) = try self.register(allocator, try Model.fromMesh(allocator, pair.shell, .named(entry[0], white)));
+            glow_owned = false;
+            @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
+        }
     }
     self.district = try District.generate(seed);
     self.content.district = try self.reserve();
@@ -270,15 +296,20 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.landscape_count += 1;
     // Generated meshes have no sidecar: their GUIDs derive from fixed names.
     const generated = [_]struct { name: []const u8, handle: MeshHandle }{
-        .{ .name = "relic", .handle = self.content.relic },           .{ .name = "plant", .handle = self.content.plant },
-        .{ .name = "fern", .handle = self.content.flora[1] },         .{ .name = "wildflower", .handle = self.content.flora[2] },
-        .{ .name = "broadleaf", .handle = self.content.flora[3] },    .{ .name = "needleleaf", .handle = self.content.flora[4] },
-        .{ .name = "willow", .handle = self.content.flora[5] },       .{ .name = "canopy_trunk", .handle = self.content.tree_trunk },
-        .{ .name = "block", .handle = self.content.block },           .{ .name = "wheel", .handle = self.content.wheel },
-        .{ .name = "test_arbor", .handle = self.content.test_arbor }, .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
-        .{ .name = "district", .handle = self.content.district },     .{ .name = "arbor_1", .handle = self.arbors[0].mesh },
-        .{ .name = "arbor_1_lod", .handle = self.arbors[0].lod },     .{ .name = "arbor_2", .handle = self.arbors[1].mesh },
-        .{ .name = "arbor_2_lod", .handle = self.arbors[1].lod },
+        .{ .name = "relic", .handle = self.content.relic },                                             .{ .name = "plant", .handle = self.content.plant },
+        .{ .name = "fern", .handle = self.content.flora[1] },                                           .{ .name = "wildflower", .handle = self.content.flora[2] },
+        .{ .name = "broadleaf", .handle = self.content.flora[3] },                                      .{ .name = "needleleaf", .handle = self.content.flora[4] },
+        .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "canopy_trunk", .handle = self.content.tree_trunk },
+        .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
+        .{ .name = "test_arbor", .handle = self.content.test_arbor },                                   .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
+        .{ .name = "district", .handle = self.content.district },                                       .{ .name = "arbor_1", .handle = self.arbors[0].mesh },
+        .{ .name = "arbor_1_lod", .handle = self.arbors[0].lod },                                       .{ .name = "arbor_2", .handle = self.arbors[1].mesh },
+        .{ .name = "arbor_2_lod", .handle = self.arbors[1].lod },                                       .{ .name = "scalari_ember_wyrm", .handle = self.content.scalari_ember_wyrm },
+        .{ .name = "scalari_ember_wyrm_glow", .handle = self.content.scalari_ember_wyrm_glow },         .{ .name = "scalari_void_lance", .handle = self.content.scalari_void_lance },
+        .{ .name = "scalari_void_lance_glow", .handle = self.content.scalari_void_lance_glow },         .{ .name = "scalari_dreadclaw", .handle = self.content.scalari_dreadclaw },
+        .{ .name = "scalari_dreadclaw_glow", .handle = self.content.scalari_dreadclaw_glow },           .{ .name = "scalari_throne_serpent", .handle = self.content.scalari_throne_serpent },
+        .{ .name = "scalari_throne_serpent_glow", .handle = self.content.scalari_throne_serpent_glow }, .{ .name = "scalari_worldcoil_ark", .handle = self.content.scalari_worldcoil_ark },
+        .{ .name = "scalari_worldcoil_ark_glow", .handle = self.content.scalari_worldcoil_ark_glow },
     };
     for (generated) |g| {
         var full: [64]u8 = undefined;
@@ -359,6 +390,7 @@ test "every catalog asset resolves by GUID: compiled through the manifest, gener
     try std.testing.expectError(error.WrongKind, catalog.registry.mesh(.{ .guid = door }));
     // Generated content has the same GUID in every build.
     try std.testing.expect((try catalog.registry.mesh(.{ .guid = Guid.derived("generated:block") })).eql(catalog.content.block));
+    try std.testing.expect((try catalog.registry.mesh(.{ .guid = Guid.derived("generated:scalari_throne_serpent") })).eql(catalog.content.scalari_throne_serpent));
     // Every shipped blueprint is reachable by GUID.
     for (catalog.blueprints[0..catalog.blueprint_count]) |*bp| {
         try std.testing.expectEqual(@as(*const Blueprint, bp), try catalog.registry.blueprint(.{ .guid = catalog.guidOf(.blueprint, bp.name()).? }));

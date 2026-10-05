@@ -53,13 +53,26 @@ Fabricate each base weapon at the garage before buying its upgrades. Install Mk 
 
 ---
 
-## 4. The Hive: Mechanized Villains & Synthetic Biology
+## 4. The Scalarians and the Hive
 
-### The Enemy: The Hive
-- **Nature:** Autonomous machine intelligence seeking universal subjugation to conduct cold optimization research.
-- **Synthetics & Chimeras:**
-  - **Synthetic Humanoids:** Cybernetic warriors (arm cannons, thrusters, visor helmets). Freeing them from their override collars recruits them as customized NPC battle allies.
-  - **Bio-Synth Pets & Chimeras:** Wild fauna infused with cybernetic armor and beam weaponry (Digimon/Pokemon aesthetic). Freeing them tames them as levelable companion pets who gain XP, evolve, and fight beside you.
+### The ancient makers
+
+- **The Scalarians:** An ancient reptilian people who left Earth long ago. They modified ancient insects and established the first Hive lineages on their homeworld. Their armor, ships and capital architecture carry a dragon motif: horned profiles, layered scales, long prow forms and swept blade wings.
+- **The Hive:** A distinct civilization descended from the engineered insects. Its brood network now fields drones, troopers, wasps and Brood carriers. The Hive is biological at its core, with machinery and Scalari technology grafted into its structures; it is not simply an autonomous robot intelligence.
+- **The central mystery:** The Scalarians' original purpose for the Hive, and whether the Hive still obeys them, can drive the campaign's discoveries. Preserve room for players to learn this through city archives and brood sites instead of explaining it all in the opening.
+
+### Scalari fleet and campaign arc
+
+The Scalari homeworld and Hive Homeworld are one destination. Five city regions lead from the outer brood districts through Varkhoss's origin records and Broodheart's command nexus to the Scalari capital, **the Obsidian Coil**. The capital is the endgame base where the Scalari Sovereign waits behind a shield network.
+
+The 3D fleet uses a clear visual hierarchy: Ember Wyrm interceptors in crimson and black, Void Lance strike fighters in purple and acid green, Dreadclaw heavy fighters in violet-black and ember orange, the red-black Throne Serpent command mothership, and the purple-green Worldcoil Ark expedition mothership. Their armor can reference draconic anatomy while keeping engines, weapons and flight-control surfaces visible and readable.
+
+The first mesh pass for all five ships is in `vehicle/ScalariMeshes.zig`; catalog registration provides their shell and glow assets. Flight simulation, collision profiles, combat damage zones and world spawning remain future implementation work.
+
+### Synthetic allies and chimeras
+
+- **Synthetic Humanoids:** Cybernetic warriors (arm cannons, thrusters, visor helmets). Freeing them from their override collars recruits them as customized NPC battle allies.
+- **Bio-Synth Pets & Chimeras:** Wild fauna infused with cybernetic armor and beam weaponry. Freeing them tames them as levelable companion pets who gain XP, evolve, and fight beside you.
 
 ---
 

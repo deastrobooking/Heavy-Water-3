@@ -9,7 +9,7 @@ The systems now in place:
 - fabrication;
 - procedural audio.
 
-The new content priority is a four-player planetary campaign: bounded open arenas on the Hive Homeworld and Gaia, with battle loot feeding procedural ship design and a real-time outpost strategy loop. The design and first deterministic catalog are in [Planetary frontier](planetary-frontier.md); no new planet is playable yet.
+The new content priority is a four-player planetary campaign across the Arbor Frontier, the Hive/Scalari Homeworld, and Gaia. Each has five city regions and a capital. Five Scalari dragon-armor ships now have procedural 3D shell/glow assets; they still need piloting and combat systems. Campaign design and catalog detail are in [Planetary frontier](planetary-frontier.md); no new world or city is playable yet.
 
 This plan orders the work. The [roadmap](../roadmap.md) stays the record of what is implemented.
 
@@ -25,7 +25,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 | Progression | 62 pickups, fabricator (cars, the fighter, suits, armor, ten weapons), suit upgrades, vital cells, story flags. |
 | Fighting | Timed saber combos with guard and parry, four energy firearms, Ranger and Synthetic classes with three specials each. Untuned by hand. |
 | Audio | Synthesized sounds and loops, positional cues, four volume buses. Nobody has listened to it yet. |
-| Planetary campaign | Three world descriptors and eight arena concepts have deterministic metadata/seeds; region generation, ship-blueprint progression, RTS construction and world saves are not integrated. |
+| Planetary campaign | Three world descriptors, fifteen city regions, three capitals, eight arena concepts and five Scalari ship assets are authored; world generation, flight/combat integration, ship-blueprint progression, RTS construction and world saves are not integrated. |
 | Engine phases | 1–13 done; 14 (skeletal animation), 15 (scenes), 16 (networking) planned. |
 
 ## Known gaps from review
@@ -109,12 +109,15 @@ Acceptance: a four-player run can fabricate, fly and fight with every player act
 
 ### G. Planetary arena campaign (new content track)
 
-The destination and arena catalog is seeded and tested. Build the first playable slice in this order:
+The destination, city, capital and arena catalog is seeded and tested, and the Scalari ship meshes are registered. Build the playable campaign in this order:
 
 1. Convert one existing Frontier Hive basin into a selectable four-player open arena with an objective, stable loot IDs, extraction and per-world save/restore.
 2. Add a 3D modular ship design bay: typed attachment sockets, composition validation, a rotatable preview, derived mass/inertia/thrust/handling, fabrication costs and saved blueprints.
 3. Add a real-time outpost loop to that arena: command hub, extractor, power, fabricator and defense turret; verify a seeded raid, resource flow, damage/recovery and persistence.
-4. Build the first Hive Homeworld arena from the same content/runtime contracts, then Gaia's human colony arena and its geodesic-shell objectives.
+4. Build the first Hive Homeworld arena from the same content/runtime contracts, then add its five connected city regions and Scalari ship flight/combat roles.
+5. Build Gaia's human colony arena and geodesic-shell objectives, followed by its five city regions and orbital route.
+6. Connect the five Arbor Frontier city regions to the existing hub and surrounding exploration districts, then implement each capital's command-base role.
+7. Unlock the final Obsidian Coil siege after the Hive and Gaia story arcs; stage the Scalari Sovereign and Throne Serpent boss fight in the Hive Homeworld capital.
 
 Use local tangent coordinates for each surface arena and stable geodesic face/cell IDs for Gaia's sky enclosure. Ship control, construction, combat and previews remain fully 3D. The detailed [Planetary frontier plan](planetary-frontier.md) owns dimensions, resource roles and acceptance checks.
 

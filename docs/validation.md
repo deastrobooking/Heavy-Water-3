@@ -2,6 +2,15 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Scalari campaign foundation — 2026-10-05
+
+- The campaign catalog now has three destinations, five stable city-region IDs and one capital per destination. Validation enforces the city count, unique IDs/capitals and the single final-boss site at the Scalari Obsidian Coil; the Hive Homeworld records the Scalarians as its ancient founders.
+- Five procedural Scalari ship assets are built and registered under generated GUIDs: Ember Wyrm, Void Lance, Dreadclaw, Throne Serpent and Worldcoil Ark. Their shell/glow geometry test checks non-empty indexed meshes and finite 3D vertices. The final mothership geometry uses one full-span armored wing assembly.
+- `-Dshowcase=47` presents the three fighters and two motherships together for in-game visual review.
+- `python3 tools/zig.py build test --summary all` passed **331/331 Debug tests**. After the mothership mesh review, the targeted Scalari/vehicle run passed **36/36 tests**; `python3 tools/zig.py build check --summary all` passed the full application compile, and `git diff --check` passed.
+- ReleaseSafe Metal art-review capture: `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Dshowcase=47 -Dcapture-frame=90 -Daudio=false -Doptimize=ReleaseSafe` exited cleanly on Apple M3 Pro. It rendered all five ships in one 3D frame with no Metal validation messages; the review image is `zig-out/scalari_fleet.png`.
+- City descriptions and ship meshes are authoring foundations only. City environments, capital interiors, playable Scalari flight/combat and final-boss gameplay remain unimplemented.
+
 ## Collision, interiors and shareable controller profiles — 2026-10-05
 
 - Free-flight movement now passes through the character collision controller. Regression coverage checks landing on terrain and a rigid platform. Rigid boxes also resolve oriented SAT contacts against each other, while characters can stand on or be stopped by rigid-body floors and ceilings.
