@@ -367,6 +367,11 @@ fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8) void {
     const arsenal = &sb.combat.arsenals[player];
     const name = if (arsenal.active) |w| pretty(&buffer, @tagName(w)) else "NO WEAPON";
     c.text(r.x + 14, r.y + 9, name, 1, gold);
+    if (arsenal.active) |w| {
+        var tier_buffer: [8]u8 = undefined;
+        const tier = std.fmt.bufPrint(&tier_buffer, "MK {d}", .{1 + arsenal.weapon_upgrades[@intFromEnum(w)]}) catch "MK I";
+        c.text(r.x + 100, r.y + 9, tier, 0.75, alpha(gold, 0.8));
+    }
     bar(c, .{ .x = r.x + 160, .y = r.y + 10, .w = 76, .h = 6 }, arsenal.charge(), gold);
 }
 

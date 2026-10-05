@@ -79,7 +79,7 @@ The standard 14 m deck contains two 3.5 m traffic lanes, two 3 m walkways, and t
 
 Validation checks graph reachability, endpoint IDs, finite bounded positions, span length, grades of at most **6%**, trunk and plaza envelopes, road crossings, junction approach angles, trunk spurs, and reserved market bays. Terrain clearance is sampled every 4 m at the road center and both edges, requiring 6 m beneath the deck. The fixed legacy test-Arbor entrance still has its original 10% descending bridge and spiral ramp; it is outside the new district road rules.
 
-The generated district uses one resident mesh and one static collider. Player bridges use existing block instances and their own mesh colliders. Save loading validates the graph and stages allocating collision work before replacing live state; a failed allocation preserves the current session. The format is **11**, content version **7**, district generator **2** (generator 2 added styled bridges, piers, braces, and the skyline; earlier district saves are rejected). Older saves are rejected rather than migrated.
+The generated district uses one resident mesh and one static collider. Player bridges use existing block instances and their own mesh colliders. Save loading validates the graph and stages allocating collision work before replacing live state; a failed allocation preserves the current session. The format is **12**, content version **7**, district generator **2** (generator 2 added styled bridges, piers, braces, and the skyline; format 12 adds the persistent race best). Format 11 saves migrate with an empty best-lap record; earlier formats are rejected.
 
 ## Current limits
 

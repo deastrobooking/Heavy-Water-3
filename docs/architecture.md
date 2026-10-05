@@ -336,7 +336,7 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 
 ## Saves
 
-`game/Save.zig` writes JSON format v11 (content version 7). It records:
+`game/Save.zig` writes JSON format v12 (content version 7). It records:
 - the format, seed, generator and content versions, and the tick;
 - the player's pose and mode, and their profile;
 - every crate by slot, and the removed relic IDs;
@@ -345,13 +345,15 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 - player bridge endpoint pairs (bridges already closing are left out);
 - the market wallet (scrap, parts, kits) and each stall's stock with its market day;
 - the installed mods by name and version.
+- the best completed lap time on the seeded sprint circuit.
 
-Later additions are optional fields with defaults, so older v11 saves still load:
+Optional fields in format 12 have defaults for documents that omit them:
 - **progress:** suit upgrade levels, owned suits, armor accents, weapons, cars and the fighter, held pickups, collected pickup IDs, and story flags (including destroyed nests and carriers);
 - **cars:** each hover car's pose;
 - **fighter:** the Kestrel's pose.
+- **race_best:** the saved course best, or zero until a lap is completed.
 
-Formats before v11 are rejected, not migrated. Whether the player is seated or piloting is not saved: loading leaves the player standing. City life, guests, Hive units, wasps and shots are not saved either.
+Format 11 saves migrate with no recorded lap; formats before v11 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. City life, guests, Hive units, wasps and shots are not saved either.
 
 Writes go to a temporary file, then rename over `saves/quicksave.json`. Loading validates everything before tearing down and rebuilding the session:
 - versions, seed, slot ranges and duplicates;

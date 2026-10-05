@@ -29,12 +29,12 @@ To match anime-level heroism and freedom across vertical ecosystems:
 
 ### Signature Weapons
 1. **Beam Saber (Zero-Style):**
-   - 3-hit standard slash combo with heavy-finisher shockwaves.
+   - 3-hit standard slash combo; Mk II adds a heavy-finisher shockwave and Mk III enlarges it.
    - High-speed Dash Slash and 360° Aerial Spin Slash.
-   - Chargeable wave slashes and Plasma Edge core upgrades.
+   - Chargeable wave slashes, with stronger waves at Mk III.
 2. **Energy Blasters (Mega Man Buster):**
    - Rapid-fire kinetic bolts.
-   - 3 tiers of charge shots scaling to screen-clearing plasma spheres.
+   - 3 tiers of charge shots scaling to plasma spheres; Mk II/Mk III shorten charge time and expand the blast.
 3. **Energy Bow & Warp Sniping:**
    - Precision long-distance elemental archery with variable draw strength.
    - Quantum Warp arrows for instantaneous long-distance tele-frag assassinations.
@@ -44,7 +44,9 @@ To match anime-level heroism and freedom across vertical ecosystems:
    - Frontal energy barriers absorbing heavy incoming attacks.
    - Frame-perfect parries (220 ms window) reflecting enemy projectiles back at the Hive.
 6. **Giant Energy Blasts (Kamehameha / Hyper Beam):**
-   - High-energy channeled devastation beams piercing through armored Hive walkers and dread spires.
+   - Hold to charge through three beam strengths, then release; Mk II/Mk III increase charge speed and full-charge power.
+
+Weapon upgrades are fabricated at the garage from Mk I through Mk III. They persist in the world save and apply to every local player's arsenal.
 
 ### Elemental Customization & Core Sockets
 - **Elements:** Kinetic, Solar-Lumen (fire/anti-synth), Cryo-Deuterium (freeze/slow), Rootsong (disrupt/overload).

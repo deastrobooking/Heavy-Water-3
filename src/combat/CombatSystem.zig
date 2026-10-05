@@ -44,7 +44,7 @@ pub fn update(self: *CombatSystem, physics: *const Physics, dt: f32) void {
     self.blaster.update(dt, slot);
     self.bow.update(dt);
     self.shield.update(dt);
-    self.giant_blast.update(dt, slot);
+    self.giant_blast.update(dt, slot, self.giant_blast.charging);
 
     if (self.warp_strike_pending != null) {
         self.warp_strike_timer = @max(0, self.warp_strike_timer - dt);
@@ -77,7 +77,7 @@ pub fn chargeBlaster(self: *CombatSystem, charging: bool) void {
 pub fn fireBlaster(self: *CombatSystem, origin: V, dir: V) ?usize {
     const shot = self.blaster.releaseShot(self.slots[1]) orelse return null;
     const kind: Projectile.ProjectileKind = if (shot.level >= 2) .charged_plasma else .blaster_bolt;
-    return self.projectiles.spawn(
+    const spawned = self.projectiles.spawn(
         kind,
         origin,
         dir,
@@ -87,6 +87,8 @@ pub fn fireBlaster(self: *CombatSystem, origin: V, dir: V) ?usize {
         2.5,
         null,
     );
+    if (spawned) |i| self.projectiles.items[i].radius = shot.size;
+    return spawned;
 }
 
 /// Draw and fire Energy Bow
@@ -243,7 +245,7 @@ test "protective shield absorption, break cooldown, and parry window" {
 test "giant energy blast charge, duration, and damage beam" {
     var combat: CombatSystem = .{};
     combat.giant_blast.startCharge();
-    combat.giant_blast.update(1.8, combat.slots[0]);
+    combat.giant_blast.update(1.8, combat.slots[0], true);
     try std.testing.expect(combat.giant_blast.ready);
 
     const beam = combat.giant_blast.fire(combat.slots[0]);
@@ -251,4 +253,31 @@ test "giant energy blast charge, duration, and damage beam" {
     try std.testing.expect(beam.?.dps > 100.0);
     try std.testing.expect(beam.?.beam_length >= 80.0);
     try std.testing.expect(combat.giant_blast.firing);
+}
+
+test "giant blast charge tiers require a held trigger and scale the released beam" {
+    var quick: Weapon.GiantBlast = .{};
+    const base_slot: Weapon.WeaponSlot = .{ .kind = .giant_blast, .core = .overdrive_core, .level = 1 };
+    const upgraded_slot: Weapon.WeaponSlot = .{ .kind = .giant_blast, .core = .overdrive_core, .level = 3 };
+    quick.startCharge();
+    quick.update(0.9, base_slot, true);
+    try std.testing.expect(!quick.ready);
+    quick.update(0.2, base_slot, true);
+    try std.testing.expect(quick.ready);
+    const base = quick.fire(base_slot).?;
+
+    var full: Weapon.GiantBlast = .{};
+    full.startCharge();
+    full.update(2.1, upgraded_slot, true);
+    try std.testing.expect(full.ready);
+    const charged = full.fire(upgraded_slot).?;
+    try std.testing.expect(charged.dps > base.dps);
+    try std.testing.expect(charged.beam_width > base.beam_width);
+    try std.testing.expect(full.duration > quick.duration);
+
+    var released_early: Weapon.GiantBlast = .{};
+    released_early.startCharge();
+    released_early.update(0.6, upgraded_slot, false);
+    try std.testing.expect(!released_early.ready);
+    try std.testing.expect(released_early.fire(upgraded_slot) == null);
 }

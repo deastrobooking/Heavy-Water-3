@@ -136,6 +136,8 @@ pub const Stance = struct {
 /// trigger edges.
 pub const Arsenal = struct {
     system: CombatSystem = .{},
+    /// Weapon Mk II/Mk III bonuses, copied from shared party progression.
+    weapon_upgrades: [@typeInfo(WeaponKind).@"enum".fields.len]u8 = @splat(0),
     /// Selected weapon (one the party has fabricated), if any.
     active: ?WeaponKind = null,
     was_fire: bool = false,
@@ -214,7 +216,7 @@ pub const Arsenal = struct {
             .energy_bow => s.bow.draw,
             .beam_saber => if (s.saber.is_charging) @min(1, s.saber.charge_time / 1.2) else 0,
             .sniper_rifle, .machine_gun, .heavy_rifle, .energy_bazooka => self.firearm.meter(Firearms.of(k).?),
-            .giant_blast => if (self.beam != null) 1 else @min(1, s.giant_blast.charge / 1.5),
+            .giant_blast => if (self.beam != null) 1 else @min(1, s.giant_blast.charge / 2.4),
             .protective_shield => s.shield.health / s.shield.max_health,
             .tracking_missile => 0,
         };
@@ -228,8 +230,16 @@ effects: [max_effects]?Effect = @splat(null),
 rng: std.Random.DefaultPrng = .init(0x5ab3e),
 
 fn slotFor(self: *const Arsenal, kind: WeaponKind) Weapon.WeaponSlot {
-    for (self.system.slots) |s| if (s.kind == kind) return s;
-    return .{ .kind = kind, .element = .solar_lumen, .core = if (kind == .protective_shield) .aegis_reflector else .overdrive_core };
+    for (self.system.slots) |s| if (s.kind == kind) {
+        var upgraded = s;
+        upgraded.level = 1 + self.weapon_upgrades[@intFromEnum(kind)];
+        return upgraded;
+    };
+    return .{ .kind = kind, .element = .solar_lumen, .core = switch (kind) {
+        .protective_shield => .aegis_reflector,
+        .giant_blast => .overdrive_core,
+        else => .none,
+    }, .level = 1 + self.weapon_upgrades[@intFromEnum(kind)] };
 }
 
 fn effect(self: *Combat, e: Effect) void {
@@ -280,15 +290,17 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
     arsenal.pitch = std.math.asin(std.math.clamp(aim.forward[1], -1, 1));
     const s = &arsenal.system;
     const kind = arsenal.active;
+    s.slots[0] = slotFor(arsenal, .beam_saber);
+    s.slots[1] = slotFor(arsenal, .blaster);
     const blaster_slot = s.slots[1];
+    const pressed = aim.fire and !arsenal.was_fire;
+    const released = !aim.fire and arsenal.was_fire;
     s.saber.update(dt);
     s.blaster.update(dt, blaster_slot);
     s.bow.update(dt);
     s.shield.update(dt);
-    s.giant_blast.update(dt, slotFor(arsenal, .giant_blast));
-
-    const pressed = aim.fire and !arsenal.was_fire;
-    const released = !aim.fire and arsenal.was_fire;
+    if (kind == .giant_blast and pressed) s.giant_blast.startCharge();
+    s.giant_blast.update(dt, slotFor(arsenal, .giant_blast), aim.fire or released);
     const alt_pressed = aim.alt and !arsenal.was_alt;
     const alt_released = !aim.alt and arsenal.was_alt;
     arsenal.was_fire = aim.fire;
@@ -318,11 +330,14 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
             if (!aim.fire and !aim.alt) s.shield.lower();
         },
         .giant_blast => {
-            if (pressed) s.giant_blast.startCharge();
-            if (released and s.giant_blast.ready) if (s.giant_blast.fire(slotFor(arsenal, .giant_blast))) |b| {
-                arsenal.beam = .{ .left = s.giant_blast.duration, .dps = b.dps, .width = b.beam_width, .length = b.beam_length };
-                push(out, &n, .{ .fired = .giant_blast });
-            };
+            if (released) {
+                if (s.giant_blast.ready) {
+                    if (s.giant_blast.fire(slotFor(arsenal, .giant_blast))) |b| {
+                        arsenal.beam = .{ .left = s.giant_blast.duration, .dps = b.dps, .width = b.beam_width, .length = b.beam_length };
+                        push(out, &n, .{ .fired = .giant_blast });
+                    }
+                } else s.giant_blast.cancelCharge();
+            }
         },
     };
 
@@ -366,7 +381,7 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
                 push(out, &n, .{ .cut = at });
                 continue;
             }
-            if (p.kind == .charged_plasma or p.kind == .tracking_missile) _ = enemies.strikeArea(at, 3, p.damage * 0.5, null, &hive, &hn);
+            if (p.kind == .charged_plasma or p.kind == .tracking_missile) _ = enemies.strikeArea(at, if (p.kind == .charged_plasma) @max(2.2, p.radius * 3.2) else 3, p.damage * 0.5, null, &hive, &hn);
             self.effect(.{ .kind = if (p.kind == .tracking_missile) .burst else .spark, .position = at, .life = 0.35, .size = if (p.kind == .tracking_missile) 2.5 else 0.8, .color = Weapon.Element.color(p.element)[0..3].* });
             push(out, &n, .{ .impact = at });
             if (p.kind == .warp_arrow) push(out, &n, .{ .warp = R.sub(at, R.scale(dir, 2)) });
@@ -381,7 +396,7 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
             self.burstOrb(enemies, h.position, h.damage, out, &n, &hive, &hn);
             continue;
         }
-        if (h.kind == .charged_plasma or h.kind == .tracking_missile) _ = enemies.strikeArea(h.position, 3, h.damage * 0.5, null, &hive, &hn);
+        if (h.kind == .charged_plasma or h.kind == .tracking_missile) _ = enemies.strikeArea(h.position, if (h.kind == .charged_plasma) @max(2.2, h.radius * 3.2) else 3, h.damage * 0.5, null, &hive, &hn);
         self.effect(.{ .kind = if (h.kind == .tracking_missile) .burst else .spark, .position = h.position, .life = 0.3, .size = if (h.kind == .tracking_missile) 2.5 else 0.6, .color = Weapon.Element.color(h.element)[0..3].* });
         push(out, &n, .{ .impact = h.position });
         if (h.is_warp) push(out, &n, .{ .warp = R.add(h.position, R.scale(h.normal, 1.2)) });
@@ -400,11 +415,11 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
     if (pressed) {
         if (mel.swing) |sw| {
             if (sw.t > 0.3) mel.queued = true;
-        } else cut(arsenal, enemies, aim, out, n);
+        } else self.cut(arsenal, enemies, aim, out, n, hive, hn);
     }
     // Holding the primary after a cut charges the wave cut; releasing it full unleashes it.
     if (released) {
-        if (mel.swing == null and s.saber.charge_time >= 1.2) cut(arsenal, enemies, aim, out, n);
+        if (mel.swing == null and s.saber.charge_time >= 1.2) self.cut(arsenal, enemies, aim, out, n, hive, hn);
         s.saber.charge_time = 0;
         s.saber.is_charging = false;
     } else s.saber.is_charging = aim.fire and mel.swing == null and mel.guard == null;
@@ -432,14 +447,15 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
         mel.swing = null;
         if (mel.queued) {
             mel.queued = false;
-            cut(arsenal, enemies, aim, out, n);
+            self.cut(arsenal, enemies, aim, out, n, hive, hn);
         }
     }
 }
 
 /// Starts a cut: the combo step (or dash, aerial or charged cut) sets the arc and its weight.
-fn cut(arsenal: *Arsenal, enemies: *const Enemies, aim: Aim, out: []Event, n: *usize) void {
+fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Event, n: *usize, hive: []Enemies.Event, hn: *usize) void {
     const s = &arsenal.system;
+    s.slots[0] = slotFor(arsenal, .beam_saber);
     const c = s.attackSaber(aim.dashing, aim.airborne);
     const arc: Ranger.Arc = switch (c.combo) {
         2 => .backhand,
@@ -464,9 +480,16 @@ fn cut(arsenal: *Arsenal, enemies: *const Enemies, aim: Aim, out: []Event, n: *u
     };
     push(out, n, .slash);
     const fwd = flat(aim);
+    if (arc == .overhead and s.slots[0].level >= 2) {
+        const center = R.add(aim.feet, R.add(R.scale(fwd, 2.2), .{ 0, 0.8, 0 }));
+        const radius: f32 = if (s.slots[0].level >= 3) 5 else 3.8;
+        _ = enemies.strikeArea(center, radius, c.damage * (if (s.slots[0].level >= 3) @as(f32, 0.9) else 0.65), fwd, hive, hn);
+        _ = enemies.shock(center, radius, 0.8, 9);
+        self.effect(.{ .kind = .burst, .position = center, .life = 0.32, .size = radius, .color = .{ 0.25, 0.9, 1 } });
+    }
     if (arc == .charged) {
         // A crescent of light that flies on through everything in its path.
-        if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, 40, c.damage * 0.6, .solar_lumen, 0.6, null)) |i| s.projectiles.items[i].pierce = 8;
+        if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, 40, c.damage * (if (s.slots[0].level >= 3) @as(f32, 0.85) else 0.6), .solar_lumen, 0.6, null)) |i| s.projectiles.items[i].pierce = 8;
         push(out, n, .{ .fired = .beam_saber });
     }
     // A unit just ahead pulls the cut toward it.

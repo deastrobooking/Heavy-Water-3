@@ -16,7 +16,7 @@ See [World and Systems](world.md), [Arbor Genomes and Sap](arbors.md), [Canopy C
 
 - Explore on foot, climb, wall-jump, grapple, hover, fly, glide, dash, swim, and ride a hoverboard.
 - Create and customize a ranger, switch between first- and third-person views, and play local split-screen with up to four players.
-- Fabricate one of three hover racers and run the elevated sprint loop, chaining its ramps, jump gaps, magnetic vertical loop, checkpoints, and charge pads.
+- Fabricate one of three hover racers and run the elevated sprint loop, chaining its ramps, jump gaps, magnetic vertical loop, checkpoints, and charge pads; completed best laps appear on the HUD and persist in the world save.
 - Build and wire machines, ride a powered rover, place sap beacons, add bridges, and capture machine circuits as reusable prefabs.
 - Solve shrines, salvage relics, trade at markets, and save or restore your constructed world.
 - Grow the district through procedural Arbors, powered Rootsong networks, and player-built connections.

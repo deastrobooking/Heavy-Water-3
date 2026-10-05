@@ -1766,7 +1766,9 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         const car = &sandbox.garage.cars[i].?.flyer;
         const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, car.body.pos.x, car.body.pos.z).height;
         const race = sandbox.garage.race;
-        renderer.hud_lines[1].set("{s}  {d:.0} M/S  BOOST {d:.0}%  {s} {d}/{d} {d:.1}s  {d:.0} M UP", .{ @import("vehicle/Designs.zig").name(@enumFromInt(i)), car.body.vel.length(), car.boost_charge * 100, if (race.active) "GATE" else if (race.finished) "FINISH" else "START", if (race.active) race.gate + 1 else 0, @import("game/Racing.zig").node_count, race.elapsed, car.body.pos.y - ground });
+        var pb_buffer: [16]u8 = undefined;
+        const personal_best = if (race.best > 0) std.fmt.bufPrint(&pb_buffer, "{d:.1}s", .{race.best}) catch "--" else "--";
+        renderer.hud_lines[1].set("{s}  {d:.0} M/S  BOOST {d:.0}%  {s} {d}/{d} {d:.1}s  PB {s}  {d:.0} M UP", .{ @import("vehicle/Designs.zig").name(@enumFromInt(i)), car.body.vel.length(), car.boost_charge * 100, if (race.active) "GATE" else if (race.finished) "FINISH" else "START", if (race.active) race.gate + 1 else 0, @import("game/Racing.zig").node_count, race.elapsed, personal_best, car.body.pos.y - ground });
     } else if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;

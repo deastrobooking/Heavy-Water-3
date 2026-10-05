@@ -144,7 +144,7 @@ Next:
 - nest assault events and a Hive progression across the map;
 - hand-tune the three racer silhouettes, paint and lighting in the running game;
 - tune loop entry speed and boost timing by hand, then add more ramp and loop variants;
-- split-screen race HUD, multiplayer starts, and persistent best-lap records.
+- split-screen race HUD and multiplayer starts with independent vehicle controls and lap state.
 
 ## Traversal and local co-op — implemented
 
@@ -290,7 +290,7 @@ The district is rebuilt as a sky city held up by steel:
 - **Supports:** braced pole piers under every non-suspension road, and braced legs under the free-standing plazas.
 - **Skyline:** seeded, validated skyscrapers, with a sky-lobby tower beside each tower plaza.
 - **Night lighting:** window columns, spire beacons, lit rails, and cable light strings.
-- **Saves:** district generator 2 and save format 11 (bridge styles).
+- **Saves:** district generator 2 and save format 12 (bridge styles and the sprint course best lap).
 
 Acceptance evidence:
 

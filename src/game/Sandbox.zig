@@ -1393,7 +1393,8 @@ fn reason(err: anyerror) []const u8 {
     return switch (err) {
         error.NotEnoughScrap => "not enough scrap",
         error.NotEnoughParts => "not enough parts",
-        error.NotOwned => "paint scheme is not owned",
+        error.NotOwned => "fabricate the base weapon first",
+        error.PreviousTierRequired => "install the previous weapon tier first",
         error.NoFighter => "fabricate the Kestrel first",
         error.NoBlueprint => "ask Maro for the Kestrel blueprint",
         error.MaxLevel => "already fully tuned",
@@ -1466,6 +1467,7 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
                         self.combat.arsenals[0].active = w;
                         self.say("{s} ready: tool 5 to wield", .{name});
                     },
+                    .weapon_upgrade => |u| self.say("{s} installed: weapon tier {d}", .{ name, u.tier }),
                     .kestrel_upgrade => |upgrade| {
                         self.hangar.applyLevels(self.progress.kestrel_levels);
                         self.skies.configureKestrel(self.progress.kestrel_levels);
@@ -1919,6 +1921,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .machines = machines[0..machine_count],
         .wallet = self.wallet,
         .progress = try self.progress.toDoc(arena),
+        .race_best = self.garage.race.best,
         .fighter = if (self.hangar.fighter) |f| .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .yaw = f.heading() } else null,
         .cars = cars: {
             var list: std.ArrayList(Save.CarState) = .empty;
@@ -2059,6 +2062,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (&self.guests, 0..) |*g, i| if (g.active) self.respawnGuest(i);
     self.sap_stats = @splat(.{});
     self.tap_links = @splat(@splat(null));
+    self.garage.race = .{ .best = doc.race_best };
     Frontier.refresh(self);
     for (doc.cars) |c| if (self.progress.ownsVehicle(c.design)) self.garage.place(self.seed, spawn, self.catalog, c.design, c.position, c.yaw);
     if (doc.fighter) |f| if (self.progress.fighter) self.hangar.placeWithLevels(self.seed, spawn, f.position, f.yaw, self.progress.kestrel_levels);

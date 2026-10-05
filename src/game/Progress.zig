@@ -44,6 +44,8 @@ picked: Collectibles.Picked = .initEmpty(),
 vehicles: u8 = 0,
 armors: u8 = free_armors,
 weapons: u16 = 0,
+/// Installed weapon tiers beyond Mk I, indexed by `WeaponKind` (0..2).
+weapon_upgrades: [@typeInfo(WeaponKind).@"enum".fields.len]u8 = @splat(0),
 /// The Kestrel fighter has been fabricated.
 fighter: bool = false,
 kestrel_levels: [kestrel_upgrade_count]u8 = @splat(0),
@@ -69,6 +71,9 @@ pub fn ownsVehicle(self: *const Progress, d: Designs.Design) bool {
 }
 pub fn ownsWeapon(self: *const Progress, w: WeaponKind) bool {
     return self.weapons & (@as(u16, 1) << @intCast(@intFromEnum(w))) != 0;
+}
+pub fn weaponLevel(self: *const Progress, w: WeaponKind) u8 {
+    return 1 + self.weapon_upgrades[@intFromEnum(w)];
 }
 pub fn count(self: *const Progress, k: Collectibles.Kind) u32 {
     return self.inventory[@intFromEnum(k)];
@@ -217,6 +222,8 @@ pub const Doc = struct {
     vehicles: []const Designs.Design = &.{},
     armors: []const Profile.Armor = &.{},
     weapons: []const WeaponKind = &.{},
+    /// Installed Mk II/Mk III weapon tiers; older saves omit this field.
+    weapon_upgrades: []const u8 = &.{},
     fighter: bool = false,
     kestrel_levels: []const u8 = &.{},
     kestrel_paints: u8 = 1,
@@ -239,7 +246,7 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     inline for (@typeInfo(Profile.Armor).@"enum".fields) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
     var weapons: std.ArrayList(WeaponKind) = .empty;
     inline for (@typeInfo(WeaponKind).@"enum".fields) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
-    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint };
+    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .weapon_upgrades = try arena.dupe(u8, &self.weapon_upgrades), .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
@@ -257,6 +264,9 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     for (doc.vehicles) |d| result.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d));
     for (doc.armors) |a| result.armors |= armorBit(a);
     for (doc.weapons) |w| result.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w));
+    if (doc.weapon_upgrades.len > result.weapon_upgrades.len) return error.InvalidProgress;
+    for (doc.weapon_upgrades) |tier| if (tier > 2) return error.InvalidProgress;
+    @memcpy(result.weapon_upgrades[0..doc.weapon_upgrades.len], doc.weapon_upgrades);
     result.fighter = doc.fighter;
     if (doc.kestrel_levels.len > kestrel_upgrade_count) return error.InvalidProgress;
     for (doc.kestrel_levels) |l| if (l > max_level) return error.InvalidProgress;
@@ -322,11 +332,13 @@ test "suits are bought once, and progress round-trips through its save shape" {
         more.picked.set(90);
         more.vehicles = 0b101;
         more.weapons = 0b11;
+        more.weapon_upgrades[@intFromEnum(WeaponKind.beam_saber)] = 2;
         more.armors |= armorBit(.skyguard);
         const d2 = try more.toDoc(arena.allocator());
         const j2 = try std.json.Stringify.valueAlloc(arena.allocator(), d2, .{});
         const r2 = try fromDoc(try std.json.parseFromSliceLeaky(Doc, arena.allocator(), j2, .{}));
         try std.testing.expectEqual(more.inventory, r2.inventory);
+        try std.testing.expectEqual(more.weapon_upgrades, r2.weapon_upgrades);
         try std.testing.expect(r2.picked.isSet(90) and r2.picked.isSet(3) and r2.picked.count() == 2);
         try std.testing.expect(r2.ownsVehicle(.courier) and !r2.ownsVehicle(.dart) and r2.ownsArmor(.skyguard) and r2.ownsArmor(.scout));
         try std.testing.expectEqual(@as(f32, 140), r2.maxHealth());
@@ -334,6 +346,7 @@ test "suits are bought once, and progress round-trips through its save shape" {
     }
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &(.{0} ** (upgrade_count + 1)) }));
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .weapon_upgrades = &.{3} }));
     // Saves made before later upgrades existed list fewer levels; the rest start at 0.
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));
     // A save without progress starts fresh with the free suits.

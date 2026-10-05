@@ -5,7 +5,7 @@
 ## Today
 
 - **Hard-coded placement:** the world is generated from seed and generator versions (terrain, Arbors, district, shrines). Default placements (spawn crates, door, elevator, rover) are hard-coded in `Sandbox.init`.
-- **Saves:** complete JSON world documents (format 11), but they are flat lists of machines, crates, and bridges, not authored scenes.
+- **Saves:** complete JSON world documents (format 12), but they are flat lists of machines, crates, bridges, and progression records, not authored scenes.
 - **Missing:** a transform hierarchy, a level format, and a way to author a place by hand.
 
 ## Design

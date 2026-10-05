@@ -46,6 +46,7 @@ pub const HitEvent = struct {
     position: V,
     normal: V,
     damage: f32,
+    radius: f32 = 0.2,
     element: Weapon.Element,
     is_warp: bool,
 };
@@ -139,6 +140,7 @@ pub const ProjectilePool = struct {
                         .position = hit.point,
                         .normal = hit.normal,
                         .damage = p.damage,
+                        .radius = p.radius,
                         .element = p.element,
                         .is_warp = (p.kind == .warp_arrow),
                     };

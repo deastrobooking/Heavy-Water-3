@@ -148,7 +148,8 @@ pub const Blaster = struct {
         self.cooldown = @max(0, self.cooldown - dt);
         self.heat = @max(0, self.heat - 35.0 * dt);
         if (self.is_charging) {
-            const charge_rate = if (slot.core == .accelerator) @as(f32, 1.8) else 1.0;
+            const tier_rate: f32 = if (slot.level >= 3) 1.3 else if (slot.level >= 2) 1.15 else 1.0;
+            const charge_rate = (if (slot.core == .accelerator) @as(f32, 1.8) else 1.0) * tier_rate;
             self.charge_time += dt * charge_rate;
             if (self.charge_time >= 1.6) {
                 self.charge_level = 3; // Buster Level 3 (Giant Plasma)
@@ -168,8 +169,8 @@ pub const Blaster = struct {
         const result: ShotResult = switch (lvl) {
             0 => .{ .damage = slot.baseDamage(), .speed = 65.0, .size = 0.25, .level = 0 },
             1 => .{ .damage = slot.baseDamage() * 1.6, .speed = 75.0, .size = 0.45, .level = 1 },
-            2 => .{ .damage = slot.baseDamage() * 2.8, .speed = 85.0, .size = 0.8, .level = 2 },
-            3 => .{ .damage = slot.baseDamage() * 4.8, .speed = 95.0, .size = 1.4, .level = 3 },
+            2 => .{ .damage = slot.baseDamage() * 2.8, .speed = 85.0, .size = 0.8 + @as(f32, @floatFromInt(slot.level -| 1)) * 0.15, .level = 2 },
+            3 => .{ .damage = slot.baseDamage() * 4.8, .speed = 95.0, .size = 1.4 + @as(f32, @floatFromInt(slot.level -| 1)) * 0.25, .level = 3 },
             else => .{ .damage = slot.baseDamage(), .speed = 65.0, .size = 0.25, .level = 0 },
         };
         self.heat += if (lvl == 3) 40.0 else if (lvl == 2) 25.0 else 10.0;
@@ -269,15 +270,23 @@ pub const GiantBlast = struct {
     charge: f32 = 0,
     ready: bool = true,
     cooldown: f32 = 0,
+    charging: bool = false,
 
     pub fn startCharge(self: *GiantBlast) void {
         if (self.cooldown == 0) {
             self.charge = 0;
             self.ready = false;
+            self.charging = true;
         }
     }
 
-    pub fn update(self: *GiantBlast, dt: f32, slot: WeaponSlot) void {
+    pub fn cancelCharge(self: *GiantBlast) void {
+        self.charge = 0;
+        self.ready = true;
+        self.charging = false;
+    }
+
+    pub fn update(self: *GiantBlast, dt: f32, slot: WeaponSlot, held: bool) void {
         self.cooldown = @max(0, self.cooldown - dt);
         if (self.firing) {
             self.duration = @max(0, self.duration - dt);
@@ -285,25 +294,28 @@ pub const GiantBlast = struct {
                 self.firing = false;
                 self.cooldown = 4.0;
             }
-        } else if (!self.ready and self.cooldown == 0) {
-            self.charge = @min(2.0, self.charge + dt);
-            if (self.charge >= 1.5) {
-                self.ready = true;
-            }
+        } else if (self.charging and held and self.cooldown == 0) {
+            const charge_rate: f32 = if (slot.level >= 2) 1.2 else 1.0;
+            self.charge = @min(2.4, self.charge + dt * charge_rate);
+            if (self.charge >= 1.0) self.ready = true;
         }
-        _ = slot;
     }
 
     pub fn fire(self: *GiantBlast, slot: WeaponSlot) ?struct { dps: f32, beam_width: f32, beam_length: f32 } {
-        if (!self.ready or self.firing) return null;
+        if (!self.ready or self.firing or self.charge < 1.0) return null;
         self.firing = true;
         const core_overdrive = slot.core == .overdrive_core;
-        self.duration = if (core_overdrive) self.max_duration * 1.6 else self.max_duration;
+        const full_charge = self.charge >= 2.2;
+        const powered_charge = self.charge >= 1.5;
+        const charge_scale: f32 = if (full_charge) 2.0 else if (powered_charge) 1.45 else 1.0;
+        const tier3_bonus: f32 = if (slot.level >= 3 and full_charge) 1.25 else 1.0;
+        self.duration = self.max_duration * (if (core_overdrive) @as(f32, 1.6) else 1.0) * (if (full_charge) @as(f32, 1.25) else 1.0);
         self.ready = false;
+        self.charging = false;
         self.charge = 0;
-        const width: f32 = if (core_overdrive) 3.5 else 1.8;
+        const width: f32 = (if (core_overdrive) @as(f32, 3.5) else 1.8) * (if (powered_charge) @as(f32, 1.25) else 1.0);
         return .{
-            .dps = slot.baseDamage() * 1.8,
+            .dps = slot.baseDamage() * 1.8 * charge_scale * tier3_bonus,
             .beam_width = width,
             .beam_length = 80.0,
         };

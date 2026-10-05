@@ -31,7 +31,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 - **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
 - **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. The M3 Pro ReleaseFast run meets render, skinning, and audio budgets; simulation P99 improved from 7.11 ms to 6.72 ms but still exceeds its 4 ms target. Projectile terrain raycasts are optimized; the next profile pass should target remaining wasp and Hive AI spikes.
 - **Guests:** they can't pilot, talk, or open the fabricator.
-- **Save versioning:** saves grew through optional fields under format v11. When a field changes meaning, bump the format and say so in the migration notes.
+- **Save versioning:** saves are at format v12, which persists the seeded sprint course's best lap. When a field changes meaning, bump the format and record it in the migration notes.
 
 ## Milestones
 

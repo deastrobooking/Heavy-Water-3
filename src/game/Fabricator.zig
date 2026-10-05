@@ -12,11 +12,12 @@ const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 
 pub const Tab = enum { vehicles, suits, armor, weapons, aircraft };
 pub const tab_count = @typeInfo(Tab).@"enum".fields.len;
-pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
+pub const WeaponUpgrade = struct { weapon: WeaponKind, tier: u8 };
+pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
 pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
-pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, NoFighter, NoBlueprint };
+pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, PreviousTierRequired, NoFighter, NoBlueprint };
 
 pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
@@ -39,6 +40,12 @@ pub const recipes = [_]Recipe{
     .{ .tab = .weapons, .output = .{ .weapon = .sniper_rifle }, .cost = .{ .lumen = 12, .rotor = 1, .alloy = 8 }, .about = "Instant beam that pierces one. The alternate scopes; a steady scope hits harder." },
     .{ .tab = .weapons, .output = .{ .weapon = .energy_bazooka }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 12 }, .about = "Arcing plasma orb that bursts, stuns and throws. The alternate detonates it." },
     .{ .tab = .weapons, .output = .{ .weapon = .giant_blast }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 16 }, .about = "Charge a beam that cuts through anything." },
+    .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .beam_saber, .tier = 2 } }, .cost = .{ .lumen = 8, .alloy = 3, .scrap = 35 }, .about = "Mk II: wider plasma edge and a finisher shockwave." },
+    .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .beam_saber, .tier = 3 } }, .cost = .{ .lumen = 14, .rotor = 1, .alloy = 8, .scrap = 75 }, .about = "Mk III: heavier combo finishers and a stronger saber wave." },
+    .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .blaster, .tier = 2 } }, .cost = .{ .lumen = 8, .alloy = 3, .scrap = 35 }, .about = "Mk II: larger charged plasma burst and faster charging." },
+    .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .blaster, .tier = 3 } }, .cost = .{ .lumen = 14, .rotor = 1, .alloy = 8, .scrap = 75 }, .about = "Mk III: maximum charge hits harder and detonates wider." },
+    .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .giant_blast, .tier = 2 } }, .cost = .{ .lumen = 10, .rotor = 1, .alloy = 8, .scrap = 55 }, .about = "Mk II: charge to a stronger, wider beam tier." },
+    .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .giant_blast, .tier = 3 } }, .cost = .{ .lumen = 16, .rotor = 2, .alloy = 14, .scrap = 100 }, .about = "Mk III: full charge doubles beam duration and pierces longer." },
     .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .armor }, .cost = .{}, .about = "Layered plating increases the Kestrel's maximum hull." },
     .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .missile_rack }, .cost = .{}, .about = "Expand the rack by two missiles per level." },
     .{ .tab = .aircraft, .output = .{ .kestrel_upgrade = .engine }, .cost = .{}, .about = "Increase engine and afterburner thrust." },
@@ -56,6 +63,12 @@ pub fn name(output: Output, buffer: []u8) []const u8 {
         .suit => |c| @tagName(c),
         .armor => |a| @tagName(a),
         .weapon => |w| @tagName(w),
+        .weapon_upgrade => |u| return switch (u.weapon) {
+            .beam_saber => if (u.tier == 2) "PLASMA EDGE II" else "PLASMA EDGE III",
+            .blaster => if (u.tier == 2) "BUSTER CORE II" else "BUSTER CORE III",
+            .giant_blast => if (u.tier == 2) "OVERDRIVE CORE II" else "OVERDRIVE CORE III",
+            else => "WEAPON UPGRADE",
+        },
         .kestrel_upgrade => |u| return switch (u) {
             .armor => "KESTREL ARMOR",
             .missile_rack => "MISSILE RACK",
@@ -91,6 +104,7 @@ pub fn made(p: *const Progress, output: Output) bool {
         .suit => |c| p.owns(c),
         .armor => |a| p.ownsArmor(a),
         .weapon => |w| p.ownsWeapon(w),
+        .weapon_upgrade => |u| p.weaponLevel(u.weapon) >= u.tier,
         .kestrel_upgrade => |u| p.kestrelLevel(u) >= Progress.max_level,
         .kestrel_paint => |paint| p.ownsKestrelPaint(paint),
     };
@@ -99,6 +113,7 @@ pub fn made(p: *const Progress, output: Output) bool {
 pub fn status(p: *const Progress, output: Output) ?[]const u8 {
     return switch (output) {
         .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
+        .weapon_upgrade => |u| if (!p.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (p.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (p.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
             .kestrel_upgrade => |u| if (p.kestrelLevel(u) >= Progress.max_level) "MAX LEVEL" else null,
             .kestrel_paint => |paint| if (p.ownsKestrelPaint(paint)) (if (p.kestrel_paint == paint) "EQUIPPED" else "OWNED") else null,
@@ -130,6 +145,12 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
     if (r.output == .fighter and !p.fighter and !p.hasFlag("kestrel_blueprint")) return error.NoBlueprint;
     if ((r.output == .kestrel_upgrade or r.output == .kestrel_paint) and !p.fighter) return error.NoFighter;
     if (r.output == .kestrel_upgrade and p.kestrelLevel(r.output.kestrel_upgrade) >= Progress.max_level) return error.MaxLevel;
+    if (r.output == .weapon_upgrade) {
+        const u = r.output.weapon_upgrade;
+        if (!p.ownsWeapon(u.weapon)) return error.NotOwned;
+        if (p.weaponLevel(u.weapon) >= u.tier) return error.AlreadyMade;
+        if (p.weaponLevel(u.weapon) + 1 < u.tier) return error.PreviousTierRequired;
+    }
     if (r.output == .kestrel_paint) {
         const paint = r.output.kestrel_paint;
         if (p.ownsKestrelPaint(paint)) {
@@ -170,6 +191,7 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
         .suit => |c| p.suits |= Progress.bit(c),
         .armor => |a| p.armors |= Progress.armorBit(a),
         .weapon => |w| p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),
+        .weapon_upgrade => |u| p.weapon_upgrades[@intFromEnum(u.weapon)] = u.tier - 1,
         .kestrel_upgrade, .kestrel_paint => unreachable,
     }
     return r.output;
@@ -194,6 +216,26 @@ test "recipes pay exactly, make once, and refuse what cannot be paid" {
     for (onTab(.weapons, &weapons_tab)[0..2]) |i| try std.testing.expectEqual(@as(u32, 0), recipes[i].cost.alloy);
     var buffer: [24]u8 = undefined;
     try std.testing.expectEqualStrings("TRACKING MISSILE", name(.{ .weapon = .tracking_missile }, &buffer));
+}
+
+test "weapon tiers require ownership and the prior tier, then persist as installed upgrades" {
+    var p: Progress = .{};
+    var wallet: Market.Wallet = .{ .scrap = 1_000 };
+    var rows: [recipes.len]u8 = undefined;
+    const weapons = onTab(.weapons, &rows);
+    const tier2 = weapons[weapons.len - 6];
+    const tier3 = weapons[weapons.len - 5];
+    try std.testing.expectEqualStrings("FABRICATE WEAPON FIRST", status(&p, recipes[tier2].output).?);
+    try std.testing.expectError(error.NotOwned, make(&p, &wallet, tier2));
+
+    p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(WeaponKind.beam_saber));
+    try std.testing.expectError(error.PreviousTierRequired, make(&p, &wallet, tier3));
+    p.inventory = .{ 100, 100, 100, 0 };
+    _ = try make(&p, &wallet, tier2);
+    try std.testing.expectEqual(@as(u8, 2), p.weaponLevel(.beam_saber));
+    _ = try make(&p, &wallet, tier3);
+    try std.testing.expectEqual(@as(u8, 3), p.weaponLevel(.beam_saber));
+    try std.testing.expectEqualStrings("INSTALLED", status(&p, recipes[tier3].output).?);
 }
 
 test "Maro's Kestrel blueprint gates fabrication until the carrier sighting conversation" {

@@ -560,7 +560,12 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools;
     return switch (st.tool) {
         .hands => "",
-        .weapon => if (sb.combat.arsenals[0].active) |w| std.fmt.bufPrint(buffer, "{s}  CLICK FIRE  RMB ALTERNATE  TAB SWITCH", .{@tagName(w)}) catch buffer else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
+        .weapon => if (sb.combat.arsenals[0].active) |w| switch (w) {
+            .beam_saber => "BEAM SABER  CLICK COMBO  HOLD AFTER CUT FOR WAVE  RMB GUARD / PARRY",
+            .blaster => "BUSTER  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
+            .giant_blast => "GIANT BLAST  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
+            else => std.fmt.bufPrint(buffer, "{s}  CLICK FIRE  RMB ALTERNATE  TAB SWITCH", .{@tagName(w)}) catch buffer,
+        } else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
         .build => switch (current(sb)) {
             .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.wallet.kits[@intFromEnum(ware)] }) catch buffer,

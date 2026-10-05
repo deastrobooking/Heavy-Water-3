@@ -17,9 +17,9 @@ const Market = @import("../city/Market.zig");
 /// the market wallet (scrap, salvaged parts) and each stall's stock with the day it was stocked;
 /// v9 tags Rootdeep shrine machines (their doors, latches, and sealed vault persist as machine
 /// state; the solver-verified layout is regenerated from the seed); v10 records installed mods;
-/// v11 records each player bridge's structural style.
-/// Older saves are rejected, not migrated.
-pub const format_version: u32 = 11;
+/// v11 records each player bridge's structural style; v12 records the sprint course's best lap.
+/// v11 saves migrate with no recorded best lap; older saves are rejected.
+pub const format_version: u32 = 12;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -68,6 +68,8 @@ pub const Document = struct {
     fighter: ?FighterState = null,
     /// Suit upgrades, owned armor and story flags; absent in older saves (a fresh start).
     progress: @import("Progress.zig").Doc = .{},
+    /// Best completed time on the seeded sprint circuit; zero means no lap has been recorded.
+    race_best: f32 = 0,
     market_day: u64,
     market_stock: []const [Market.ware_count]u8,
     /// Mods installed when saved (name and "major.minor.patch").
@@ -86,7 +88,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     const parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format != format_version) return error.UnsupportedSaveFormat;
+    if (doc.format != format_version and doc.format != format_version - 1) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) return error.GeneratorMismatch;
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
@@ -98,6 +100,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;
     if (doc.machines.len > machine_slots) return error.InvalidSave;
     if (doc.mods.len > 16) return error.InvalidSave;
+    if (!finite(doc.race_best) or doc.race_best < 0) return error.InvalidSave;
     if (doc.cars.len > @import("../vehicle/Designs.zig").count) return error.InvalidSave;
     if (doc.fighter) |f| {
         for (f.position) |v| if (!finite(v)) return error.InvalidSave;
@@ -154,7 +157,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const collected = [_]Modifications.ObjectRef{.{ .x = -3, .z = 2, .id = 17 }};
     const devices = [_]Blueprint.DocDevice{.{ .id = "lamp", .kind = .lamp, .watts = 5 }};
     const machines = [_]MachineState{.{ .slot = 3, .blueprint = .{ .format = 1, .name = "bench", .devices = &devices }, .origin = .{ 1, 2, 3 }, .yaw = 1, .states = &.{0} }};
-    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{}, .wallet = .{ .scrap = 40, .parts = 2 }, .market_day = 3, .market_stock = &.{ .{ 1, 0, 2 }, .{ 0, 0, 1 }, .{ 3, 3, 3 } } };
+    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{}, .wallet = .{ .scrap = 40, .parts = 2 }, .race_best = 93.25, .market_day = 3, .market_stock = &.{ .{ 1, 0, 2 }, .{ 0, 0, 1 }, .{ 3, 3, 3 } } };
     const bytes = try encode(allocator, doc);
     defer allocator.free(bytes);
     const back = try decode(allocator, bytes, doc.seed, 4, 8);
@@ -167,7 +170,22 @@ test "save documents round-trip and reject mismatched or malformed input" {
     try std.testing.expectEqual(@as(u8, 1), back.value.machines[0].yaw);
     try std.testing.expectEqual(Market.Wallet{ .scrap = 40, .parts = 2 }, back.value.wallet);
     try std.testing.expectEqualSlices([Market.ware_count]u8, doc.market_stock, back.value.market_stock);
+    try std.testing.expectEqual(doc.race_best, back.value.race_best);
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 4, 2));
+
+    var invalid_best_doc = doc;
+    invalid_best_doc.race_best = -1;
+    const invalid_best = try encode(allocator, invalid_best_doc);
+    defer allocator.free(invalid_best);
+    try std.testing.expectError(error.InvalidSave, decode(allocator, invalid_best, doc.seed, 4, 8));
+
+    const v11_header = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 12", "\"format\": 11");
+    defer allocator.free(v11_header);
+    const v11 = try std.mem.replaceOwned(u8, allocator, v11_header, "  \"race_best\": 93.25,\n", "");
+    defer allocator.free(v11);
+    const migrated = try decode(allocator, v11, doc.seed, 4, 8);
+    defer migrated.deinit();
+    try std.testing.expectEqual(@as(f32, 0), migrated.value.race_best);
 
     try std.testing.expectError(error.SeedMismatch, decode(allocator, bytes, 1, 4, 8));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 1, 8));
@@ -175,9 +193,9 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 5", "\"generator\": 2");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const future = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 11", "\"format\": 10");
-    defer allocator.free(future);
-    try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
+    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 12", "\"format\": 10");
+    defer allocator.free(old_format);
+    try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, old_format, doc.seed, 4, 8));
 }
 
 test "save files are written atomically and read back" {

@@ -460,6 +460,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
     // Arsenals: P1 with the weapon tool on foot, guests with the right trigger.
     if (timing != null) phase_timer.reset();
     sb.combat.tick(dt);
+    for (&sb.combat.arsenals) |*arsenal| arsenal.weapon_upgrades = sb.progress.weapon_upgrades;
     const armed = !frozen and sb.tools.tool == .weapon and sb.garage.piloting == null and sb.seated == null;
     const aim_camera = sb.aimCameraPublic(camera.*);
     const f = aim_camera.forward();
