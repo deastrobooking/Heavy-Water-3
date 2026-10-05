@@ -135,3 +135,9 @@ The style is painterly cel shading: readable at 500 m, lush up close.
 - Threats: wildlife and ancient guardians in the Rootdeep, blight on the trees, or rival factions in the city?
 - Economy: what shops trade, and whether sap is currency.
 - How fast grafting and city growth run relative to a play session.
+
+## Multi-world campaign direction
+
+The Arbor Frontier remains the party's home shipyard. The next campaign expansion adds bounded co-op arena regions on the Hive Homeworld and Gaia, an Earth-radius artificial planet with a rotating surface and a geodesic enclosure about a mile above nominal sea level. Gaia is the terraformed human colony beyond Jupiter. Four local players enter a region together, fight or explore, gather world-stable materials, and extract to fabricate custom ships or establish a planetary outpost.
+
+These are mission-sized open regions rather than complete planet surfaces generated at once. The first release loop should prove one four-player arena, a small custom ship design bay, and a command hub with resource extraction and defense. Cooperative PvE is the default; competitive rules and seamless globe-scale travel can follow later. See [Planetary frontier](plans/planetary-frontier.md) for region sizes, the ship module grammar, Gaia's shell, the real-time strategy loop, save boundaries, and delivery gates. The catalog in `src/procedural/Worlds.zig` is a deterministic metadata foundation only; it does not make either destination playable yet.

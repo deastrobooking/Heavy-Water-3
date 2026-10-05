@@ -9,6 +9,8 @@ The systems now in place:
 - fabrication;
 - procedural audio.
 
+The new content priority is a four-player planetary campaign: bounded open arenas on the Hive Homeworld and Gaia, with battle loot feeding procedural ship design and a real-time outpost strategy loop. The design and first deterministic catalog are in [Planetary frontier](planetary-frontier.md); no new planet is playable yet.
+
 This plan orders the work. The [roadmap](../roadmap.md) stays the record of what is implemented.
 
 ## Where things stand
@@ -23,6 +25,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 | Progression | 62 pickups, fabricator (cars, the fighter, suits, armor, ten weapons), suit upgrades, vital cells, story flags. |
 | Fighting | Timed saber combos with guard and parry, four energy firearms, Ranger and Synthetic classes with three specials each. Untuned by hand. |
 | Audio | Synthesized sounds and loops, positional cues, four volume buses. Nobody has listened to it yet. |
+| Planetary campaign | Three world descriptors and eight arena concepts have deterministic metadata/seeds; region generation, ship-blueprint progression, RTS construction and world saves are not integrated. |
 | Engine phases | 1–13 done; 14 (skeletal animation), 15 (scenes), 16 (networking) planned. |
 
 ## Known gaps from review
@@ -104,16 +107,28 @@ Acceptance: a four-player run can fabricate, fly and fight with every player act
 - **Onboarding:** a guided first ten minutes (meet Maro, salvage, fabricate a blaster, first drone).
 - **Accessibility:** subtitles for all audio cues, and colorblind-safe pickup and threat colors.
 
+### G. Planetary arena campaign (new content track)
+
+The destination and arena catalog is seeded and tested. Build the first playable slice in this order:
+
+1. Convert one existing Frontier Hive basin into a selectable four-player open arena with an objective, stable loot IDs, extraction and per-world save/restore.
+2. Add a 3D modular ship design bay: typed attachment sockets, composition validation, a rotatable preview, derived mass/inertia/thrust/handling, fabrication costs and saved blueprints.
+3. Add a real-time outpost loop to that arena: command hub, extractor, power, fabricator and defense turret; verify a seeded raid, resource flow, damage/recovery and persistence.
+4. Build the first Hive Homeworld arena from the same content/runtime contracts, then Gaia's human colony arena and its geodesic-shell objectives.
+
+Use local tangent coordinates for each surface arena and stable geodesic face/cell IDs for Gaia's sky enclosure. Ship control, construction, combat and previews remain fully 3D. The detailed [Planetary frontier plan](planetary-frontier.md) owns dimensions, resource roles and acceptance checks.
+
+Acceptance: a four-local-player session completes combat → loot → extraction → ship fabrication → outpost defense and save/reload on the same arena, with a deterministic Debug test and a ReleaseSafe smoke.
+
 ## Order and sizing
 
 | Order | Milestone | Rough size | Why now |
 | --- | --- | --- | --- |
 | 1 | A. Play, measure, tune | Small | Everything else depends on what playing reveals; frame budgets guard the rest. |
-| 2 | B. Air war depth (collisions, assault) | Medium | The newest system has the most obvious gaps. |
-| 3 | C. Hive campaign | Medium–large | Turns the systems into a game with a goal. |
+| 2 | G. Planetary arena campaign | Large | Connects local co-op, existing combat/loot, procedural ship design and planetary building into a replayable progression loop. |
+| 3 | D. Co-op completeness | Medium | Broader vehicle, fabrication and conversation support makes the full party useful. |
 | 4 | E. Mach evaluation, then phase 14 | Large | Troopers and ships need animation; it is the next engine unlock. |
-| 5 | D. Co-op completeness | Medium | Best done after vehicles and panels settle. |
-| 6 | E. Phases 15–16 | Large | Content authoring and online play build on all of the above. |
+| 5 | E. Phases 15–16 | Large | Content authoring and online play build on all of the above. |
 | — | F. Content and polish | Continuous | Alongside every milestone. |
 
 ## Risks

@@ -358,11 +358,10 @@ This isolated path is not yet bound through `Catalog` into the active streamer, 
 
 Phases 1–13 have runnable slices. The game layer has also grown well beyond the phases: menus and conversations, procedural audio, hover cars and the Kestrel fighter, the Hive on the ground and in the air, fabrication and progression. The ordered plan for what comes next is [next steps](plans/next-steps.md):
 1. **Play, measure and tune:** a frontier benchmark with frame budgets, a hand-play checklist, and correctness fixes.
-2. **Air war depth — complete:** collisions, carrier assault, new Hive wings, raids, Kestrel upgrades and tower-roof landing pads.
-3. **A Hive campaign:** corruption spread, story beats and a quest log.
-4. **Engine work:** the Mach `main` evaluation, then phase 14 skeletal animation.
-5. **Co-op completeness.**
-6. **Phases 15–16:** scenes and networking.
+2. **Planetary frontier:** a four-player arena slice that connects loot to procedural ship design and a real-time planetary outpost loop. The catalog/design foundation is in [the plan](plans/planetary-frontier.md); the new destinations are not playable yet.
+3. **Engine work:** the Mach `main` evaluation, then phase 14 skeletal animation.
+4. **Co-op completeness.**
+5. **Phases 15–16:** scenes and networking.
 
 Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
 
@@ -377,4 +376,8 @@ Lighting (the cel pipeline, shadows through the canopy, clustered lumen lights, 
 
 Free-flight traversal now shares character collision queries with walking, including terrain and rigid-body floors/ceilings. Oriented vehicle boxes now run SAT contacts against one another in addition to terrain, meshes and axis-aligned bodies. Controller setup has an in-game remapping screen, saved settings, device discovery labels, analog trigger tuning, generic macOS HID discovery, native preset file pickers, and eight portable JSON preset slots. Windows/Linux backends and OS-hidden vendor interfaces remain open work; website hosting for the exported JSON remains separate.
 
-`procedural/Interiors.zig` establishes connected room-module graphs for residences, shops, factories, enemy bases and dungeons. Those maps are deterministic and tested, but the next interior slice still needs room mesh/collider construction, building entry/exit transitions, streaming, doors, minimap presentation, AI and loot population. Keep that work as the next playable content step; the generator alone does not make new interiors visible or enterable.
+`procedural/Interiors.zig` establishes connected room-module graphs for residences, shops, factories, enemy bases and dungeons. Those maps are deterministic and tested, but still need room mesh/collider construction, building entry/exit transitions, streaming, doors, minimap presentation, AI and loot population. Keep that interior slice as a follow-up; the current next playable content milestone is the Frontier arena and extraction loop.
+
+## Multi-world arena campaign — design foundation — 2026-10-05
+
+`procedural/Worlds.zig` defines three campaign destinations, bounded four-player arena concepts, reward budgets, Gaia's Earth-scale/shell metadata, and independent deterministic world/arena seeds. `docs/plans/planetary-frontier.md` sets the cooperative combat/extraction loop, modular ship-design path, real-time outpost strategy, save boundaries, and delivery gates. This is a metadata foundation, not generated or connected world content. The next playable increment is one selectable Frontier arena that persists collected loot and completes an extraction/save loop before either new planet is started.

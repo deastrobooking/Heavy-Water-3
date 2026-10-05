@@ -28,6 +28,7 @@ test {
     _ = @import("procedural/Mountains.zig");
     _ = @import("procedural/Caves.zig");
     _ = @import("procedural/Interiors.zig");
+    _ = @import("procedural/Worlds.zig");
     _ = @import("render/Capture.zig");
     _ = @import("asset/Guid.zig");
     _ = @import("asset/Meta.zig");
