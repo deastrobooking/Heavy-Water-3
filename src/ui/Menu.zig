@@ -7,20 +7,23 @@ const Bindings = @import("../game/Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 const Menu = @This();
 
-pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, confirm_quit };
+pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import };
+pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
 pub const title_items = [_]Item{
     .{ .label = "CONTINUE", .command = .continue_game },
     .{ .label = "NEW GAME", .command = .new_game },
+    .{ .label = "HERO ARENA", .opens = .arena },
     .{ .label = "SETTINGS", .opens = .settings },
     .{ .label = "CONTROLS", .opens = .controls },
     .{ .label = "QUIT", .opens = .confirm_quit },
 };
 pub const pause_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
+    .{ .label = "HEROES", .opens = .heroes },
+    .{ .label = "HERO ARENA", .opens = .arena },
     .{ .label = "CUSTOMIZE RANGER", .command = .character },
     .{ .label = "QUEST LOG", .opens = .quest_log },
     .{ .label = "SAVE GAME", .command = .save },
@@ -34,6 +37,19 @@ pub const confirm_items = [_]Item{
     .{ .label = "CANCEL" },
 };
 pub const quest_items = [_]Item{.{ .label = "BACK" }};
+pub const arena_items = [_]Item{
+    .{ .label = "START THE ARENA", .command = .start_arena },
+    .{ .label = "LEAVE THE ARENA", .command = .leave_arena },
+    .{ .label = "BACK" },
+};
+/// Heroes screen rows: four player tabs, your own ranger, every Wildkin, then BACK. Cards sit in
+/// a grid `heroes_columns` wide.
+pub const heroes_tabs = 4;
+pub const heroes_ranger = heroes_tabs;
+pub const heroes_first = heroes_ranger + 1;
+pub const heroes_back = heroes_first + @import("../game/Heroes.zig").count;
+pub const heroes_rows = heroes_back + 1;
+pub const heroes_columns = 7;
 /// Settings rows are the fields, then "BACK".
 pub const settings_rows = Settings.field_count + 1;
 /// Keyboard actions, reset, gamepad setup, then back.
@@ -69,6 +85,13 @@ swapped: ?Bindings.Action = null,
 pad_capturing_action: ?PadBindings.Action = null,
 pad_preset_slot_index: u8 = 0,
 pad_preset_label: [64]u8 = @splat(0),
+/// Set by the application each frame: heroes on the roster (bit per roster index), local
+/// players present (bit per player), and whether the party is in the arena.
+heroes_unlocked: u32 = 0,
+players_present: u8 = 1,
+arena_active: bool = false,
+/// The player a hero card is chosen for (Heroes screen tabs).
+hero_player: u8 = 0,
 
 pub fn open(self: *Menu, screen: Screen) void {
     if (screen == .title or screen == .pause or screen == .none) self.base = screen;
@@ -86,6 +109,7 @@ pub fn items(self: *const Menu) []const Item {
         .pause => &pause_items,
         .confirm_quit => &confirm_items,
         .quest_log => &quest_items,
+        .arena => &arena_items,
         else => &.{},
     };
 }
@@ -96,6 +120,7 @@ pub fn rows(self: *const Menu) u8 {
         .controls => controls_rows,
         .pad_controls => pad_controls_rows,
         .quest_log => 1,
+        .heroes => heroes_rows,
         .none => 0,
         else => @intCast(self.items().len),
     };
@@ -105,6 +130,15 @@ pub fn rows(self: *const Menu) u8 {
 pub fn enabled(self: *const Menu, row: usize) bool {
     if (self.screen == .title and row == 0) return self.has_save;
     if (self.screen == .pause and pause_items[row].command == .load) return self.has_save;
+    if (self.screen == .arena) return switch (arena_items[row].command) {
+        .start_arena => !self.arena_active,
+        .leave_arena => self.arena_active,
+        else => true,
+    };
+    if (self.screen == .heroes) {
+        if (row < heroes_tabs) return self.players_present & (@as(u8, 1) << @intCast(row)) != 0;
+        if (row >= heroes_first and row < heroes_back) return self.heroes_unlocked & (@as(u32, 1) << @intCast(row - heroes_first)) != 0;
+    }
     return true;
 }
 
@@ -129,6 +163,7 @@ pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .controls) return self.controlsKey(k);
     if (self.screen == .pad_controls) return self.padControlsKey(k);
     if (self.screen == .quest_log and k == .confirm) return self.back();
+    if (self.screen == .heroes) return self.heroesKey(k);
     switch (k) {
         .up => self.step(-1),
         .down => self.step(1),
@@ -265,9 +300,52 @@ pub fn bindKey(self: *Menu, k: Bindings.Key) Command {
 }
 
 /// Back out one level: sub-screens return to their base; pause resumes; the title stays.
+/// The Heroes screen: tabs pick the player, the grid picks the hero (locked cards are skipped
+/// for choosing but can be looked at), BACK leaves.
+fn heroesKey(self: *Menu, k: Key) Command {
+    const r: i32 = self.row;
+    const columns: i32 = heroes_columns;
+    const first: i32 = heroes_ranger;
+    const last: i32 = heroes_back;
+    switch (k) {
+        .back => return self.back(),
+        .left, .right => {
+            const d: i32 = if (k == .left) -1 else 1;
+            if (r < heroes_tabs) {
+                var t = r;
+                for (0..heroes_tabs) |_| {
+                    t = @mod(t + d, heroes_tabs);
+                    if (self.enabled(@intCast(t))) break;
+                }
+                self.row = @intCast(t);
+                self.hero_player = self.row;
+            } else if (r < last) self.row = @intCast(std.math.clamp(r + d, first, last - 1));
+        },
+        .up => self.row = if (r < heroes_tabs) self.row else if (r == last) @intCast(last - 1) else if (r - columns < first) self.hero_player else @intCast(r - columns),
+        .down => self.row = if (r < heroes_tabs) @intCast(first) else if (r == last) self.row else @intCast(@min(last, r + columns)),
+        .confirm => {
+            if (r == last) return self.back();
+            if (r < heroes_tabs) {
+                if (self.enabled(self.row)) self.hero_player = self.row;
+                self.row = heroes_ranger;
+                return .none;
+            }
+            if (!self.enabled(self.row)) return .none;
+            return .play_hero;
+        },
+    }
+    return .none;
+}
+
+/// The hero chosen on the Heroes screen: null for the player's own ranger.
+pub fn chosenHero(self: *const Menu) ?u8 {
+    if (self.row >= heroes_first and self.row < heroes_back) return self.row - heroes_first;
+    return null;
+}
+
 fn back(self: *Menu) Command {
     switch (self.screen) {
-        .settings, .controls, .quest_log, .confirm_quit => {
+        .settings, .controls, .quest_log, .heroes, .arena, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.
@@ -291,15 +369,15 @@ test "title skips continue without a save, and sub-screens return to their entry
     try std.testing.expectEqual(@as(u8, 1), m.row);
     _ = m.key(.up);
     // Wraps past the disabled CONTINUE to QUIT.
-    try std.testing.expectEqual(@as(u8, 4), m.row);
-    m.row = 2;
+    try std.testing.expectEqual(@as(u8, 5), m.row);
+    m.row = 3;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.settings, m.screen);
     try std.testing.expectEqual(Command.settings_changed, m.key(.right));
     try std.testing.expectEqual(@as(u8, 90), m.settings.master_volume);
     _ = m.key(.back);
     try std.testing.expectEqual(Screen.title, m.screen);
-    try std.testing.expectEqual(@as(u8, 2), m.row);
+    try std.testing.expectEqual(@as(u8, 3), m.row);
     m.row = 1;
     try std.testing.expectEqual(Command.new_game, m.key(.confirm));
 
@@ -311,12 +389,44 @@ test "title skips continue without a save, and sub-screens return to their entry
 test "quest log opens from pause and returns to its menu row" {
     var m: Menu = .{};
     m.open(.pause);
-    m.row = 2;
+    m.row = 4;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.quest_log, m.screen);
     try std.testing.expectEqual(Command.none, m.key(.back));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 2), m.row);
+    try std.testing.expectEqual(@as(u8, 4), m.row);
+}
+
+test "heroes are chosen per player from unlocked cards, and the arena starts or leaves" {
+    var m: Menu = .{ .heroes_unlocked = 0b101, .players_present = 0b11 };
+    m.open(.pause);
+    m.row = 1;
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(Screen.heroes, m.screen);
+    // Tabs: only present players can be chosen.
+    _ = m.key(.right);
+    try std.testing.expectEqual(@as(u8, 1), m.hero_player);
+    _ = m.key(.right);
+    try std.testing.expectEqual(@as(u8, 0), m.hero_player);
+    _ = m.key(.down);
+    try std.testing.expectEqual(@as(u8, heroes_ranger), m.row);
+    try std.testing.expectEqual(Command.play_hero, m.key(.confirm));
+    try std.testing.expectEqual(@as(?u8, null), m.chosenHero());
+    // The first hero is unlocked; the second is not.
+    _ = m.key(.right);
+    try std.testing.expectEqual(Command.play_hero, m.key(.confirm));
+    try std.testing.expectEqual(@as(?u8, 0), m.chosenHero());
+    _ = m.key(.right);
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    _ = m.key(.back);
+    try std.testing.expectEqual(Screen.pause, m.screen);
+    try std.testing.expectEqual(@as(u8, 1), m.row);
+    // Arena: start when outside, leave when in.
+    m.open(.arena);
+    try std.testing.expect(m.enabled(0) and !m.enabled(1));
+    try std.testing.expectEqual(Command.start_arena, m.key(.confirm));
+    m.arena_active = true;
+    try std.testing.expect(!m.enabled(0) and m.enabled(1));
 }
 
 test "controls rebind by capture, swap conflicts, cancel, and reset" {
@@ -373,18 +483,18 @@ test "pause resumes on back, confirms quit, and cancels back to pause" {
     var m: Menu = .{};
     m.open(.pause);
     try std.testing.expectEqual(Command.@"resume", m.key(.back));
-    m.row = 7;
+    m.row = 9;
     _ = m.key(.confirm);
     try std.testing.expectEqual(Screen.confirm_quit, m.screen);
     m.select(1);
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 7), m.row);
+    try std.testing.expectEqual(@as(u8, 9), m.row);
     _ = m.key(.confirm);
     try std.testing.expectEqual(Command.quit, m.key(.confirm));
     // LOAD is skipped without a save.
     m.open(.pause);
-    m.row = 4;
+    m.row = 5;
     _ = m.key(.down);
-    try std.testing.expectEqual(@as(u8, 5), m.row);
+    try std.testing.expectEqual(@as(u8, 7), m.row);
 }

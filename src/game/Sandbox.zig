@@ -47,6 +47,7 @@ const Hangar = @import("Hangar.zig");
 const Skies = @import("Skies.zig");
 const Rig = @import("Rig.zig");
 const Specials = @import("Specials.zig");
+pub const Heroes = @import("Heroes.zig");
 pub const BenchmarkStage = enum { players, machines, city_life, frontier, frontier_setup, air_war, carriers, wasps, air_projectiles, hive_ai, arsenal, physics, post_step };
 pub const BenchmarkMetric = struct {
     total: u64 = 0,
@@ -110,6 +111,8 @@ pub const Target = union(enum) {
     fabricator,
     /// The parked Kestrel fighter.
     jet,
+    /// A Wildkin hero waiting to be met, by roster index.
+    hero: u8,
 };
 /// Panels the tinker opens from a conversation: suit upgrades or the armor wardrobe.
 /// A sound for the application to play, placed in the world when it has a position.
@@ -269,6 +272,12 @@ player: Player = .{},
 guests: [max_players - 1]Guest = @splat(.{}),
 /// Class specials: energy, cooldowns, grenades and sentries (session-only, like vitals).
 specials: Specials = .{},
+/// The Starbowl co-op arena (`Arena`), when the party is in it.
+arena: @import("Arena.zig") = .{},
+/// Each player's own ranger, kept while they play as a Wildkin hero (Heroes menu).
+own_profiles: [max_players]?Profile = @splat(null),
+/// Where each Wildkin hero waits to be met (`Encounters.place`), set when the frontier is built.
+encounters: [Heroes.count]?@import("Encounters.zig").Spot = @splat(null),
 /// The caves in the mountain ranges (layout from the seed), and each system's collider, built
 /// when a player first comes near it.
 caves: Caves.Layout = undefined,
@@ -772,6 +781,18 @@ pub fn halve(size: [3]f32) Physics.Vec3 {
     return .{ size[0] / 2, size[1] / 2, size[2] / 2 };
 }
 
+/// A body's passives on top of the party's suit: a Wildkin hero's run speed, and wings that
+/// make flight cheap and long.
+pub fn heroSuit(base: Player.Suit, profile: Profile) Player.Suit {
+    var suit = base;
+    suit.sprint *= Specials.loadout(profile).speed;
+    if (@import("../character/Beasts.zig").winged(profile.species)) {
+        suit.fuel_max += 80;
+        suit.burn *= 0.4;
+    }
+    return suit;
+}
+
 fn groundSample(context: ?*const anyopaque, x: f32, z: f32) Physics.GroundSample {
     const caves: *const Caves.Layout = @ptrCast(@alignCast(context.?));
     const s = Terrain.surface(caves.seed, x, z);
@@ -912,10 +933,11 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     // The creator, conversations and tinker panels freeze the character and every tool.
     self.creator.owned = self.progress.suits;
     self.creator.owned_armor = self.progress.armors;
+    self.creator.owned_species = Heroes.forms(self.progress.heroes);
     const frozen = self.creator.open or self.talk != null or self.shop != null;
     const suit = self.progress.suit();
-    self.player.suit = suit;
-    for (&self.guests) |*g| g.player.suit = suit;
+    self.player.suit = heroSuit(suit, self.profile);
+    for (&self.guests) |*g| g.player.suit = heroSuit(suit, g.profile);
     if (self.talk) |*session| Dialogue.advance(session, dt);
     const input: Input = if (frozen) .{} else raw_input;
     const actions: Actions = if (frozen) .{} else raw_actions;
@@ -1027,6 +1049,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .car => |i| Frontier.board(self, i, camera),
                     .fabricator => self.shop = .{ .kind = .fabricate },
                     .jet => Frontier.boardJet(self, camera),
+                    .hero => |i| Frontier.recruit(self, i),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);

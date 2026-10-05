@@ -295,6 +295,34 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Review, Wildkin heroes and the Starbowl — 2026-10-05
+
+- **Project review baseline:** 331/331 Debug tests, the app check, and the Metal smoke all passed before any change. The review read the most recent and riskiest changes (controller HID bridge, presets, rigid-body pairs, flight collision, menus). Issues found and fixed:
+  - **Phantom pads:** `gamepad.m` matched HID devices to GameController pads by manufacturer against `vendorName` (which holds the device name), so a supported pad could appear twice, as two players. It now asks `GCController.supportsHIDDevice` (macOS 11+), with a product-name fallback.
+  - **Stuck triggers:** on HID pads whose right stick reports on Z/Rz (0–255), those axes were also read as triggers, about 0.5 at rest and above the 0.15 threshold, holding sprint and fire down. Z/Rz are now triggers only when the pad has separate Rx/Ry axes.
+  - **Off-thread dialogs:** preset export/import ran `NSSavePanel`/`NSOpenPanel` on Mach's app thread, but AppKit requires the main thread. They now run synchronously on the main queue.
+  - **Preset string ownership:** `PadPreset.parse` could return strings aliasing the input buffer, which `loadSlot` frees first. It now always copies (regression test added).
+  - **Flag limit:** `Progress` kept at most 48 story flags and silently dropped the rest; nests, carriers, caves and conversations can exceed that. Raised to 96 (test added).
+  - Untyped HID name properties are type-checked before use.
+  - **Noted, not changed:** `SuperMobility`, `Companion` and `QuestLog` logic exist but are only referenced from tests (the quest log screen draws from `QuestLog`, but nothing drives the other two in play). The rigid-body pair contacts and character rigid floors read correctly.
+- **After the expansion:** **340/340 tests pass** (Debug), plus the app check.
+- **Metal smoke** (ReleaseSafe, `MTL_DEBUG_LAYER=1`, 300 frames, unlocked, 391 ticks): `Smoke heroes: met ROOK BANDIT joined=true, played as them=true, powers used 3/3; arena entered=true wave 1 bots 2, cleared and paid=true, left=true`. Every other stage was unchanged and there were no validation messages.
+  - An earlier run of the same build logged 71,259 ticks because the window was throttled during a long run; an immediate rerun with the screen confirmed unlocked logged 391.
+- **Debug launch:** the Debug executable starts and builds its background meshes.
+- **Captures:** `-Dshowcase=48` to `53`. Fixes from looking at them:
+  - The first lineups showed dark bodies (the human undersuit covered the fur); Wildkin now wear a bright tank and shorts.
+  - The lineup was wider than the view.
+  - Long hero names overflowed their cards.
+  - The arena floor was blown out white.
+  - The scorpion's tail curled down instead of arching over its back (bend sign for a backward chain).
+- **Not done or not measured:**
+  - power balance and arena difficulty by hand;
+  - guests choosing heroes from their own pads (the Heroes screen assigns any present player from P1's input);
+  - per-form animation (tails and wings are rigid);
+  - faces under snouts and beaks are simple;
+  - the Starbowl has no boss;
+  - cost of 32 skinned characters at once.
+
 ## Mountain ranges and cave dungeons — 2026-10-02
 
 - Debug suite: **288/288 tests pass** (about 3.5 minutes). New tests:

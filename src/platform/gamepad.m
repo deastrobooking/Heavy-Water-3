@@ -10,6 +10,8 @@
 typedef struct { float lx, ly, rx, ry, lt, rt; uint32_t buttons, connected; char vendor[48], product[64]; } HWPad;
 static void copy_name(char *out, size_t capacity, NSString *name) {
     if (!name) return;
+    // HID properties are untyped: only strings carry a name.
+    if (CFGetTypeID((__bridge CFTypeRef)name) != CFStringGetTypeID()) return;
     const char *utf8 = [name UTF8String];
     if (utf8) { strncpy(out, utf8, capacity - 1); out[capacity - 1] = '\0'; }
 }
@@ -56,11 +58,16 @@ static int same_text(CFTypeRef value, NSString *text) {
 }
 
 static int already_in_gamecontroller(IOHIDDeviceRef device, NSArray<GCController *> *controllers) {
-    CFTypeRef vendor = IOHIDDeviceGetProperty(device, CFSTR(kIOHIDManufacturerKey));
+    // GameController claims every pad it supports; those are read through its profile only.
+    if (@available(macOS 11.0, *)) {
+        if ([GCController supportsHIDDevice:device]) return 1;
+    }
+    // Older systems: GameController's vendorName is the device's name (for example "Xbox
+    // Wireless Controller"), which matches the HID product string, not its manufacturer.
     CFTypeRef product = IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
     for (GCController *pad in controllers) {
         if (!pad.extendedGamepad && !pad.microGamepad) continue;
-        if (same_text(vendor, pad.vendorName) && same_text(product, pad.productCategory)) return 1;
+        if (same_text(product, pad.vendorName) || same_text(product, pad.productCategory)) return 1;
     }
     return 0;
 }
@@ -131,9 +138,10 @@ static void read_hid(IOHIDDeviceRef device, HWPad *out) {
     CFRelease(elements);
     out->lx = has_x ? x : 0; out->ly = has_y ? y : 0;
     out->rx = has_rx ? rx : (has_z ? z : 0); out->ry = has_ry ? ry : (has_rz ? rz : 0);
-    // Trigger axes reported as unipolar sliders are promoted to analog trigger values.
-    if (z_trigger > out->lt) out->lt=z_trigger;
-    if (rz_trigger > out->rt) out->rt=rz_trigger;
+    // Z and Rz are triggers only when the right stick has its own Rx/Ry axes. Otherwise they are
+    // the right stick (centred at half range), and reading them as triggers would hold both down.
+    if (has_rx && z_trigger > out->lt) out->lt=z_trigger;
+    if (has_ry && rz_trigger > out->rt) out->rt=rz_trigger;
 }
 
 void hw_gamepads(HWPad *out) {
@@ -214,7 +222,26 @@ void hw_gamepads(HWPad *out) {
     }
 }
 
+// AppKit windows (the save and open panels) must run on the main thread; the game calls these
+// from its simulation thread, so each panel runs synchronously on the main queue.
+static int save_json_on_main(const char *json, size_t length, const char *suggested_name);
+static int open_json_on_main(char *buffer, size_t capacity, size_t *length);
+
 int hw_choose_save_json(const char *json, size_t length, const char *suggested_name) {
+    if ([NSThread isMainThread]) return save_json_on_main(json, length, suggested_name);
+    __block int result = 0;
+    dispatch_sync(dispatch_get_main_queue(), ^{ result = save_json_on_main(json, length, suggested_name); });
+    return result;
+}
+
+int hw_choose_open_json(char *buffer, size_t capacity, size_t *length) {
+    if ([NSThread isMainThread]) return open_json_on_main(buffer, capacity, length);
+    __block int result = 0;
+    dispatch_sync(dispatch_get_main_queue(), ^{ result = open_json_on_main(buffer, capacity, length); });
+    return result;
+}
+
+static int save_json_on_main(const char *json, size_t length, const char *suggested_name) {
     @autoreleasepool {
         NSSavePanel *panel = [NSSavePanel savePanel];
         panel.allowedFileTypes = @[ @"json" ];
@@ -227,7 +254,7 @@ int hw_choose_save_json(const char *json, size_t length, const char *suggested_n
     }
 }
 
-int hw_choose_open_json(char *buffer, size_t capacity, size_t *length) {
+static int open_json_on_main(char *buffer, size_t capacity, size_t *length) {
     @autoreleasepool {
         NSOpenPanel *panel = [NSOpenPanel openPanel];
         panel.canChooseFiles = YES; panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;

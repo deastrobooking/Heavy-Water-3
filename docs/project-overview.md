@@ -61,7 +61,10 @@ The next campaign expansion spans the Arbor Frontier, the Hive/Scalari Homeworld
 | Space (driving) | Brake |
 | F5 / F9 | Quicksave / quickload |
 | R | Return to spawn |
-| Escape | Pause menu: resume, customize, save, load, settings, controls, quit. Every key in this table except Escape and Enter can be rebound under Controls |
+| Escape | Pause menu: resume, heroes, hero arena, customize, quest log, save, load, settings, controls, quit. Every key in this table except Escape and Enter can be rebound under Controls |
+| Left click a Wildkin hero, hands | Meet them: they join your heroes (look for the beams of light in the city, the wilds and the mountain caves) |
+| Pause > HEROES | Choose a tab (P1–P4), then a joined hero to play as them, or YOUR RANGER to switch back |
+| Pause or title > HERO ARENA | Take the party into the Starbowl: Hive waves, loot after each, a new hero every third wave |
 | F7 / F1 | Toggle culling / toggle metrics |
 | Window close | Quit |
 

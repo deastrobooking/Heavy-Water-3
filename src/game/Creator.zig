@@ -24,9 +24,12 @@ confirmed: bool = false,
 owned: u8 = 0xff,
 /// Armor accents owned, one bit per `Profile.Armor`.
 owned_armor: u8 = 0xff,
+/// Forms unlocked, one bit per `Profile.Species` (human always; a Wildkin form once its hero
+/// has joined the roster).
+owned_species: u32 = 1,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1 };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
@@ -59,6 +62,13 @@ pub fn key(self: *Creator, k: Key) Result {
 /// Changes the selected field; clothing skips types not yet owned.
 pub fn adjust(self: *Creator, delta: i32) void {
     self.draft.adjust(self.field, delta);
+    if (self.field == .species) {
+        for (0..Profile.species_count) |_| {
+            if (self.owned_species & (@as(u32, 1) << @intCast(@intFromEnum(self.draft.species))) != 0) return;
+            self.draft.adjust(.species, delta);
+        }
+        return;
+    }
     if (self.field == .armor) {
         for (0..@typeInfo(Profile.Armor).@"enum".fields.len) |_| {
             if (self.owned_armor & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.armor))) != 0) return;
@@ -81,6 +91,9 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
             .ranger => "ranger: tech",
             .synthetic => "synthetic: powers",
         },
+        .species => if (p.species == .human) "human" else std.fmt.bufPrint(buffer, "{s} form", .{@tagName(p.species)}) catch buffer,
+        .coat => std.fmt.bufPrint(buffer, "COAT {d} OF {d}", .{ p.coat + 1, Profile.coat_colors.len }) catch buffer,
+        .marking => std.fmt.bufPrint(buffer, "MARKING {d} OF {d}", .{ p.marking + 1, Profile.coat_colors.len }) catch buffer,
         .presentation => @tagName(p.presentation),
         .height => std.fmt.bufPrint(buffer, "{d:.2} M", .{1.8 * p.height}) catch buffer,
         .build => std.fmt.bufPrint(buffer, "{d:.0}%", .{p.build * 100}) catch buffer,
@@ -124,8 +137,8 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     while (c.draft.name_len > 0) _ = c.key(.backspace);
     try std.testing.expect(c.key(.enter) == .editing);
     for ("Mira-7") |ch| _ = c.key(.{ .char = ch });
-    // Name, class, presentation, height.
-    for (0..3) |_| _ = c.key(.down);
+    // Name, class, species, presentation, height.
+    for (0..4) |_| _ = c.key(.down);
     _ = c.key(.right);
     c.field = .accent;
     try std.testing.expectEqual(Profile.Field.accent, c.field);
@@ -141,11 +154,25 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     c.begin(result.confirmed);
     _ = c.key(.right);
     try std.testing.expect(c.key(.escape) == .canceled);
-    var panel: [16]Line = undefined;
+    var panel: [24]Line = undefined;
     c.begin(result.confirmed);
     const count = c.lines(&panel);
-    try std.testing.expectEqual(@as(usize, 16), count);
+    try std.testing.expectEqual(@as(usize, 19), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
+}
+
+test "forms cycle only through unlocked Wildkin, and human is always available" {
+    var c: Creator = .{ .owned_species = (1 << @intFromEnum(Profile.Species.fox)) | (1 << @intFromEnum(Profile.Species.bat)) };
+    c.begin(.{});
+    c.field = .species;
+    _ = c.key(.right);
+    try std.testing.expectEqual(Profile.Species.fox, c.draft.species);
+    _ = c.key(.right);
+    try std.testing.expectEqual(Profile.Species.bat, c.draft.species);
+    _ = c.key(.right);
+    try std.testing.expectEqual(Profile.Species.human, c.draft.species);
+    _ = c.key(.left);
+    try std.testing.expectEqual(Profile.Species.bat, c.draft.species);
 }
 
 test "clothing cycles only through owned types" {

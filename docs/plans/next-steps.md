@@ -23,6 +23,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 | Vehicles | Three hover cars and the Kestrel, from the procedural vehicle generator. Flying has not been checked by hand. |
 | The Hive | Three nests (drones, sentinels, troopers), two Brood carriers with wasp swarms. Difficulty only roughly tuned. |
 | Progression | 62 pickups, fabricator (cars, the fighter, suits, armor, ten weapons), suit upgrades, vital cells, story flags. |
+| Wildkin and arena | 26 collectible heroes with 78 powers, the Heroes menu, and the Starbowl co-op arena. Untuned by hand. |
 | Fighting | Timed saber combos with guard and parry, four energy firearms, Ranger and Synthetic classes with three specials each. Untuned by hand. |
 | Audio | Synthesized sounds and loops, positional cues, four volume buses. Nobody has listened to it yet. |
 | Planetary campaign | Three world descriptors, fifteen city regions, three capitals, eight arena concepts and five Scalari ship assets are authored; world generation, flight/combat integration, ship-blueprint progression, RTS construction and world saves are not integrated. |

@@ -16,6 +16,10 @@ const PadBindings = @import("../engine/PadBindings.zig");
 const Fabricator = @import("../game/Fabricator.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
+const Heroes = @import("../game/Heroes.zig");
+const Specials = @import("../game/Specials.zig");
+const Encounters = @import("../game/Encounters.zig");
+const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
 pub const Rect = Canvas.Rect;
 const Color = Canvas.Color;
@@ -191,7 +195,151 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
         .controls => drawControls(c, menu),
         .pad_controls => drawPadControls(c, menu),
         .quest_log => if (sb) |s| drawQuestLog(c, menu, s),
+        .heroes => if (sb) |s| drawHeroes(c, menu, s),
+        .arena => drawArena(c, menu, sb),
         else => {},
+    }
+}
+
+/// Who a player is playing: their hero's name, or their own ranger's.
+fn playing(sb: *const Sandbox, p: usize) ?[]const u8 {
+    const profile = if (p == 0) &sb.profile else if (sb.guests[p - 1].active) &sb.guests[p - 1].profile else return null;
+    return profile.name();
+}
+
+fn wherePlaceFound(home: Heroes.Home, hero: u8, buffer: []u8) []const u8 {
+    return switch (home) {
+        .starter => "WITH YOU FROM THE START",
+        .city => "FIND THEM IN THE CITY",
+        .wilds => "FIND THEM IN THE WILDS",
+        .cave => "FIND THEM IN THE MOUNTAIN CAVES",
+        .arena => std.fmt.bufPrint(buffer, "CLEAR ARENA WAVE {d}", .{Encounters.arenaWave(hero) orelse 0}) catch "",
+    };
+}
+
+/// The roster: player tabs, a card per hero (locked ones say where to find them), and the
+/// chosen card's details: who they are, their powers and passives.
+fn drawHeroes(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const r = menuRect(c, @min(c.width - 40, 1140), @min(c.height - 30, 700));
+    panel(c, r, "HEROES");
+    var count_buffer: [48]u8 = undefined;
+    const joined = @popCount(sb.progress.heroes);
+    c.text(r.x + 140, r.y + 20, std.fmt.bufPrint(&count_buffer, "{d} OF {d} WILDKIN JOINED", .{ joined, Heroes.count }) catch "", 1, gold);
+    // Player tabs.
+    var tx = r.x + r.w - 4 * 170 - 12;
+    for (0..Menu.heroes_tabs) |p| {
+        const on = menu.enabled(p);
+        const tab: Rect = .{ .x = tx, .y = r.y + 12, .w = 160, .h = 30 };
+        c.rect(tab, if (menu.hero_player == p) alpha(accent, 0.32) else alpha(accent, 0.08));
+        if (menu.row == p) c.frame(tab, 1, accent);
+        var label: [40]u8 = undefined;
+        const who = playing(sb, p) orelse "NOT JOINED";
+        c.text(tab.x + 10, tab.y + 10, std.fmt.bufPrint(&label, "P{d} {s}", .{ p + 1, who }) catch "", 0.9, if (!on) alpha(dim, 0.5) else if (menu.hero_player == p) accent else ink);
+        if (on) c.hit(tab, hitId(.menu, p));
+        tx += 170;
+    }
+    // Cards: your own ranger, then every Wildkin.
+    const columns: usize = Menu.heroes_columns;
+    const gap: f32 = 8;
+    const card_w = (r.w - 24 - gap * @as(f32, @floatFromInt(columns - 1))) / @as(f32, @floatFromInt(columns));
+    const card_h: f32 = 74;
+    const top = r.y + 54;
+    for (Menu.heroes_ranger..Menu.heroes_back) |row| {
+        const k = row - Menu.heroes_ranger;
+        const card: Rect = .{ .x = r.x + 12 + @as(f32, @floatFromInt(k % columns)) * (card_w + gap), .y = top + @as(f32, @floatFromInt(k / columns)) * (card_h + gap), .w = card_w, .h = card_h };
+        const selected = menu.row == row;
+        const unlocked = menu.enabled(row);
+        c.rect(card, if (selected) alpha(accent, 0.22) else .{ 1, 1, 1, 0.05 });
+        if (selected) c.frame(card, 2, accent);
+        c.hit(card, hitId(.menu, row));
+        if (row == Menu.heroes_ranger) {
+            const own = sb.own_profiles[menu.hero_player] orelse sb.profile;
+            c.rect(.{ .x = card.x + 8, .y = card.y + 10, .w = 30, .h = 30 }, Profile.skin_tones[own.skin]);
+            c.text(card.x + 46, card.y + 12, "YOUR RANGER", 0.95, ink);
+            c.text(card.x + 46, card.y + 30, if (own.class == .synthetic) "SYNTHETIC" else "HUMAN", 0.8, dim);
+            continue;
+        }
+        const index: u8 = @intCast(row - Menu.heroes_first);
+        const h = Heroes.roster[index];
+        // A badge in the hero's colours: coat, marking stripe, accent spark.
+        const badge: Rect = .{ .x = card.x + 8, .y = card.y + 10, .w = 30, .h = 30 };
+        const coat = Profile.coat_colors[h.coat];
+        c.rect(badge, if (unlocked) coat else .{ coat[0] * 0.25, coat[1] * 0.25, coat[2] * 0.25, 1 });
+        c.rect(.{ .x = badge.x, .y = badge.y + 18, .w = badge.w, .h = 6 }, if (unlocked) Profile.coat_colors[h.marking] else .{ 0.2, 0.2, 0.22, 1 });
+        if (unlocked) c.rect(.{ .x = badge.x + 21, .y = badge.y + 4, .w = 5, .h = 5 }, Profile.accent_colors[h.accent]);
+        // Long names shrink to fit the card.
+        const label = if (unlocked) h.name else "? ? ?";
+        const fit = @min(0.88, (card.w - 54) / @max(1, Canvas.textWidth(label, 1)));
+        c.text(card.x + 46, card.y + 10, label, fit, if (unlocked) ink else dim);
+        var species: [24]u8 = undefined;
+        c.text(card.x + 46, card.y + 27, pretty(&species, @tagName(h.species)), 0.78, dim);
+        if (@import("../character/Beasts.zig").winged(h.species)) c.text(card.x + card.w - 34, card.y + 27, "FLY", 0.7, gold);
+        if (!unlocked) c.text(card.x + 8, card.y + 52, "LOCKED", 0.75, alpha(bad, 0.8));
+    }
+    // Details of the selected card.
+    const rows_used = (Menu.heroes_back - Menu.heroes_ranger + columns - 1) / columns;
+    const dy = top + @as(f32, @floatFromInt(rows_used)) * (card_h + gap) + 4;
+    const detail: Rect = .{ .x = r.x + 12, .y = dy, .w = r.w - 24, .h = r.y + r.h - dy - 44 };
+    c.rect(detail, .{ 1, 1, 1, 0.04 });
+    if (menu.chosenHero()) |index| {
+        const h = Heroes.roster[index];
+        const unlocked = menu.enabled(menu.row);
+        var title: [64]u8 = undefined;
+        c.text(detail.x + 14, detail.y + 12, std.fmt.bufPrint(&title, "{s}  {s}", .{ h.name, h.title }) catch "", 1.3, gold);
+        var role: [24]u8 = undefined;
+        c.text(detail.x + 14, detail.y + 36, pretty(&role, @tagName(h.role)), 0.9, accent);
+        var wrapped: [3][]const u8 = undefined;
+        const lines = Canvas.wrap(h.blurb, 60, &wrapped);
+        for (wrapped[0..lines], 0..) |line, i| c.text(detail.x + 14, detail.y + 56 + @as(f32, @floatFromInt(i)) * 16, line, 1, ink);
+        var where: [40]u8 = undefined;
+        if (!unlocked) c.text(detail.x + 14, detail.y + detail.h - 22, wherePlaceFound(h.home, index, &where), 1, gold);
+        // Powers and passives on the right.
+        const px = detail.x + detail.w * 0.55;
+        const keys = [_][]const u8{ "Z", "C", "H" };
+        for (h.powers, 0..) |kind, i| {
+            const about = Specials.info(kind);
+            const y = detail.y + 12 + @as(f32, @floatFromInt(i)) * 22;
+            c.rect(.{ .x = px, .y = y - 2, .w = 18, .h = 15 }, alpha(Profile.accent_colors[h.accent], 0.35));
+            c.centered(px + 9, y + 2, keys[i], 0.8, ink);
+            c.text(px + 26, y + 2, about.label, 0.95, ink);
+            var mech: [24]u8 = undefined;
+            c.text(px + 230, y + 2, pretty(&mech, @tagName(about.mechanic)), 0.8, dim);
+        }
+        c.print(px, detail.y + 86, 0.85, dim, "HEALTH +{d:.0}   SABER x{d:.2}   SPEED x{d:.2}   ENERGY {d:.0}/S{s}", .{ h.health, h.melee, h.speed, h.regen, if (Heroes.winged(index)) "   WINGS" else "" });
+    } else {
+        c.text(detail.x + 14, detail.y + 12, "YOUR RANGER", 1.3, gold);
+        c.text(detail.x + 14, detail.y + 38, "Go back to the character you made: tech or synthetic powers, by class.", 1, ink);
+    }
+    var hint: [80]u8 = undefined;
+    c.text(r.x + 18, r.y + r.h - 28, std.fmt.bufPrint(&hint, "UP TO THE TABS TO PICK A PLAYER  ENTER PLAY AS  ESC BACK   (CHOOSING FOR P{d})", .{menu.hero_player + 1}) catch "", 0.9, dim);
+    const back: Rect = .{ .x = r.x + r.w - 136, .y = r.y + r.h - 40, .w = 112, .h = 28 };
+    button(c, back, "BACK", hitId(.menu, Menu.heroes_back), menu.row == Menu.heroes_back);
+}
+
+/// The Starbowl: what it is, the party, the best wave, and start / leave.
+fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
+    const r = menuRect(c, 560, 380);
+    panel(c, r, "THE STARBOWL");
+    var wrapped: [4][]const u8 = undefined;
+    const lines = Canvas.wrap("A sky arena over the Frontier. Up to four heroes hold out against waves of Hive bots. Every wave cleared drops loot and scrap; every third brings a Wildkin champion to your roster.", 60, &wrapped);
+    for (wrapped[0..lines], 0..) |line, i| c.text(r.x + 22, r.y + 52 + @as(f32, @floatFromInt(i)) * 17, line, 1, ink);
+    var y = r.y + 52 + @as(f32, @floatFromInt(lines)) * 17 + 10;
+    if (sb) |s| {
+        c.print(r.x + 22, y, 1, gold, "BEST WAVE {d}", .{s.progress.arena_best});
+        y += 22;
+        for (0..4) |p| if (playing(s, p)) |who| {
+            c.print(r.x + 22, y, 0.95, dim, "P{d}  {s}", .{ p + 1, who });
+            y += 17;
+        };
+    }
+    y = r.y + r.h - 3 * 36 - 14;
+    for (Menu.arena_items, 0..) |item, i| {
+        const row: Rect = .{ .x = r.x + 12, .y = y, .w = r.w - 24, .h = 30 };
+        const on = menu.enabled(i);
+        rowBack(c, row, menu.row == i);
+        c.text(row.x + 16, row.y + 9, item.label, 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
+        if (on) c.hit(row, hitId(.menu, i));
+        y += 36;
     }
 }
 
@@ -369,6 +517,20 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
     }
     if (panels) return;
+    // The Starbowl's wave banner, top centre.
+    if (sb.arena.active) {
+        var line: [64]u8 = undefined;
+        const bots = sb.enemies.unitCount(@import("../game/Enemies.zig").arena_nest);
+        const text = if (sb.arena.waiting > 0)
+            std.fmt.bufPrint(&line, "STARBOWL  NEXT WAVE IN {d:.0}  BEST {d}", .{ @ceil(sb.arena.waiting), sb.progress.arena_best }) catch ""
+        else
+            std.fmt.bufPrint(&line, "STARBOWL  WAVE {d}  BOTS LEFT {d}", .{ sb.arena.wave, bots }) catch "";
+        const w = Canvas.textWidth(text, 1.4) + 40;
+        const banner: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + 18, .w = w, .h = 34 };
+        c.rect(banner, .{ 0.02, 0.035, 0.05, 0.72 });
+        c.frame(banner, 1, alpha(gold, 0.7));
+        c.centered(v.x + v.w / 2, banner.y + 10, text, 1.4, gold);
+    }
     // Interaction prompt and toast, bottom centre.
     prompt(c, v, hud.prompt, accent);
     if (hud.toast.len > 0) c.centered(v.x + v.w / 2, v.y + v.h - 150, hud.toast, 1.2, accent);
@@ -403,16 +565,15 @@ fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profil
 
 /// Energy and the class's three specials (key, name, cooldown), beside the vitals.
 fn specials(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8, profile: Profile, keys: [3][]const u8) void {
-    const Specials = @import("../game/Specials.zig");
     const s = sb.specials.players[player];
     const w: f32 = @min(230, v.w - 290);
     if (w < 150) return;
     const r: Rect = .{ .x = v.x + 280, .y = v.y + v.h - 110, .w = w, .h = 90 };
     c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
     const lumen = Profile.accent_colors[profile.accent];
-    c.text(r.x + 12, r.y + 10, if (profile.class == .synthetic) "POWERS" else "TECH", 0.9, lumen);
+    c.text(r.x + 12, r.y + 10, if (profile.species != .human) "WILD" else if (profile.class == .synthetic) "POWERS" else "TECH", 0.9, lumen);
     bar(c, .{ .x = r.x + 70, .y = r.y + 11, .w = r.w - 82, .h = 7 }, s.energy / Specials.max_energy, lumen);
-    for (Specials.kit(profile.class), 0..) |kind, i| {
+    for (Specials.loadout(profile).kit, 0..) |kind, i| {
         const about = Specials.info(kind);
         const y = r.y + 30 + @as(f32, @floatFromInt(i)) * 19;
         const ready = s.cooldowns[i] == 0 and s.energy >= about.cost;
@@ -511,6 +672,8 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
         .hair_color => Profile.hair_colors[p.hair_color],
         .outfit => Profile.outfit_colors[p.outfit],
         .accent => Profile.accent_colors[p.accent],
+        .coat => Profile.coat_colors[p.coat],
+        .marking => Profile.coat_colors[p.marking],
         else => null,
     };
 }

@@ -29,7 +29,12 @@ const m = @import("../character/math.zig");
 const Rig = @import("Rig.zig");
 const Profile = @import("Profile.zig");
 const Specials = @import("Specials.zig");
+const Heroes = @import("Heroes.zig");
+const Encounters = @import("Encounters.zig");
+const Arena = @import("Arena.zig");
 const R = Physics.Rotation;
+/// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
+pub const hero_first_id: u8 = 24;
 const V = Physics.Vec3;
 
 /// The fabricator kiosk stands at the head of the garage pads.
@@ -87,6 +92,10 @@ pub fn init(sb: *Sandbox) void {
     const spawn: V = .{ Sandbox.spawn[0], Terrain.surface(sb.seed, Sandbox.spawn[0], Sandbox.spawn[2]).height, Sandbox.spawn[2] };
     sb.collectibles = Collectibles.generate(.{ .seed = sb.seed, .spawn = spawn, .plazas = &plazas, .roads = &roads, .roofs = roofs[0..r], .shrines = &shrines, .nests = nests[0..surface] });
     placeDungeons(sb);
+    // The Wildkin heroes' spots: plazas, the meadow ring, cave caches.
+    var hero_plazas: [District.node_count]Encounters.Plaza = undefined;
+    for (sb.catalog.district.nodes, &hero_plazas) |node, *p| p.* = .{ .position = node.position, .arbor = node.kind == .arbor };
+    sb.encounters = Encounters.place(.{ .seed = sb.seed, .spawn = spawn, .plazas = &hero_plazas, .caves = &sb.caves });
     // Settle every pickup onto what is really there: above the terrain (not inside a cave),
     // onto any deck, roof or cave floor.
     for (sb.collectibles.items[0..sb.collectibles.count]) |*item| {
@@ -97,6 +106,100 @@ pub fn init(sb: *Sandbox) void {
         if (sb.physics.castRay(R.add(p.*, .{ 0, 2.5, 0 }), .{ 0, -1, 0 }, 8, .none)) |hit| p[1] = hit.point[1] + 0.9;
     }
     refresh(sb);
+}
+
+/// Takes the party (P1 and every active guest) into the Starbowl.
+pub fn enterArena(sb: *Sandbox, camera: *Camera) void {
+    if (sb.arena.active) return;
+    if (sb.garage.piloting != null) _ = sb.garage.leave(&sb.physics);
+    if (sb.hangar.piloting) leaveJet(sb, camera);
+    if (sb.seated != null) sb.exitVehicle(camera);
+    const at = Arena.site(sb.seed, Sandbox.spawn);
+    sb.arena.open(sb.allocator, &sb.physics, at, Sandbox.world_flag) catch |err| return sb.say("the arena would not open: {s}", .{@errorName(err)});
+    _ = sb.enemies.addArenaNest(at);
+    sb.arena.returns[0] = sb.player.feet;
+    sb.player.mode = .walk;
+    sb.player.feet = sb.arena.standing(0);
+    sb.player.velocity = @splat(0);
+    camera.position = sb.player.eye();
+    for (&sb.guests, 1..) |*g, p| {
+        sb.arena.returns[p] = if (g.active) g.player.feet else null;
+        if (!g.active) continue;
+        g.player.feet = sb.arena.standing(p);
+        g.player.velocity = @splat(0);
+    }
+    for (&sb.combat.vitals) |*v| v.health = v.max;
+    sb.cue(.vault, null);
+    sb.say("THE STARBOWL: hold out against the Hive waves!", .{});
+}
+
+/// Leaves the Starbowl: its bots vanish and everyone returns to where they were.
+pub fn leaveArena(sb: *Sandbox, camera: *Camera) void {
+    if (!sb.arena.active) return;
+    for (&sb.enemies.units) |*slot| if (slot.*) |u| if (u.nest == Enemies.arena_nest) {
+        slot.* = null;
+    };
+    sb.enemies.bolts = @splat(null);
+    sb.arena.close(&sb.physics);
+    if (sb.arena.returns[0]) |back| sb.player.feet = back;
+    sb.player.velocity = @splat(0);
+    camera.position = sb.player.eye();
+    for (&sb.guests, 1..) |*g, p| if (sb.arena.returns[p]) |back| if (g.active) {
+        g.player.feet = back;
+        g.player.velocity = @splat(0);
+    };
+    sb.say("left the Starbowl (best wave {d})", .{sb.progress.arena_best});
+}
+
+/// Waves, rewards and champions in the Starbowl, and catching anyone who falls off.
+fn stepArena(sb: *Sandbox, camera: *Camera, dt: f32) void {
+    if (!sb.arena.active) return;
+    var party: u8 = 1;
+    for (sb.guests) |g| party += @intFromBool(g.active);
+    var events: [4]Arena.Event = undefined;
+    const n = sb.arena.step(&sb.enemies, Enemies.arena_nest, party, sb.enemies.unitCount(Enemies.arena_nest), dt, &events);
+    for (events[0..@min(n, events.len)]) |e| switch (e) {
+        .wave_started => |w| {
+            sb.cue(.hive_zap, sb.arena.center);
+            sb.say("WAVE {d}!", .{w});
+        },
+        .wave_cleared => |c| {
+            sb.cue(.vault, null);
+            sb.wallet.scrap += c.reward.scrap;
+            const center = R.add(sb.arena.center, .{ 0, 1, 0 });
+            const loot = [_]struct { kind: Collectibles.Kind, count: u8 }{ .{ .kind = .lumen_shard, .count = c.reward.lumen }, .{ .kind = .hive_alloy, .count = c.reward.alloy }, .{ .kind = .rotor_core, .count = c.reward.rotor }, .{ .kind = .vital_cell, .count = c.reward.vital } };
+            var k: usize = 0;
+            for (loot) |item| for (0..item.count) |_| {
+                const a = @as(f32, @floatFromInt(k)) * 0.9;
+                sb.collectibles.drop(item.kind, R.add(center, .{ @sin(a) * (3 + 0.3 * @as(f32, @floatFromInt(k))), 0, @cos(a) * (3 + 0.3 * @as(f32, @floatFromInt(k))) }));
+                k += 1;
+            };
+            if (c.wave > sb.progress.arena_best) sb.progress.arena_best = c.wave;
+            sb.say("wave {d} cleared! +{d} scrap and loot in the bowl", .{ c.wave, c.reward.scrap });
+            // An arena champion, impressed, joins the roster.
+            for (0..Heroes.count) |h| if (Encounters.arenaWave(@intCast(h))) |w| if (w == c.wave) recruit(sb, @intCast(h));
+        },
+    };
+    // Off the edge: set back on the floor.
+    if (sb.arena.fallen(sb.player.feet)) {
+        sb.player.feet = sb.arena.standing(0);
+        sb.player.velocity = @splat(0);
+        camera.position = sb.player.eye();
+    }
+    for (&sb.guests, 1..) |*g, p| if (g.active and sb.arena.fallen(g.player.feet)) {
+        g.player.feet = sb.arena.standing(p);
+        g.player.velocity = @splat(0);
+    };
+}
+
+/// Meeting a Wildkin hero: they join the roster (their form opens in the creator, and the
+/// Heroes menu lets any player become them).
+pub fn recruit(sb: *Sandbox, hero: u8) void {
+    if (!sb.progress.addHero(hero)) return;
+    const h = Heroes.roster[hero];
+    sb.cue(.vault, null);
+    sb.say("{s} joined your heroes! Pause > HEROES to play as them", .{h.name});
+    sb.progress.setFlag("met_wildkin");
 }
 
 /// The cave dungeons: a Hive nest in each heart chamber, and loot through the chambers (lumen
@@ -201,7 +304,7 @@ pub fn refresh(sb: *Sandbox) void {
     sb.collectibles.drops = @splat(null);
     sb.specials = .{};
     sb.combat.setMaxHealth(sb.progress.maxHealth());
-    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + Specials.healthBonus(sb.profile.class));
+    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + Specials.loadout(sb.profile).health);
     for (&sb.combat.vitals) |*v| v.health = v.max;
     // Whatever the loaded ranger already wears stays available.
     sb.progress.suits |= Progress.bit(sb.profile.clothing);
@@ -284,7 +387,15 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
     }
     const kiosk = kioskPosition(sb);
     if (Physics.rayBox(eye, dir, R.add(kiosk, .{ 0, 1.2, 0 }), .{ 0.8, 1.2, 0.6 })) |hit| if (hit.distance < nearest) {
+        nearest = hit.distance;
         result = .fabricator;
+    };
+    // Wildkin waiting to be met.
+    for (sb.encounters) |maybe| if (maybe) |spot| if (!sb.progress.hasHero(spot.hero)) {
+        if (Enemies.segmentSphere(eye, dir, nearest, R.add(spot.position, .{ 0, 1.1, 0 }), 0.9)) |t| {
+            nearest = t;
+            result = .{ .hero = spot.hero };
+        }
     };
     return result;
 }
@@ -296,10 +407,12 @@ fn targets(sb: *const Sandbox, out: *[Sandbox.max_players]Enemies.Target) []cons
         const car = sb.garage.cars[i].?.flyer.body;
         p1 = .{ .chest = .{ car.pos.x, car.pos.y, car.pos.z }, .velocity = .{ car.vel.x, car.vel.y, car.vel.z } };
     }
+    // A player under a vanish power is not seen.
+    p1.alive = p1.alive and !sb.specials.hidden(0);
     out[0] = p1;
     var n: usize = 1;
     for (sb.guests) |g| {
-        out[n] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active, .guard = sb.combat.arsenals[n].guard(), .facing = facingOf(g.body_yaw) };
+        out[n] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active and !sb.specials.hidden(n), .guard = sb.combat.arsenals[n].guard(), .facing = facingOf(g.body_yaw) };
         n += 1;
     }
     return out[0..n];
@@ -402,6 +515,18 @@ fn checkCampaignComplete(sb: *Sandbox) void {
 }
 
 fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
+    // Knocked out in the arena: back up at the centre of the bowl, healed.
+    if (sb.arena.active) {
+        const p = if (player == 0) &sb.player else &sb.guests[player - 1].player;
+        if (sb.arena.inside(p.feet)) {
+            p.feet = sb.arena.standing(player);
+            p.velocity = @splat(0);
+            sb.combat.vitals[player].health = sb.combat.vitals[player].max;
+            if (player == 0) camera.position = sb.player.eye();
+            sb.say("P{d} is back on their feet", .{player + 1});
+            return;
+        }
+    }
     if (player == 0) {
         if (sb.garage.piloting != null) _ = sb.garage.leave(&sb.physics);
         sb.resetPlayer(camera);
@@ -416,6 +541,7 @@ fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
 pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Actions, frozen: bool, dt: f32, timing: ?Sandbox.BenchmarkTiming) void {
     var phase_timer = if (timing) |profile| mach.time.Timer.start(profile.io) else undefined;
     stepCaves(sb);
+    stepArena(sb, camera, dt);
     // Hover cars: the piloted one takes P1's movement keys; parked ones idle.
     sb.garage.step(&sb.physics, if (frozen) .{} else Garage.controls(input), dt);
 
@@ -523,19 +649,21 @@ fn stepSpecials(sb: *Sandbox, camera: *Camera, actions: Sandbox.Actions, frozen:
     const on_foot = !frozen and sb.garage.piloting == null and sb.seated == null and !sb.hangar.piloting;
     const f = sb.aimCameraPublic(camera.*).forward();
     const eye = sb.player.eye();
-    sb.combat.arsenals[0].melee_scale = Specials.meleeScale(sb.profile.class);
-    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + Specials.healthBonus(sb.profile.class));
+    const own = Specials.loadout(sb.profile);
+    sb.combat.arsenals[0].melee_scale = own.melee;
+    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + own.health);
     const pressed: [3]bool = if (on_foot) .{ actions.special_1, actions.special_2, actions.special_3 } else @splat(false);
-    var n = sb.specials.step(0, sb.profile.class, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ eye.x(), eye.y(), eye.z() }, .forward = .{ f.x(), f.y(), f.z() }, .feet = sb.player.feet, .pressed = pressed }, dt, &events);
+    var n = sb.specials.step(0, sb.profile, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ eye.x(), eye.y(), eye.z() }, .forward = .{ f.x(), f.y(), f.z() }, .feet = sb.player.feet, .pressed = pressed }, dt, &events);
     specialEvents(sb, events[0..@min(n, events.len)], camera);
     for (&sb.guests, 1..) |*g, p| {
         defer g.special = @splat(false);
         if (!g.active) continue;
-        sb.combat.arsenals[p].melee_scale = Specials.meleeScale(g.profile.class);
-        sb.combat.setPlayerMax(p, sb.progress.maxHealth() + Specials.healthBonus(g.profile.class));
+        const theirs = Specials.loadout(g.profile);
+        sb.combat.arsenals[p].melee_scale = theirs.melee;
+        sb.combat.setPlayerMax(p, sb.progress.maxHealth() + theirs.health);
         const ge = g.player.eye();
         const gf = g.camera.forward();
-        n = sb.specials.step(@intCast(p), g.profile.class, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ ge.x(), ge.y(), ge.z() }, .forward = .{ gf.x(), gf.y(), gf.z() }, .feet = g.player.feet, .pressed = if (frozen) @splat(false) else g.special }, dt, &events);
+        n = sb.specials.step(@intCast(p), g.profile, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ ge.x(), ge.y(), ge.z() }, .forward = .{ gf.x(), gf.y(), gf.z() }, .feet = g.player.feet, .pressed = if (frozen) @splat(false) else g.special }, dt, &events);
         specialEvents(sb, events[0..@min(n, events.len)], camera);
     }
     n = sb.specials.stepWorld(&sb.physics, &sb.enemies, &sb.combat, dt, &events);
@@ -546,12 +674,15 @@ fn specialEvents(sb: *Sandbox, events: []const Specials.Event, camera: *Camera) 
     for (events) |e| switch (e) {
         .used => |u| {
             const at: ?V = if (u.player == 0) null else R.add(sb.guests[u.player - 1].player.feet, .{ 0, 1.2, 0 });
-            switch (u.kind) {
-                .arc_grenade, .sentry => sb.cuePitch(.grapple, at, 1.3),
-                .overshield => sb.cuePitch(.restock, at, 1.2),
-                .phase_dash => sb.cuePitch(.dash, at, 1.5),
-                .kinetic_slam => sb.cuePitch(.boom, at, 0.7),
-                .lumen_lance => sb.cuePitch(.zap, at, 0.45),
+            switch (Specials.info(u.kind).mechanic) {
+                .grenade, .sentry, .field => sb.cuePitch(.grapple, at, 1.3),
+                .shield, .heal => sb.cuePitch(.restock, at, 1.2),
+                .blink, .launch => sb.cuePitch(.dash, at, 1.5),
+                .slam, .aura => sb.cuePitch(.boom, at, 0.7),
+                .cone => sb.cuePitch(.slash, at, 0.8),
+                .chain => sb.cuePitch(.zap, at, 1.4),
+                .lance => sb.cuePitch(.zap, at, 0.45),
+                .vanish => sb.cuePitch(.vault, at, 1.6),
             }
             if (u.player == 0) sb.say("{s}", .{Specials.info(u.kind).label});
         },
@@ -564,6 +695,18 @@ fn specialEvents(sb: *Sandbox, events: []const Specials.Event, camera: *Camera) 
             player.velocity = .{ 0, 0, 0 };
             if (b.player == 0) camera.position = sb.player.eye();
         },
+        .launch => |l| {
+            const player = if (l.player == 0) &sb.player else &sb.guests[l.player - 1].player;
+            player.velocity = l.velocity;
+            if (l.velocity[1] > 0) player.grounded = false;
+        },
+        .heal => |h| for (0..Sandbox.max_players) |p| {
+            const feet = if (p == 0) sb.player.feet else if (sb.guests[p - 1].active) sb.guests[p - 1].player.feet else continue;
+            const d = R.sub(feet, h.center);
+            if (p != h.player and (h.radius == 0 or R.dot(d, d) > h.radius * h.radius)) continue;
+            const v = &sb.combat.vitals[p];
+            v.health = @min(v.max, v.health + h.amount);
+        },
         .hive => |h| hive(sb, h, camera),
     };
 }
@@ -574,8 +717,8 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sand
         jet = .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .velocity = .{ f.body.vel.x, f.body.vel.y, f.body.vel.z }, .forward = .{ f.forward().x, f.forward().y, f.forward().z }, .airborne = !f.grounded };
     };
     var on_foot: [Sandbox.max_players]Enemies.Target = undefined;
-    on_foot[0] = .{ .chest = R.add(sb.player.feet, .{ 0, 1.3, 0 }), .velocity = sb.player.velocity, .alive = !sb.hangar.piloting };
-    for (sb.guests, 1..) |g, i| on_foot[i] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active };
+    on_foot[0] = .{ .chest = R.add(sb.player.feet, .{ 0, 1.3, 0 }), .velocity = sb.player.velocity, .alive = !sb.hangar.piloting and !sb.specials.hidden(0) };
+    for (sb.guests, 1..) |g, i| on_foot[i] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active and !sb.specials.hidden(i) };
     var events: [64]Skies.Event = undefined;
     var n: usize = 0;
     if (jet) |j| if (!frozen) sb.skies.fireJetUpgraded(&sb.enemies, j, sb.hangar.guns(), sb.trigger.fire, sb.trigger.alt, dt, sb.progress.kestrel_levels, &events, &n);
@@ -823,6 +966,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     }.ok;
     n += sb.garage.publish(sb.catalog, out[n..]);
     n = publishMountains(sb, out, n, t);
+    n = publishWildkin(sb, out, n, t);
+    n = publishArena(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);
     if (room(out, n, 3)) {
@@ -889,7 +1034,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     // Troopers are skinned characters (ids 16–23), drawn only near P1 to bound skinning cost.
     var trooper_id: u8 = 16;
     for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .trooper) {
-        if (trooper_id >= @import("../character/Ranger.zig").capacity or !room(out, n, 1)) break;
+        if (trooper_id >= hero_first_id or !room(out, n, 1)) break;
         const d = R.sub(u.position, sb.player.feet);
         if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
         const Ranger = @import("../character/Ranger.zig");
@@ -1135,6 +1280,94 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         out[i] = .{ .mesh = block, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = rotation };
     }
     return parts.len;
+}
+
+/// The Starbowl: a floating slab with a lit ring, low walls, four corner pylons with beacons,
+/// and a sun emblem at the centre that pulses with the wave.
+fn publishArena(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    if (!sb.arena.active) return start;
+    var n = start;
+    const c = &sb.catalog.content;
+    const at = sb.arena.center;
+    const h = Arena.half;
+    const room = struct {
+        fn ok(o: []World.Prop, k: usize, need: usize) bool {
+            return k + need <= o.len;
+        }
+    }.ok;
+    if (!room(out, n, 24)) return n;
+    const stone: [4]f32 = .{ 0.42, 0.42, 0.5, 1 };
+    const trim: [4]f32 = .{ 0.36, 0.32, 0.5, 1 };
+    out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, -1, 0 }) }, .tint = stone, .size = .{ h * 2, 2, h * 2 } };
+    out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, -5, 0 }) }, .tint = trim, .size = .{ h * 1.7, 6, h * 1.7 } };
+    n += 2;
+    for ([_][2]f32{ .{ 1, 0 }, .{ -1, 0 }, .{ 0, 1 }, .{ 0, -1 } }) |side| {
+        const pos = R.add(at, .{ side[0] * h, Arena.wall_height / 2, side[1] * h });
+        const size: [3]f32 = if (side[0] != 0) .{ 1.2, Arena.wall_height, h * 2 } else .{ h * 2, Arena.wall_height, 1.2 };
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = pos }, .tint = trim, .size = size };
+        // A lit band along the wall's top.
+        const band: [3]f32 = if (side[0] != 0) .{ 1.3, 0.2, h * 2 } else .{ h * 2, 0.2, 1.3 };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(pos, .{ 0, Arena.wall_height / 2, 0 }) }, .tint = Material.emissive(.{ 1, 0.75, 0.3, 1 }, 0.7), .size = band };
+        n += 2;
+    }
+    for ([_][2]f32{ .{ 1, 1 }, .{ -1, 1 }, .{ 1, -1 }, .{ -1, -1 } }) |corner| {
+        const base = R.add(at, .{ corner[0] * h, 0, corner[1] * h });
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(base, .{ 0, 5, 0 }) }, .tint = trim, .size = .{ 2.2, 10, 2.2 } };
+        out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = R.add(base, .{ 0, 11.5 + 0.3 * @sin(t * 2), 0 }) }, .tint = Material.emissive(.{ 0.4, 0.9, 1, 1 }, 1), .size = @splat(1.6), .rotation = yawQuat(t) };
+        n += 2;
+    }
+    // Rings on the floor: an outer path and the central sun, brighter while a wave is on.
+    const fighting: f32 = if (sb.arena.waiting > 0) 0.35 else 0.9;
+    for (0..8) |k| {
+        const a = @as(f32, @floatFromInt(k)) / 8 * std.math.pi;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 0.01, 0 }) }, .tint = Material.emissive(.{ 1, 0.8, 0.35, 1 }, fighting * (0.5 + 0.3 * @sin(t * 3 + @as(f32, @floatFromInt(k))))), .size = .{ 0.12, 0.02, 7 }, .rotation = yawQuat(a + t * 0.2) };
+        n += 1;
+    }
+    return n;
+}
+
+/// Wildkin waiting to be met: the nearest eight within 90 m are drawn as characters (ids 24–31),
+/// turning to face P1 as they come close; each one within 400 m also raises a beam of light in
+/// its accent colour, with a spinning gem over its head, so heroes can be found from afar.
+fn publishWildkin(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    var n = start;
+    const c = &sb.catalog.content;
+    const me = sb.player.feet;
+    // The nearest unmet heroes, by squared distance.
+    var near: [8]?struct { hero: u8, d2: f32 } = @splat(null);
+    for (sb.encounters) |maybe| if (maybe) |spot| if (!sb.progress.hasHero(spot.hero)) {
+        const d = R.sub(spot.position, me);
+        const d2 = R.dot(d, d);
+        if (d2 > 400 * 400) continue;
+        if (n + 2 <= out.len) {
+            const accent = Profile.accent_colors[Heroes.roster[spot.hero].accent];
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(spot.position, .{ 0, 22, 0 }) }, .tint = Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 0.55 + 0.2 * @sin(t * 2)), .size = .{ 0.22, 40, 0.22 } };
+            out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = R.add(spot.position, .{ 0, 2.7 + 0.15 * @sin(t * 2.5), 0 }) }, .tint = Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 0.9), .size = @splat(0.5), .rotation = yawQuat(t * 2) };
+            n += 2;
+        }
+        if (d2 > 90 * 90) continue;
+        var slot: ?usize = null;
+        for (&near, 0..) |entry, k| {
+            if (entry == null) {
+                slot = k;
+                break;
+            }
+            if (d2 < entry.?.d2 and (slot == null or near[slot.?].?.d2 < entry.?.d2)) slot = k;
+        }
+        if (slot) |k| near[k] = .{ .hero = spot.hero, .d2 = d2 };
+    };
+    for (near, 0..) |entry, k| if (entry) |e| if (n < out.len) {
+        const spot = sb.encounters[e.hero].?;
+        const d = R.sub(me, spot.position);
+        const yaw = if (e.d2 < 25 * 25) std.math.atan2(d[0], d[2]) else spot.yaw;
+        out[n] = .{ .mesh = .none, .transform = .{ .position = spot.position }, .tint = .{ 1, 1, 1, 1 }, .character = .{
+            .profile = Heroes.profile(e.hero),
+            .pose = .{ .feet = spot.position, .yaw = yaw, .time = t + @as(f32, @floatFromInt(e.hero)) },
+            .id = hero_first_id + @as(u8, @intCast(k)),
+        } };
+        n += 1;
+    };
+    return n;
 }
 
 /// The ranges' far panorama (not while anyone is underground: it runs under the slopes, through

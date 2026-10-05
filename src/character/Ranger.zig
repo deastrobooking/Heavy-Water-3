@@ -10,13 +10,14 @@ const Animation = @import("Animation.zig");
 const cm = @import("mesh.zig");
 const m = @import("math.zig");
 const toon = @import("toon.zig");
+const Beasts = @import("Beasts.zig");
 const Mesh = @import("../render/Mesh.zig");
 const V = m.Vec3;
 const Q = m.Quat;
 const Ranger = @This();
 /// Skinned characters drawn at once: players 0–3, keepers 4–6, pedestrians 7–14, Hive troopers
-/// 16–23.
-pub const capacity = 24;
+/// 16–23, Wildkin heroes met in the world 24–31.
+pub const capacity = 32;
 /// What the upper body is doing on top of the gait: weapon use, throwing, a trooper's strike, or
 /// a low cover posture. `action_t` advances timed actions from 0 to 1.
 pub const Action = enum { none, aim, swing, guard, cast, throw, strike, cover };
@@ -51,12 +52,14 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     const outfit_len = outfit(profile, &garments);
     const feminine = profile.presentation == .feminine;
     // Synthetics: a cool porcelain sheen over the chosen tone, and eyes lit in the accent.
-    const synthetic = profile.class == .synthetic;
+    const synthetic = profile.class == .synthetic and profile.species == .human;
+    const wildkin = profile.species != .human;
     const lumen = Profile.accent_colors[profile.accent];
     var ch = try gen.Character.build(a, .{
         .body = bodySpec(profile),
-        .skin = if (synthetic) mix(Profile.skin_tones[profile.skin], spec.Rgb.hex(0xe4eaef), 0.6) else rgb(Profile.skin_tones[profile.skin], 1),
-        .eyes = .{ .size = if (feminine) 0.18 else 0.15, .aspect = if (feminine) 0.82 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946), .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31, .highlight_count = 1 },
+        // Wildkin wear their coat where a human shows skin.
+        .skin = if (wildkin) rgb(Profile.coat_colors[profile.coat], 1) else if (synthetic) mix(Profile.skin_tones[profile.skin], spec.Rgb.hex(0xe4eaef), 0.6) else rgb(Profile.skin_tones[profile.skin], 1),
+        .eyes = Beasts.eyes(profile.species, .{ .size = if (feminine) 0.18 else 0.15, .aspect = if (feminine) 0.82 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946), .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31, .highlight_count = 1 }, rgb(lumen, 1.2)),
         .hair = .{ .style = switch (profile.hair_style) {
             .short, .crest => .short_spiky,
             .ponytail => .twin_tails,
@@ -79,7 +82,7 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     for (self.mesh.vertices, self.character.mesh.vertices.items, self.character.color_index.items) |*v, source, color| {
         var c = self.character.palette.items[color];
         if (source.region == .face and source.uv.x >= 0 and source.uv.y >= 0) {
-            const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = if (feminine) 0.38 else 0.12 }, 0.008);
+            const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = if (wildkin) 0.55 else if (feminine) 0.38 else 0.12 }, 0.008);
             if (decal.alpha > 0) c = toon.mix(c, decal.color, decal.alpha);
         }
         // Face UVs drive the CPU decal bake above; game characters use a neutral renderer UV so
@@ -289,7 +292,11 @@ fn smoothstep(edge0: f32, edge1: f32, value: f32) f32 {
 /// The body part of a profile's character spec (everything the skeleton depends on).
 pub fn bodySpec(profile: Profile) spec.BodySpec {
     const feminine = profile.presentation == .feminine;
-    return .{ .height = 1.8 * profile.height, .head_ratio = 7.5, .femininity = if (feminine) 0.84 else 0.18, .bust = if (feminine) 0.24 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * profile.build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * profile.build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * profile.build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * profile.build, .head_width = if (feminine) 0.80 else 0.83, .jaw_sharpness = if (feminine) 0.65 else 0.28 };
+    // Wildkin forms scale height and build, and carry cartoon-heroic heads.
+    const form = Beasts.scale(profile.species);
+    const build = profile.build * form.build;
+    const wildkin = profile.species != .human;
+    return .{ .height = 1.8 * profile.height * form.height, .head_ratio = Beasts.headRatio(profile.species), .femininity = if (feminine) 0.84 else 0.18, .bust = if (wildkin) 0.02 else if (feminine) 0.24 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * build, .head_width = if (wildkin) 0.9 else if (feminine) 0.80 else 0.83, .jaw_sharpness = if (wildkin) 0.2 else if (feminine) 0.65 else 0.28 };
 }
 
 fn mix(a: [4]f32, b: spec.Rgb, t: f32) spec.Rgb {
@@ -309,10 +316,20 @@ pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
             count.* += 1;
         }
     };
-    Add.one(out, &n, .{ .coverage = .long_sleeve, .color = rgb(cloth, 0.35), .neckline = .high });
-    Add.one(out, &n, .{ .coverage = .leggings, .color = rgb(cloth, 0.32) });
+    if (profile.species != .human) {
+        // Wildkin wear bright hero suits that leave their fur, scales or feathers showing: a
+        // tank top and shorts in the outfit colour, gloves and boots in the marking colour.
+        const mark = Profile.coat_colors[profile.marking];
+        Add.one(out, &n, .{ .coverage = .tank, .color = rgb(cloth, 1.15), .neckline = .crew });
+        Add.one(out, &n, .{ .coverage = .shorts, .color = rgb(cloth, 0.75) });
+        Add.one(out, &n, .{ .coverage = .gloves, .color = rgb(mark, 0.9), .layer = 2, .looseness = 0.003 });
+        Add.one(out, &n, .{ .coverage = .shoes, .color = rgb(mark, 0.75), .layer = 3, .looseness = 0.009 });
+    } else {
+        Add.one(out, &n, .{ .coverage = .long_sleeve, .color = rgb(cloth, 0.35), .neckline = .high });
+        Add.one(out, &n, .{ .coverage = .leggings, .color = rgb(cloth, 0.32) });
+    }
     switch (profile.clothing) {
-        .undersuit, .field_jacket => {
+        .undersuit, .field_jacket => if (profile.species == .human) {
             Add.one(out, &n, .{ .coverage = .gloves, .color = dark, .layer = 2, .looseness = 0.003 });
             Add.one(out, &n, .{ .coverage = .shoes, .color = spec.Rgb.hex(0x202c36), .layer = 3, .looseness = 0.009 });
             if (profile.clothing == .field_jacket) Add.one(out, &n, .{ .coverage = .long_sleeve, .color = rgb(cloth, 1), .layer = 3, .looseness = 0.013, .neckline = .v });
@@ -412,7 +429,7 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
             try plate(a, ch, .chest, chest.add(V.init(side * 0.105 * h, -0.066 * h, 0.160 * h)), V.init(0.027 * h, 0.004 * h, 0.006 * h), accent);
         }
     }
-    if (p.class == .synthetic) {
+    if (p.class == .synthetic and p.species == .human) {
         // Lit seams: a collar ring, a core light over the sternum and cheek lines.
         const seam = rgb(Profile.accent_colors[p.accent], 1.45);
         const neck = s.worldPos(.neck);
@@ -469,8 +486,10 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         },
         else => {},
     }
-    if (p.helmet == .sealed or p.hair_style == .hood) {
-        // Conceal hair under the helmet/hood instead of allowing it to poke through.
+    const wildkin = p.species != .human;
+    if (p.helmet == .sealed or p.hair_style == .hood or wildkin) {
+        // Conceal hair under the helmet/hood instead of allowing it to poke through. Wildkin
+        // have fur, scales or feathers instead, built by `Beasts`.
         var write: usize = 0;
         var i: usize = 0;
         while (i < ch.mesh.indices.items.len) : (i += 3) {
@@ -481,8 +500,10 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
             write += 3;
         }
         ch.mesh.indices.shrinkRetainingCapacity(write);
-        try plate(a, ch, .head, V.init(0, lm.chin_y + 0.56 * lm.H, -0.02 * h), V.init(lm.head_half_width + 0.024 * h, 0.56 * lm.H, 0.14 * h), if (p.helmet == .sealed) metal else rgb(Profile.outfit_colors[p.outfit], 0.7));
+        if (p.helmet == .sealed or p.hair_style == .hood) try plate(a, ch, .head, V.init(0, lm.chin_y + 0.56 * lm.H, -0.02 * h), V.init(lm.head_half_width + 0.024 * h, 0.56 * lm.H, 0.14 * h), if (p.helmet == .sealed) metal else rgb(Profile.outfit_colors[p.outfit], 0.7));
     }
+    // Wildkin show their faces: no visor, and their own features.
+    if (wildkin) return Beasts.build(a, ch, p);
     if (p.helmet != .open) {
         const center = V.init(0, lm.chin_y + 0.47 * lm.H, 0.105 * h);
         try visorSurface(a, ch, center, 0.117 * h, 0.048 * h, 0.028 * h, dark, 8, 24);

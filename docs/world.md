@@ -95,6 +95,10 @@ Districts differ in purpose and mood: markets, workshops, gardens, residences, d
 
 Beyond the hub's valley and its ridged highlands, four great ranges rise 1.3–1.7 km out. Their summits carry snow, and rivers have cut passes through them. The ranges are hollow. Cave dungeons open in their lower flanks: a mouth in the mountainside, then chambers and tunnels that branch and descend under the rock. Lumen crystals light the chambers, dead ends hold caches, and the deepest chamber is a heart where the Hive has grown a nest. Breaking a heart clears the cave.
 
+## The Wildkin
+
+The Scalari did not only remake insects. Long ago they carried Earth's animals off aboard the Worldcoil Ark to make soldiers of them, and failed in the best way. The animals woke up upright, clever and super-powered, with their own big hearts instead of orders. When the Ark broke apart over the Frontier, they scattered. A hedgehog who outruns sound, a gator who rolls like a boulder, a spider who weaves glowing webs, an owl who casts moonlight: 26 of them wait in the city, the wilds, the mountain caves and the sky arena, ready to join the party. Players collect them and play as any of them, alone or four together. The tone is for all ages: bright, heroic, funny, and still full of action and magic. The roster is in [The Wildkin](wildkin.md).
+
 ## Systems inspired by nature
 
 Each system pairs a natural analogue with gameplay and with the engine piece it maps onto.

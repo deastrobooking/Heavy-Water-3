@@ -45,7 +45,12 @@ pub const tuning = .{
 /// Three nests on the surface, then one in the heart of each cave system.
 pub const surface_nests = tuning.surface_nests;
 pub const max_seeded_nests = 3;
-pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems;
+/// Surface, seeded and cave nests, then one home nest for the arena's bots.
+pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems + 1;
+comptime {
+    // Blades and dashes remember nests cut per swing in a u16.
+    std.debug.assert(max_nests <= 16);
+}
 pub const max_units = 24;
 /// Cave nests field troopers only (fliers have no room), at most this many.
 pub const cave_troopers = tuning.cave_troopers;
@@ -101,7 +106,7 @@ pub const Unit = struct {
     }
 };
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
-pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false, seeded: bool = false };
+pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false, seeded: bool = false, arena: bool = false };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
 pub const Grenade = struct { position: V, velocity: V = @splat(0), fuse: f32 = 1.25, damage: f32 = 24, radius: f32 = 4.2 };
 
@@ -155,7 +160,7 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
 
 /// A nest in a cave's heart chamber, standing on its floor.
 pub fn addCaveNest(self: *Enemies, floor: V) void {
-    if (self.nest_count == max_nests) return;
+    if (self.nest_count >= arena_nest) return;
     self.nests[self.nest_count] = .{ .position = floor, .cave = true, .health = nest_health * 0.7 };
     self.nest_count += 1;
 }
@@ -163,7 +168,7 @@ pub fn addCaveNest(self: *Enemies, floor: V) void {
 /// A campaign spore site is stable across loads: it is a fixed distance and angle from its
 /// recorded parent and samples the same seeded terrain height.
 pub fn addSeededNest(self: *Enemies, parent: u8, serial: u8, spread_day: u64) ?u8 {
-    if (serial >= max_seeded_nests or self.nest_count == max_nests or parent >= self.nest_count) return null;
+    if (serial >= max_seeded_nests or self.nest_count >= arena_nest or parent >= self.nest_count) return null;
     const source = self.nests[parent];
     if (source.cave) return null;
     const hash = Seed.mix(self.seed ^ 0x53504f5245534954 ^ (@as(u64, serial) *% 0x9e3779b97f4a7c15) ^ @as(u64, parent));
@@ -183,6 +188,27 @@ pub fn unitCount(self: *const Enemies, nest: ?u8) usize {
         n += @intFromBool(nest == null or u.nest == nest.?);
     };
     return n;
+}
+
+/// The arena's home nest: never alive (it spawns nothing itself and cannot be struck), but its
+/// bots hunt within its leash. It lives in the last slot, outside `nest_count`, so every nest
+/// loop skips it and the other nests' indices (and saved flags) never shift. Returns its index.
+pub const arena_nest: u8 = max_nests - 1;
+pub fn addArenaNest(self: *Enemies, center: V) u8 {
+    std.debug.assert(self.nest_count <= arena_nest);
+    self.nests[arena_nest] = .{ .position = center, .alive = false, .health = 0, .arena = true };
+    return arena_nest;
+}
+
+/// A bot of `kind` for `nest` at `position`, hunting at once, with `toughness` times its health.
+pub fn spawnAt(self: *Enemies, kind: Kind, nest: u8, position: V, toughness: f32) bool {
+    for (&self.units, 0..) |*slot, i| if (slot.* == null) {
+        self.unit_generations[i] +%= 1;
+        if (self.unit_generations[i] == 0) self.unit_generations[i] = 1;
+        slot.* = .{ .generation = self.unit_generations[i], .kind = kind, .nest = nest, .position = position, .health = stats(kind).health * toughness, .orbit = @as(f32, @floatFromInt(i)) * 0.7, .state = .hunt, .state_timer = 6 };
+        return true;
+    };
+    return false;
 }
 
 fn spawnUnit(self: *Enemies, nest: u8) void {
@@ -778,6 +804,62 @@ fn damageNest(self: *Enemies, i: u8, damage: f32, out: []Event, n: *usize) void 
         if (n.* < out.len) out[n.*] = .{ .nest_down = .{ .nest = i, .position = nest.position } };
         n.* += 1;
     }
+}
+
+/// A blast in front: every unit within `range` of `origin` and inside the cone (`cos_half` of
+/// the angle from `dir`) takes `damage`, a `stun`, and a shove along the blast (`push`; a
+/// negative push pulls toward the origin). Returns how many were caught.
+pub fn cone(self: *Enemies, origin: V, dir: V, range: f32, cos_half: f32, damage: f32, stun: f32, push: f32, out: []Event, n: *usize) usize {
+    var hits: usize = 0;
+    for (&self.units, 0..) |*slot, i| if (slot.*) |u| {
+        const d = R.sub(u.center(), origin);
+        const dist = R.length(d);
+        if (dist > range + stats(u.kind).radius) continue;
+        const away = if (dist > 0.1) R.scale(d, 1 / dist) else dir;
+        if (dist > 0.8 and R.dot(away, dir) < cos_half) continue;
+        hits += 1;
+        if (damage > 0) self.damageUnit(i, damage, out, n);
+        if (slot.*) |*alive| {
+            const mass: f32 = switch (alive.kind) {
+                .drone => 1,
+                .trooper => 1.6,
+                .sentinel => 4,
+            };
+            alive.velocity = R.add(alive.velocity, R.scale(R.add(away, .{ 0, 0.3, 0 }), push / mass));
+            alive.stun = @max(alive.stun, stun);
+        }
+    };
+    return hits;
+}
+
+/// The distance to the first unit along a segment (radius `pad` widens it), without harming it.
+pub fn aimAt(self: *const Enemies, origin: V, dir: V, length: f32, pad: f32) ?f32 {
+    var best: ?f32 = null;
+    var limit = length;
+    for (self.units) |slot| if (slot) |u| {
+        if (segmentSphere(origin, dir, limit, u.center(), stats(u.kind).radius + pad)) |t| {
+            best = t;
+            limit = t;
+        }
+    };
+    return best;
+}
+
+pub const Found = struct { index: u8, position: V };
+
+/// The nearest living unit to `p` within `reach`, skipping the slots set in `skip`.
+pub fn nearestUnitExcept(self: *const Enemies, p: V, reach: f32, skip: u32) ?Found {
+    var best: ?Found = null;
+    var best_d = reach;
+    for (self.units, 0..) |slot, i| if (slot) |u| {
+        if (skip & (@as(u32, 1) << @intCast(i)) != 0) continue;
+        const d = R.length(R.sub(u.center(), p));
+        if (d < best_d) {
+            best_d = d;
+            best = .{ .index = @intCast(i), .position = u.center() };
+        }
+    };
+    return best;
 }
 
 /// The nearest living unit to `p` within `reach`, for homing missiles.

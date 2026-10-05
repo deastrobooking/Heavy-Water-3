@@ -210,6 +210,29 @@ The avatar appears in your own view in third person (F2), the creator, conversat
 - **HUD:** the flight HUD shows speed, height, throttle and afterburner, hull and gun heat, a nose marker, and a lock reticle that closes as the lock builds. Both marks are projected from the camera.
 - **Sound:** a turbine (the engine loop pitched with throttle) and afterburner roar, cannon, missile, flak and stinger cues.
 
+## Wildkin heroes and the Starbowl
+
+The Wildkin are 26 collectible animal and insect heroes. The roster, powers, homes and how to add one are in [The Wildkin](wildkin.md).
+
+- **Forms:** `Profile.species` (human, or one of 26 forms), `coat` and `marking` (a 16-colour palette). Older profiles default to human. `character/Beasts.zig` builds each form onto the shared humanoid skeleton:
+  - cartoon-heroic proportions: 5-heads-tall heads, bigger eyes, and a per-form height and build;
+  - coat-coloured skin;
+  - features made of oriented ellipsoids and tapering chains bound rigidly to joints: snouts, ears, beaks, manes, trunks and tusks, horns, shells, tails, feathered and membrane wings, spider legs, antennae, mantis blades, a scorpion tail and pincers.
+
+  Features follow every gait and combat pose with no new animation. Wildkin wear a bright tank-and-shorts hero suit so the fur shows. The palette is shared, so the builder reuses entries (it holds at most 256).
+- **Character ids:** capacity is now 32. Troopers take ids 16–23, and up to eight unmet heroes near P1 take 24–31.
+- **Roster:** `game/Heroes.zig` has one hero per form: name, title, role, kid-friendly blurb, colours, three powers, passives (health, saber factor, energy regeneration, run speed) and a home. `Progress.heroes` (a bitmask, saved by name; older saves get the three starters) records who has joined. The creator offers human plus every joined hero's form. `Sandbox.heroSuit` applies run speed, and wings add 80 fuel and make flight 60% cheaper.
+- **Powers:** `Specials.info` is a table of 84 powers: the 6 class powers plus 78 Wildkin powers. Each row is a mechanic with its numbers:
+  - existing mechanics: grenade, sentry, shield, blink, slam, lance;
+  - new: **launch** (an impulse, optionally with a damaging spin aura), **aura**, **field** (a lingering zone placed on the first bot along the aim, or where the aim lands), **cone** (`Enemies.cone`: damage, stun and push or pull in front), **heal** (the party within a radius), **chain** (zaps several bots in sight) and **vanish** (unseen by the Hive: `Target.alive` is false, and it heals).
+- **Meeting heroes:** `game/Encounters.zig` seeds a spot for every hero who isn't a starter or an arena champion: city heroes on plazas, wild heroes on a meadow ring, cave heroes in cave cache chambers (extra cave heroes share systems, a chamber each). Unmet heroes stand under a beam of light in their colour within 400 m, and the nearest eight are drawn as characters within 90 m, facing P1. Aiming at one with the hands tool gives `Target.hero`; clicking calls `Frontier.recruit`.
+- **Heroes menu:** Pause > HEROES has tabs for P1–P4 (present players only), cards for YOUR RANGER and every hero (locked cards show where to find them), and a detail panel with the blurb, powers and passives. Choosing a hero gives that player the hero's profile and keeps their own ranger to return to (`Sandbox.own_profiles`); winged heroes start on the flight kit.
+- **The Starbowl** (`game/Arena.zig`): a walled 56 m floating floor 150 m over the meadow beside the spawn, with box colliders and a drawn slab, walls, pylons and a sun emblem. Pause or title > HERO ARENA enters it with the whole party.
+  - **Waves:** troopers, drones and sentinels spawn at the rim through `Enemies.spawnAt`. Counts grow with the wave and the party size, and health by 12% a wave. Bots belong to a fixed arena home nest in the last nest slot (never alive, outside `nest_count`, so no other nest's index or saved flag shifts).
+  - **Rewards:** each cleared wave drops lumen, alloy, a rotor core every third wave and a vital cell every fifth on the floor, adds scrap, and raises `Progress.arena_best`. Every third wave brings an arena champion to the roster.
+  - **Safety:** fallen players are set back on the floor, and knocked-out players get up at the centre.
+  - **Leaving:** removes the arena's bots and returns everyone to where they stood.
+
 ## Frontier: pickups, fabricator, the Hive and weapons
 
 - **Pickups:** `game/Collectibles.zig` places 62 pickups from the seed and the world's landmarks, each settled onto the real surface with a downward ray. Collecting is by proximity, for any local player.
@@ -258,6 +281,7 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   | Synthetic | Phase dash: a 14 m blink that cuts and stuns along its path (25, 2.5 s) | Kinetic slam: 70 damage, a throw and a 1.5 s stun within 8 m (40, 6 s) | Lumen lance: a 2.5 s channelled beam, 90 damage a second (60, 10 s) |
 
   Synthetics also have 30 more maximum health and cut 25% harder. They are drawn with a porcelain sheen, eyes in the accent colour, and lit seams (collar, sternum core, cheek lines). Specials are session state, like vitals.
+- **Wildkin heroes:** see the section below. A Wildkin form's loadout (three powers and passives) comes from its hero instead of the class (`Specials.loadout(profile)`).
 - **HUD:** health, fuel and stamina bars; the weapon and its charge (or heat); the overshield over the health bar; energy and the three specials with their keys and cooldowns; collectible counts; and a red edge flash when hurt, for P1 and each guest. In a car, the HUD shows speed, height above the ground, and the controls.
 
 ## Audio

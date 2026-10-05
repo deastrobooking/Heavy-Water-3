@@ -27,6 +27,10 @@ test {
     _ = @import("procedural/Skyline.zig");
     _ = @import("procedural/Mountains.zig");
     _ = @import("procedural/Caves.zig");
+    _ = @import("character/Beasts.zig");
+    _ = @import("game/Heroes.zig");
+    _ = @import("game/Encounters.zig");
+    _ = @import("game/Arena.zig");
     _ = @import("procedural/Interiors.zig");
     _ = @import("procedural/Worlds.zig");
     _ = @import("render/Capture.zig");

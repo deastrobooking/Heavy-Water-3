@@ -13,7 +13,9 @@ const Progress = @This();
 pub const Upgrade = enum { fuel_tank, jet_efficiency, sprint_servos, stamina_weave, grapple_reel, salvage_kit };
 pub const upgrade_count = @typeInfo(Upgrade).@"enum".fields.len;
 pub const max_level = 3;
-pub const max_flags = 48;
+/// Nests, carriers, caves, conversations and quests each set flags; 48 overflowed once caves
+/// arrived (later flags were silently dropped and not saved).
+pub const max_flags = 96;
 pub const flag_capacity = 24;
 pub const Cost = struct { scrap: u32, parts: u32 };
 pub const KestrelUpgrade = enum { armor, missile_rack, engine, gun_cooling };
@@ -51,6 +53,11 @@ fighter: bool = false,
 kestrel_levels: [kestrel_upgrade_count]u8 = @splat(0),
 kestrel_paints: u8 = 1,
 kestrel_paint: Paint = .ivory,
+/// Wildkin heroes who have joined the roster (bit per `Heroes.roster` index); the starters
+/// begin joined.
+heroes: u32 = @import("Heroes.zig").starters(),
+/// The furthest arena wave the party has cleared.
+arena_best: u16 = 0,
 flag_names: [max_flags][flag_capacity]u8 = undefined,
 flag_lens: [max_flags]u8 = @splat(0),
 flag_count: usize = 0,
@@ -230,7 +237,21 @@ pub const Doc = struct {
     kestrel_paint: Paint = .ivory,
     suits: []const Profile.Clothing = &.{},
     flags: []const []const u8 = &.{},
+    /// Joined heroes by name (stable if the roster grows); older saves omit it (starters only).
+    heroes: ?[]const []const u8 = null,
+    arena_best: u16 = 0,
 };
+
+pub fn hasHero(self: *const Progress, index: u8) bool {
+    return self.heroes & (@as(u32, 1) << @intCast(index)) != 0;
+}
+
+/// A hero joins the roster; false if they already had.
+pub fn addHero(self: *Progress, index: u8) bool {
+    if (self.hasHero(index)) return false;
+    self.heroes |= @as(u32, 1) << @intCast(index);
+    return true;
+}
 
 pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     var suits: std.ArrayList(Profile.Clothing) = .empty;
@@ -246,7 +267,10 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     inline for (@typeInfo(Profile.Armor).@"enum".fields) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
     var weapons: std.ArrayList(WeaponKind) = .empty;
     inline for (@typeInfo(WeaponKind).@"enum".fields) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
-    return .{ .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .weapon_upgrades = try arena.dupe(u8, &self.weapon_upgrades), .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint };
+    const Heroes = @import("Heroes.zig");
+    var heroes: std.ArrayList([]const u8) = .empty;
+    for (Heroes.roster, 0..) |h, i| if (self.hasHero(@intCast(i))) try heroes.append(arena, h.name);
+    return .{ .heroes = heroes.items, .arena_best = self.arena_best, .levels = try arena.dupe(u8, &self.levels), .suits = suits.items, .flags = flags, .inventory = try arena.dupe(u32, &self.inventory), .picked = picked.items, .vehicles = vehicles.items, .armors = armors.items, .weapons = weapons.items, .weapon_upgrades = try arena.dupe(u8, &self.weapon_upgrades), .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
@@ -277,6 +301,16 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     if (doc.kestrel_paints == 0 or doc.kestrel_paints >> paint_count != 0 or (doc.kestrel_paints & (@as(u8, 1) << @intCast(@intFromEnum(doc.kestrel_paint)))) == 0) return error.InvalidProgress;
     result.kestrel_paints = doc.kestrel_paints;
     result.kestrel_paint = doc.kestrel_paint;
+    if (doc.heroes) |names| {
+        const Heroes = @import("Heroes.zig");
+        result.heroes = 0;
+        for (names) |name| for (Heroes.roster, 0..) |h, i| if (std.mem.eql(u8, h.name, name)) {
+            result.heroes |= @as(u32, 1) << @intCast(i);
+        };
+        // The starters are always on the roster.
+        result.heroes |= Heroes.starters();
+    }
+    result.arena_best = doc.arena_best;
     if (doc.flags.len > max_flags) return error.InvalidProgress;
     for (doc.flags) |name| {
         if (name.len == 0 or name.len > flag_capacity) return error.InvalidProgress;
@@ -377,4 +411,28 @@ test "Kestrel upgrades change owned loadout and paint selection persists" {
     try std.testing.expectEqual(p.kestrel_paints, restored.kestrel_paints);
     try std.testing.expectEqual(p.kestrel_paint, restored.kestrel_paint);
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .kestrel_levels = &.{4} }));
+}
+
+test "heroes join once, round-trip by name, and older saves keep the starters" {
+    const Heroes = @import("Heroes.zig");
+    var p: Progress = .{};
+    try std.testing.expectEqual(Heroes.starters(), p.heroes);
+    const coil = Heroes.forSpecies(.snake).?;
+    try std.testing.expect(p.addHero(coil));
+    try std.testing.expect(!p.addHero(coil));
+    p.arena_best = 7;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const json = try std.json.Stringify.valueAlloc(arena.allocator(), try p.toDoc(arena.allocator()), .{});
+    const back = try fromDoc(try std.json.parseFromSliceLeaky(Doc, arena.allocator(), json, .{}));
+    try std.testing.expect(back.hasHero(coil));
+    try std.testing.expectEqual(@as(u16, 7), back.arena_best);
+    // A save from before heroes: the starters only.
+    const old = try fromDoc(.{});
+    try std.testing.expectEqual(Heroes.starters(), old.heroes);
+    // Up to the flag limit, every flag is kept.
+    var many: Progress = .{};
+    var name: [12]u8 = undefined;
+    for (0..80) |i| many.setFlag(try std.fmt.bufPrint(&name, "flag_{d}", .{i}));
+    try std.testing.expect(many.hasFlag("flag_79"));
 }

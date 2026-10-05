@@ -92,6 +92,30 @@ Next:
 - continue air-war playtesting and tuning;
 - extend phase 14 with clips for the remaining traversal states, glTF animation import, named attachments and GPU skinning; tune trooper pacing in the planned hand-play pass.
 
+## Wildkin heroes, the Heroes menu and the Starbowl arena — implemented
+
+26 collectible animal and insect heroes, the Scalari's runaway experiments, are built procedurally onto the shared skeleton, from a hedgehog speedster to a butterfly mage. Each has three of 78 new powers, made from thirteen mechanics, and passives; winged heroes fly. Heroes wait in the city, the wilds and the mountain caves under beams of light. Meeting one adds them to the roster, their form to the creator, and their card to Pause > HEROES, where any present player can become them. The Starbowl is a floating four-player arena with scaling Hive waves, loot after every wave, saved best-wave records, and an arena champion every third wave. See [The Wildkin](wildkin.md).
+
+Acceptance:
+- **Tests:**
+  - every form builds a clean, weighted, walking character;
+  - one hero per form, with unique names and powers;
+  - every one of the 78 powers has an effect on a squad of bots;
+  - every hero can be met somewhere;
+  - the roster round-trips by name;
+  - the menu chooses only unlocked heroes for present players;
+  - the arena's waves grow, pay out, and open and close the bowl.
+- **Smoke:** aims at and meets a city hero, plays as them through the Heroes menu, fires all three powers, then clears and is paid for a Starbowl wave and leaves.
+- **Captures:** `-Dshowcase=48` to `51` (lineups of all 26), `52` (the Heroes screen), `53` (the Starbowl).
+
+Next:
+- per-hero animation flourishes (tail sway, wing beats);
+- better faces for snouted forms;
+- hero voice barks;
+- an arena boss every fifth wave;
+- guests picking heroes from their own pads;
+- a hero gallery viewer.
+
 ## Mountain ranges and cave dungeons — implemented
 
 Four seeded mountain ranges, peaks of 160–260 m with snow on their summits, stand 1.3–1.7 km from the hub. Rivers cut passes through them, and a far panorama keeps them on the horizon. Each range holds up to two cave dungeons: a mouth in the mountainside opens into a descending tree of chambers and tunnels. Halls and caches hold loot, lumen crystals light the chambers, and a Hive nest with troopers guards each heart. The caves are meshed watertight from a distance field. The streamed terrain opens over their mouths, and physics treats cave air as hollow, so players, troopers, drops and rays all work underground.

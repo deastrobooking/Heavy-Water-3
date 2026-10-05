@@ -418,6 +418,13 @@ fn runCommand(self: *App, command: Menu.Command) void {
             self.capture(self.core, true);
         },
         .new_game => self.newGame(),
+        .play_hero => self.playHero(),
+        .start_arena => self.startArena(),
+        .leave_arena => {
+            @import("game/Frontier.zig").leaveArena(&self.sandbox, &self.engine.camera);
+            self.menu.open(.none);
+            self.capture(self.core, true);
+        },
         .continue_game, .load => if (self.quickload()) self.menu.open(.none),
         .save => {
             self.quicksave();
@@ -496,6 +503,44 @@ fn runCommand(self: *App, command: Menu.Command) void {
 }
 
 /// From the title: a fresh ranger at the spawn point, starting in the creator.
+/// Heroes menu: the chosen player becomes the chosen Wildkin (their own ranger is kept to come
+/// back to), or returns to their own ranger.
+fn playHero(self: *App) void {
+    const sb = &self.sandbox;
+    const p = self.menu.hero_player;
+    if (p > 0 and !sb.guests[p - 1].active) return;
+    const profile = if (p == 0) &sb.profile else &sb.guests[p - 1].profile;
+    const player = if (p == 0) &sb.player else &sb.guests[p - 1].player;
+    if (self.menu.chosenHero()) |hero| {
+        if (sb.own_profiles[p] == null and profile.species == .human) sb.own_profiles[p] = profile.*;
+        profile.* = Sandbox.Heroes.profile(hero);
+        // Wings come with the flight kit selected.
+        if (Sandbox.Heroes.winged(hero)) player.traversal = .flight;
+        self.report("P{d} IS NOW {s}, {s}", .{ p + 1, Sandbox.Heroes.roster[hero].name, Sandbox.Heroes.roster[hero].title });
+    } else {
+        if (sb.own_profiles[p]) |own| profile.* = own;
+        sb.own_profiles[p] = null;
+        self.report("P{d} IS THEIR OWN RANGER AGAIN", .{p + 1});
+    }
+    sb.cue(.ui_confirm, null);
+}
+
+/// HERO ARENA: from the title, continue the saved game (or start one as Bolt Quill), then take
+/// the party into the Starbowl.
+fn startArena(self: *App) void {
+    if (self.menu.base == .title) {
+        if (self.menu.has_save and self.quickload()) {} else {
+            self.newGame();
+            self.sandbox.profile = Sandbox.Heroes.profile(0);
+            self.sandbox.creator.open = false;
+            self.sandbox.creator.confirmed = true;
+        }
+    }
+    @import("game/Frontier.zig").enterArena(&self.sandbox, &self.engine.camera);
+    self.menu.open(.none);
+    self.capture(self.core, true);
+}
+
 fn newGame(self: *App) void {
     self.menu.open(.none);
     self.sandbox.player.mode = .walk;
@@ -801,6 +846,12 @@ pub fn update(self: *App, core: *mach.Core) void {
     if (self.uiActive() and self.captured) self.capture(core, false);
     self.engine.input.sample(core, self.menu.settings.bindings);
     self.menu.seconds = self.seconds;
+    self.menu.heroes_unlocked = self.sandbox.progress.heroes;
+    self.menu.arena_active = self.sandbox.arena.active;
+    self.menu.players_present = 1;
+    for (self.sandbox.guests, 1..) |g, i| if (g.active) {
+        self.menu.players_present |= @as(u8, 1) << @intCast(i);
+    };
     self.pollPads();
     if (self.pad_menu) {
         self.pad_menu = false;
@@ -965,7 +1016,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 53)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1212,6 +1263,38 @@ fn guiShowcase(self: *App, v: u32) void {
             if (v == 37) self.engine.camera.yaw += 0.6;
             self.showcase_feet = sb.player.feet;
             self.engine.camera.pitch = -0.05;
+        },
+        48, 49, 50, 51 => {
+            // Wildkin lineups, eight at a time, facing the camera on the plaza.
+            sb.progress.heroes = 0;
+            sb.encounters = @splat(null);
+            sb.view = .first;
+            // On the open meadow by the spawn, looking out toward the mountains.
+            const ground = @import("procedural/Terrain.zig").surface(sb.seed, Sandbox.spawn[0] + 30, Sandbox.spawn[2] - 40).height;
+            sb.player.feet = .{ Sandbox.spawn[0] + 30, ground, Sandbox.spawn[2] - 40 };
+            self.engine.camera.yaw = 2.6;
+            const yaw = self.engine.camera.yaw;
+            const fwd: [3]f32 = .{ @sin(yaw), 0, @cos(yaw) };
+            const right: [3]f32 = .{ -@cos(yaw), 0, @sin(yaw) };
+            for (0..8) |i| {
+                const hero = (v - 48) * 8 + i;
+                if (hero >= Sandbox.Heroes.count) break;
+                const at = R3.add(sb.player.feet, R3.add(R3.scale(fwd, 7.5), R3.scale(right, (@as(f32, @floatFromInt(i)) - 3.5) * 1.05)));
+                sb.encounters[hero] = .{ .hero = @intCast(hero), .position = .{ at[0], @import("procedural/Terrain.zig").surface(sb.seed, at[0], at[2]).height, at[2] }, .yaw = yaw + std.math.pi };
+            }
+            self.engine.camera.pitch = -0.08;
+        },
+        52 => {
+            sb.progress.heroes = Sandbox.Heroes.starters() | 0b1011_0110_0000;
+            self.menu.open(.pause);
+            self.menu.open(.heroes);
+            self.menu.row = Menu.heroes_first + 6;
+        },
+        53 => {
+            sb.profile = Sandbox.Heroes.profile(0);
+            sb.view = .third;
+            @import("game/Frontier.zig").enterArena(sb, &self.engine.camera);
+            self.engine.camera.pitch = -0.25;
         },
         41, 42, 43, 44 => {
             // Mountains and caves: the first range from the foothills, then cave system 0's
@@ -1574,6 +1657,7 @@ fn smokeFrontier(self: *App) void {
     std.log.info("Smoke flight: kestrel fabricated={any}, lifted off={any}, wasp downed={any}; carriers at {d:.0} and {d:.0} m up", .{ sb.progress.fighter, lifted, wasp_down, sb.skies.carriers[0].altitude, sb.skies.carriers[1].altitude });
     self.smokeCombat();
     self.smokeCaves();
+    self.smokeHeroes();
     // Leave the run's progress as it was (later stages log the market and wallet).
     sb.progress = keep;
     sb.wallet = wallet;
@@ -1629,14 +1713,14 @@ fn smokeCombat(self: *App) void {
     var special_events: [32]Specials.Event = undefined;
     sb.enemies.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 298.4, 7 }, .health = 1000, .orbit = 0 };
     sb.specials = .{};
-    _ = sb.specials.step(0, .ranger, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .pressed = .{ true, false, false } }, dt, &special_events);
+    _ = sb.specials.step(0, .{ .class = .ranger }, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .pressed = .{ true, false, false } }, dt, &special_events);
     var grenade = false;
     for (0..90) |_| {
         const n = sb.specials.stepWorld(&sb.physics, &sb.enemies, &sb.combat, dt, &special_events);
         for (special_events[0..@min(n, special_events.len)]) |e| grenade = grenade or e == .burst;
     }
     sb.enemies.units[1] = .{ .kind = .drone, .nest = 0, .position = .{ 3, 299.5, 0 }, .health = 1000, .orbit = 0 };
-    _ = sb.specials.step(1, .synthetic, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .pressed = .{ false, true, false } }, dt, &special_events);
+    _ = sb.specials.step(1, .{ .class = .synthetic }, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ 0, 300, 0 }, .forward = .{ 0, 0, 1 }, .feet = feet, .pressed = .{ false, true, false } }, dt, &special_events);
     const slammed = sb.enemies.units[1].?.velocity[0] > 3;
     std.log.info("Smoke combat: saber and sniper made={any}, saber cuts={d} trooper health {d:.0} stunned={any}, sniper pierced={any}, grenade burst={any}, slam threw={any}", .{ made, cuts, cut_health, stunned, pierced, grenade, slammed });
     sb.enemies.units = @splat(null);
@@ -1646,6 +1730,72 @@ fn smokeCombat(self: *App) void {
 
 /// Walks P1 in through the first cave mouth with the real simulation step, and reports the
 /// ranges and caves.
+/// The Wildkin and the Starbowl through the real paths: aim at an unmet city hero and meet
+/// them, play as them from the Heroes menu, fire all three powers, then take the party into the
+/// arena, clear the first wave with the simulation step, collect its reward, and leave.
+fn smokeHeroes(self: *App) void {
+    const sb = &self.sandbox;
+    const Heroes = Sandbox.Heroes;
+    const Frontier = @import("game/Frontier.zig");
+    const keep_player = sb.player;
+    const keep_profile = sb.profile;
+    const keep_progress = sb.progress;
+    const keep_wallet = sb.wallet;
+    var camera = self.engine.camera;
+    // Meet the first unmet hero with a spot: stand before them and look at their chest.
+    var met: ?u8 = null;
+    for (sb.encounters) |maybe| if (maybe) |spot| if (!sb.progress.hasHero(spot.hero) and met == null) {
+        const eye: [3]f32 = .{ spot.position[0], spot.position[1] + 1.6, spot.position[2] - 3 };
+        const target = Frontier.pick(sb, eye, R3.normalize(.{ 0, -0.45, 3 }), 8, 8);
+        if (target != null and target.? == .hero and target.?.hero == spot.hero) {
+            Frontier.recruit(sb, spot.hero);
+            met = spot.hero;
+        }
+    };
+    const joined = if (met) |h| sb.progress.hasHero(h) else false;
+    // Play as them through the Heroes menu, then use each power.
+    self.menu.open(.pause);
+    self.menu.open(.heroes);
+    self.menu.heroes_unlocked = sb.progress.heroes;
+    self.menu.hero_player = 0;
+    self.menu.row = Menu.heroes_first + (met orelse 0);
+    self.runCommand(self.menu.key(.confirm));
+    self.menu.open(.none);
+    const became = met != null and sb.profile.species == Heroes.roster[met.?].species;
+    var used: usize = 0;
+    for (0..3) |k| {
+        sb.specials.players[0].energy = 100;
+        var actions: Sandbox.Actions = .{};
+        switch (k) {
+            0 => actions.special_1 = true,
+            1 => actions.special_2 = true,
+            else => actions.special_3 = true,
+        }
+        const before = sb.specials.players[0].cooldowns[k];
+        sb.step(&camera, .{}, actions, 1.0 / 60.0) catch {};
+        used += @intFromBool(sb.specials.players[0].cooldowns[k] > before);
+    }
+    // The Starbowl: wave one starts, is cleared, and pays out.
+    Frontier.enterArena(sb, &camera);
+    const entered = sb.arena.active;
+    const scrap = sb.wallet.scrap;
+    for (0..60 * 4) |_| sb.step(&camera, .{}, .{}, 1.0 / 60.0) catch break;
+    const bots = sb.enemies.unitCount(@import("game/Enemies.zig").arena_nest);
+    for (&sb.enemies.units) |*u| if (u.*) |unit| if (unit.nest == @import("game/Enemies.zig").arena_nest) {
+        u.* = null;
+    };
+    for (0..30) |_| sb.step(&camera, .{}, .{}, 1.0 / 60.0) catch break;
+    const paid = sb.wallet.scrap > scrap and sb.progress.arena_best >= 1;
+    Frontier.leaveArena(sb, &camera);
+    std.log.info("Smoke heroes: met {s} joined={any}, played as them={any}, powers used {d}/3; arena entered={any} wave 1 bots {d}, cleared and paid={any}, left={any}", .{ if (met) |h| Heroes.roster[h].name else "none", joined, became, used, entered, bots, paid, !sb.arena.active });
+    sb.player = keep_player;
+    sb.profile = keep_profile;
+    sb.progress = keep_progress;
+    sb.wallet = keep_wallet;
+    sb.own_profiles = @splat(null);
+    sb.specials = .{};
+}
+
 fn smokeCaves(self: *App) void {
     const sb = &self.sandbox;
     const Terrain = @import("procedural/Terrain.zig");
@@ -1897,6 +2047,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .car => |i| renderer.hud_lines[1].set("{s}  CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
         .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  CLICK OPEN", .{}),
+        .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;

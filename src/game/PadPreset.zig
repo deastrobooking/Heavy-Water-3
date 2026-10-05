@@ -18,7 +18,8 @@ pub const Preset = struct {
 };
 
 pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidPreset}!Preset {
-    const preset = std.json.parseFromSliceLeaky(Preset, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidPreset;
+    // Strings are copied: callers may free `bytes` (loadSlot does) before using the preset.
+    const preset = std.json.parseFromSliceLeaky(Preset, allocator, bytes, .{ .ignore_unknown_fields = true, .allocate = .alloc_always }) catch return error.InvalidPreset;
     if (preset.format != format_version or preset.name.len == 0 or preset.name.len > max_name_bytes or
         preset.vendor.len > max_identity_bytes or preset.product.len > max_identity_bytes or !preset.mapping.validate()) return error.InvalidPreset;
     return preset;
@@ -63,4 +64,14 @@ test "controller presets round-trip for sharing and reject unsupported or malfor
     try std.testing.expectEqual(preset.mapping, back.mapping);
     try std.testing.expectError(error.InvalidPreset, parse(arena.allocator(), "{\"format\":88}"));
     try std.testing.expectError(error.InvalidPreset, parse(arena.allocator(), "{\"format\":1,\"mapping\":{\"deadzone\":99}}"));
+}
+
+test "a parsed preset owns its strings, so its source buffer may be freed first" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = try std.testing.allocator.dupe(u8, "{\"format\":1,\"name\":\"Arcade stick\",\"product\":\"Fight pad\"}");
+    const preset = try parse(arena.allocator(), source);
+    std.testing.allocator.free(source);
+    try std.testing.expectEqualStrings("Arcade stick", preset.name);
+    try std.testing.expectEqualStrings("Fight pad", preset.product);
 }

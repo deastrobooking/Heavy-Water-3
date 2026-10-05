@@ -21,6 +21,45 @@ pub const outfit_colors = [_][4]f32{
 pub const accent_colors = [_][4]f32{
     .{ 0.30, 0.95, 1.00, 1 }, .{ 1.00, 0.72, 0.25, 1 }, .{ 1.00, 0.40, 0.85, 1 }, .{ 0.60, 1.00, 0.35, 1 }, .{ 0.95, 0.95, 1.00, 1 },
 };
+/// Fur, scale, feather and shell colours for the Wildkin forms (`species` other than human).
+pub const coat_colors = [_][4]f32{
+    .{ 0.16, 0.36, 0.86, 1 }, .{ 0.92, 0.48, 0.14, 1 }, .{ 0.96, 0.95, 0.90, 1 }, .{ 0.52, 0.50, 0.50, 1 },
+    .{ 0.28, 0.62, 0.30, 1 }, .{ 0.34, 0.72, 0.26, 1 }, .{ 0.20, 0.42, 0.22, 1 }, .{ 0.62, 0.62, 0.66, 1 },
+    .{ 0.86, 0.66, 0.30, 1 }, .{ 0.48, 0.48, 0.54, 1 }, .{ 0.12, 0.12, 0.14, 1 }, .{ 0.44, 0.27, 0.14, 1 },
+    .{ 0.76, 0.18, 0.20, 1 }, .{ 0.36, 0.20, 0.52, 1 }, .{ 0.96, 0.80, 0.16, 1 }, .{ 0.20, 0.70, 0.80, 1 },
+};
+/// The body a character wears. `human` is the Ranger or Synthetic; every other form is one of
+/// the Wildkin: Earth's animals that the Scalari engineered and lost, grown into heroes.
+pub const Species = enum {
+    human,
+    hedgehog,
+    fox,
+    rabbit,
+    raccoon,
+    turtle,
+    frog,
+    snake,
+    alligator,
+    possum,
+    lion,
+    elephant,
+    kangaroo,
+    wolf,
+    rhino,
+    panda,
+    gorilla,
+    eagle,
+    hawk,
+    owl,
+    bat,
+    spider,
+    mantis,
+    beetle,
+    bee,
+    butterfly,
+    scorpion,
+};
+pub const species_count = @typeInfo(Species).@"enum".fields.len;
 pub const HairStyle = enum { short, ponytail, long, crest, hood };
 pub const Presentation = enum { masculine, feminine };
 /// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
@@ -32,11 +71,15 @@ pub const Class = enum { ranger, synthetic };
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
 pub const Armor = enum { none, scout, sentinel, rootweave, skyguard };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, class, presentation, height, build, skin, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
+pub const Field = enum { name, class, species, presentation, height, build, skin, coat, marking, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
 class: Class = .ranger,
+species: Species = .human,
+/// Wildkin main and marking colours (`coat_colors`); unused for humans.
+coat: u8 = 0,
+marking: u8 = 2,
 presentation: Presentation = .masculine,
 /// Relative to the 1.8 m reference: 0.9–1.1.
 height: f32 = 1,
@@ -86,6 +129,9 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
     switch (field) {
         .name => {},
         .class => self.class = @enumFromInt(cycle(@intFromEnum(self.class), delta, @typeInfo(Class).@"enum".fields.len)),
+        .species => self.species = @enumFromInt(cycle(@intFromEnum(self.species), delta, species_count)),
+        .coat => self.coat = cycle(self.coat, delta, coat_colors.len),
+        .marking => self.marking = cycle(self.marking, delta, coat_colors.len),
         .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, @typeInfo(Presentation).@"enum".fields.len)),
         .height => self.height = std.math.clamp(self.height + @as(f32, @floatFromInt(delta)) * 0.02, 0.9, 1.1),
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
@@ -109,6 +155,9 @@ fn cycle(value: anytype, delta: i32, count: usize) @TypeOf(value) {
 pub const Doc = struct {
     name: []const u8,
     class: Class = .ranger,
+    species: Species = .human,
+    coat: u8 = 0,
+    marking: u8 = 2,
     presentation: Presentation = .masculine,
     height: f32,
     build: f32,
@@ -123,17 +172,21 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
+    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     var result: Profile = .{};
     try result.setName(doc.name);
     if (!(doc.height >= 0.9 and doc.height <= 1.1) or !(doc.build >= 0.85 and doc.build <= 1.15)) return error.InvalidProfile;
+    if (doc.coat >= coat_colors.len or doc.marking >= coat_colors.len) return error.InvalidProfile;
     if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
     result.height = doc.height;
     result.build = doc.build;
     result.class = doc.class;
+    result.species = doc.species;
+    result.coat = doc.coat;
+    result.marking = doc.marking;
     result.presentation = doc.presentation;
     result.skin = doc.skin;
     result.hair_style = doc.hair_style;
