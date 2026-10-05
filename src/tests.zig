@@ -27,6 +27,7 @@ test {
     _ = @import("procedural/Skyline.zig");
     _ = @import("procedural/Mountains.zig");
     _ = @import("procedural/Caves.zig");
+    _ = @import("procedural/Interiors.zig");
     _ = @import("render/Capture.zig");
     _ = @import("asset/Guid.zig");
     _ = @import("asset/Meta.zig");
@@ -66,6 +67,7 @@ test {
     _ = @import("game/Avatar.zig");
     _ = @import("game/Player.zig");
     _ = @import("engine/Gamepads.zig");
+    _ = @import("engine/PadBindings.zig");
     _ = @import("game/Creator.zig");
     _ = @import("game/Progress.zig");
     _ = @import("game/Dialogue.zig");
@@ -73,6 +75,7 @@ test {
     _ = @import("ui/Menu.zig");
     _ = @import("ui/Screens.zig");
     _ = @import("game/Settings.zig");
+    _ = @import("game/PadPreset.zig");
     _ = @import("game/Bindings.zig");
     _ = @import("audio/Synth.zig");
     _ = @import("audio/Mixer.zig");

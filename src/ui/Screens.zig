@@ -12,6 +12,7 @@ const Progress = @import("../game/Progress.zig");
 const Dialogue = @import("../game/Dialogue.zig");
 const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
+const PadBindings = @import("../engine/PadBindings.zig");
 const Fabricator = @import("../game/Fabricator.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
@@ -188,6 +189,7 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
         },
         .settings => drawSettings(c, menu),
         .controls => drawControls(c, menu),
+        .pad_controls => drawPadControls(c, menu),
         .quest_log => if (sb) |s| drawQuestLog(c, menu, s),
         else => {},
     }
@@ -275,10 +277,73 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
         "ENTER REBIND  LEFT RIGHT COLUMN  SAVED WHEN YOU LEAVE";
     c.text(r.x + 24, r.y + r.h - 90, message, 1, if (menu.swapped != null and !menu.capturing) gold else dim);
     c.text(r.x + 24, r.y + r.h - 68, "PAD: STICKS MOVE/LOOK  A JUMP  X USE  B ROLL/BACK  MENU PAUSES (P1) OR JOINS", 0.9, dim);
+    const gamepad: Rect = .{ .x = r.x + 18, .y = r.y + r.h - 40, .w = 170, .h = 26 };
+    button(c, gamepad, "GAMEPAD SETUP", hitId(.menu, Menu.controls_gamepad), menu.row == Menu.controls_gamepad);
     const reset: Rect = .{ .x = r.x + r.w - 290, .y = r.y + r.h - 40, .w = 150, .h = 26 };
     const back: Rect = .{ .x = r.x + r.w - 130, .y = r.y + r.h - 40, .w = 110, .h = 26 };
     button(c, reset, "RESET KEYS", hitId(.menu, Menu.controls_reset), menu.row == Menu.controls_reset);
     button(c, back, "BACK", hitId(.menu, Menu.controls_back), menu.row == Menu.controls_back);
+}
+
+fn drawPadControls(c: *Canvas, menu: *const Menu) void {
+    const r = menuRect(c, 880, 650);
+    panel(c, r, "CONTROLLER MAPPING");
+    c.text(r.x + 24, r.y + 34, "STANDARD AND GENERIC HID GAMEPADS CAN BE REMAPPED; SETTINGS SAVE AUTOMATICALLY", 0.92, dim);
+    const mapping = menu.settings.pad_mapping;
+    for (0..PadBindings.action_count) |i| {
+        const column: f32 = @floatFromInt(i / Menu.pad_controls_column);
+        const row: f32 = @floatFromInt(i % Menu.pad_controls_column);
+        const item: Rect = .{ .x = r.x + 14 + column * 426, .y = r.y + 52 + row * 23, .w = 414, .h = 21 };
+        const selected = menu.row == i;
+        rowBack(c, item, selected);
+        c.hit(item, hitId(.menu, i));
+        c.text(item.x + 10, item.y + 6, PadBindings.actionName(@enumFromInt(i)), 0.9, if (selected) accent else ink);
+        const value = if (menu.pad_capturing_action == @as(?PadBindings.Action, @enumFromInt(i)))
+            (if (@mod(menu.seconds, 1) < 0.6) "PRESS PAD BUTTON" else "")
+        else
+            PadBindings.buttonName(mapping.buttons[i]);
+        c.text(item.x + item.w - 10 - Canvas.textWidth(value, 0.85), item.y + 6, value, 0.85, gold);
+    }
+
+    const axes_y = r.y + 52 + @as(f32, @floatFromInt(Menu.pad_controls_column)) * 23 + 10;
+    for (0..PadBindings.axis_count) |i| {
+        const row: Rect = .{ .x = r.x + 20 + @as(f32, @floatFromInt(i % 2)) * 270, .y = axes_y + @as(f32, @floatFromInt(i / 2)) * 24, .w = 258, .h = 22 };
+        const item_row = Menu.pad_axis_start + i;
+        rowBack(c, row, menu.row == item_row);
+        c.hit(row, hitId(.menu, item_row));
+        const logical = if (i < 2) (if (i == 0) "MOVE X" else "MOVE Y") else (if (i == 2) "LOOK X" else "LOOK Y");
+        c.text(row.x + 9, row.y + 6, logical, 0.85, if (menu.row == item_row) accent else ink);
+        var value_buffer: [48]u8 = undefined;
+        const value = std.fmt.bufPrint(&value_buffer, "{s}{s}", .{ PadBindings.axisName(mapping.axes[i]), if (mapping.invert[i]) "  INV" else "" }) catch "";
+        c.text(row.x + row.w - 8 - Canvas.textWidth(value, 0.75), row.y + 7, value, 0.75, gold);
+    }
+
+    const values_y = axes_y + 56;
+    const deadzone_row: Rect = .{ .x = r.x + 20, .y = values_y, .w = 235, .h = 22 };
+    rowBack(c, deadzone_row, menu.row == Menu.pad_deadzone);
+    c.hit(deadzone_row, hitId(.menu, Menu.pad_deadzone));
+    c.print(deadzone_row.x + 9, deadzone_row.y + 7, 0.85, if (menu.row == Menu.pad_deadzone) accent else ink, "STICK DEADZONE  {d:.2}", .{mapping.deadzone});
+    const trigger_row: Rect = .{ .x = r.x + 266, .y = values_y, .w = 260, .h = 22 };
+    rowBack(c, trigger_row, menu.row == Menu.pad_trigger_threshold);
+    c.hit(trigger_row, hitId(.menu, Menu.pad_trigger_threshold));
+    c.print(trigger_row.x + 9, trigger_row.y + 7, 0.85, if (menu.row == Menu.pad_trigger_threshold) accent else ink, "TRIGGER POINT  {d:.2}", .{mapping.trigger_threshold});
+    const slot_row: Rect = .{ .x = r.x + 20, .y = values_y + 28, .w = 300, .h = 22 };
+    rowBack(c, slot_row, menu.row == Menu.pad_preset_slot);
+    c.hit(slot_row, hitId(.menu, Menu.pad_preset_slot));
+    const preset_name = std.mem.sliceTo(&menu.pad_preset_label, 0);
+    c.print(slot_row.x + 9, slot_row.y + 7, 0.85, if (menu.row == Menu.pad_preset_slot) accent else ink, "PRESET SLOT {d}  {s}", .{ menu.pad_preset_slot_index + 1, if (preset_name.len == 0) "(EMPTY OR CUSTOM)" else preset_name });
+
+    c.text(r.x + 24, r.y + r.h - 82, "ENTER CAPTURES  ARROWS CHANGE  AXIS ENTER INVERTS", 0.9, dim);
+    c.text(r.x + 24, r.y + r.h - 62, "EXPORT CREATES A SHAREABLE JSON FILE; IMPORT LOADS A DOWNLOADED PRESET INTO THIS SLOT", 0.82, dim);
+    const y = r.y + r.h - 38;
+    const export_button: Rect = .{ .x = r.x + r.w - 445, .y = y, .w = 104, .h = 25 };
+    const import_button: Rect = .{ .x = r.x + r.w - 335, .y = y, .w = 104, .h = 25 };
+    const reset_button: Rect = .{ .x = r.x + r.w - 225, .y = y, .w = 104, .h = 25 };
+    const back_button: Rect = .{ .x = r.x + r.w - 115, .y = y, .w = 96, .h = 25 };
+    button(c, export_button, "EXPORT", hitId(.menu, Menu.pad_export), menu.row == Menu.pad_export);
+    button(c, import_button, "IMPORT", hitId(.menu, Menu.pad_import), menu.row == Menu.pad_import);
+    button(c, reset_button, "RESET", hitId(.menu, Menu.pad_reset), menu.row == Menu.pad_reset);
+    button(c, back_button, "BACK", hitId(.menu, Menu.pad_back), menu.row == Menu.pad_back);
 }
 
 // ---------------------------------------------------------------- HUD
@@ -807,7 +872,7 @@ test "every screen lays out inside the window and records hits" {
     var c: Canvas = .{};
     var m: Menu = .{};
     const Case = struct { screen: Menu.Screen, base: Menu.Screen };
-    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
+    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .pad_controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
         m.open(case.base);
         m.screen = case.screen;
         c.reset(1280, 720);

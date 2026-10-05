@@ -15,6 +15,10 @@ const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
 const Gamepads = @import("engine/Gamepads.zig");
+const PadBindings = @import("engine/PadBindings.zig");
+const PadPreset = @import("game/PadPreset.zig");
+extern "c" fn hw_choose_save_json(json: [*]const u8, length: usize, suggested_name: [*:0]const u8) c_int;
+extern "c" fn hw_choose_open_json(buffer: [*]u8, capacity: usize, length: *usize) c_int;
 const HotReload = @import("asset/HotReload.zig");
 const Registry = @import("asset/Registry.zig");
 const Guid = @import("asset/Guid.zig");
@@ -93,6 +97,7 @@ stress_installed: u32 = 0,
 stress_requested: bool = false,
 /// Guests joined from a controller leave when it disconnects; F6 and smoke guests stay.
 pad_guests: [Sandbox.max_players - 1]bool = @splat(false),
+pad_connected: [4]bool = @splat(false),
 core: *mach.Core = undefined,
 /// Title, pause and settings menus (settings persist in `saves/settings.json`).
 menu: Menu = .{},
@@ -178,6 +183,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     }
     if (self.interactive) {
         self.menu.settings = Settings.load(io, allocator);
+        self.pads.mapping = self.menu.settings.pad_mapping;
         self.show_metrics = self.menu.settings.metrics;
         self.menu.has_save = self.saveExists();
         self.menu.open(.title);
@@ -425,8 +431,61 @@ fn runCommand(self: *App, command: Menu.Command) void {
         .quit => self.core.exit(),
         .settings_changed => {
             self.show_metrics = self.menu.settings.metrics;
+            self.pads.mapping = self.menu.settings.pad_mapping;
             self.settings_dirty = true;
             if (self.audio) |a| a.setVolumes(self.menu.settings);
+        },
+        .pad_export => {
+            var vendor: []const u8 = "";
+            var product: []const u8 = "";
+            for (self.pads.samples, 0..) |_, i| if (self.pads.samples[i].connected != 0) {
+                vendor = std.mem.sliceTo(&self.pads.samples[i].vendor, 0);
+                product = std.mem.sliceTo(&self.pads.samples[i].product, 0);
+                break;
+            };
+            const slot = self.menu.pad_preset_slot_index;
+            const name = std.fmt.allocPrint(self.allocator, "Controller preset {d}", .{slot + 1}) catch return self.report("PRESET EXPORT FAILED", .{});
+            defer self.allocator.free(name);
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            const preset: PadPreset.Preset = .{ .name = name, .vendor = vendor, .product = product, .mapping = self.menu.settings.pad_mapping };
+            PadPreset.saveSlot(self.io, arena.allocator(), slot, preset) catch |err| return self.report("PRESET EXPORT FAILED: {s}", .{@errorName(err)});
+            const json = PadPreset.toJson(arena.allocator(), preset) catch |err| return self.report("PRESET EXPORT FAILED: {s}", .{@errorName(err)});
+            if (@import("builtin").os.tag == .macos) {
+                const filename = std.fmt.allocPrintSentinel(arena.allocator(), "heavy-water-controller-{d}.json", .{slot + 1}, 0) catch return self.report("PRESET EXPORT FAILED", .{});
+                const result = hw_choose_save_json(json.ptr, json.len, filename);
+                if (result == 0) return;
+                if (result < 0) return self.report("COULD NOT WRITE PRESET FILE", .{});
+                self.report("PRESET EXPORTED — UPLOAD THE JSON FILE TO SHARE IT", .{});
+            } else {
+                self.report("PRESET EXPORTED TO saves/controller-presets/slot-{d:0>2}.json", .{slot + 1});
+            }
+            @memset(&self.menu.pad_preset_label, 0);
+            const label_len = @min(name.len, self.menu.pad_preset_label.len - 1);
+            @memcpy(self.menu.pad_preset_label[0..label_len], name[0..label_len]);
+        },
+        .pad_import => {
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            var preset: PadPreset.Preset = undefined;
+            if (@import("builtin").os.tag == .macos) {
+                var bytes: [16 << 10]u8 = undefined;
+                var length: usize = 0;
+                const result = hw_choose_open_json(&bytes, bytes.len, &length);
+                if (result == 0) return;
+                if (result < 0) return self.report("PRESET FILE IS TOO LARGE OR COULD NOT BE READ", .{});
+                preset = PadPreset.parse(arena.allocator(), bytes[0..length]) catch |err| return self.report("PRESET IMPORT FAILED: {s}", .{@errorName(err)});
+                PadPreset.saveSlot(self.io, arena.allocator(), self.menu.pad_preset_slot_index, preset) catch |err| return self.report("PRESET SLOT SAVE FAILED: {s}", .{@errorName(err)});
+            } else {
+                preset = PadPreset.loadSlot(self.io, arena.allocator(), self.menu.pad_preset_slot_index) catch |err| return self.report("PRESET IMPORT FAILED: {s}", .{@errorName(err)});
+            }
+            self.menu.settings.pad_mapping = preset.mapping;
+            self.pads.mapping = preset.mapping;
+            const n = @min(preset.name.len, self.menu.pad_preset_label.len - 1);
+            @memset(&self.menu.pad_preset_label, 0);
+            @memcpy(self.menu.pad_preset_label[0..n], preset.name[0..n]);
+            self.settings_dirty = true;
+            self.report("IMPORTED CONTROLLER PRESET: {s}", .{self.menu.pad_preset_label[0..n]});
         },
     }
     // Settings are written once on leaving their screen, not on every (repeating) press.
@@ -702,7 +761,13 @@ pub fn update(self: *App, core: *mach.Core) void {
             .left => if (self.captured) {
                 self.fire_held = true;
                 self.actions.interact = true;
-            } else self.capture(core, true),
+            } else {
+                // The click that starts trackpad/mouse aiming is also a primary click. This keeps
+                // laptop shooting responsive instead of requiring a second click after capture.
+                self.capture(core, true);
+                self.fire_held = true;
+                self.actions.interact = true;
+            },
             .right => if (self.captured) {
                 self.alt_held = true;
                 self.actions.secondary = true;
@@ -796,8 +861,24 @@ pub fn update(self: *App, core: *mach.Core) void {
 /// fixed step cannot toggle twice.
 fn pollPads(self: *App) void {
     self.pads.poll();
+    if (self.menu.screen == .pad_controls) if (self.menu.pad_capturing_action) |action| {
+        for (self.pads.button_edges, 0..) |edges, controller| if (edges != 0) {
+            const physical = @as(u8, @intCast(@ctz(edges)));
+            self.menu.settings.pad_mapping.buttons[@intFromEnum(action)] = physical;
+            self.menu.pad_capturing_action = null;
+            self.pads.commands[controller] = .{ .connected = self.pads.commands[controller].connected };
+            self.runCommand(.settings_changed);
+            self.report("{s} BOUND TO {s}", .{ PadBindings.actionName(action), PadBindings.buttonName(physical) });
+            break;
+        };
+    };
     for (&self.pads.commands, 0..) |*cmd, c| {
         const p = Gamepads.playerIndex(c);
+        if (cmd.connected and !self.pad_connected[c]) {
+            var label: [128]u8 = undefined;
+            self.report("P{d} CONTROLLER FOUND: {s}", .{ p + 1, self.pads.deviceLabel(c, &label) });
+        }
+        self.pad_connected[c] = cmd.connected;
         if (p == 0) {
             if (cmd.join) self.pad_menu = true;
             cmd.join = false;
@@ -837,6 +918,10 @@ fn routePads(self: *App) void {
                 continue;
             }
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
+            // A fourth pad can share P1 with the keyboard and mouse. Its standard right trigger
+            // and stick-click alternate must reach the same weapons path as guest controllers.
+            self.sandbox.trigger.fire = self.sandbox.trigger.fire or cmd.fire;
+            self.sandbox.trigger.alt = self.sandbox.trigger.alt or cmd.alt;
             self.actions.interact = self.actions.interact or cmd.interact;
             if (self.sandbox.hangar.piloting and cmd.interact) self.actions.leave_jet = true;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
@@ -880,7 +965,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 45)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1205,6 +1290,12 @@ fn guiShowcase(self: *App, v: u32) void {
             self.menu.row = @intFromEnum(@import("game/Bindings.zig").Action.grapple);
             self.menu.capturing = true;
         },
+        46 => {
+            self.menu.open(.pause);
+            self.menu.open(.controls);
+            self.menu.open(.pad_controls);
+            self.menu.row = 0;
+        },
         27 => {
             for (0..3) |i| sb.joinGuest(i);
             sb.guests[1].trading = 0;
@@ -1496,7 +1587,10 @@ fn smokeCombat(self: *App) void {
     sb.wallet.scrap += 100;
     var list: [Fabricator.recipes.len]u8 = undefined;
     for (Fabricator.onTab(.weapons, &list), 0..) |index, row| {
-        const w = Fabricator.recipes[index].output.weapon;
+        const w = switch (Fabricator.recipes[index].output) {
+            .weapon => |kind| kind,
+            else => continue,
+        };
         if (w != .beam_saber and w != .sniper_rifle) continue;
         sb.shop = .{ .kind = .fabricate, .tab = 3, .row = @intCast(row) };
         self.uiNav(.confirm);
@@ -1628,7 +1722,7 @@ fn capture(self: *App, core: *mach.Core, enabled: bool) void {
     core.windows.lock();
     defer core.windows.unlock();
     core.windows.set(self.window, .mouse_capture, enabled);
-    if (!enabled) self.captured = false;
+    self.captured = enabled;
 }
 
 /// Installs finished background builds into the catalog. Runs inside the render mutex, so the

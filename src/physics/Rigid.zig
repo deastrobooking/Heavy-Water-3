@@ -254,3 +254,88 @@ pub fn rayCast(body: State, origin: Vec3, direction: Vec3) ?Physics.BoxHit {
     const hit = Physics.rayBox(lo, ld, .{ 0, 0, 0 }, body.half) orelse return null;
     return .{ .distance = hit.distance, .point = body.toWorld(hit.point), .normal = R.rotate(body.orientation, hit.normal) };
 }
+
+pub const PairContact = struct { point: Vec3, normal: Vec3, depth: f32 };
+
+/// Separating-axis test for two oriented boxes. The returned normal points from `a` to `b`.
+/// Face normals and edge cross products make this exact for box overlap, including rotated cars.
+pub fn pairContact(a: State, b: State) ?PairContact {
+    const a_axes = [_]Vec3{
+        R.rotate(a.orientation, .{ 1, 0, 0 }),
+        R.rotate(a.orientation, .{ 0, 1, 0 }),
+        R.rotate(a.orientation, .{ 0, 0, 1 }),
+    };
+    const b_axes = [_]Vec3{
+        R.rotate(b.orientation, .{ 1, 0, 0 }),
+        R.rotate(b.orientation, .{ 0, 1, 0 }),
+        R.rotate(b.orientation, .{ 0, 0, 1 }),
+    };
+    const delta = R.sub(b.position, a.position);
+    var best_depth = std.math.inf(f32);
+    var best_axis: Vec3 = .{ 0, 1, 0 };
+    for (a_axes ++ b_axes) |axis| if (!separated(a, b, delta, axis, &best_depth, &best_axis)) return null;
+    for (a_axes) |aa| for (b_axes) |ba| {
+        const axis = R.cross(aa, ba);
+        if (R.dot(axis, axis) < 1e-8) continue;
+        if (!separated(a, b, delta, axis, &best_depth, &best_axis)) return null;
+    };
+    if (R.dot(delta, best_axis) < 0) best_axis = R.scale(best_axis, -1);
+    const pa = supportPoint(a, best_axis);
+    const pb = supportPoint(b, R.scale(best_axis, -1));
+    return .{ .point = R.scale(R.add(pa, pb), 0.5), .normal = best_axis, .depth = best_depth };
+}
+
+fn separated(a: State, b: State, delta: Vec3, axis_in: Vec3, depth: *f32, best: *Vec3) bool {
+    const length_sq = R.dot(axis_in, axis_in);
+    if (length_sq < 1e-8) return true;
+    const axis = R.scale(axis_in, 1 / @sqrt(length_sq));
+    const ra = projectedRadius(a, axis);
+    const rb = projectedRadius(b, axis);
+    const overlap = ra + rb - @abs(R.dot(delta, axis));
+    if (overlap <= 0) return false;
+    if (overlap < depth.*) {
+        depth.* = overlap;
+        best.* = axis;
+    }
+    return true;
+}
+
+fn projectedRadius(body: State, axis: Vec3) f32 {
+    const x = R.rotate(body.orientation, .{ 1, 0, 0 });
+    const y = R.rotate(body.orientation, .{ 0, 1, 0 });
+    const z = R.rotate(body.orientation, .{ 0, 0, 1 });
+    return body.half[0] * @abs(R.dot(axis, x)) + body.half[1] * @abs(R.dot(axis, y)) + body.half[2] * @abs(R.dot(axis, z));
+}
+
+fn supportPoint(body: State, direction: Vec3) Vec3 {
+    const local = R.inverseRotate(body.orientation, direction);
+    const point: Vec3 = .{
+        if (@abs(local[0]) < 1e-4) 0 else if (local[0] >= 0) body.half[0] else -body.half[0],
+        if (@abs(local[1]) < 1e-4) 0 else if (local[1] >= 0) body.half[1] else -body.half[1],
+        if (@abs(local[2]) < 1e-4) 0 else if (local[2] >= 0) body.half[2] else -body.half[2],
+    };
+    return body.toWorld(point);
+}
+
+/// Resolves one rigid-rigid contact using angular effective mass and a split positional correction.
+/// The small backend uses zero restitution; vehicle impacts should not add energy.
+pub fn solvePair(a: *State, b: *State, contact: PairContact) void {
+    const inv_total = a.inv_mass + b.inv_mass;
+    if (inv_total <= 0) return;
+    const correction = @max(0, contact.depth - slop) * 0.8 / inv_total;
+    a.position = R.sub(a.position, R.scale(contact.normal, correction * a.inv_mass));
+    b.position = R.add(b.position, R.scale(contact.normal, correction * b.inv_mass));
+
+    const ra = R.sub(contact.point, a.position);
+    const rb = R.sub(contact.point, b.position);
+    const relative = R.sub(b.pointVelocity(contact.point), a.pointVelocity(contact.point));
+    const closing = R.dot(relative, contact.normal);
+    if (closing >= 0) return;
+    const kn = effectiveMass(a.*, ra, contact.normal) + effectiveMass(b.*, rb, contact.normal);
+    if (kn <= 1e-8) return;
+    const impulse = R.scale(contact.normal, -closing / kn);
+    a.linear = R.sub(a.linear, R.scale(impulse, a.inv_mass));
+    b.linear = R.add(b.linear, R.scale(impulse, b.inv_mass));
+    a.angular = R.sub(a.angular, R.applyInverseInertia(a.orientation, a.inv_inertia, R.cross(ra, impulse)));
+    b.angular = R.add(b.angular, R.applyInverseInertia(b.orientation, b.inv_inertia, R.cross(rb, impulse)));
+}

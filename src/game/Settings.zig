@@ -3,6 +3,7 @@
 const std = @import("std");
 const Settings = @This();
 const Bindings = @import("Bindings.zig");
+const PadBindings = @import("../engine/PadBindings.zig");
 
 pub const path = "saves/settings.json";
 pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, metrics };
@@ -26,6 +27,8 @@ third_person: bool = false,
 metrics: bool = false,
 /// Keyboard bindings (rebound on the controls screen).
 bindings: Bindings = .{},
+/// The active gamepad mapping; imported presets are kept as portable JSON files.
+pad_mapping: PadBindings.Mapping = .{},
 
 pub fn adjust(self: *Settings, field: Field, delta: i32) void {
     const d: f32 = @floatFromInt(delta);
@@ -95,6 +98,7 @@ const Raw = struct {
     third_person: bool = false,
     metrics: bool = false,
     bindings: []const Bindings.Entry = &.{},
+    pad_mapping: PadBindings.Mapping = .{},
 };
 
 /// Parses settings, clamping every field into range; unknown fields are ignored.
@@ -115,13 +119,14 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
         .third_person = r.third_person,
         .metrics = r.metrics,
         .bindings = Bindings.fromEntries(r.bindings),
+        .pad_mapping = if (r.pad_mapping.validate()) r.pad_mapping else defaults.pad_mapping,
     };
 }
 
 /// The settings file's JSON (bindings by action and key name).
 pub fn toJson(self: Settings, allocator: std.mem.Allocator) ![]u8 {
     var entries: [Bindings.count]Bindings.Entry = undefined;
-    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .metrics = self.metrics, .bindings = self.bindings.toEntries(&entries) };
+    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .metrics = self.metrics, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
     return std.json.Stringify.valueAlloc(allocator, doc, .{ .whitespace = .indent_2 });
 }
 
@@ -152,6 +157,9 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     for (0..20) |_| s.adjust(.effects_volume, 1);
     try std.testing.expectEqual(@as(u8, 100), s.effects_volume);
     _ = try s.bindings.bind(.stomp, .k);
+    s.pad_mapping.buttons[@intFromEnum(PadBindings.Action.fire)] = 5;
+    s.pad_mapping.axes = .{ 2, 3, 0, 1 };
+    s.pad_mapping.invert[3] = true;
     const json = try s.toJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     const back = try parse(std.testing.allocator, json);
@@ -160,5 +168,7 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     // One wild value clamps; the other settings survive.
     const wild = try parse(std.testing.allocator, "{\"fov\":400,\"invert_y\":true}");
     try std.testing.expect(wild.fov == 100 and wild.invert_y);
+    const bad_pad = try parse(std.testing.allocator, "{\"pad_mapping\":{\"deadzone\":99}}");
+    try std.testing.expectEqual(PadBindings.Mapping{}, bad_pad.pad_mapping);
     try std.testing.expectError(error.InvalidSettings, parse(std.testing.allocator, "{\"fov\":"));
 }

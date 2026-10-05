@@ -87,6 +87,20 @@ pub fn step(self: *BoxWorld, dt: f32) void {
     // Rigid bodies see the boxes' resolved positions and push dynamic ones.
     var rigid = self.rigids.live.iterator(.{});
     while (rigid.next()) |i| Rigid.step(self, &self.rigids.items[i], dt);
+    // Vehicles and other oriented boxes contact one another too. Capacity is deliberately small,
+    // so four pair passes are cheaper and simpler than maintaining a broadphase.
+    var indices: [Physics.max_rigids]usize = undefined;
+    var count: usize = 0;
+    rigid = self.rigids.live.iterator(.{});
+    while (rigid.next()) |i| {
+        indices[count] = i;
+        count += 1;
+    }
+    for (0..4) |_| for (0..count) |ai| for (ai + 1..count) |bi| {
+        const a = &self.rigids.items[indices[ai]];
+        const b = &self.rigids.items[indices[bi]];
+        if (Rigid.pairContact(a.*, b.*)) |contact| Rigid.solvePair(a, b, contact);
+    };
     live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = &self.bodies.items[i];
@@ -418,6 +432,17 @@ fn characterSupport(self: *const BoxWorld, shape: Physics.Character, feet: Vec3)
     for ([_][2]f32{ .{ 0, 0 }, .{ r, 0 }, .{ -r, 0 }, .{ 0, r }, .{ 0, -r } }) |o| {
         if (self.meshFloor(.{ feet[0] + o[0], feet[1] + shape.step, feet[2] + o[1] }, shape.step + 60)) |floor| support = @max(support, floor);
     }
+    // Rigid-body roofs are valid floors for characters in flight and on foot.
+    var rigids = self.rigids.live.iterator(.{});
+    while (rigids.next()) |i| {
+        const rigid = self.rigids.items[i];
+        for ([_][2]f32{ .{ 0, 0 }, .{ r, 0 }, .{ -r, 0 }, .{ 0, r }, .{ 0, -r } }) |o| {
+            const ray_top = @max(feet[1] + shape.step + 0.1, rigid.position[1] + rigid.radius() + 0.1);
+            const origin: Vec3 = .{ feet[0] + o[0], ray_top, feet[2] + o[1] };
+            const hit = Rigid.rayCast(rigid, origin, .{ 0, -1, 0 }) orelse continue;
+            if (hit.normal[1] >= Physics.walkable_normal_y and hit.point[1] <= feet[1] + shape.step and hit.point[1] > support) support = hit.point[1];
+        }
+    }
     var live = self.bodies.live.iterator(.{});
     while (live.next()) |i| {
         const b = self.bodies.items[i];
@@ -442,6 +467,15 @@ fn characterCeiling(self: *const BoxWorld, shape: Physics.Character, feet: Vec3)
     while (meshes.next()) |i| {
         const hit = self.meshes.items[i].mesh.raycast(.{ feet[0], feet[1] + shape.height - 0.05, feet[2] }, .{ 0, 1, 0 }, 50) orelse continue;
         ceiling = @min(ceiling, hit.point[1]);
+    }
+    var rigids = self.rigids.live.iterator(.{});
+    while (rigids.next()) |i| {
+        const rigid = self.rigids.items[i];
+        const head = feet[1] + shape.height - 0.05;
+        const ray_bottom = @min(head, rigid.position[1] - rigid.radius() - 0.1);
+        const origin: Vec3 = .{ feet[0], ray_bottom, feet[2] };
+        const hit = Rigid.rayCast(rigid, origin, .{ 0, 1, 0 }) orelse continue;
+        if (hit.normal[1] < -Physics.walkable_normal_y and hit.point[1] >= head - 0.01) ceiling = @min(ceiling, hit.point[1]);
     }
     return ceiling;
 }
@@ -576,6 +610,28 @@ test "rigid bodies stop at static walls and block the character; surface rays re
     try std.testing.expectEqual(@as(f32, 2), hit.velocity[1]);
     const ground = physics.castRay(.{ -20, 1, 0 }, .{ 0, -1, 0 }, 5, .none).?;
     try std.testing.expectApproxEqAbs(@as(f32, 1), ground.distance, 0.001);
+}
+
+test "oriented rigid bodies collide with one another and carry character floor and ceiling contacts" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    const a = try physics.createRigid(.{ .half_extents = .{ 0.5, 0.5, 0.5 }, .position = .{ 0, 10, -1.5 }, .linear = .{ 0, 0, 4 }, .mass = 30 });
+    const b = try physics.createRigid(.{ .half_extents = .{ 0.5, 0.5, 0.5 }, .position = .{ 0, 10, 1.5 }, .linear = .{ 0, 0, -4 }, .mass = 30 });
+    for (0..45) |_| physics.step(1.0 / 60.0);
+    const pa = physics.rigidPose(a).?.position;
+    const pb = physics.rigidPose(b).?.position;
+    try std.testing.expect(pb[2] - pa[2] >= 0.99);
+    try std.testing.expect(@abs(physics.rigidVelocity(a).?.linear[2]) < 0.1);
+    try std.testing.expect(@abs(physics.rigidVelocity(b).?.linear[2]) < 0.1);
+
+    const platform = try physics.createRigid(.{ .half_extents = .{ 2, 0.5, 2 }, .position = .{ 8, 0.5, 0 }, .mass = 200 });
+    for (0..60) |_| physics.step(1.0 / 60.0);
+    const pose = physics.rigidPose(platform).?;
+    const support = physics.moveCharacter(.{}, .{ 8, 1.2, 0 }, .{ 0, -0.5, 0 }, false);
+    try std.testing.expect(support.grounded);
+    try std.testing.expectApproxEqAbs(pose.position[1] + 0.5, support.feet[1], 0.02);
+    const under = physics.moveCharacter(.{}, .{ 8, pose.position[1] - 0.5 - 1.8, 0 }, .{ 0, 1, 0 }, false);
+    try std.testing.expect(under.hit_ceiling);
 }
 
 test "character climbs a mesh ramp, is stopped by a steep wall, and stands on an angled deck" {

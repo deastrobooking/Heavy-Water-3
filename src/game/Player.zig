@@ -141,8 +141,17 @@ pub fn step(self: *Player, physics: *Physics, camera: *Camera, input: Input, dt:
 pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, env: Environment, dt: f32) void {
     if (dt <= 0) return;
     if (self.mode == .fly) {
-        camera.move(input, dt);
-        self.feet = .{ camera.position.x(), camera.position.y() - eye_height, camera.position.z() };
+        // Free flight changes the requested destination, but still uses the same collision
+        // world as walking. The old direct camera move skipped floors, buildings and props.
+        const start: V = .{ camera.position.x(), camera.position.y() - eye_height, camera.position.z() };
+        var desired = camera.*;
+        desired.move(input, dt);
+        const target: V = .{ desired.position.x(), desired.position.y() - eye_height, desired.position.z() };
+        const result = physics.moveCharacter(self.shape, start, R.sub(target, start), false);
+        self.feet = result.feet;
+        self.grounded = result.grounded;
+        self.support = result.support;
+        camera.position = self.eye();
         self.previous_jump = input.jump;
         return;
     }
@@ -534,6 +543,26 @@ test "grapple zips toward a static anchor and releases on arrival; flight glides
     try std.testing.expectEqual(Motion.glide, glider.motion);
     try std.testing.expect(glider.velocity[1] >= -3.5);
     try std.testing.expect(glider.fuel < 100);
+}
+
+test "free flight stays above terrain and lands on rigid bodies" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .position = math.vec3(0, eye_height + 0.1, 0) };
+    var player: Player = .{ .mode = .fly };
+    var descend: Input = .{};
+    descend.up = -1;
+    runFor(&player, &physics, &camera, descend, 120);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), player.feet[1], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, eye_height), camera.position.y(), 0.001);
+
+    _ = try physics.createRigid(.{ .half_extents = .{ 2, 0.5, 2 }, .position = .{ 8, 0.5, 0 }, .mass = 20 });
+    for (0..30) |_| physics.step(test_dt);
+    camera.position = math.vec3(8, 2.7, 0);
+    player.setMode(.fly, camera);
+    runFor(&player, &physics, &camera, descend, 60);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), player.feet[1], 0.01);
+    try std.testing.expectApproxEqAbs(player.feet[1] + eye_height, camera.position.y(), 0.001);
 }
 
 test "three quick jump taps toggle hover" {

@@ -2,6 +2,15 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Collision, interiors and shareable controller profiles — 2026-10-05
+
+- Free-flight movement now passes through the character collision controller. Regression coverage checks landing on terrain and a rigid platform. Rigid boxes also resolve oriented SAT contacts against each other, while characters can stand on or be stopped by rigid-body floors and ceilings.
+- Controller setup captures button mappings, adjusts axis sources/inversion and analog thresholds, and stores eight versioned JSON slots. macOS adds generic HID discovery and native JSON file dialogs; imported files are validated before becoming active and are copied into the chosen slot. Exported JSON can be uploaded to a community website. No website endpoint is part of this game repository.
+- Interior generation now produces connected deterministic room-module graphs for residences, shops, factories, enemy bases and dungeons. Room rendering, entry transitions, doors, population and loot remain to be integrated into gameplay.
+- `python3 tools/zig.py build test check --summary all` passed: **329/329 Debug tests** and the full application compile check.
+- ReleaseSafe Metal smoke: `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Dsmoke-frames=120 -Doptimize=ReleaseSafe` completed all nine scripted stages, including saber/sniper combat, caves, four-player split-screen, building, save/restore and city traffic, with no Metal validation errors. The smoke also exposed and fixed an invalid tagged-union read in its weapon-fabrication loop.
+- No physical unfamiliar HID controller or native import/export dialog was available for a hands-on run. Linux and Windows controller backends remain unimplemented.
+
 Bootstrap (phase 1):
 
 - Debug unit suite: 10/10 passed. Covers fixed-step stall accounting, projection depth and camera orientation, seed hashing, shared chunk seams, same/different seeds, allocation-failure cleanup, frustum boundaries, and signal graph validation.

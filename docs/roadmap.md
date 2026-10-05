@@ -372,3 +372,9 @@ Landscape authoring has an isolated foundation and awaits runtime integration. O
 - **Content and design:** the level and character design pass deferred earlier, and art-direction review.
 
 Lighting (the cel pipeline, shadows through the canopy, clustered lumen lights, postprocessing) should develop alongside measurable scenes, serving the painterly direction rather than physically based realism. Long-term research remains World Genome, civilization archaeology, Machine DNA, procedural graph compilation, and solver-verified dungeons. None is represented as implemented by this bootstrap.
+
+## Mobility, interiors and input follow-up — 2026-10-05
+
+Free-flight traversal now shares character collision queries with walking, including terrain and rigid-body floors/ceilings. Oriented vehicle boxes now run SAT contacts against one another in addition to terrain, meshes and axis-aligned bodies. Controller setup has an in-game remapping screen, saved settings, device discovery labels, analog trigger tuning, generic macOS HID discovery, native preset file pickers, and eight portable JSON preset slots. Windows/Linux backends and OS-hidden vendor interfaces remain open work; website hosting for the exported JSON remains separate.
+
+`procedural/Interiors.zig` establishes connected room-module graphs for residences, shops, factories, enemy bases and dungeons. Those maps are deterministic and tested, but the next interior slice still needs room mesh/collider construction, building entry/exit transitions, streaming, doors, minimap presentation, AI and loot population. Keep that work as the next playable content step; the generator alone does not make new interiors visible or enterable.

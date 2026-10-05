@@ -38,13 +38,13 @@ The Hive conflict is connected to the playable campaign: nests spread corruption
 | V | Toggle walking and free-flight modes |
 | F2 / F4 | Change camera view / customize your ranger |
 | 1 / 2 / 3 / 4 / 5 | Hands / build / wire / bridge / weapon tools |
-| Weapon tool | Left button fires (hold to charge or draw), right button is the alternate, Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), hold after a cut to charge a wave, right button guards (parries bolts at first). Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
+| Weapon tool | Left click or trackpad click fires; hold to charge or draw. The first click also captures mouse look and fires immediately. Right button is the alternate; Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), hold after a cut to charge a wave, right button guards (parries bolts at first). Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
 | Z / C / H | Class specials. Ranger: arc grenade, sentry turret, overshield. Synthetic: phase dash, kinetic slam, lumen lance |
 | Left click a hover car, hands | Board it. W / S thrust, A / D turn, Space or E climb, Q descend, Shift boost, click to leave |
 | Left click the fabricator kiosk | Fabricate cars, suits, armor, weapons and the Kestrel fighter from pickups |
 | Left click the Kestrel, hands | Board it. Mouse aims (the jet flies where you point), W / S throttle, A / D roll, Space or E climb and Q sink while hovering, Shift afterburner, left button cannons, hold right button to lock and release to fire a missile, F climbs out |
 | Q / E | Descend / ascend in flight |
-| Left click, then mouse | Capture pointer and look |
+| Left click and mouse / trackpad | Capture pointer and aim; the click also fires the current weapon or performs the current hands action |
 | Left click (captured), hands | Grab or drop a crate, press a machine button, enter or exit the rover |
 | Right click (captured), hands | Salvage the relic under the crosshair |
 | Left click a stall keeper or pedestrian, hands | Talk. Up / Down or 1–6 choose a reply, Enter says it, Escape leaves. Keeper replies open the trade, upgrade, or wardrobe panels |
@@ -65,7 +65,7 @@ The Hive conflict is connected to the playable campaign: nests spread corruption
 
 ## Local Co-op
 
-Up to four players share one window in split screen. On macOS, supported extended-profile controllers join and leave with **Menu**; disconnecting a controller also leaves. F6 adds or removes a keyboard-less guest for testing.
+Up to four players share one window in split screen. On macOS, controllers exposed by Apple's Extended or Micro Gamepad profile or generic HID joystick/gamepad devices join and leave with **Menu**; disconnecting a guest controller also leaves. The game reports the detected vendor/product category. Xbox-, PlayStation- and Switch-style controllers use macOS's standard profile mapping where available, and unfamiliar HID pads can be remapped in Gamepad Setup. F6 adds or removes a keyboard-less guest for testing.
 
 | Controller input | Action |
 | --- | --- |
@@ -74,7 +74,7 @@ Up to four players share one window in split screen. On macOS, supported extende
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
 | X | Press the aimed button or open a stall; hold to hang and mantle |
 | D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons; away from a stall, up and down use specials 1 and 2 (up with the right stick held: special 3) |
-| Right trigger | Fire the party's selected weapon (hold to charge or draw) |
+| Right trigger | Fire the selected weapon (hold to charge or draw); a low analog threshold makes trigger pulls register earlier |
 | Right stick click (held) | The weapon's alternate: saber guard, scope, charge |
 | Menu (P1's controller) | Open or close the pause menu |
 | Y | First- / third-person view |
@@ -84,6 +84,10 @@ Up to four players share one window in split screen. On macOS, supported extende
 | Options | Respawn beside P1 |
 
 Guests can traverse, press machine buttons, and trade using the shared wallet. Building, wiring, carrying, driving, salvage, and saving remain P1's actions. Guests are not saved and rejoin beside P1 after loading.
+
+Choose **Controls → Gamepad Setup** to capture each action onto a button, change which physical stick axes drive movement and aiming, invert individual axes, and tune the stick deadzone or analog trigger point. Eight JSON preset slots live in `saves/controller-presets/`; Export creates a shareable file through the macOS Save dialog, and Import selects a downloaded preset through the Open dialog. The format is platform-neutral and records the controller label when one is available. macOS also scans generic HID gamepads; devices with unusual interfaces or unavailable OS access may still need backend support. Linux and Windows gamepad backends are not implemented yet.
+
+The [controller preset format](controller-presets.md) documents the upload/import flow and field meanings for the community preset page.
 
 ## How It Is Built
 
