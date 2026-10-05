@@ -558,7 +558,8 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 
 ## Hover racer and elevated sprint circuit — 2026-10-04
 
-- The seeded elevated circuit uses the same generated route for its render mesh, ordered checkpoint gates, charge pads, and static physics collider. The road includes ramp grades and two mesh gaps; racers carry a finite boost capacitor that recharges over time and at pads. The garage HUD reports charge, gate progress, and lap time.
+- The seeded elevated circuit uses the same generated route for its render mesh, ordered checkpoint gates, charge pads, and static physics collider. The road includes ramp grades, two mesh gaps, and a tessellated vertical loop; racers carry a finite boost capacitor that recharges over time and at pads. The garage HUD reports charge, gate progress, and lap time.
 - Racer meshes add a front splitter, side intake louvers, canopy spines, and a three-fin diffuser. The course and collider raycast, checkpoint order, boost depletion/recharge, and app integration are covered by the test suite.
-- Full Debug test suite passed. `python3 tools/zig.py build check --cache-dir .zig-cache-racer-check` passed. A ReleaseSafe 180-frame smoke run on Apple M3 Pro completed all stages, including hover-car fabrication and driving, four-player split-screen, save/restore, and city traffic.
-- True driveable vertical loops still need surface adhesion and gravity transitions; the current loop is a closed elevated sprint course.
+- Signed magnetic normal force and a track-relative attitude controller keep the vehicle aligned through the inverted crown. A regression test holds a racer on the inverted frame; loop geometry tests verify closure, crown orientation, and mesh density.
+- Full Debug test suite passed. `python3 tools/zig.py build check --cache-dir .zig-cache-loop-check` passed. A ReleaseSafe 180-frame smoke run on Apple M3 Pro completed all stages, including hover-car fabrication and driving, four-player split-screen, save/restore, and city traffic.
+- The smoke initializes the circuit but does not drive a complete loop at speed. Entry speed, boost timing, and sustained high-speed stability still need hands-on tuning.

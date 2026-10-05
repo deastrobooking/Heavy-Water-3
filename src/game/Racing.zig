@@ -8,7 +8,7 @@ const Mesh = @import("../render/Mesh.zig");
 const V = Physics.Vec3;
 
 pub const node_count = 8;
-pub const samples_per_segment = 12;
+pub const samples_per_segment = 48;
 pub const sample_count = node_count * samples_per_segment;
 pub const gate_radius: f32 = 19;
 pub const road_half_width: f32 = 8;
@@ -16,6 +16,7 @@ const origin_x: f32 = 0;
 const origin_z: f32 = -150;
 
 pub const Gate = struct { center: V, forward: V };
+pub const TrackFrame = struct { center: V, tangent: V, up: V, radius: f32 = 0 };
 pub const Course = struct {
     seed: u64,
     nodes: [node_count]V,
@@ -49,16 +50,57 @@ pub const Course = struct {
 
     pub fn point(self: Course, segment: usize, t_in: f32) V {
         const segment_index = segment % node_count;
+        const t = std.math.clamp(t_in, 0, 1);
+        if (segment_index == 2 and t >= 0.25 and t <= 0.75) {
+            const loop = self.loopFrameAt((t - 0.25) * 2);
+            return loop.center;
+        }
+        if (segment_index == 2 and t > 0.75) {
+            const anchor = self.splinePoint(segment_index, 0.25);
+            const end = self.splinePoint(segment_index, 1);
+            return add(anchor, scale(sub(end, anchor), (t - 0.75) * 4));
+        }
+        return self.splinePoint(segment_index, t);
+    }
+
+    fn splinePoint(self: Course, segment_index: usize, t: f32) V {
         const p0 = self.nodes[(segment_index + node_count - 1) % node_count];
         const p1 = self.nodes[segment_index];
         const p2 = self.nodes[(segment_index + 1) % node_count];
         const p3 = self.nodes[(segment_index + 2) % node_count];
-        const t = std.math.clamp(t_in, 0, 1);
         const t2 = t * t;
         const t3 = t2 * t;
         var out: V = undefined;
         for (0..3) |axis| out[axis] = 0.5 * ((2 * p1[axis]) + (-p0[axis] + p2[axis]) * t + (2 * p0[axis] - 5 * p1[axis] + 4 * p2[axis] - p3[axis]) * t2 + (-p0[axis] + 3 * p1[axis] - 3 * p2[axis] + p3[axis]) * t3);
         return out;
+    }
+
+    fn loopFrameAt(self: Course, u_in: f32) TrackFrame {
+        const u = std.math.clamp(u_in, 0, 1);
+        const theta = u * 2 * std.math.pi;
+        const anchor = self.splinePoint(2, 0.25);
+        const tangent = normalize(sub(self.splinePoint(2, 0.251), self.splinePoint(2, 0.249)));
+        const world_up: V = .{ 0, 1, 0 };
+        const center = add(anchor, add(scale(tangent, loop_radius * @sin(theta)), .{ 0, loop_radius * (1 - @cos(theta)), 0 }));
+        const forward = add(scale(tangent, @cos(theta)), scale(world_up, @sin(theta)));
+        const up = add(scale(tangent, -@sin(theta)), scale(world_up, @cos(theta)));
+        return .{ .center = center, .tangent = normalize(forward), .up = normalize(up), .radius = loop_radius };
+    }
+
+    /// Return the nearest loop frame while the racer is within the road's capture band.
+    pub fn stuntFrame(self: Course, position: V) ?TrackFrame {
+        var best: ?TrackFrame = null;
+        var distance_sq: f32 = (road_half_width + 7) * (road_half_width + 7);
+        for (0..samples_per_segment * 2 + 1) |i| {
+            const frame = self.loopFrameAt(@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(samples_per_segment * 2)));
+            const delta = sub(frame.center, position);
+            const d2 = dot(delta, delta);
+            if (d2 < distance_sq) {
+                best = frame;
+                distance_sq = d2;
+            }
+        }
+        return best;
     }
 
     pub fn padPosition(self: Course, pad: usize) V {
@@ -76,7 +118,7 @@ pub const Course = struct {
         return false;
     }
 
-    /// Road ribbon and luminous edge rails. The gaps at segments 3 and 7 are deliberate jumps.
+    /// Road ribbon, loop and luminous edge rails. The gaps at segments 3 and 7 are deliberate jumps.
     pub fn mesh(self: Course, allocator: std.mem.Allocator) !Mesh {
         var vertices: std.ArrayList(Mesh.Vertex) = .empty;
         errdefer vertices.deinit(allocator);
@@ -91,8 +133,10 @@ pub const Course = struct {
             const b = self.sample(next_sample);
             const ta = normalize(sub(self.sample((sample_index + 1) % sample_count), self.sample((sample_index + sample_count - 1) % sample_count)));
             const tb = normalize(sub(self.sample((next_sample + 1) % sample_count), self.sample((next_sample + sample_count - 1) % sample_count)));
-            const sa: V = .{ ta[2], 0, -ta[0] };
-            const sb: V = .{ tb[2], 0, -tb[0] };
+            const ua = self.frameAtSample(sample_index).up;
+            const ub = self.frameAtSample(next_sample).up;
+            const sa = normalize(cross(ua, ta));
+            const sb = normalize(cross(ub, tb));
             const pa_l = add(a, scale(sa, -road_half_width));
             const pa_r = add(a, scale(sa, road_half_width));
             const pb_l = add(b, scale(sb, -road_half_width));
@@ -104,8 +148,8 @@ pub const Course = struct {
             for ([_]f32{ -1, 1 }) |side| {
                 const edge_a = add(a, scale(sa, side * (road_half_width - 0.28)));
                 const edge_b = add(b, scale(sb, side * (road_half_width - 0.28)));
-                const high_a = add(edge_a, .{ 0, 0.34, 0 });
-                const high_b = add(edge_b, .{ 0, 0.34, 0 });
+                const high_a = add(edge_a, scale(ua, 0.34));
+                const high_b = add(edge_b, scale(ub, 0.34));
                 try quad(allocator, &vertices, &indices, edge_a, high_a, high_b, edge_b, if (boost) .{ 0.05, 0.95, 1 } else .{ 0.08, 0.56, 0.74 });
             }
         }
@@ -127,7 +171,18 @@ pub const Course = struct {
         const wrapped = index % sample_count;
         return self.point(wrapped / samples_per_segment, @as(f32, @floatFromInt(wrapped % samples_per_segment)) / samples_per_segment);
     }
+
+    fn frameAtSample(self: Course, index: usize) TrackFrame {
+        const wrapped = index % sample_count;
+        const segment = wrapped / samples_per_segment;
+        const local = @as(f32, @floatFromInt(wrapped % samples_per_segment)) / samples_per_segment;
+        if (segment == 2 and local >= 0.25 and local <= 0.75) return self.loopFrameAt((local - 0.25) * 2);
+        const tangent = normalize(sub(self.sample((index + 1) % sample_count), self.sample((index + sample_count - 1) % sample_count)));
+        return .{ .center = self.sample(index), .tangent = tangent, .up = .{ 0, 1, 0 } };
+    }
 };
+
+pub const loop_radius: f32 = 19;
 
 pub const State = struct {
     gate: u8 = 0,
@@ -227,6 +282,23 @@ test "seeded racecourse has a closed route, elevated jumps, boost pads, and rend
     defer mesh.deinit(allocator);
     try std.testing.expect(mesh.vertices.len > 1000);
     try std.testing.expect(mesh.indices.len > mesh.vertices.len);
+}
+
+test "vertical loop closes smoothly and turns the track upside down" {
+    const course = Course.init(77);
+    const entry = course.point(2, 0.25);
+    const exit = course.point(2, 0.75);
+    try std.testing.expectApproxEqAbs(entry[0], exit[0], 0.001);
+    try std.testing.expectApproxEqAbs(entry[1], exit[1], 0.001);
+    try std.testing.expectApproxEqAbs(entry[2], exit[2], 0.001);
+    const bottom = course.loopFrameAt(0);
+    const top = course.loopFrameAt(0.5);
+    try std.testing.expectApproxEqAbs(-1, top.up[1], 0.001);
+    try std.testing.expectApproxEqAbs(2 * loop_radius, top.center[1] - bottom.center[1], 0.01);
+    try std.testing.expect(course.stuntFrame(top.center) != null);
+    const geometry = try course.mesh(std.testing.allocator);
+    defer geometry.deinit(std.testing.allocator);
+    try std.testing.expect(geometry.vertices.len > 3000);
 }
 
 test "raceway static collider is the first floor hit above the terrain" {

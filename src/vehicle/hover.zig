@@ -46,6 +46,8 @@ pub fn groundEffect(z: f32, r: f32) f32 {
 }
 
 pub const Hit = struct { distance: f32, normal: Vec3 };
+/// Local road frame for magnetically guided stunts such as vertical loop sections.
+pub const TrackFrame = struct { center: Vec3, tangent: Vec3, up: Vec3, radius: f32 = 0 };
 
 pub const Input = struct {
     /// Forward (+) / reverse (-) thrust demand.
@@ -57,6 +59,8 @@ pub const Input = struct {
     /// Ride height adjust: + climbs, - descends.
     lift: f32 = 0,
     boost: bool = false,
+    /// Set only while inside a generated stunt section; regular flight remains free-flight.
+    track_frame: ?TrackFrame = null,
 };
 
 pub const Config = struct {
@@ -159,10 +163,12 @@ pub const HoverCar = struct {
     pub fn step(self: *HoverCar, dt: f32, input: Input, context: anytype, comptime probe: anytype) void {
         const b = &self.body;
         const cfg = self.cfg;
-        const up_w = self.up();
+        const body_up = self.up();
+        const track = input.track_frame;
+        const up_w = if (track) |frame| frame.up else body_up;
         const fwd = self.forward();
-        // Right-handed body frame: +X is the car's left, so right = forward × up.
-        const right = fwd.cross(Vec3.unit_y).normalizeOr(Vec3.unit_x.neg());
+        // Right-handed body frame: +X is the car's left, so right = forward × track-up.
+        const right = fwd.cross(up_w).normalizeOr(Vec3.unit_x.neg());
         const down = Vec3.init(0, -1, 0);
 
         // Ground below each pad. Rays start 2 m up, so a pad that dips into a slope still finds
@@ -171,18 +177,20 @@ pub const HoverCar = struct {
         var ground_sum: f32 = 0;
         var ground_count: f32 = 0;
         var pad_height: [4]?f32 = @splat(null);
-        for (cfg.pads, 0..) |pad, i| {
-            const p = b.pointWorld(pad);
-            if (probe(context, p.add(Vec3.init(0, lift_off, 0)), down, cfg.probe_reach + lift_off)) |hit| {
-                pad_height[i] = hit.distance - lift_off;
-                ground_sum += p.y - (hit.distance - lift_off);
-                ground_count += 1;
+        if (track == null) {
+            for (cfg.pads, 0..) |pad, i| {
+                const p = b.pointWorld(pad);
+                if (probe(context, p.add(Vec3.init(0, lift_off, 0)), down, cfg.probe_reach + lift_off)) |hit| {
+                    pad_height[i] = hit.distance - lift_off;
+                    ground_sum += p.y - (hit.distance - lift_off);
+                    ground_count += 1;
+                }
             }
         }
         // Look ahead along the horizontal velocity: climb before a rising slope arrives.
         var ahead_ground: ?f32 = null;
         const flat_v = Vec3.init(b.vel.x, 0, b.vel.z);
-        if (flat_v.length() > 3) {
+        if (track == null and flat_v.length() > 3) {
             const look = b.pos.add(flat_v.scale(0.9)).add(Vec3.init(0, lift_off + 1, 0));
             if (probe(context, look, down, cfg.probe_reach + lift_off + 1)) |hit| ahead_ground = look.y - hit.distance;
         }
@@ -200,26 +208,34 @@ pub const HoverCar = struct {
         const weight = b.mass * gravity;
         const height_error = self.target_altitude - b.pos.y;
         const climb = std.math.clamp(height_error * 5.0 - b.vel.y * 3.2, -6, 14);
-        const lift_total = (weight + b.mass * climb) / @max(0.5, up_w.y);
+        const lift_total = if (track == null) (weight + b.mass * climb) / @max(0.5, up_w.y) else 0;
 
-        // Attitude. Body tilt angles from world up seen in the body frame:
-        //   theta_x > 0 is nose down (rotation about +X), theta_z > 0 is right side down.
-        const local_up = b.toBody(Vec3.unit_y);
-        const theta_x = std.math.atan2(-local_up.z, local_up.y);
-        const theta_z = std.math.atan2(local_up.x, local_up.y);
-        // Lean into the demanded motion: nose down to accelerate, roll toward a strafe, bank
-        // into turns at speed.
-        const speed_factor = std.math.clamp(b.vel.dot(fwd) / 20, -1, 1);
-        const target_x = input.forward * cfg.max_lean * 0.5;
-        const target_z = input.strafe * cfg.max_lean - input.turn * cfg.max_lean * 0.4 * speed_factor;
-        const w_b = b.toBody(b.omega);
         const kp = 9.0;
         const kd = 3.2;
-        self.trim_x = std.math.clamp(self.trim_x + (theta_x - target_x) * dt, -0.3, 0.3);
-        self.trim_z = std.math.clamp(self.trim_z + (theta_z - target_z) * dt, -0.3, 0.3);
-        const ki = 3.0;
-        const tau_x = (-kp * (theta_x - target_x) - ki * self.trim_x - kd * w_b.x) * b.inertia.m[0][0];
-        const tau_z = (-kp * (theta_z - target_z) - ki * self.trim_z - kd * w_b.z) * b.inertia.m[2][2];
+        var tau_x: f32 = 0;
+        var tau_z: f32 = 0;
+        if (track) |frame| {
+            // Match both the track normal and tangent. Aligning only the normal leaves a 180°
+            // ambiguity at the loop crown, where the car could point backward after flipping.
+            var delta = Quat.lookRotation(frame.tangent, frame.up).mul(b.rot.conjugate()).normalize();
+            if (delta.w < 0) delta = .{ .x = -delta.x, .y = -delta.y, .z = -delta.z, .w = -delta.w };
+            const rotation_error = Vec3.init(delta.x, delta.y, delta.z).scale(2);
+            b.addTorque(rotation_error.scale(kp * b.inertia.m[1][1]).sub(b.omega.scale(kd * b.inertia.m[1][1])));
+        } else {
+            // Attitude from world up. Lean into acceleration, strafing, and turns.
+            const local_up = b.toBody(Vec3.unit_y);
+            const theta_x = std.math.atan2(-local_up.z, local_up.y);
+            const theta_z = std.math.atan2(local_up.x, local_up.y);
+            const speed_factor = std.math.clamp(b.vel.dot(fwd) / 20, -1, 1);
+            const target_x = input.forward * cfg.max_lean * 0.5;
+            const target_z = input.strafe * cfg.max_lean - input.turn * cfg.max_lean * 0.4 * speed_factor;
+            const w_b = b.toBody(b.omega);
+            self.trim_x = std.math.clamp(self.trim_x + (theta_x - target_x) * dt, -0.3, 0.3);
+            self.trim_z = std.math.clamp(self.trim_z + (theta_z - target_z) * dt, -0.3, 0.3);
+            const ki = 3.0;
+            tau_x = (-kp * (theta_x - target_x) - ki * self.trim_x - kd * w_b.x) * b.inertia.m[0][0];
+            tau_z = (-kp * (theta_z - target_z) - ki * self.trim_z - kd * w_b.z) * b.inertia.m[2][2];
+        }
         const shares = liftShares(cfg.pads);
 
         // Mix into the four fans. Thrust T along body up at pad (x, z) gives torque
@@ -252,7 +268,7 @@ pub const HoverCar = struct {
             self.boost_charge = @min(1, self.boost_charge + dt / cfg.boost_recharge_time);
         }
         const thrust = if (self.boost_active) cfg.boost_thrust else cfg.cruise_thrust;
-        b.addForce(flat_fwd.scale(input.forward * thrust));
+        b.addForce((if (track != null) fwd else flat_fwd).scale(input.forward * thrust));
         b.addForce(right.scale(input.strafe * cfg.cruise_thrust * 0.5));
 
         // Aerodynamic drag and sideslip grip (the ducts act like keels).
@@ -263,8 +279,27 @@ pub const HoverCar = struct {
         // Gravity.
         b.addForce(Vec3.init(0, -weight, 0));
 
+        // Magnetic guide force supplies both centripetal acceleration and adhesion on the
+        // inverted half of a loop. Lateral/normal PD pulls toward the road ribbon while leaving
+        // the driver's velocity along the track free. The signed normal term can pull as well as
+        // push, which ordinary hover fans cannot do once the car is upside down.
+        if (track) |frame| {
+            const target = frame.center.add(frame.up.scale(cfg.skid_depth + self.ride));
+            const offset_error = target.sub(b.pos);
+            const tangent_error = offset_error.sub(frame.tangent.scale(offset_error.dot(frame.tangent)));
+            const tangent_speed = b.vel.dot(frame.tangent);
+            const lateral_velocity = b.vel.sub(frame.tangent.scale(tangent_speed));
+            var accel = tangent_error.scale(14).sub(lateral_velocity.scale(8));
+            const curvature_accel = if (frame.radius > 0) tangent_speed * tangent_speed / frame.radius else 0;
+            const normal_accel = std.math.clamp(curvature_accel + gravity * frame.up.y, -80, 100);
+            accel = accel.add(frame.up.scale(normal_accel));
+            const accel_len = accel.length();
+            if (accel_len > 140) accel = accel.scale(140 / accel_len);
+            b.addForce(accel.scale(b.mass));
+        }
+
         // Skids: a stiff spring-damper wherever a pad would dip below the ground.
-        self.grounded = false;
+        self.grounded = track != null;
         for (cfg.pads, 0..) |pad, i| {
             const h = pad_height[i] orelse continue;
             const gap = h - cfg.skid_depth * 0.5;
@@ -282,19 +317,21 @@ pub const HoverCar = struct {
 
         // Hard floor: the keel never goes through the ground, whatever the speed. Springs alone
         // cannot stop a tonne at 40 m/s meeting a crest.
-        if (probe(context, b.pos.add(Vec3.init(0, 3, 0)), down, cfg.probe_reach + 3)) |hit| {
-            const floor = b.pos.y + 3 - hit.distance + cfg.skid_depth * 0.8;
-            if (b.pos.y < floor) {
-                b.pos.y = floor;
-                if (b.vel.y < 0) b.vel.y = 0;
-                self.grounded = true;
+        if (track == null) {
+            if (probe(context, b.pos.add(Vec3.init(0, 3, 0)), down, cfg.probe_reach + 3)) |hit| {
+                const floor = b.pos.y + 3 - hit.distance + cfg.skid_depth * 0.8;
+                if (b.pos.y < floor) {
+                    b.pos.y = floor;
+                    if (b.vel.y < 0) b.vel.y = 0;
+                    self.grounded = true;
+                }
             }
         }
 
         // Walls: probe along the horizontal velocity; stop the component into the wall.
         const flat_vel = Vec3.init(b.vel.x, 0, b.vel.z);
         const flat_speed = flat_vel.length();
-        if (flat_speed > 0.05) {
+        if (track == null and flat_speed > 0.05) {
             const dir = flat_vel.scale(1 / flat_speed);
             const reach = cfg.half_length + flat_speed * dt;
             if (probe(context, b.pos, dir, reach)) |hit| {
@@ -441,4 +478,19 @@ test "over a gap the car holds altitude and sinks slowly instead of falling" {
     const none: Flat = .{ .height = -1000 };
     for (0..60 * 2) |_| car.step(1.0 / 60.0, .{}, &none, Flat.probe);
     try testing.expect(car.body.pos.y > 27.5 and car.body.pos.y < 30.2);
+}
+
+test "magnetic track guidance holds an inverted racer through the loop crown" {
+    var car = testCar(Vec3.init(0, -1.1, 0));
+    const none: Flat = .{ .height = -1000 };
+    const inverted: TrackFrame = .{
+        .center = Vec3.zero,
+        .tangent = Vec3.unit_z,
+        .up = Vec3.init(0, -1, 0),
+        .radius = 19,
+    };
+    for (0..60 * 5) |_| car.step(1.0 / 60.0, .{ .track_frame = inverted }, &none, Flat.probe);
+    try testing.expect(car.up().y < -0.95);
+    try testing.expectApproxEqAbs(@as(f32, -1.1), car.body.pos.y, 0.5);
+    try testing.expect(car.grounded);
 }

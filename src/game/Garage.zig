@@ -91,7 +91,18 @@ pub fn controls(input: Input) hover.Input {
 /// Steps every car: the piloted one with `pilot`, parked ones idling low on their pads.
 pub fn step(self: *Garage, physics: *const Physics, pilot: hover.Input, dt: f32) void {
     for (&self.cars, 0..) |*slot, i| if (slot.*) |*c| {
-        const input: hover.Input = if (self.piloting == @as(?u8, @intCast(i))) pilot else .{};
+        var input: hover.Input = if (self.piloting == @as(?u8, @intCast(i))) pilot else .{};
+        if (self.piloting == @as(?u8, @intCast(i))) if (self.course) |course| {
+            const pos = c.flyer.body.pos;
+            if (course.stuntFrame(.{ pos.x, pos.y, pos.z })) |frame| {
+                input.track_frame = .{
+                    .center = m.Vec3.init(frame.center[0], frame.center[1], frame.center[2]),
+                    .tangent = m.Vec3.init(frame.tangent[0], frame.tangent[1], frame.tangent[2]),
+                    .up = m.Vec3.init(frame.up[0], frame.up[1], frame.up[2]),
+                    .radius = frame.radius,
+                };
+            }
+        };
         c.flyer.step(dt, input, physics, probe);
         if (self.piloting == @as(?u8, @intCast(i))) if (self.course) |course| {
             _ = self.race.step(course, .{ c.flyer.body.pos.x, c.flyer.body.pos.y, c.flyer.body.pos.z }, dt);
