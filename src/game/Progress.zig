@@ -45,7 +45,7 @@ picked: Collectibles.Picked = .initEmpty(),
 /// Fabricated hover car designs, armor accents and weapons (bit per enum value).
 vehicles: u8 = 0,
 armors: u8 = free_armors,
-weapons: u16 = 0,
+weapons: u16 = starter_weapons,
 /// Installed weapon tiers beyond Mk I, indexed by `WeaponKind` (0..2).
 weapon_upgrades: [@typeInfo(WeaponKind).@"enum".fields.len]u8 = @splat(0),
 /// The Kestrel fighter has been fabricated.
@@ -62,6 +62,7 @@ flag_names: [max_flags][flag_capacity]u8 = undefined,
 flag_lens: [max_flags]u8 = @splat(0),
 flag_count: usize = 0,
 
+pub const starter_weapons: u16 = (1 << @intFromEnum(WeaponKind.machine_gun)) | (1 << @intFromEnum(WeaponKind.beam_saber));
 pub const free_suits: u8 = bit(.undersuit) | bit(.field_jacket);
 pub const free_armors: u8 = armorBit(.none) | armorBit(.scout);
 pub const health_per_cell: f32 = 20;
@@ -384,7 +385,7 @@ test "suits are bought once, and progress round-trips through its save shape" {
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .levels = &(.{0} ** (upgrade_count + 1)) }));
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .weapon_upgrades = &.{3} }));
-    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .weapon_upgrades = &.{1} }));
+    try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .weapon_upgrades = &.{1} })).weaponLevel(.beam_saber));
     // Saves made before later upgrades existed list fewer levels; the rest start at 0.
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));
     // A save without progress starts fresh with the free suits.
@@ -435,4 +436,15 @@ test "heroes join once, round-trip by name, and older saves keep the starters" {
     var name: [12]u8 = undefined;
     for (0..80) |i| many.setFlag(try std.fmt.bufPrint(&name, "flag_{d}", .{i}));
     try std.testing.expect(many.hasFlag("flag_79"));
+}
+
+test "new and legacy players own level one rapid shot and saber but unlock missiles later" {
+    const p: Progress = .{};
+    const old = try fromDoc(.{});
+    for ([_]Progress{ p, old }) |progress| {
+        try std.testing.expect(progress.ownsWeapon(.machine_gun));
+        try std.testing.expect(progress.ownsWeapon(.beam_saber));
+        try std.testing.expectEqual(@as(u8, 1), progress.weaponLevel(.machine_gun));
+        try std.testing.expect(!progress.ownsWeapon(.tracking_missile));
+    }
 }

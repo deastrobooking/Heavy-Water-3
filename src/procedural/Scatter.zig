@@ -29,13 +29,13 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const chance = Seed.unit(Seed.mix(h +% 2));
         if (kind == .vegetation and chance > 0.85 - biome.arid * 0.65) continue;
         const choice = Seed.unit(Seed.mix(h +% 3));
-        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.97) Vegetation.tree_first + @as(u8, @intCast(Seed.mix(h +% 4) % 3)) else if (choice > 0.80) 2 else if (choice > 0.62) 1 else 0;
+        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.82) Vegetation.tree_first + @as(u8, @intCast(Seed.mix(h +% 4) % 3)) else if (choice > 0.70) 2 else if (choice > 0.48) 1 else 0;
         const color = biome.color();
         output[count] = .{
             .local_id = @intCast(i),
             .kind = kind,
             .variant = variant,
-            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (variant >= Vegetation.tree_first) 7 + Seed.unit(Seed.mix(h +% 1)) * 6 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (variant >= Vegetation.tree_first) 10 + Seed.unit(Seed.mix(h +% 1)) * 9 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
             .tint = if (kind == .relic) .{ 0.40, 0.72, 0.81, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else .{ color[0] * 0.8, color[1] * 1.3, color[2] * 0.9, 1 },
         };
         count += 1;

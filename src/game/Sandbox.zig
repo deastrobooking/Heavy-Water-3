@@ -237,10 +237,10 @@ pub const Guest = struct {
     trade_down: bool = false,
     /// Right trigger held (fire the party's selected weapon) and a weapon-switch edge (D-pad).
     fire: bool = false,
-    /// Right stick click held: the weapon's alternate (saber guard, scope, charge).
+    /// Right bumper held: quick-draw saber attack.
     alt: bool = false,
     next_weapon: bool = false,
-    /// Class special press edges (D-pad up and down; up with the right stick held is the third).
+    /// Class special press edges (D-pad up and down; up with the right bumper held is the third).
     special: [3]bool = @splat(false),
 };
 /// Where guests appear relative to P1's facing: left, right, and behind.
@@ -318,7 +318,7 @@ combat: Combat = .{},
 cues: [32]Cue = undefined,
 cue_count: usize = 0,
 /// Weapon triggers held this step (primary and alternate), set by the application.
-trigger: struct { fire: bool = false, alt: bool = false } = .{},
+trigger: struct { fire: bool = false, alt: bool = false, saber: bool = false, direct: bool = false } = .{},
 /// Stall whose trade panel is open (P1 only), and the selected row.
 trading: ?u8 = null,
 trade_row: u8 = 0,
@@ -3538,4 +3538,61 @@ test "a guest fires the party's blaster with the trigger and downs a drone" {
     }
     try std.testing.expect(downed or sb.enemies.units[0] == null);
     try std.testing.expectEqual(@as(?@import("../combat/Weapon.zig").WeaponKind, .blaster), sb.combat.arsenals[1].active);
+}
+
+/// Stable regional destinations shared by the map and fast travel.
+pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
+    var point = if (destination == 0 or destination > self.shrines.len) spawn else R.add(self.shrines[destination - 1].origin, .{ 0, 0, -12 });
+    point[1] = Terrain.surface(self.seed, point[0], point[2]).height + 0.1;
+    return point;
+}
+
+pub fn fastTravel(self: *Sandbox, p: usize, destination: usize, camera: *Camera) bool {
+    if (p >= max_players or destination > self.shrines.len or self.arena.active or self.seated != null or self.garage.piloting != null or self.hangar.piloting) return false;
+    if (p > 0 and !self.guests[p - 1].active) return false;
+    var point = self.travelPoint(destination);
+    if (self.physics.castRay(R.add(point, .{ 0, 100, 0 }), .{ 0, -1, 0 }, 200, .none)) |hit| point[1] = @max(point[1], hit.point[1] + 0.1);
+    if (p == 0) {
+        self.release();
+        self.player = .{ .feet = point };
+        camera.position = self.player.eye();
+        self.trigger = .{};
+    } else {
+        const g = &self.guests[p - 1];
+        g.player = .{ .feet = point };
+        g.camera.position = g.player.eye();
+        g.input = .{};
+        g.fire = false;
+        g.alt = false;
+        g.trading = null;
+        g.target = .none;
+    }
+    return true;
+}
+
+test "regional travel moves only its player, resets motion, and rejects invalid or vehicle travel" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const host = sb.player.feet;
+    try std.testing.expect(!sb.fastTravel(1, 0, &camera));
+    sb.joinGuest(0);
+    sb.guests[0].player.velocity = .{ 20, 30, 40 };
+    try std.testing.expect(sb.fastTravel(1, 1, &camera));
+    try std.testing.expectEqual(host, sb.player.feet);
+    try std.testing.expectEqual(sb.travelPoint(1)[0], sb.guests[0].player.feet[0]);
+    try std.testing.expectEqual(@as(Physics.Vec3, @splat(0)), sb.guests[0].player.velocity);
+    try std.testing.expect(!sb.fastTravel(4, 0, &camera));
+    try std.testing.expect(!sb.fastTravel(0, 99, &camera));
+    sb.arena.active = true;
+    try std.testing.expect(!sb.fastTravel(0, 0, &camera));
+    sb.arena.active = false;
+    sb.hangar.piloting = true;
+    try std.testing.expect(!sb.fastTravel(0, 0, &camera));
+    sb.hangar.piloting = false;
+    try std.testing.expect(sb.fastTravel(0, 2, &camera));
+    try std.testing.expectEqual(sb.travelPoint(2)[2], sb.player.feet[2]);
 }

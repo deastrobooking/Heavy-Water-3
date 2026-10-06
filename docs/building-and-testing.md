@@ -182,6 +182,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 43 | Inside a cave's first chamber |
 | 44 | A cave's heart chamber and its Hive nest |
 | 45 | Kestrel missile lock reticle, acquired on a ground drone |
+| 54, 55 | Four-player setup; regional map and fast travel |
 | 48–51 | The Wildkin, eight at a time, on the meadow |
 | 52 | The Heroes screen |
 | 53 | The Starbowl arena, wave 1, as Bolt Quill |

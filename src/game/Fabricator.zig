@@ -219,7 +219,7 @@ test "recipes pay exactly, make once, and refuse what cannot be paid" {
 }
 
 test "weapon tiers require ownership and the prior tier, then persist as installed upgrades" {
-    var p: Progress = .{};
+    var p: Progress = .{ .weapons = 0 };
     var wallet: Market.Wallet = .{ .scrap = 1_000 };
     var rows: [recipes.len]u8 = undefined;
     const weapons = onTab(.weapons, &rows);

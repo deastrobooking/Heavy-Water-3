@@ -14,7 +14,7 @@ pub const deadzone_default: f32 = 0.18;
 /// Axis ids follow the standardized profile: left X/Y, then right X/Y. Button ids are documented
 /// in `buttonName`; triggers remain analog in Sample and can be activated with a lighter pull.
 pub const Mapping = struct {
-    buttons: [action_count]u8 = .{ 0, 1, 2, 4, 5, 3, 6, 7, 11, 10, 8, 9, 12, 13, 14, 15 },
+    buttons: [action_count]u8 = .{ 0, 1, 2, 4, 3, 11, 6, 7, 5, 10, 8, 9, 12, 13, 14, 15 },
     axes: [axis_count]u8 = .{ 0, 1, 2, 3 },
     invert: [axis_count]bool = .{ false, false, false, false },
     deadzone: f32 = deadzone_default,
@@ -73,10 +73,10 @@ pub fn actionName(action: Action) []const u8 {
         .view => "CAMERA VIEW",
         .sprint => "SPRINT / BOOST",
         .fire => "FIRE",
-        .alt => "ALTERNATE / GUARD",
+        .alt => "BEAM SABER",
         .stomp => "STOMP",
         .join => "MENU / JOIN",
-        .respawn => "RESPAWN",
+        .respawn => "PLAYER MENU / SELECT",
         .up => "UI UP",
         .down => "UI DOWN",
         .left => "UI LEFT",

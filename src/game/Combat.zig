@@ -76,6 +76,8 @@ pub const Aim = struct {
     fire: bool = false,
     alt: bool = false,
     cycle: bool = false,
+    saber: bool = false,
+    direct: bool = false,
 };
 
 pub const Event = union(enum) {
@@ -139,7 +141,8 @@ pub const Arsenal = struct {
     /// Weapon Mk II/Mk III bonuses, copied from shared party progression.
     weapon_upgrades: [@typeInfo(WeaponKind).@"enum".fields.len]u8 = @splat(0),
     /// Selected weapon (one the party has fabricated), if any.
-    active: ?WeaponKind = null,
+    active: ?WeaponKind = .machine_gun,
+    ranged: WeaponKind = .machine_gun,
     was_fire: bool = false,
     was_alt: bool = false,
     beam: ?struct { left: f32, dps: f32, width: f32, length: f32 } = null,
@@ -281,12 +284,30 @@ pub fn tick(self: *Combat, dt: f32) void {
 }
 
 /// One fixed step of player `p`'s arsenal: weapon timers, triggers, projectiles and the beam.
-pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemies, owned: u16, aim: Aim, dt: f32, out: []Event) usize {
+pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemies, owned: u16, input_aim: Aim, dt: f32, out: []Event) usize {
+    var aim = input_aim;
     var n: usize = 0;
     var hive: [16]Enemies.Event = undefined;
     var hn: usize = 0;
     const arsenal = &self.arsenals[player];
+    if (aim.direct) {
+        if (arsenal.active != .beam_saber) if (arsenal.active) |k| {
+            arsenal.ranged = k;
+        };
+        const desired: WeaponKind = if (aim.saber or (arsenal.active == .beam_saber and (arsenal.melee.swing != null or (arsenal.was_fire and arsenal.system.saber.charge_time > 0)))) .beam_saber else arsenal.ranged;
+        if (arsenal.active != desired) {
+            arsenal.lowerAll();
+            arsenal.active = desired;
+            arsenal.was_fire = false;
+            arsenal.was_alt = false;
+        }
+        if (desired == .beam_saber) {
+            aim.fire = aim.saber;
+            aim.alt = false;
+        }
+    }
     arsenal.select(owned, aim.cycle);
+    if (aim.direct and aim.cycle and arsenal.active == .beam_saber) arsenal.select(owned, true);
     arsenal.armed = aim.armed;
     arsenal.pitch = std.math.asin(std.math.clamp(aim.forward[1], -1, 1));
     const s = &arsenal.system;
@@ -443,7 +464,7 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
         }
         if (enemies.cutBolts(b.base, b.dir, blade_length, blade_radius + 0.15) > 0) push(out, n, .{ .cut = tip });
     }
-    self.effect(.{ .kind = .trail, .position = R.add(b.base, R.scale(b.dir, blade_length / 2)), .dir = b.dir, .life = 0.12, .size = 0.08, .length = blade_length, .color = .{ 1, 0.8, 0.3 } });
+    self.effect(.{ .kind = .trail, .position = R.add(b.base, R.scale(b.dir, blade_length / 2)), .dir = b.dir, .life = 0.12, .size = 0.08, .length = blade_length, .color = .{ 0.8, 0.1, 1 } });
     if (sw.t >= 1) {
         mel.swing = null;
         if (mel.queued) {
@@ -798,4 +819,35 @@ test "the shield absorbs, health regenerates, and a downed player is restored" {
     try std.testing.expectEqual(@as(f32, 100), c.vitals[3].health);
     c.setMaxHealth(140);
     try std.testing.expectEqual(@as(f32, 140), c.vitals[0].health);
+}
+
+test "all four players start rapid fire, quick draw saber, then return to their energy gun" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var enemies: Enemies = .{};
+    var c: Combat = .{};
+    const owned = @import("Progress.zig").starter_weapons;
+    var events: [32]Event = undefined;
+    const dt = 1.0 / 60.0;
+    for (0..4) |p| {
+        var aim: Aim = .{ .eye = .{ 0, 1.6, 0 }, .forward = .{ 0, 0, 1 }, .feet = .{ 0, 0, 0 }, .direct = true, .fire = true };
+        var shots: usize = 0;
+        for (0..30) |_| {
+            const n = c.step(@intCast(p), &physics, &enemies, owned, aim, dt, &events);
+            for (events[0..@min(n, events.len)]) |e| if (e == .fired and e.fired == .machine_gun) {
+                shots += 1;
+            };
+        }
+        try std.testing.expect(shots >= 3);
+        aim.fire = false;
+        aim.saber = true;
+        _ = c.step(@intCast(p), &physics, &enemies, owned, aim, dt, &events);
+        try std.testing.expect(c.arsenals[p].melee.swing != null);
+        for (0..110) |_| _ = c.step(@intCast(p), &physics, &enemies, owned, aim, dt, &events);
+        aim.saber = false;
+        _ = c.step(@intCast(p), &physics, &enemies, owned, aim, dt, &events);
+        try std.testing.expectEqual(Ranger.Arc.charged, c.arsenals[p].melee.swing.?.arc);
+        for (0..30) |_| _ = c.step(@intCast(p), &physics, &enemies, owned, aim, dt, &events);
+        try std.testing.expectEqual(@as(?WeaponKind, .machine_gun), c.arsenals[p].active);
+    }
 }

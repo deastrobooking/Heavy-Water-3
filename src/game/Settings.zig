@@ -119,7 +119,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
         .third_person = r.third_person,
         .metrics = r.metrics,
         .bindings = Bindings.fromEntries(r.bindings),
-        .pad_mapping = if (r.pad_mapping.validate()) r.pad_mapping else defaults.pad_mapping,
+        .pad_mapping = migratePadMapping(if (r.pad_mapping.validate()) r.pad_mapping else defaults.pad_mapping),
     };
 }
 
@@ -171,4 +171,19 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     const bad_pad = try parse(std.testing.allocator, "{\"pad_mapping\":{\"deadzone\":99}}");
     try std.testing.expectEqual(PadBindings.Mapping{}, bad_pad.pad_mapping);
     try std.testing.expectError(error.InvalidSettings, parse(std.testing.allocator, "{\"fov\":"));
+}
+
+fn migratePadMapping(mapping: PadBindings.Mapping) PadBindings.Mapping {
+    const old = [_]u8{ 0, 1, 2, 4, 5, 3, 6, 7, 11, 10, 8, 9, 12, 13, 14, 15 };
+    var result = mapping;
+    if (std.mem.eql(u8, &mapping.buttons, &old)) result.buttons = (PadBindings.Mapping{}).buttons;
+    return result;
+}
+
+test "old factory bindings migrate while custom controller buttons survive" {
+    var old: PadBindings.Mapping = .{};
+    old.buttons = .{ 0, 1, 2, 4, 5, 3, 6, 7, 11, 10, 8, 9, 12, 13, 14, 15 };
+    try std.testing.expectEqual(@as(u8, 11), migratePadMapping(old).button(.view));
+    old.buttons[0] = 2;
+    try std.testing.expectEqual(old.buttons, migratePadMapping(old).buttons);
 }

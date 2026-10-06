@@ -602,6 +602,8 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .airborne = !sb.player.grounded,
         .fire = armed and sb.trigger.fire,
         .alt = armed and sb.trigger.alt,
+        .saber = armed and sb.trigger.saber,
+        .direct = sb.trigger.direct,
         .cycle = armed and actions.next_item,
     }, dt, &out);
     rangerAirShots(sb, .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() }, .{ f.x(), f.y(), f.z() }, out[0..@min(fought, out.len)]);
@@ -617,12 +619,13 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .feet = g.player.feet,
             .yaw = g.body_yaw,
             .rig = rigFor(sb, p, g.profile),
-            .armed = g.trading == null,
+            .armed = !frozen and g.trading == null,
             .dashing = g.player.motion == .dash or g.player.motion == .roll,
             .airborne = !g.player.grounded,
-            .fire = g.fire and g.trading == null,
-            .alt = g.alt and g.trading == null,
-            .cycle = g.next_weapon and g.trading == null,
+            .fire = !frozen and g.fire and g.trading == null,
+            .saber = !frozen and g.alt and g.trading == null,
+            .direct = true,
+            .cycle = !frozen and g.next_weapon and g.trading == null,
         }, dt, &out);
         rangerAirShots(sb, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, out[0..@min(n, out.len)]);
         arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
@@ -1212,7 +1215,9 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         .beam_saber => &.{
             .{ .at = .{ 0, 0, -0.02 }, .size = .{ 0.06, 0.06, 0.26 }, .color = gunmetal },
             .{ .at = .{ 0, 0, 0.13 }, .size = .{ 0.09, 0.09, 0.04 }, .color = plate },
-            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.055, 0.055, 1.35 }, .color = .{ 1, 0.82, 0.35 }, .glow = hum },
+            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.055, 0.055, 1.35 }, .color = .{ 0.8, 0.06, 1 }, .glow = hum },
+            .{ .at = .{ 0.035 * @sin(t * 43), 0.035 * @cos(t * 37), 0.2 + @mod(t * 2.4, 1.25) }, .size = .{ 0.065, 0.065, 0.19 }, .color = .{ 0.05, 0.55, 1 }, .glow = 1 },
+            .{ .at = .{ -0.035 * @cos(t * 39), 0.03 * @sin(t * 47), 0.2 + @mod(t * 2.4 + 0.62, 1.25) }, .size = .{ 0.065, 0.065, 0.14 }, .color = .{ 0.1, 0.7, 1 }, .glow = hum },
         },
         .blaster => &.{
             .{ .at = .{ 0, 0.03, 0.05 }, .size = .{ 0.08, 0.13, 0.32 }, .color = plate },

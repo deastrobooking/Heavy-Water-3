@@ -14,10 +14,9 @@ pub const Sample = extern struct {
     vendor: [48]u8 = @splat(0),
     product: [64]u8 = @splat(0),
 };
-/// `join` (Menu) adds or removes the pad's player; `respawn` (Options) returns it beside P1.
+/// `join` (Menu) joins or opens party setup; `respawn` (Select/Options) opens the player menu.
 /// `up` / `down` / `left` / `right` are D-pad edges (menus, panels, market stalls); `fire` is
-/// the right trigger, held; `alt` (the weapon's alternate: guard, scope, charge) is the right
-/// stick click, held.
+/// the right trigger, held; `alt` is the right bumper saber action, held.
 pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, fire: bool = false, alt: bool = false };
 extern fn hw_gamepads(out: [*]Sample) void;
 previous: [4]u32 = @splat(0),
@@ -108,9 +107,9 @@ pub fn consume(self: *Gamepads) void {
         c.right = false;
     }
 }
-/// Three guests first; a fourth controller operates P1 alongside the keyboard.
+/// Default controller order; the party menu can assign any controller to any player.
 pub fn playerIndex(controller: usize) usize {
-    return (controller + 1) % 4;
+    return controller;
 }
 
 test "pads preserve ownership, radial deadzone, once-only edges and disconnect neutralization" {
@@ -128,7 +127,7 @@ test "pads preserve ownership, radial deadzone, once-only edges and disconnect n
     samples[1].connected = 0;
     pads.sample(samples);
     try std.testing.expect(!pads.commands[1].input.jump and !pads.commands[1].connected);
-    try std.testing.expectEqual(@as(usize, 2), playerIndex(1));
+    try std.testing.expectEqual(@as(usize, 1), playerIndex(1));
 }
 
 test "remapped gamepad actions and soft analog trigger reach the logical command" {

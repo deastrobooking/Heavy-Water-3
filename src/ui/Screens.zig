@@ -174,23 +174,37 @@ fn menuRect(c: *const Canvas, width: f32, height: f32) Rect {
 
 fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
     switch (menu.screen) {
-        .pause, .confirm_quit => {
+        .pause, .confirm_quit, .party, .player => {
             const list = menu.items();
             const r = menuRect(c, 400, 92 + @as(f32, @floatFromInt(list.len)) * 36 + (if (sb != null) @as(f32, 34) else 0));
-            panel(c, r, if (menu.screen == .pause) "PAUSED" else "QUIT HEAVY WATER?");
+            panel(c, r, switch (menu.screen) {
+                .party => "FOUR PLAYER SETUP",
+                .player => "PLAYER MENU",
+                .pause => "PAUSED",
+                else => "QUIT HEAVY WATER?",
+            });
+            if (menu.screen == .player) c.print(r.x + 240, r.y + 20, 1, accent, "P{d}", .{menu.hero_player + 1});
             var y = r.y + 54;
             for (list, 0..) |item, i| {
                 const row: Rect = .{ .x = r.x + 12, .y = y, .w = r.w - 24, .h = 30 };
                 const on = menu.enabled(i);
                 rowBack(c, row, menu.row == i);
-                c.text(row.x + 16, row.y + 9, item.label, 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
+                c.text(row.x + 16, row.y + 9, if (menu.screen == .party and menu.base == .title and item.command == .@"resume") "START GAME" else item.label, if (menu.screen == .party) 1 else 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
                 if (on) c.hit(row, hitId(.menu, i));
+                if (menu.screen == .party and i < 4) {
+                    var controller: usize = 0;
+                    for (menu.controller_players, 0..) |p, index| if (p == i) {
+                        controller = index + 1;
+                    };
+                    c.print(row.x + 105, row.y + 9, 1, accent, "{s} PAD {d}{s} {s}", .{ if (menu.players_present & (@as(u8, 1) << @intCast(i)) != 0) "JOINED" else "EMPTY", controller, if (controller > 0 and menu.controllers_connected[controller - 1]) " ON" else " OFF", if (menu.hero_player == i) "<" else "" });
+                }
                 y += 36;
             }
             if (sb) |s| if (menu.screen == .pause) {
                 c.print(r.x + 18, r.y + r.h - 28, 1, dim, "DAY {d}   SCRAP {d}   PARTS {d}   UNSAVED PROGRESS IS LOST ON QUIT", .{ s.market.day, s.wallet.scrap, s.wallet.parts });
             };
         },
+        .world_map => if (sb) |s| drawWorldMap(c, menu, s),
         .settings => drawSettings(c, menu),
         .controls => drawControls(c, menu),
         .pad_controls => drawPadControls(c, menu),
@@ -337,7 +351,7 @@ fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
         const row: Rect = .{ .x = r.x + 12, .y = y, .w = r.w - 24, .h = 30 };
         const on = menu.enabled(i);
         rowBack(c, row, menu.row == i);
-        c.text(row.x + 16, row.y + 9, item.label, 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
+        c.text(row.x + 16, row.y + 9, if (menu.screen == .party and menu.base == .title and item.command == .@"resume") "START GAME" else item.label, if (menu.screen == .party) 1 else 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
         if (on) c.hit(row, hitId(.menu, i));
         y += 36;
     }
@@ -1097,4 +1111,43 @@ test "every screen lays out inside the window and records hits" {
     const id = hitId(.choice, 3);
     try std.testing.expectEqual(Area.choice, hitArea(id));
     try std.testing.expectEqual(@as(u8, 3), hitRow(id));
+}
+
+fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const r = menuRect(c, @min(720, c.width - 30), @min(650, c.height - 30));
+    panel(c, r, "WORLD MAP / FAST TRAVEL");
+    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 265 };
+    c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
+    const span: f32 = 700;
+    for (0..12) |z| for (0..20) |x| {
+        const fx = @as(f32, @floatFromInt(x)) / 20;
+        const fz = @as(f32, @floatFromInt(z)) / 12;
+        const color = @import("../procedural/Biome.zig").sample(sb.seed, (fx - 0.5) * span, Sandbox.spawn[2] + (fz - 0.5) * span).color();
+        c.rect(.{ .x = map.x + map.w * fx, .y = map.y + map.h * fz, .w = map.w / 20 + 1, .h = map.h / 12 + 1 }, .{ color[0] * 0.5, color[1] * 0.6, color[2] * 0.5, 1 });
+    };
+    for (0..8) |i| {
+        const f = @as(f32, @floatFromInt(i)) / 7;
+        c.rect(.{ .x = map.x + map.w * f, .y = map.y, .w = 1, .h = map.h }, alpha(dim, 0.2));
+        c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
+    }
+    c.text(map.x + 8, map.y + 8, "N ^   LOCAL REGION - 700 METERS", 1, dim);
+    for (0..3) |i| {
+        const p = sb.travelPoint(i);
+        const x = map.x + map.w * (0.5 + p[0] / span);
+        const y = map.y + map.h * (0.5 + (p[2] - Sandbox.spawn[2]) / span);
+        c.rect(.{ .x = x - 4, .y = y - 4, .w = 8, .h = 8 }, gold);
+        c.print(x + 8, y, 1, gold, "{d}", .{i + 1});
+    }
+    for (0..4) |i| {
+        if (i > 0 and !sb.guests[i - 1].active) continue;
+        const p = if (i == 0) sb.player.feet else sb.guests[i - 1].player.feet;
+        const x = map.x + map.w * std.math.clamp(0.5 + p[0] / span, 0.02, 0.98);
+        const y = map.y + map.h * std.math.clamp(0.5 + (p[2] - Sandbox.spawn[2]) / span, 0.02, 0.98);
+        c.print(x, y, 1, accent, "P{d}", .{i + 1});
+    }
+    c.print(r.x + 22, map.y + map.h + 15, 1, ink, "TRAVEL FOR PLAYER {d}  /  GOLD = DESTINATION", .{menu.hero_player + 1});
+    for (Menu.map_items, 0..) |item, i| {
+        const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 34, .w = r.w - 24, .h = 30 };
+        button(c, row, item.label, hitId(.menu, i), menu.row == i);
+    }
 }

@@ -70,7 +70,7 @@ The next campaign expansion spans the Arbor Frontier, the Hive/Scalari Homeworld
 
 ## Local Co-op
 
-Up to four players share one window in split screen. On macOS, controllers exposed by Apple's Extended or Micro Gamepad profile or generic HID joystick/gamepad devices join and leave with **Menu**; disconnecting a guest controller also leaves. The game reports the detected vendor/product category. Xbox-, PlayStation- and Switch-style controllers use macOS's standard profile mapping where available, and unfamiliar HID pads can be remapped in Gamepad Setup. F6 adds or removes a keyboard-less guest for testing.
+Up to four players share one window in split screen. On macOS, controllers exposed by Apple's Extended or Micro Gamepad profile or generic HID joystick/gamepad devices join with **Menu**; an already joined guest opens the party setup. Disconnected players keep their slot and character. The first controller operates P1 alongside the keyboard; the next three operate P2–P4. The game reports the detected vendor/product category. Xbox-, PlayStation- and Switch-style controllers use macOS's standard profile mapping where available, and unfamiliar HID pads can be remapped in Gamepad Setup. F6 adds or removes a keyboard-less guest for testing.
 
 | Controller input | Action |
 | --- | --- |
@@ -78,15 +78,21 @@ Up to four players share one window in split screen. On macOS, controllers expos
 | A | Jump |
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
 | X | Press the aimed button or open a stall; hold to hang and mantle |
-| D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons; away from a stall, up and down use specials 1 and 2 (up with the right stick held: special 3) |
-| Right trigger | Fire the selected weapon (hold to charge or draw); a low analog threshold makes trigger pulls register earlier |
-| Right stick click (held) | The weapon's alternate: saber guard, scope, charge |
+| D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons; away from a stall, up and down use specials 1 and 2 (up with RB held: special 3) |
+| Right trigger | Fire the selected energy weapon; starts with level 1 rapid shot (machine gun) |
+| RB | Quick-draw the neon-purple beam saber with blue electrical pulses; tap for a cut, hold then release for a charged wave |
 | Menu (P1's controller) | Open or close the pause menu |
-| Y | First- / third-person view |
-| LB / RB | Grapple / cycle traversal kit |
+| Right stick click (R3) | First- / third-person view |
+| LB / Y | Grapple / cycle traversal kit |
 | LT | Sprint |
 | Left stick click | Stomp |
-| Options | Respawn beside P1 |
+| Select / Options | Open the individual player menu (hero, party setup, map) |
+
+Every new game and legacy save includes the level 1 machine gun and beam saber. Homing missiles and other energy weapons remain fabrication unlocks. RB returns to the previously selected energy weapon after the saber cut finishes.
+
+Use **Local Co-op Setup** on the title or **Four Player Setup** from pause to select a player, join/leave, assign a controller, or swap with the next occupied screen position. Assigning a controller exchanges its previous assignment so ownership stays unique. P1 remains the host; controller assignments and guest characters are session-only.
+
+**World Map / Fast Travel** is available from pause and each player menu. The regional biome map marks all joined players, base camp, and two Rootdeep shrines. Choose a destination to move the selected player; other players stay where they are. Travel is unavailable in the arena or while the party is using a vehicle. These initial destinations are available immediately.
 
 Guests can traverse, press machine buttons, and trade using the shared wallet. Building, wiring, carrying, driving, salvage, and saving remain P1's actions. Guests are not saved and rejoin beside P1 after loading.
 

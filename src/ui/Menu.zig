@@ -7,9 +7,9 @@ const Bindings = @import("../game/Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 const Menu = @This();
 
-pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, confirm_quit };
+pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena };
+pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, travel };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
 pub const title_items = [_]Item{
@@ -19,6 +19,7 @@ pub const title_items = [_]Item{
     .{ .label = "SETTINGS", .opens = .settings },
     .{ .label = "CONTROLS", .opens = .controls },
     .{ .label = "QUIT", .opens = .confirm_quit },
+    .{ .label = "LOCAL CO-OP SETUP", .opens = .party },
 };
 pub const pause_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
@@ -31,10 +32,28 @@ pub const pause_items = [_]Item{
     .{ .label = "SETTINGS", .opens = .settings },
     .{ .label = "CONTROLS", .opens = .controls },
     .{ .label = "QUIT GAME", .opens = .confirm_quit },
+    .{ .label = "FOUR PLAYER SETUP", .opens = .party },
+    .{ .label = "WORLD MAP / FAST TRAVEL", .opens = .world_map },
 };
 pub const confirm_items = [_]Item{
     .{ .label = "QUIT TO DESKTOP", .command = .quit },
     .{ .label = "CANCEL" },
+};
+pub const party_items = [_]Item{
+    .{ .label = "PLAYER 1" },                                               .{ .label = "PLAYER 2" },                                             .{ .label = "PLAYER 3" },                                                   .{ .label = "PLAYER 4" },
+    .{ .label = "JOIN / LEAVE SELECTED PLAYER", .command = .party_toggle }, .{ .label = "ASSIGN NEXT CONTROLLER", .command = .party_controller }, .{ .label = "SWAP WITH NEXT SCREEN POSITION", .command = .party_position }, .{ .label = "RESUME", .command = .@"resume" },
+};
+pub const player_items = [_]Item{
+    .{ .label = "RESUME", .command = .@"resume" },
+    .{ .label = "CHOOSE HERO", .opens = .heroes },
+    .{ .label = "FOUR PLAYER SETUP", .opens = .party },
+    .{ .label = "MAP / FAST TRAVEL", .opens = .world_map },
+};
+pub const map_items = [_]Item{
+    .{ .label = "TRAVEL: BASE CAMP", .command = .travel },
+    .{ .label = "TRAVEL: ROOTDEEP SHRINE 1", .command = .travel },
+    .{ .label = "TRAVEL: ROOTDEEP SHRINE 2", .command = .travel },
+    .{ .label = "RESUME", .command = .@"resume" },
 };
 pub const quest_items = [_]Item{.{ .label = "BACK" }};
 pub const arena_items = [_]Item{
@@ -92,6 +111,8 @@ players_present: u8 = 1,
 arena_active: bool = false,
 /// The player a hero card is chosen for (Heroes screen tabs).
 hero_player: u8 = 0,
+controller_players: [4]u8 = .{ 0, 1, 2, 3 },
+controllers_connected: [4]bool = @splat(false),
 
 pub fn open(self: *Menu, screen: Screen) void {
     if (screen == .title or screen == .pause or screen == .none) self.base = screen;
@@ -110,6 +131,9 @@ pub fn items(self: *const Menu) []const Item {
         .confirm_quit => &confirm_items,
         .quest_log => &quest_items,
         .arena => &arena_items,
+        .party => &party_items,
+        .player => &player_items,
+        .world_map => &map_items,
         else => &.{},
     };
 }
@@ -164,6 +188,10 @@ pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .pad_controls) return self.padControlsKey(k);
     if (self.screen == .quest_log and k == .confirm) return self.back();
     if (self.screen == .heroes) return self.heroesKey(k);
+    if (self.screen == .party and k == .confirm and self.row < 4) {
+        self.hero_player = self.row;
+        return .none;
+    }
     switch (k) {
         .up => self.step(-1),
         .down => self.step(1),
@@ -185,6 +213,7 @@ pub fn key(self: *Menu, k: Key) Command {
                 return .none;
             }
             if (self.screen == .confirm_quit and item.command == .none) return self.back();
+            if (self.screen == .party and self.base == .title and item.command == .@"resume") return .new_game;
             return item.command;
         },
     }
@@ -345,7 +374,7 @@ pub fn chosenHero(self: *const Menu) ?u8 {
 
 fn back(self: *Menu) Command {
     switch (self.screen) {
-        .settings, .controls, .quest_log, .heroes, .arena, .confirm_quit => {
+        .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.
@@ -369,7 +398,7 @@ test "title skips continue without a save, and sub-screens return to their entry
     try std.testing.expectEqual(@as(u8, 1), m.row);
     _ = m.key(.up);
     // Wraps past the disabled CONTINUE to QUIT.
-    try std.testing.expectEqual(@as(u8, 5), m.row);
+    try std.testing.expectEqual(@as(u8, 6), m.row);
     m.row = 3;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.settings, m.screen);
@@ -497,4 +526,41 @@ test "pause resumes on back, confirms quit, and cancels back to pause" {
     m.row = 5;
     _ = m.key(.down);
     try std.testing.expectEqual(@as(u8, 7), m.row);
+}
+
+/// Exchange assignments rather than allowing two controllers to own one slot.
+pub fn nextController(self: *Menu, player: u8) void {
+    var current: usize = 0;
+    for (self.controller_players, 0..) |owner, i| if (owner == player) {
+        current = i;
+    };
+    const next = (current + 1) % 4;
+    std.mem.swap(u8, &self.controller_players[current], &self.controller_players[next]);
+}
+
+test "party setup keeps four unique controller owners and selects empty slots" {
+    var m: Menu = .{};
+    m.open(.title);
+    m.open(.party);
+    m.row = 3;
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(@as(u8, 3), m.hero_player);
+    m.row = 4;
+    try std.testing.expectEqual(Command.party_toggle, m.key(.confirm));
+    for (0..12) |_| {
+        m.nextController(3);
+        var seen: u8 = 0;
+        for (m.controller_players) |p| seen |= @as(u8, 1) << @intCast(p);
+        try std.testing.expectEqual(@as(u8, 15), seen);
+    }
+    m.row = 7;
+    try std.testing.expectEqual(Command.new_game, m.key(.confirm));
+    m.open(.pause);
+    m.open(.player);
+    m.row = 3;
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(Screen.world_map, m.screen);
+    m.row = 2;
+    try std.testing.expectEqual(Command.travel, m.key(.confirm));
+    try std.testing.expectEqual(@as(u8, 3), m.hero_player);
 }

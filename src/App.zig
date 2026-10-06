@@ -98,6 +98,7 @@ stress_requested: bool = false,
 /// Guests joined from a controller leave when it disconnects; F6 and smoke guests stay.
 pad_guests: [Sandbox.max_players - 1]bool = @splat(false),
 pad_connected: [4]bool = @splat(false),
+menu_controller: usize = 0,
 core: *mach.Core = undefined,
 /// Title, pause and settings menus (settings persist in `saves/settings.json`).
 menu: Menu = .{},
@@ -413,6 +414,67 @@ fn menuKey(self: *App, k: Menu.Key) void {
 fn runCommand(self: *App, command: Menu.Command) void {
     switch (command) {
         .none => {},
+        .party_toggle => {
+            const p = self.menu.hero_player;
+            if (p == 0) return self.report("PLAYER 1 HOST STAYS IN THE PARTY", .{});
+            if (self.sandbox.guests[p - 1].active) self.sandbox.leaveGuest(p - 1) else self.sandbox.joinGuest(p - 1);
+            self.pad_guests[p - 1] = self.sandbox.guests[p - 1].active;
+        },
+        .party_controller => {
+            const p = self.menu.hero_player;
+            self.menu.nextController(p);
+            self.engine.input = .{};
+            self.sandbox.trigger = .{};
+            for (&self.sandbox.guests) |*g| {
+                g.input = .{};
+                g.fire = false;
+                g.alt = false;
+            }
+            for (&self.pads.commands) |*cmd| cmd.* = .{ .connected = cmd.connected };
+        },
+        .party_position => {
+            const p: usize = self.menu.hero_player;
+            const next = (p + 1) % 4;
+            if ((p > 0 and !self.sandbox.guests[p - 1].active) or (next > 0 and !self.sandbox.guests[next - 1].active)) return self.report("JOIN BOTH PLAYERS BEFORE SWAPPING POSITIONS", .{});
+            if (self.sandbox.arena.active or self.sandbox.seated != null or self.sandbox.garage.piloting != null or self.sandbox.hangar.piloting) return self.report("LEAVE VEHICLES / ARENA BEFORE SWAPPING POSITIONS", .{});
+            const sb = &self.sandbox;
+            if (p > 0 and next > 0) {
+                std.mem.swap(Sandbox.Guest, &sb.guests[p - 1], &sb.guests[next - 1]);
+            } else {
+                const g = &sb.guests[(if (p == 0) next else p) - 1];
+                std.mem.swap(@TypeOf(sb.player), &sb.player, &g.player);
+                std.mem.swap(@TypeOf(sb.profile), &sb.profile, &g.profile);
+                std.mem.swap(@TypeOf(sb.body_yaw), &sb.body_yaw, &g.body_yaw);
+                std.mem.swap(@TypeOf(sb.view), &sb.view, &g.view);
+                std.mem.swap(f32, &sb.walk_phase, &g.walk_phase);
+                std.mem.swap(f32, &sb.walk_amount, &g.walk_amount);
+                sb.release();
+                sb.trading = null;
+                g.trading = null;
+                g.target = .none;
+                std.mem.swap(@TypeOf(self.engine.camera), &self.engine.camera, &g.camera);
+            }
+            std.mem.swap(@TypeOf(sb.own_profiles[0]), &sb.own_profiles[p], &sb.own_profiles[next]);
+            std.mem.swap(@TypeOf(sb.specials.players[0]), &sb.specials.players[p], &sb.specials.players[next]);
+            std.mem.swap(@TypeOf(sb.combat.arsenals[0]), &sb.combat.arsenals[p], &sb.combat.arsenals[next]);
+            std.mem.swap(@TypeOf(sb.combat.vitals[0]), &sb.combat.vitals[p], &sb.combat.vitals[next]);
+            for (&self.menu.controller_players) |*owner| {
+                if (owner.* == p) owner.* = @intCast(next) else if (owner.* == next) owner.* = @intCast(p);
+            }
+            self.menu.hero_player = @intCast(next);
+            self.engine.input = .{};
+            self.sandbox.trigger = .{};
+            for (&sb.guests) |*g| {
+                g.input = .{};
+                g.fire = false;
+                g.alt = false;
+            }
+            for (&self.pads.commands) |*cmd| cmd.* = .{ .connected = cmd.connected };
+        },
+        .travel => {
+            if (!self.sandbox.fastTravel(self.menu.hero_player, self.menu.row, &self.engine.camera)) return self.report("LEAVE VEHICLES / ARENA AND JOIN THE PLAYER BEFORE TRAVEL", .{});
+            self.menu.open(.none);
+        },
         .@"resume" => {
             self.menu.open(.none);
             self.capture(self.core, true);
@@ -543,8 +605,10 @@ fn startArena(self: *App) void {
 
 fn newGame(self: *App) void {
     self.menu.open(.none);
+    self.sandbox.tools.tool = .weapon;
     self.sandbox.player.mode = .walk;
     self.sandbox.resetPlayer(&self.engine.camera);
+    for (self.sandbox.guests, 0..) |g, i| if (g.active) self.sandbox.respawnGuest(i);
     self.sandbox.view = if (self.menu.settings.third_person) .third else .first;
     self.sandbox.creator.begin(self.sandbox.profile);
 }
@@ -759,7 +823,10 @@ pub fn update(self: *App, core: *mach.Core) void {
                 }
             };
             if (self.navKey(key.key)) |k| self.uiNav(k);
-        } else if (key.key == .escape) self.menu.open(.pause) else if (self.menu.settings.bindings.action(key.key)) |action| switch (action) {
+        } else if (key.key == .escape) {
+            self.menu.open(.pause);
+            self.menu.hero_player = 0;
+        } else if (self.menu.settings.bindings.action(key.key)) |action| switch (action) {
             // Held movement keys are sampled each frame; these are the press edges.
             .forward, .back, .left, .right, .sprint, .ascend, .descend => {},
             // Mantle is held while climbing; pressed in the Kestrel it climbs out.
@@ -924,27 +991,48 @@ fn pollPads(self: *App) void {
         };
     };
     for (&self.pads.commands, 0..) |*cmd, c| {
-        const p = Gamepads.playerIndex(c);
+        const p = @as(usize, self.menu.controller_players[c]);
         if (cmd.connected and !self.pad_connected[c]) {
             var label: [128]u8 = undefined;
             self.report("P{d} CONTROLLER FOUND: {s}", .{ p + 1, self.pads.deviceLabel(c, &label) });
         }
         self.pad_connected[c] = cmd.connected;
+        self.menu.controllers_connected[c] = cmd.connected;
+        if (cmd.respawn and self.menu.base != .title and (p == 0 or self.sandbox.guests[p - 1].active)) {
+            self.menu.open(.pause);
+            self.menu.hero_player = @intCast(p);
+            self.menu.open(.player);
+            self.menu_controller = c;
+        }
+        cmd.respawn = false;
         if (p == 0) {
-            if (cmd.join) self.pad_menu = true;
+            if (cmd.join) {
+                self.pad_menu = true;
+                self.menu.hero_player = 0;
+                self.menu_controller = c;
+            }
             cmd.join = false;
             if (!self.uiActive()) self.engine.input.merge(cmd.input);
             continue;
         }
         const g = p - 1;
+        if (!cmd.connected) {
+            self.sandbox.guests[g].input = .{};
+            self.sandbox.guests[g].fire = false;
+            self.sandbox.guests[g].alt = false;
+            self.sandbox.guests[g].interact = false;
+            self.sandbox.guests[g].special = @splat(false);
+        }
         if (cmd.join) {
-            if (self.sandbox.guests[g].active) self.sandbox.leaveGuest(g) else self.sandbox.joinGuest(g);
+            self.menu_controller = c;
+            if (!self.sandbox.guests[g].active) self.sandbox.joinGuest(g);
+            if (self.menu.base != .title) {
+                self.menu.open(.pause);
+                self.menu.open(.party);
+                self.menu.hero_player = @intCast(p);
+            }
             self.pad_guests[g] = self.sandbox.guests[g].active;
             self.report("P{d} {s}", .{ p + 1, if (self.pad_guests[g]) "JOINED" else "LEFT" });
-        } else if (!cmd.connected and self.pad_guests[g]) {
-            self.sandbox.leaveGuest(g);
-            self.pad_guests[g] = false;
-            self.report("P{d} CONTROLLER DISCONNECTED", .{p + 1});
         }
         if (cmd.respawn and self.sandbox.guests[g].active) self.sandbox.respawnGuest(g);
         cmd.join = false;
@@ -955,10 +1043,10 @@ fn pollPads(self: *App) void {
 /// Hands each pad's latest command to its player for the coming fixed step.
 fn routePads(self: *App) void {
     for (self.pads.commands, 0..) |cmd, c| {
-        const p = Gamepads.playerIndex(c);
-        if (p == 0) {
-            if (!cmd.connected) continue;
-            if (self.uiActive()) {
+        const p = @as(usize, self.menu.controller_players[c]);
+        if (!cmd.connected) continue;
+        if (self.uiActive()) {
+            if (c == self.menu_controller or p == 0) {
                 // A pad driving P1 through any GUI: D-pad moves, X chooses, B goes back.
                 if (cmd.up) self.uiNav(.up);
                 if (cmd.down) self.uiNav(.down);
@@ -966,19 +1054,22 @@ fn routePads(self: *App) void {
                 if (cmd.right) self.uiNav(.right);
                 if (cmd.interact) self.uiNav(.confirm);
                 if (cmd.input.dodge) self.uiNav(.back);
-                continue;
             }
+            continue;
+        }
+        if (p == 0) {
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
-            // A fourth pad can share P1 with the keyboard and mouse. Its standard right trigger
-            // and stick-click alternate must reach the same weapons path as guest controllers.
+            // P1 shares the same direct energy/saber path as the guests.
             self.sandbox.trigger.fire = self.sandbox.trigger.fire or cmd.fire;
-            self.sandbox.trigger.alt = self.sandbox.trigger.alt or cmd.alt;
+            self.sandbox.trigger.saber = cmd.alt;
+            self.sandbox.trigger.direct = true;
+            if (cmd.fire or cmd.alt) self.sandbox.tools.tool = .weapon;
             self.actions.interact = self.actions.interact or cmd.interact;
             if (self.sandbox.hangar.piloting and cmd.interact) self.actions.leave_jet = true;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
             continue;
         }
-        if (!self.pad_guests[p - 1]) continue;
+        if (!self.sandbox.guests[p - 1].active) continue;
         const g = &self.sandbox.guests[p - 1];
         g.input = cmd.input;
         g.interact = g.interact or cmd.interact;
@@ -1016,7 +1107,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 53)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 55)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1283,6 +1374,12 @@ fn guiShowcase(self: *App, v: u32) void {
                 sb.encounters[hero] = .{ .hero = @intCast(hero), .position = .{ at[0], @import("procedural/Terrain.zig").surface(sb.seed, at[0], at[2]).height, at[2] }, .yaw = yaw + std.math.pi };
             }
             self.engine.camera.pitch = -0.08;
+        },
+        54, 55 => {
+            for (0..3) |i| sb.joinGuest(i);
+            self.menu.open(.pause);
+            self.menu.open(if (v == 54) .party else .world_map);
+            self.menu.hero_player = 2;
         },
         52 => {
             sb.progress.heroes = Sandbox.Heroes.starters() | 0b1011_0110_0000;
