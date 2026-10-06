@@ -138,6 +138,9 @@ pub const GarmentSpec = struct {
     /// Hard garments: plate count along the limb (or abdomen bands for a cuirass), separated by
     /// small gaps so the armor articulates; 0 or 1 = one piece.
     segments: u8 = 0,
+    /// Scale the protected span of a hard-surface plate. Values below 1 expose more of the
+    /// undersuit; values above 1 extend coverage while keeping the plate centered on its limb.
+    coverage_extent: f32 = 1.0,
     /// Skirt: length below waist in body units (height / 6.3), flare (hem radius / hip radius).
     length: f32 = 1.1,
     flare: f32 = 1.75,

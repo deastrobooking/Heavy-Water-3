@@ -1033,18 +1033,18 @@ fn showcase(self: *App) void {
             eye = .{ target[0] - side[0] * back, target[1] + 18, target[2] - side[2] * back };
         };
     } else if (v == 16 or v == 17) {
-        // Armor lineup: three guests in the exo rig, hardsuit, and vanguard face the camera.
+        // Armor lineup: compare coverage tiers in the same neutral outfit and open-face pose.
         const Sandbox_ = @import("game/Sandbox.zig");
         const clothing = [_]Profile.Clothing{ .exo_rig, .hardsuit, .vanguard };
         for (&self.sandbox.guests, 0..) |*g, i| {
             if (!g.active) {
                 self.sandbox.joinGuest(i);
                 g.profile.clothing = clothing[i];
-                g.profile.armor = .scout;
-                g.profile.helmet = if (i == 2) .sealed else .visor;
-                g.profile.outfit = @intCast((i * 2 + 2) % Profile.outfit_colors.len);
+                g.profile.armor = .none;
+                g.profile.helmet = .open;
+                g.profile.outfit = 5;
             }
-            const x = Sandbox_.spawn[0] + (@as(f32, @floatFromInt(i)) - 1) * 1.6;
+            const x = Sandbox_.spawn[0] + (@as(f32, @floatFromInt(i)) - 1) * 1.25;
             const z = Sandbox_.spawn[2] + 3;
             g.player.feet = .{ x, @import("procedural/Terrain.zig").surface(self.sandbox.seed, x, z).height, z };
             g.player.velocity = .{ 0, 0, 0 };
@@ -1052,8 +1052,8 @@ fn showcase(self: *App) void {
             g.view = .first;
         }
         const ground = @import("procedural/Terrain.zig").surface(self.sandbox.seed, Sandbox_.spawn[0], Sandbox_.spawn[2] + 3).height;
-        target = .{ Sandbox_.spawn[0], ground + 1.0, Sandbox_.spawn[2] + 3 };
-        eye = .{ Sandbox_.spawn[0] + 0.6, ground + 1.5, Sandbox_.spawn[2] - 1.6 };
+        target = .{ Sandbox_.spawn[0], ground + 0.95, Sandbox_.spawn[2] + 3 };
+        eye = .{ Sandbox_.spawn[0] + 0.25, ground + 1.3, Sandbox_.spawn[2] + 0.45 };
         // 17: a three-quarter close-up of the hardsuit.
         if (v == 17) eye = .{ Sandbox_.spawn[0] + 0.9, ground + 1.35, Sandbox_.spawn[2] + 1.35 };
     } else if (v == 36) {

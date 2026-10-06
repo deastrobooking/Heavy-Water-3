@@ -380,7 +380,8 @@ This isolated path is not yet bound through `Catalog` into the active streamer, 
 
 ## Next
 
-Phases 1–13 have runnable slices. The game layer has also grown well beyond the phases: menus and conversations, procedural audio, hover cars and the Kestrel fighter, the Hive on the ground and in the air, fabrication and progression. The ordered plan for what comes next is [next steps](plans/next-steps.md):
+Phases 1–13 have runnable slices. The game layer has also grown well beyond the phases: menus and conversations, procedural audio, hover cars and the Kestrel fighter, the Hive on the ground and in the air, fabrication and progression. The ordered plan for what comes next is [next steps](plans/next-steps.md). The current user-directed visual priority is the [character and environment pass](plans/visual-direction.md). The first Ranger face, neck, field-harness, and helmet-fit slice is implemented; differentiated armor and the Frontier material, foliage, and city-composition pass remain next.
+
 1. **Play, measure and tune:** a frontier benchmark with frame budgets, a hand-play checklist, and correctness fixes.
 2. **Planetary frontier:** build the three-destination, four-player campaign through one arena at a time, connecting loot to procedural ships and real-time outpost defense. The Scalari are the ancient reptilian founders of the insect Hive; their five 3D ship meshes, fifteen named city regions and three capitals now have design/catalog foundations. The final boss is at the Scalari capital on the Hive Homeworld. The campaign remains unplayable until arena runtime, travel, city generation and saves are connected; see [the plan](plans/planetary-frontier.md).
 3. **Engine work:** the Mach `main` evaluation, then phase 14 skeletal animation.
@@ -392,7 +393,7 @@ Landscape authoring has an isolated foundation and awaits runtime integration. O
 - **Mach:** update or fork it for indirect draws, shader atomics, timestamp queries, and texture-to-buffer copies (phase 12). The plan is to evaluate the current Mach `main` on a branch before phase 14 ([alignment](plans/alignment.md#mach-tracking)).
 - **Economy:** whether building should cost resources (phase 9 markets are additive today).
 - **Mod API 2:** host imports, mod-defined genomes, shrines and wares, and saved script state (phase 11).
-- **Content and design:** the level and character design pass deferred earlier, and art-direction review.
+- **Content and design:** destination, encounter, and faction art direction beyond the current character and environment pass.
 
 Lighting (the cel pipeline, shadows through the canopy, clustered lumen lights, postprocessing) should develop alongside measurable scenes, serving the painterly direction rather than physically based realism. Long-term research remains World Genome, civilization archaeology, Machine DNA, procedural graph compilation, and solver-verified dungeons. None is represented as implemented by this bootstrap.
 

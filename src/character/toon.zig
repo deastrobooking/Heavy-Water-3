@@ -148,8 +148,9 @@ pub const Expression = struct {
 pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
     var out: Decal = .{ .color = Rgb.init(0, 0, 0), .alpha = 0 };
     if (uv.x < 0 or uv.y < 0) return out;
-    const lash = Rgb.hex(0x2a1a22);
-    const white = Rgb.init(1, 1, 1);
+    // Warm charcoal keeps linework distinct from skin without turning the eye into a black mask.
+    const lash = Rgb.hex(0x493631);
+    const white = Rgb.init(0.96, 0.93, 0.86);
 
     // mirror: work in the left eye's space
     const side: f32 = if (uv.x >= 0.5) 1 else -1;
@@ -168,8 +169,8 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
             out = over(out, white, in_eye);
             // iris: tall ellipse, vertical gradient dark (top) -> light (bottom)
             const ic = Vec2.init(ec.x + expr.look.x * w * side, ec.y - h * 0.12 + expr.look.y * h);
-            const irx = w * 0.62;
-            const iry = h * 0.95;
+            const irx = w * 0.54;
+            const iry = h * 0.78;
             const d_iris = ellipse(q, ic, irx, iry);
             const a_iris = (1 - m.smoothstep(-aa, aa, d_iris)) * in_eye;
             const g = m.saturate((q.y - (ic.y - iry)) / (2 * iry));
@@ -180,7 +181,7 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
             out = over(out, iris_col, a_iris);
             // iris rim
             const ring = (1 - m.smoothstep(0, aa * 2, @abs(d_iris) - aa * 0.6)) * in_eye;
-            out = over(out, eyes.iris_dark, ring * 0.8);
+            out = over(out, eyes.iris_dark, ring * 0.62);
             // pupil
             const d_pupil = ellipse(q, Vec2.init(ic.x, ic.y + iry * 0.05), irx * eyes.pupil_size, iry * eyes.pupil_size * 1.1);
             out = over(out, scalec(eyes.iris_dark, 0.45), (1 - m.smoothstep(-aa, aa, d_pupil)) * in_eye);
@@ -200,7 +201,7 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
         const ang = std.math.atan2((q.y - ec.y) / h, (q.x - ec.x) / w); // 0 outer .. pi inner
         if (ang > -0.35 and ang < m.pi + 0.15) {
             const s_out = 1 - m.saturate(ang / m.pi);
-            const thick = h * (0.05 + 0.22 * m.smoothstep(0.05, 0.75, s_out));
+            const thick = h * (0.035 + 0.13 * m.smoothstep(0.05, 0.75, s_out));
             const d_edge = ellipse(q, ec, w, h);
             var a_lash = (1 - m.smoothstep(thick - aa, thick + aa, d_edge)) * m.smoothstep(-0.25 * thick - aa, -0.25 * thick + aa, d_edge);
             a_lash *= m.smoothstep(-0.35, 0.0, ang) * (1 - m.smoothstep(m.pi - 0.1, m.pi + 0.15, ang));
@@ -217,7 +218,7 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
         // thin lower lash at the outer half
         const d_lo = ellipse(q, ec, w * 1.0, h * 1.02);
         if (q.y < ec.y - h * 0.55 and q.x > ec.x) {
-            out = over(out, lash, (1 - m.smoothstep(aa * 0.5, aa * 1.5, @abs(d_lo))) * 0.7);
+            out = over(out, lash, (1 - m.smoothstep(aa * 0.5, aa * 1.5, @abs(d_lo))) * 0.48);
         }
     } else {
         // closed eye: a happy arc
@@ -230,7 +231,7 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
     const bc = Vec2.init(ec.x - w * 0.05, ec.y + w * eyes.aspect * 1.55 + expr.brow_raise * 0.03);
     const d_brow = ellipse(p, Vec2.init(bc.x, bc.y - w * 0.6), w * 1.05, w * 0.6);
     if (p.y > bc.y - w * 0.2 and @abs(p.x - bc.x) < w * 1.0) {
-        out = over(out, lash, (1 - m.smoothstep(aa * 0.6, aa * 1.8, @abs(d_brow))) * 0.85);
+        out = over(out, lash, (1 - m.smoothstep(aa * 0.6, aa * 1.8, @abs(d_brow))) * 0.68);
     }
 
     // mouth (centered, not mirrored)
@@ -241,14 +242,14 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
             const d_m = ellipse(uv, Vec2.init(0.5, 0.20), 0.045, 0.03 * expr.mouth_open);
             out = over(out, Rgb.hex(0x8a2f3c), 1 - m.smoothstep(-aa, aa, d_m));
         } else {
-            out = over(out, lash, (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(my))) * 0.8 * (1 - @abs(mx)));
+            out = over(out, Rgb.hex(0x8b5650), (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(my))) * 0.68 * (1 - @abs(mx)));
         }
     }
     // blush
     const bx = (p.x - ec.x - w * 0.15) / (w * 0.9);
     const by = (p.y - (ec.y - h * 1.35)) / (w * 0.35);
     const blush = m.saturate(1 - (bx * bx + by * by));
-    if (blush > 0) out = over(out, Rgb.hex(0xff9aa8), blush * blush * 0.40);
+    if (blush > 0) out = over(out, Rgb.hex(0xff9aa8), blush * blush * 0.24);
     return out;
 }
 

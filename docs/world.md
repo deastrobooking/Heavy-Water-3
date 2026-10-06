@@ -117,14 +117,15 @@ Each system pairs a natural analogue with gameplay and with the engine piece it 
 
 ## Visual direction
 
-The style is painterly cel shading: readable at 500 m, lush up close.
+The target is grounded, hopeful science fantasy: painterly cel shading and panoramic natural forms with deliberate contours, broad readable color shapes, and engineered details that make physical sense. “Serious” means authored and credible, not grimdark. Keep the warmth and all-ages heroism while giving people and places adult proportions, useful construction, and stronger visual hierarchy. Human Rangers already use a 7.5-head proportion; the art pass should refine face construction, equipment fit, and presentation rather than inflate their heads. See the [character and environment visual pass](plans/visual-direction.md) for the current review and work order.
 
-- Two- or three-step toon lighting ramps with soft transitions and a warm key and cool fill.
-- Rim light and selective outlines on silhouettes (trunks, towers, characters), not on every edge.
-- Aerial perspective: distance fades toward a blue-green haze, which sells the scale and hides level-of-detail changes.
-- Light shafts through crown gaps; dappled light on the bridge decks.
-- Palette: moss and jade greens, bark umbers, sunlit gold, dusk violet; bioluminescent cyan and amber at night.
-- Architecture: organic curves where wood meets steel, clean anime-tech lines on towers and machines, cloth awnings and lanterns on the bridges.
+- Two- or three-step toon ramps with soft transitions, warm key light, and cool fill.
+- Selective outlines at important silhouettes; avoid outlining every internal edge.
+- Use distance haze to layer the panorama without washing out the playable city and its landmarks.
+- Keep human Rangers adult and practical; preserve the intentionally more expressive animal silhouettes of the Wildkin.
+- Give Frontier, Hive, and Scalari distinct material families and restrained accent colors.
+- Let bark, steel, ceramic, fabric, chitin, water, and glass read differently through shape, color, and subtle surface variation.
+- Compose around a small number of landmarks and provide visible support, contact, and scale cues for buildings, trees, roads, and bridges.
 
 ## Scale, as engineering constraints
 

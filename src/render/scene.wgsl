@@ -79,23 +79,28 @@ fn outside(p: vec4<f32>, c: vec3<f32>, r: f32) -> bool {
 }
 
 @fragment fn frag_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let n = normalize(in.normal);
-    let l = frame.light_direction.xyz;
-    let ndl = dot(n, l);
-    // Two soft steps: shadow, half-lit, lit.
-    let band = smoothstep(-0.04, 0.06, ndl) * 0.6 + smoothstep(0.42, 0.52, ndl) * 0.4;
-    let hemi = n.y * 0.5 + 0.5;
-    let ambient = mix(frame.ambient_ground.rgb, frame.ambient_sky.rgb, hemi);
-    let view = normalize(frame.eye.xyz - in.world);
-    let facing = 1.0 - max(dot(n, view), 0.0);
-    let rim = facing * facing * facing * 0.45;
     let texel = textureSample(surface_texture, surface_sampler, in.uv).rgb;
     let base = in.tint.rgb * mix(vec3<f32>(1.0, 1.0, 1.0), texel, 0.35);
-    var color = base * (ambient + frame.light_color.rgb * band) + frame.light_color.rgb * rim * (0.25 + 0.75 * band);
-    // Lumen: tint alpha above 1 glows, more so at night.
-    let emissive = clamp(in.tint.a - 1.0, 0.0, 1.0);
-    let glow = base * (0.9 + 0.8 * frame.horizon.a);
-    color = mix(color, glow, emissive);
+    var color = base;
+    var emissive = 0.0;
+    // Negative tint alpha selects unlit shading without expanding the 64-byte instance record.
+    // Keep this branch in the shared pipeline so material choice adds no draw or pipeline switch.
+    if (in.tint.a >= 0.0) {
+        let n = normalize(in.normal);
+        let ndl = dot(n, frame.light_direction.xyz);
+        // Two soft steps: shadow, half-lit, lit.
+        let band = smoothstep(-0.04, 0.06, ndl) * 0.6 + smoothstep(0.42, 0.52, ndl) * 0.4;
+        let hemi = n.y * 0.5 + 0.5;
+        let ambient = mix(frame.ambient_ground.rgb, frame.ambient_sky.rgb, hemi);
+        let view = normalize(frame.eye.xyz - in.world);
+        let facing = 1.0 - max(dot(n, view), 0.0);
+        let rim = facing * facing * facing * 0.45;
+        color = base * (ambient + frame.light_color.rgb * band) + frame.light_color.rgb * rim * (0.25 + 0.75 * band);
+        // Lumen: tint alpha above 1 glows, more so at night.
+        emissive = clamp(in.tint.a - 1.0, 0.0, 1.0);
+        let glow = base * (0.9 + 0.8 * frame.horizon.a);
+        color = mix(color, glow, emissive);
+    }
 
     // Height-aware haze: ground haze hides the streamed terrain's edge (~320 m), tall shapes
     // rise out of it, and everything picks up aerial tint with distance. Lumen resists haze.

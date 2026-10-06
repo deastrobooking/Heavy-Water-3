@@ -104,7 +104,8 @@ Acceptance: a four-player run can fabricate, fly and fight with every player act
 ### F. Content and polish (continuous)
 
 - **Audio assets:** an `audio` asset kind and streamed music, keeping the synthesized set as the fallback.
-- **Art-direction pass:** vehicle and ship materials, nest and carrier silhouettes, the HUD style, and cel-shading tuning.
+- **Art direction:** the first human face, neck, restrained body cues, fitted field-jacket harness, and head-fitted helmet changes are in the [character and environment visual pass](visual-direction.md). The exo rig, hardsuit, and vanguard now use distinct coverage spans, plate profiles, and muted material palettes. Review their closer lineup capture and add front, side, and three-quarter character views; then improve Frontier terrain materials, foliage, roads, and city composition. Broaden to vehicles, Wildkin, Hive units, and Scalari after the anchors pass.
+- **Remaining polish:** vehicle and ship materials, nest and carrier silhouettes, HUD style, and cel-shading tuning.
 - **Onboarding:** a guided first ten minutes (meet Maro, salvage, fabricate a blaster, first drone).
 - **Accessibility:** subtitles for all audio cues, and colorblind-safe pickup and threat colors.
 

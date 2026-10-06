@@ -96,11 +96,14 @@ pub fn coverage(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
             else => no,
         },
         .pauldrons => switch (v.region) {
-            .upper_arm_l, .upper_arm_r => @min(0.34 - t, segment(g.segments, t / 0.34)),
+            .upper_arm_l, .upper_arm_r => blk: {
+                const span = @min(0.95, 0.34 * @max(g.coverage_extent, 0.1));
+                break :blk @min(span - t, segment(g.segments, t / span));
+            },
             else => no,
         },
         .vambraces => switch (v.region) {
-            .lower_arm_l, .lower_arm_r => @min(@min(t - 0.10, 0.90 - t), segment(g.segments, (t - 0.10) / 0.80)),
+            .lower_arm_l, .lower_arm_r => centeredPlate(g, t, 0.50, 0.80),
             else => no,
         },
         .gauntlets => switch (v.region) {
@@ -111,15 +114,15 @@ pub fn coverage(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
         // A continuous cut just above the waist (not the region border) keeps the top edge smooth.
         .faulds => switch (v.region) {
             .belly, .hips => @min(lm.waist_y + 0.03 * B - y, segment(g.segments, (lm.waist_y + 0.03 * B - y) / (0.30 * B))),
-            .thigh_l, .thigh_r => 0.16 - t,
+            .thigh_l, .thigh_r => 0.16 * @max(g.coverage_extent, 0.1) - t,
             else => no,
         },
         .cuisses => switch (v.region) {
-            .thigh_l, .thigh_r => @min(@min(t - 0.20, 0.86 - t), segment(g.segments, (t - 0.20) / 0.66)),
+            .thigh_l, .thigh_r => centeredPlate(g, t, 0.53, 0.66),
             else => no,
         },
         .greaves => switch (v.region) {
-            .shin_l, .shin_r => @min(@min(t - 0.08, 0.90 - t), segment(g.segments, (t - 0.08) / 0.82)),
+            .shin_l, .shin_r => centeredPlate(g, t, 0.49, 0.82),
             else => no,
         },
         .sabatons => switch (v.region) {
@@ -133,6 +136,15 @@ pub fn coverage(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
     return val;
 }
 
+/// Coverage interval for an articulated plate. Increasing the suit extent widens the interval
+/// symmetrically without moving its center; segmentation uses the same normalized plate span.
+fn centeredPlate(g: GarmentSpec, t: f32, center: f32, base_span: f32) f32 {
+    const span = @min(1.0, base_span * @max(g.coverage_extent, 0.1));
+    const start = @max(0, center - span * 0.5);
+    const end = @min(1, center + span * 0.5);
+    return @min(@min(t - start, end - t), segment(g.segments, (t - start) / (end - start)));
+}
+
 /// Splits a 0..1 span into `n` plates with gaps between them: > 0 on a plate, < 0 in a gap.
 /// Continuous, so `buildShell` clips plate edges as smooth curves like any hem.
 fn segment(n: u8, s: f32) f32 {
@@ -141,6 +153,26 @@ fn segment(n: u8, s: f32) f32 {
     const f = @as(f32, @floatFromInt(n)) * std.math.clamp(s, 0, 0.9999);
     const local = f - @floor(f);
     return @min(local - gap, 1 - gap - local) / @as(f32, @floatFromInt(n));
+}
+
+test "armor coverage extents create light medium and heavy protection spans" {
+    const lm = body.computeLandmarks(.{});
+    const thigh = Vertex{ .pos = Vec3.zero, .uv = m.Vec2.init(0, 0.15), .region = .thigh_l };
+    const thigh_plate = GarmentSpec{ .coverage = .cuisses, .hard = true, .segments = 0 };
+    try std.testing.expect(!covers(.{ .coverage = .cuisses, .hard = true, .segments = 0, .coverage_extent = 0.72 }, thigh, lm));
+    try std.testing.expect(!covers(thigh_plate, thigh, lm));
+    try std.testing.expect(covers(.{ .coverage = .cuisses, .hard = true, .segments = 0, .coverage_extent = 1.2 }, thigh, lm));
+
+    const shoulder = Vertex{ .pos = Vec3.zero, .uv = m.Vec2.init(0, 0.30), .region = .upper_arm_l };
+    const shoulder_plate = GarmentSpec{ .coverage = .pauldrons, .hard = true };
+    try std.testing.expect(!covers(.{ .coverage = .pauldrons, .hard = true, .coverage_extent = 0.72 }, shoulder, lm));
+    try std.testing.expect(covers(shoulder_plate, shoulder, lm));
+    try std.testing.expect(covers(.{ .coverage = .pauldrons, .hard = true, .coverage_extent = 1.2 }, shoulder, lm));
+
+    const thigh_high = Vertex{ .pos = Vec3.zero, .uv = m.Vec2.init(0, 0.88), .region = .thigh_l };
+    try std.testing.expect(!covers(thigh_plate, thigh_high, lm));
+    try std.testing.expect(!covers(.{ .coverage = .cuisses, .hard = true, .segments = 0, .coverage_extent = 1.0 }, thigh_high, lm));
+    try std.testing.expect(covers(.{ .coverage = .cuisses, .hard = true, .segments = 0, .coverage_extent = 1.2 }, thigh_high, lm));
 }
 
 pub fn covers(g: GarmentSpec, v: Vertex, lm: body.Landmarks) bool {

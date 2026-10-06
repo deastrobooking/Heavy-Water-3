@@ -280,12 +280,13 @@ fn buildNeck(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks, sk
     const pts = [_]Vec3{
         Vec3.init(0, lm.shoulder_y - 0.10 * H, -0.06 * H),
         Vec3.init(0, lm.chin_y - 0.10 * H, -0.08 * H),
-        Vec3.init(0, lm.chin_y + 0.30 * lm.H, -0.12 * lm.H),
+        Vec3.init(0, lm.chin_y + 0.20 * lm.H, -0.12 * lm.H),
     };
     const line = try loft_mod.resamplePolyline(gpa, &pts, spec.res(8, 4));
     defer gpa.free(line);
     const ctx: NeckCtx = .{
-        .r = m.lerp(0.17, 0.13, spec.body.femininity) * H,
+        // Keep a visible, anatomical taper without the thin-post look at gameplay scale.
+        .r = m.lerp(0.19, 0.16, spec.body.femininity) * H,
         .pivots = .{ skel.worldPos(.chest).y, skel.worldPos(.neck).y, skel.worldPos(.head).y },
         .H = H,
     };
@@ -303,6 +304,9 @@ const HeadCtx = struct {
     z: [7]f32,
     y0: f32,
     y1: f32,
+    eye_y: f32,
+    eye_size: f32,
+    eye_spacing: f32,
 
     pub fn uOf(c: *const HeadCtx, t: f32) f32 {
         return (m.lerp(c.y0, c.y1, t) - c.chin_y) / c.H;
@@ -322,15 +326,35 @@ const HeadCtx = struct {
         const center_z = fr.origin.z + curve.spline1D(&c.us, &c.z, m.clamp(u, 0, 1));
         const fwd = p.z - center_z;
         if (fwd > 0) {
-            // Flatten the face plane: anime faces read as a flat mask with a soft profile.
+            // Retain a readable front plane while letting the cheeks and nose turn in profile.
             const front = m.saturate(fwd / (0.45 * c.H));
             const lat = m.saturate(1 - @abs(p.x) / c.half);
             const band = m.smoothstep(0.12, 0.30, u) * (1 - m.smoothstep(0.62, 0.80, u));
-            out.z -= fwd * 0.18 * front * front * lat * band;
-            // Tiny nose: a narrow ridge ending in a small tip.
-            const nx = p.x / (0.05 * c.H);
-            const ny = (u - 0.36) / 0.08;
-            out.z += 0.045 * c.H * bump(nx * nx + ny * ny) * front;
+            out.z -= fwd * 0.10 * front * front * lat * band;
+
+            // Shallow orbital transitions keep the decal eyes seated in the face.
+            const eye_x = 2 * c.eye_spacing * c.half;
+            inline for (.{ -1.0, 1.0 }) |side| {
+                const ex = (p.x - side * eye_x) / (1.25 * c.eye_size * c.half);
+                const ey = (u - c.eye_y) / 0.075;
+                out.z -= 0.006 * c.H * bump(ex * ex + ey * ey) * front;
+
+                // A restrained brow and cheek plane gives the face volume without a heavy mask.
+                const bx = (p.x - side * 0.34 * c.half) / (0.30 * c.half);
+                const by = (u - (c.eye_y + 0.095)) / 0.055;
+                out.z += 0.010 * c.H * bump(bx * bx + by * by) * front;
+                const cx = (p.x - side * 0.43 * c.half) / (0.34 * c.half);
+                const cy = (u - 0.30) / 0.15;
+                out.z += 0.014 * c.H * bump(cx * cx + cy * cy) * front;
+            }
+
+            // A continuous bridge meets a small tip instead of one round bump.
+            const bridge_x = p.x / (0.11 * c.H);
+            const bridge_y = (u - 0.405) / 0.15;
+            out.z += 0.018 * c.H * bump(bridge_x * bridge_x + bridge_y * bridge_y) * front;
+            const tip_x = p.x / (0.075 * c.H);
+            const tip_y = (u - 0.345) / 0.07;
+            out.z += 0.050 * c.H * bump(tip_x * tip_x + tip_y * tip_y) * front;
         }
         return out;
     }
@@ -363,6 +387,9 @@ fn headContext(spec: CharacterSpec, lm: Landmarks) HeadCtx {
         .z = .{ 0.20 * H, 0.10 * H, 0.04 * H, 0.0, -0.02 * H, -0.03 * H, -0.04 * H },
         .y0 = lm.chin_y + 0.08 * H,
         .y1 = lm.chin_y + 0.72 * H,
+        .eye_y = spec.eyes.height,
+        .eye_size = spec.eyes.size,
+        .eye_spacing = spec.eyes.spacing,
     };
 }
 
