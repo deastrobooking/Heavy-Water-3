@@ -3547,21 +3547,70 @@ pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
     return point;
 }
 
+pub fn travelBlocked(self: *const Sandbox, p: usize) ?[]const u8 {
+    if (p >= max_players) return "INVALID PLAYER";
+    if (p > 0 and !self.guests[p - 1].active) return "JOIN THIS PLAYER BEFORE TRAVEL";
+    if (self.arena.active) return "LEAVE THE ARENA BEFORE TRAVEL";
+    if (p == 0 and (self.seated != null or self.garage.piloting != null or self.hangar.piloting)) return "EXIT YOUR VEHICLE BEFORE TRAVEL";
+    return null;
+}
+
+/// Search ground near the beacon, rejecting steep terrain and occupied body volumes.
+/// Do not teleport onto the roof of an obstruction or mutate a player on failure.
+fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
+    const origin = self.travelPoint(destination);
+    const shape: Physics.Character = .{};
+    var ring: i32 = 0;
+    while (ring <= 6) : (ring += 1) {
+        var z = -ring;
+        while (z <= ring) : (z += 1) {
+            var x = -ring;
+            while (x <= ring) : (x += 1) {
+                if (@abs(x) != ring and @abs(z) != ring) continue;
+                var point = R.add(origin, .{ @as(f32, @floatFromInt(x)) * 2, 0, @as(f32, @floatFromInt(z)) * 2 });
+                const ground = Terrain.surface(self.seed, point[0], point[2]);
+                if (ground.normal[1] < 0.7) continue;
+                var highest = ground.height;
+                var lowest = ground.height;
+                for ([_]f32{ -shape.radius, shape.radius }) |dx| for ([_]f32{ -shape.radius, shape.radius }) |dz| {
+                    const height = Terrain.surface(self.seed, point[0] + dx, point[2] + dz).height;
+                    highest = @max(highest, height);
+                    lowest = @min(lowest, height);
+                };
+                if (highest - lowest > shape.step) continue;
+                point[1] = highest + 0.1;
+                if (!self.physics.overlapsBox(R.add(point, .{ 0, shape.height / 2, 0 }), .{ shape.radius, shape.height / 2, shape.radius })) return point;
+            }
+        }
+    }
+    return null;
+}
+
 pub fn fastTravel(self: *Sandbox, p: usize, destination: usize, camera: *Camera) bool {
-    if (p >= max_players or destination > self.shrines.len or self.arena.active or self.seated != null or self.garage.piloting != null or self.hangar.piloting) return false;
-    if (p > 0 and !self.guests[p - 1].active) return false;
-    var point = self.travelPoint(destination);
-    if (self.physics.castRay(R.add(point, .{ 0, 100, 0 }), .{ 0, -1, 0 }, 200, .none)) |hit| point[1] = @max(point[1], hit.point[1] + 0.1);
+    if (destination > self.shrines.len or self.travelBlocked(p) != null) return false;
+    const point = self.travelArrival(destination) orelse return false;
     if (p == 0) {
         self.release();
-        self.player = .{ .feet = point };
+        self.player.cancelTraversal();
+        self.player.feet = point;
+        self.trading = null;
+        self.talk = null;
+        self.shop = null;
+        self.target = .none;
         camera.position = self.player.eye();
         self.trigger = .{};
     } else {
         const g = &self.guests[p - 1];
-        g.player = .{ .feet = point };
+        g.player.cancelTraversal();
+        g.player.feet = point;
         g.camera.position = g.player.eye();
         g.input = .{};
+        g.interact = false;
+        g.toggle_view = false;
+        g.trade_up = false;
+        g.trade_down = false;
+        g.next_weapon = false;
+        g.special = @splat(false);
         g.fire = false;
         g.alt = false;
         g.trading = null;
@@ -3581,9 +3630,15 @@ test "regional travel moves only its player, resets motion, and rejects invalid 
     try std.testing.expect(!sb.fastTravel(1, 0, &camera));
     sb.joinGuest(0);
     sb.guests[0].player.velocity = .{ 20, 30, 40 };
+    sb.guests[0].player.traversal = .flight;
+    sb.guests[0].player.fuel = 37;
+    sb.guests[0].player.suit.fuel_max = 150;
     try std.testing.expect(sb.fastTravel(1, 1, &camera));
     try std.testing.expectEqual(host, sb.player.feet);
-    try std.testing.expectEqual(sb.travelPoint(1)[0], sb.guests[0].player.feet[0]);
+    try std.testing.expectEqual(Player.Traversal.flight, sb.guests[0].player.traversal);
+    try std.testing.expectEqual(@as(f32, 37), sb.guests[0].player.fuel);
+    try std.testing.expectEqual(@as(f32, 150), sb.guests[0].player.suit.fuel_max);
+    try std.testing.expect(R.length(R.sub(sb.travelPoint(1), sb.guests[0].player.feet)) < 25);
     try std.testing.expectEqual(@as(Physics.Vec3, @splat(0)), sb.guests[0].player.velocity);
     try std.testing.expect(!sb.fastTravel(4, 0, &camera));
     try std.testing.expect(!sb.fastTravel(0, 99, &camera));
@@ -3592,7 +3647,28 @@ test "regional travel moves only its player, resets motion, and rejects invalid 
     sb.arena.active = false;
     sb.hangar.piloting = true;
     try std.testing.expect(!sb.fastTravel(0, 0, &camera));
+    try std.testing.expect(sb.fastTravel(1, 0, &camera));
     sb.hangar.piloting = false;
     try std.testing.expect(sb.fastTravel(0, 2, &camera));
-    try std.testing.expectEqual(sb.travelPoint(2)[2], sb.player.feet[2]);
+    try std.testing.expect(R.length(R.sub(sb.travelPoint(2), sb.player.feet)) < 25);
+}
+
+test "travel searches around obstructions and leaves state untouched when no arrival fits" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const original = sb.travelArrival(0).?;
+    const obstacle = try sb.physics.createBody(.{ .position = R.add(original, .{ 0, 1, 0 }), .half_extents = .{ 1, 2, 1 }, .motion = .static });
+    const fallback = sb.travelArrival(0).?;
+    try std.testing.expect(R.length(R.sub(original, fallback)) >= 2);
+    sb.physics.destroyBody(obstacle);
+    _ = try sb.physics.createBody(.{ .position = sb.travelPoint(0), .half_extents = .{ 100, 200, 100 }, .motion = .static });
+    const before = sb.player;
+    const eye = camera.position;
+    try std.testing.expect(!sb.fastTravel(0, 0, &camera));
+    try std.testing.expectEqualDeep(before, sb.player);
+    try std.testing.expectEqualDeep(eye, camera.position);
 }

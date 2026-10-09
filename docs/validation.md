@@ -615,3 +615,13 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - Save format 12 stores the best completed sprint lap, validates it as a finite non-negative time, restores it with the world, and displays `PB --` until a lap is recorded. The save document regression covers time round-trip and rejects negative values.
 - Format 11 saves migrate with an empty best-lap record; earlier save formats remain rejected.
 - Best laps update only when all ordered gates are crossed and the finish gate is reached. P1's explicit quicksave persists the record; split-screen race starts and separate player records remain future work.
+
+## Gameplay menus, terrain map, and travel review — 2026-10-09
+
+- Fast travel preserves traversal selection and suit resources, clears motion and guest interaction edges, and searches a bounded ground neighborhood for a gentle slope and full standing-body clearance. Obstructed destinations either find a nearby arrival or leave player/camera state unchanged.
+- Menu Back restores the parent screen and row. Travel availability is shared by mouse hit handling and keyboard/controller navigation. Controller input remains in the menu route for the entire update that closes a menu.
+- Map markers remain visible at the boundary with compass/off-screen labels; clustered labels are separated. Destination framing, three zoom levels, horizontal distance, and ground altitude are available.
+- `python3 tools/zig.py build test check --summary all`: **353/353 tests passed**, application compile passed. Coverage includes obstructed and fully blocked travel, nested menu navigation, disabled travel, clustered/off-screen markers, and map layouts at 640×480, 853×480, and 1280×720 across every zoom and framing mode.
+- Native Apple M3 Pro / Metal: `python3 tools/zig.py build run -Daudio=false -Dsmoke-frames=120` completed 120 frames and 199 simulation ticks, including co-op, vehicle motion, and save/restore stages.
+- `python3 tools/zig.py build run -Daudio=false -Dshowcase=55 -Dcapture-frame=3`: captured and inspected the map, separated four-player labels, elevation/distance rows, and framing control. Local preview: `zig-out/map-review.png` (generated, not tracked).
+- Physical controller playtest remains pending: judge jump buffering/coyote-time feel, grapple release, landings, camera transitions, and held-button behavior across menus. Automated traversal tests and scripted smoke do not establish subjective handling quality or hardware-specific input behavior.

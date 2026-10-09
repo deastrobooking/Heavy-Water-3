@@ -407,7 +407,15 @@ fn uiNav(self: *App, k: Menu.Key) void {
     });
 }
 
+fn syncTravelMenu(self: *App) void {
+    self.menu.travel_players = 0;
+    for (0..4) |p| if (self.sandbox.travelBlocked(p) == null) {
+        self.menu.travel_players |= @as(u8, 1) << @intCast(p);
+    };
+}
+
 fn menuKey(self: *App, k: Menu.Key) void {
+    self.syncTravelMenu();
     self.runCommand(self.menu.key(k));
 }
 
@@ -472,8 +480,11 @@ fn runCommand(self: *App, command: Menu.Command) void {
             for (&self.pads.commands) |*cmd| cmd.* = .{ .connected = cmd.connected };
         },
         .travel => {
-            if (!self.sandbox.fastTravel(self.menu.hero_player, self.menu.row, &self.engine.camera)) return self.report("LEAVE VEHICLES / ARENA AND JOIN THE PLAYER BEFORE TRAVEL", .{});
+            if (self.sandbox.travelBlocked(self.menu.hero_player)) |reason| return self.report("{s}", .{reason});
+            if (!self.sandbox.fastTravel(self.menu.hero_player, self.menu.row, &self.engine.camera)) return self.report("NO SAFE ARRIVAL NEAR DESTINATION", .{});
             self.menu.open(.none);
+            self.engine.input = .{};
+            self.capture(self.core, true);
         },
         .@"resume" => {
             self.menu.open(.none);
@@ -629,6 +640,7 @@ fn titleCamera(self: *App) void {
 
 /// Mouse over the GUI: hovering selects, clicking also activates.
 fn pointAt(self: *App, click: bool) void {
+    self.syncTravelMenu();
     var id: ?u16 = null;
     var i = self.hit_len;
     while (i > 0) {
@@ -915,6 +927,7 @@ pub fn update(self: *App, core: *mach.Core) void {
     self.menu.seconds = self.seconds;
     self.menu.heroes_unlocked = self.sandbox.progress.heroes;
     self.menu.arena_active = self.sandbox.arena.active;
+    self.syncTravelMenu();
     self.menu.players_present = 1;
     for (self.sandbox.guests, 1..) |g, i| if (g.active) {
         self.menu.players_present |= @as(u8, 1) << @intCast(i);
@@ -1042,10 +1055,12 @@ fn pollPads(self: *App) void {
 
 /// Hands each pad's latest command to its player for the coming fixed step.
 fn routePads(self: *App) void {
+    const navigating = self.uiActive();
     for (self.pads.commands, 0..) |cmd, c| {
         const p = @as(usize, self.menu.controller_players[c]);
         if (!cmd.connected) continue;
-        if (self.uiActive()) {
+        if (navigating) {
+            if (!self.uiActive()) continue;
             if (c == self.menu_controller or p == 0) {
                 // A pad driving P1 through any GUI: D-pad moves, X chooses, B goes back.
                 if (cmd.up) self.uiNav(.up);
@@ -1053,7 +1068,7 @@ fn routePads(self: *App) void {
                 if (cmd.left) self.uiNav(.left);
                 if (cmd.right) self.uiNav(.right);
                 if (cmd.interact) self.uiNav(.confirm);
-                if (cmd.input.dodge) self.uiNav(.back);
+                if (cmd.input.dodge and self.uiActive()) self.uiNav(.back);
             }
             continue;
         }

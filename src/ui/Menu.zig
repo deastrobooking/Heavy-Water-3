@@ -53,6 +53,7 @@ pub const map_items = [_]Item{
     .{ .label = "TRAVEL: BASE CAMP", .command = .travel },
     .{ .label = "TRAVEL: ROOTDEEP SHRINE 1", .command = .travel },
     .{ .label = "TRAVEL: ROOTDEEP SHRINE 2", .command = .travel },
+    .{ .label = "FRAME DESTINATION / PLAYER" },
     .{ .label = "RESUME", .command = .@"resume" },
 };
 pub const quest_items = [_]Item{.{ .label = "BACK" }};
@@ -88,7 +89,15 @@ pub const pad_back = pad_reset + 1;
 pub const pad_controls_rows = pad_back + 1;
 pub const pad_controls_column = (PadBindings.action_count + 1) / 2;
 
+const Parent = struct { screen: Screen, row: u8 };
+
 screen: Screen = .none,
+map_zoom: u8 = 1,
+map_frame_destination: bool = false,
+map_destination: u8 = 0,
+travel_players: u8 = 15,
+parents: [8]Parent = undefined,
+parent_count: usize = 0,
 /// The screen "back" returns to from settings, controls and quit (title or pause).
 base: Screen = .none,
 row: u8 = 0,
@@ -115,7 +124,17 @@ controller_players: [4]u8 = .{ 0, 1, 2, 3 },
 controllers_connected: [4]bool = @splat(false),
 
 pub fn open(self: *Menu, screen: Screen) void {
-    if (screen == .title or screen == .pause or screen == .none) self.base = screen;
+    if (screen == .title or screen == .pause or screen == .none) {
+        self.base = screen;
+        self.parent_count = 0;
+    } else if (screen != self.screen and self.screen != .none and self.parent_count < self.parents.len) {
+        var parent_row = self.row;
+        for (self.items(), 0..) |item, i| if (item.opens == screen) {
+            parent_row = @intCast(i);
+        };
+        self.parents[self.parent_count] = .{ .screen = self.screen, .row = parent_row };
+        self.parent_count += 1;
+    }
     self.screen = screen;
     self.row = 0;
     self.capturing = false;
@@ -152,6 +171,8 @@ pub fn rows(self: *const Menu) u8 {
 
 /// Whether a row can be chosen (CONTINUE and LOAD need a save).
 pub fn enabled(self: *const Menu, row: usize) bool {
+    if (row >= self.rows()) return false;
+    if (self.screen == .world_map and row < 3) return self.hero_player < 4 and self.travel_players & (@as(u8, 1) << @intCast(self.hero_player)) != 0;
     if (self.screen == .title and row == 0) return self.has_save;
     if (self.screen == .pause and pause_items[row].command == .load) return self.has_save;
     if (self.screen == .arena) return switch (arena_items[row].command) {
@@ -175,17 +196,30 @@ fn step(self: *Menu, delta: i32) void {
         if (self.enabled(@intCast(r))) break;
     }
     self.row = @intCast(r);
+    if (self.screen == .world_map and self.row < 3) self.map_destination = self.row;
 }
 
 /// Points at a row (mouse hover); disabled rows are ignored.
 pub fn select(self: *Menu, row: u8) void {
-    if (row < self.rows() and self.enabled(row)) self.row = row;
+    if (row < self.rows() and self.enabled(row)) {
+        self.row = row;
+        if (self.screen == .world_map and row < 3) self.map_destination = row;
+    }
 }
 
 pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .none) return .none;
     if (self.screen == .controls) return self.controlsKey(k);
     if (self.screen == .pad_controls) return self.padControlsKey(k);
+    if (self.screen == .world_map and self.row < 3) self.map_destination = self.row;
+    if (self.screen == .world_map and k == .confirm and self.row == 3) {
+        self.map_frame_destination = !self.map_frame_destination;
+        return .none;
+    }
+    if (self.screen == .world_map and (k == .left or k == .right)) {
+        self.map_zoom = @intCast(std.math.clamp(@as(i32, self.map_zoom) + @as(i32, if (k == .right) -1 else 1), 0, 2));
+        return .none;
+    }
     if (self.screen == .quest_log and k == .confirm) return self.back();
     if (self.screen == .heroes) return self.heroesKey(k);
     if (self.screen == .party and k == .confirm and self.row < 4) {
@@ -373,6 +407,15 @@ pub fn chosenHero(self: *const Menu) ?u8 {
 }
 
 fn back(self: *Menu) Command {
+    if (self.parent_count > 0) {
+        self.parent_count -= 1;
+        const parent = self.parents[self.parent_count];
+        self.screen = parent.screen;
+        self.row = parent.row;
+        self.capturing = false;
+        self.pad_capturing_action = null;
+        return .none;
+    }
     switch (self.screen) {
         .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .confirm_quit => {
             const from = self.screen;
@@ -563,4 +606,37 @@ test "party setup keeps four unique controller owners and selects empty slots" {
     m.row = 2;
     try std.testing.expectEqual(Command.travel, m.key(.confirm));
     try std.testing.expectEqual(@as(u8, 3), m.hero_player);
+}
+
+test "map zoom stays bounded and preserves destination selection" {
+    var m: Menu = .{};
+    m.open(.world_map);
+    m.row = 2;
+    for (0..8) |_| _ = m.key(.right);
+    try std.testing.expectEqual(@as(u8, 0), m.map_zoom);
+    for (0..8) |_| _ = m.key(.left);
+    try std.testing.expectEqual(@as(u8, 2), m.map_zoom);
+    try std.testing.expectEqual(@as(u8, 2), m.row);
+}
+
+test "nested player map returns to its parent and blocked travel skips equally for every input" {
+    var m: Menu = .{};
+    m.open(.pause);
+    m.open(.player);
+    m.row = 3;
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(Screen.world_map, m.screen);
+    m.travel_players = 0;
+    m.select(1);
+    try std.testing.expectEqual(@as(u8, 0), m.row);
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    _ = m.key(.down);
+    try std.testing.expectEqual(@as(u8, 3), m.row);
+    _ = m.key(.confirm);
+    try std.testing.expect(m.map_frame_destination);
+    _ = m.key(.back);
+    try std.testing.expectEqual(Screen.player, m.screen);
+    try std.testing.expectEqual(@as(u8, 3), m.row);
+    _ = m.key(.back);
+    try std.testing.expectEqual(Screen.pause, m.screen);
 }

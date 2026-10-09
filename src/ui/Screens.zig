@@ -1049,13 +1049,28 @@ test "every screen lays out inside the window and records hits" {
     var c: Canvas = .{};
     var m: Menu = .{};
     const Case = struct { screen: Menu.Screen, base: Menu.Screen };
-    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .pad_controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
+    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .pad_controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .world_map, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
         m.open(case.base);
         m.screen = case.screen;
         c.reset(1280, 720);
         draw(&c, &m, &sb, hud);
         try expectInside(&c);
         if (case.screen != .none) try std.testing.expect(c.hit_len > 0);
+    }
+    m.open(.pause);
+    m.open(.world_map);
+    for ([_][2]f32{ .{ 640, 480 }, .{ 853, 480 }, .{ 1280, 720 } }) |size| {
+        for (0..3) |zoom| {
+            m.map_zoom = @intCast(zoom);
+            for ([_]bool{ false, true }) |framed| {
+                m.map_frame_destination = framed;
+                c.reset(size[0], size[1]);
+                var scaled_hud = hud;
+                scaled_hud.view = .{ .x = 0, .y = 0, .w = size[0], .h = size[1] };
+                draw(&c, &m, &sb, scaled_hud);
+                try expectInside(&c);
+            }
+        }
     }
     m.open(.none);
     // Panels: customization, every conversation node, the stall, upgrades and the wardrobe.
@@ -1113,16 +1128,56 @@ test "every screen lays out inside the window and records hits" {
     try std.testing.expectEqual(@as(u8, 3), hitRow(id));
 }
 
+/// Keep marker labels separate while retaining a small dot at their true projected position.
+fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: Color, selected: bool, occupied: *[7]Rect, count: *usize) void {
+    const outside = fx < 0.03 or fx > 0.97 or fy < 0.12 or fy > 0.95;
+    const x = map.x + map.w * std.math.clamp(fx, 0.03, 0.97);
+    const y = map.y + map.h * std.math.clamp(fy, 0.12, 0.95);
+    var buffer: [32]u8 = undefined;
+    const direction: []const u8 = if (fy < 0.12) "N" else if (fy > 0.95) "S" else if (fx < 0.03) "W" else "E";
+    const text = if (outside) std.fmt.bufPrint(&buffer, "{s} {s} OFF", .{ label, direction }) catch label else label;
+    const width = Canvas.textWidth(text, 0.8) + 6;
+    var tag: Rect = .{ .x = std.math.clamp(x + 7, map.x + 2, map.x + map.w - width - 2), .y = y, .w = width, .h = 12 };
+    for (0..32) |attempt| {
+        const offset: f32 = @floatFromInt((attempt + 1) / 2 * 13);
+        tag.y = std.math.clamp(y + (if (attempt % 2 == 0) offset else -offset), map.y + 24, map.y + map.h - 14);
+        var overlaps = false;
+        for (occupied[0..count.*]) |other| {
+            if (tag.x < other.x + other.w and tag.x + tag.w > other.x and tag.y < other.y + other.h and tag.y + tag.h > other.y) overlaps = true;
+        }
+        if (!overlaps) break;
+    }
+    occupied[count.*] = tag;
+    count.* += 1;
+    c.rect(.{ .x = x - 2, .y = y - 2, .w = 4, .h = 4 }, color);
+    if (selected) c.frame(.{ .x = x - 5, .y = y - 5, .w = 10, .h = 10 }, 1, ink);
+    c.rect(tag, .{ 0.015, 0.025, 0.035, 0.95 });
+    c.text(tag.x + 3, tag.y + 2, text, 0.8, color);
+}
+
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const r = menuRect(c, @min(720, c.width - 30), @min(650, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
-    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 265 };
+    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 285 };
     c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
-    const span: f32 = 700;
+    const span: f32 = switch (menu.map_zoom) {
+        0 => 350,
+        1 => 700,
+        else => 1400,
+    };
+    const depth = span * map.h / map.w;
+    const player_position = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
+    const destination = if (menu.row < 3) menu.row else menu.map_destination;
+    const focus = if (menu.map_frame_destination) sb.travelPoint(destination) else player_position;
     for (0..12) |z| for (0..20) |x| {
         const fx = @as(f32, @floatFromInt(x)) / 20;
         const fz = @as(f32, @floatFromInt(z)) / 12;
-        const color = @import("../procedural/Biome.zig").sample(sb.seed, (fx - 0.5) * span, Sandbox.spawn[2] + (fz - 0.5) * span).color();
+        const wx = focus[0] + (fx - 0.5) * span;
+        const wz = focus[2] + (fz - 0.5) * depth;
+        const surface = @import("../procedural/Terrain.zig").surface(sb.seed, wx, wz);
+        const biome = @import("../procedural/Biome.zig").sample(sb.seed, wx, wz).color();
+        const relief = std.math.clamp(0.55 + surface.normal[0] * 0.3 + surface.normal[2] * 0.25 + surface.height / 350, 0.25, 1);
+        const color = [3]f32{ biome[0] * relief, biome[1] * relief, biome[2] * relief };
         c.rect(.{ .x = map.x + map.w * fx, .y = map.y + map.h * fz, .w = map.w / 20 + 1, .h = map.h / 12 + 1 }, .{ color[0] * 0.5, color[1] * 0.6, color[2] * 0.5, 1 });
     };
     for (0..8) |i| {
@@ -1130,24 +1185,50 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         c.rect(.{ .x = map.x + map.w * f, .y = map.y, .w = 1, .h = map.h }, alpha(dim, 0.2));
         c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
     }
-    c.text(map.x + 8, map.y + 8, "N ^   LOCAL REGION - 700 METERS", 1, dim);
+    c.print(map.x + 8, map.y + 8, 1, ink, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
+    var occupied: [7]Rect = undefined;
+    var marker_count: usize = 0;
     for (0..3) |i| {
-        const p = sb.travelPoint(i);
-        const x = map.x + map.w * (0.5 + p[0] / span);
-        const y = map.y + map.h * (0.5 + (p[2] - Sandbox.spawn[2]) / span);
-        c.rect(.{ .x = x - 4, .y = y - 4, .w = 8, .h = 8 }, gold);
-        c.print(x + 8, y, 1, gold, "{d}", .{i + 1});
+        const point = sb.travelPoint(i);
+        var label: [8]u8 = undefined;
+        mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, std.fmt.bufPrint(&label, "{d}", .{i + 1}) catch "?", gold, destination == i, &occupied, &marker_count);
     }
     for (0..4) |i| {
         if (i > 0 and !sb.guests[i - 1].active) continue;
-        const p = if (i == 0) sb.player.feet else sb.guests[i - 1].player.feet;
-        const x = map.x + map.w * std.math.clamp(0.5 + p[0] / span, 0.02, 0.98);
-        const y = map.y + map.h * std.math.clamp(0.5 + (p[2] - Sandbox.spawn[2]) / span, 0.02, 0.98);
-        c.print(x, y, 1, accent, "P{d}", .{i + 1});
+        const point = if (i == 0) sb.player.feet else sb.guests[i - 1].player.feet;
+        var label: [8]u8 = undefined;
+        mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, std.fmt.bufPrint(&label, "P{d}", .{i + 1}) catch "?", accent, menu.hero_player == i, &occupied, &marker_count);
     }
-    c.print(r.x + 22, map.y + map.h + 15, 1, ink, "TRAVEL FOR PLAYER {d}  /  GOLD = DESTINATION", .{menu.hero_player + 1});
+    c.print(r.x + 22, map.y + map.h + 15, 1, ink, "P{d} / GOLD: DESTINATION / {s} VIEW", .{ menu.hero_player + 1, if (menu.map_frame_destination) "DESTINATION" else "PLAYER" });
     for (Menu.map_items, 0..) |item, i| {
-        const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 34, .w = r.w - 24, .h = 30 };
-        button(c, row, item.label, hitId(.menu, i), menu.row == i);
+        const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = r.w - 24, .h = 26 };
+        rowBack(c, row, menu.row == i);
+        const on = menu.enabled(i);
+        c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
+        if (on) c.hit(row, hitId(.menu, i));
+        if (i < 3) {
+            const point = sb.travelPoint(i);
+            const dx = point[0] - player_position[0];
+            const dz = point[2] - player_position[2];
+            c.print(row.x + row.w - 175, row.y + 9, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
+        }
+    }
+    c.text(r.x + 22, r.y + r.h - 24, sb.travelBlocked(menu.hero_player) orelse "ENTER SELECT / ESC BACK / OFF = OUTSIDE MAP", 1, dim);
+}
+
+test "clustered and offscreen map markers retain separate labels inside the map" {
+    var c: Canvas = .{};
+    c.reset(640, 480);
+    const map: Rect = .{ .x = 30, .y = 70, .w = 580, .h = 165 };
+    for ([_][2]f32{ .{ 0.5, 0.5 }, .{ 10, -10 }, .{ -10, 10 } }) |point| {
+        var occupied: [7]Rect = undefined;
+        var count: usize = 0;
+        c.reset(640, 480);
+        for (0..7) |_| mapMarker(&c, map, point[0], point[1], "P1", accent, false, &occupied, &count);
+        try expectInside(&c);
+        for (occupied, 0..) |a, i| {
+            try std.testing.expect(a.x >= map.x and a.y >= map.y and a.x + a.w <= map.x + map.w and a.y + a.h <= map.y + map.h);
+            for (occupied[0..i]) |b| try std.testing.expect(a.x >= b.x + b.w or a.x + a.w <= b.x or a.y >= b.y + b.h or a.y + a.h <= b.y);
+        }
     }
 }
