@@ -17,7 +17,8 @@ pub const Sample = extern struct {
 /// `join` (Menu) joins or opens party setup; `respawn` (Select/Options) opens the player menu.
 /// `up` / `down` / `left` / `right` are D-pad edges (menus, panels, market stalls); `fire` is
 /// the right trigger, held; `alt` is the right bumper saber action, held.
-pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, fire: bool = false, alt: bool = false };
+/// `held` is the D-pad as held right now (up, down, left, right), for menu repeat.
+pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, fire: bool = false, alt: bool = false, held: [4]bool = @splat(false) };
 extern fn hw_gamepads(out: [*]Sample) void;
 previous: [4]u32 = @splat(0),
 button_edges: [4]u32 = @splat(0),
@@ -72,6 +73,7 @@ pub fn sample(self: *Gamepads, samples: [4]Sample) void {
         cmd.interact = cmd.interact or down.isDown(.interact, edges);
         cmd.join = cmd.join or down.isDown(.join, edges);
         cmd.respawn = cmd.respawn or down.isDown(.respawn, edges);
+        cmd.held = .{ down.isDown(.up, buttons), down.isDown(.down, buttons), down.isDown(.left, buttons), down.isDown(.right, buttons) };
         cmd.up = cmd.up or down.isDown(.up, edges);
         cmd.down = cmd.down or down.isDown(.down, edges);
         cmd.left = cmd.left or down.isDown(.left, edges);
@@ -146,4 +148,19 @@ test "remapped gamepad actions and soft analog trigger reach the logical command
     pads.sample(samples);
     try std.testing.expect(pads.commands[0].input.forward > 0.99);
     try std.testing.expect(pads.commands[0].input.look_x < -0.99);
+}
+
+test "the held D-pad is reported every poll for menu repeat, alongside its press edge" {
+    var pads: Gamepads = .{};
+    var samples: [4]Sample = @splat(.{});
+    samples[0] = .{ .connected = 1, .buttons = 1 << 13 };
+    pads.sample(samples);
+    try std.testing.expect(pads.commands[0].down and pads.commands[0].held[1]);
+    pads.consume();
+    pads.sample(samples);
+    // Still held, but no new press.
+    try std.testing.expect(!pads.commands[0].down and pads.commands[0].held[1]);
+    samples[0].buttons = 0;
+    pads.sample(samples);
+    try std.testing.expect(!pads.commands[0].held[1]);
 }

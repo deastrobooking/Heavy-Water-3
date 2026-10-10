@@ -295,6 +295,20 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Controller weapons, controller start and scrolling GUIs — 2026-10-10
+
+- **Right trigger and right bumper:** the energy gun and saber were routed correctly in code, but the installed `zig-out/bin/heavy-water` dated from Oct 5, before the Oct 6 controller change; `build run` and tests never reinstall it. It is reinstalled now. A new test drives a raw controller sample through the real mapping and P1 routing into a full Sandbox step: the right trigger fires energy-gun bolts and the right bumper swings the saber. P1's pad weapon routing is now one shared function (`Sandbox.padWeapons`). The build doc's troubleshooting covers stale installs.
+- **Starting from a controller:** Start now begins from the title and finishes the creator, as well as pausing. Menus repeat when the D-pad or left stick is held.
+- **Scrolling GUIs:** panels and menus scroll when taller than the screen, following the selection, with the right stick and mouse wheel scrolling freely. The Heroes screen keeps its natural layout at small widths instead of overlapping.
+- **Verification:** **356/356 tests pass**, plus the app check. New tests cover canvas scrolling (follows focus, stays within the content, no scroll when it fits, hits shift with content) and the held D-pad.
+- **Captures:** `-Dshowcase=56` (Heroes at 150%, scrolled to BACK) and `57` (pause menu at 150%, scrolled to its last item).
+- **Not checked:** a hand pass with a physical controller (repeat timing, stick thresholds) was not possible in this session.
+- **Review pass, the same day:**
+  - The baseline was 353/353 tests and the app check, with a clean Metal smoke.
+  - The three newest commits (armor coverage, controller intro weapons, fast travel) read correctly. Fast travel searches for a safe, unoccupied arrival (mesh colliders included) and changes nothing when none fits.
+  - The frontier benchmark fails `simulation_step_budget`: simulation p95 6.27 ms against 4 ms, mostly the air war (2.1 ms mean: wasps and air projectiles). Character skinning p99 is 2.05 ms and render CPU p99 3.26 ms.
+  - Long smoke runs while the window is occluded log tens of thousands of ticks (macOS throttling); unlocked, focused reruns log about 390.
+
 ## Review, Wildkin heroes and the Starbowl — 2026-10-05
 
 - **Project review baseline:** 331/331 Debug tests, the app check, and the Metal smoke all passed before any change. The review read the most recent and riskiest changes (controller HID bridge, presets, rigid-body pairs, flight collision, menus). Issues found and fixed:

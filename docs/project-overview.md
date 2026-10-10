@@ -79,9 +79,10 @@ Up to four players share one window in split screen. On macOS, controllers expos
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
 | X | Press the aimed button or open a stall; hold to hang and mantle |
 | D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons; away from a stall, up and down use specials 1 and 2 (up with RB held: special 3) |
+| In any menu or panel (P1's controller) | D-pad or left stick moves (hold to repeat), A or X chooses, B goes back, right stick scrolls panels taller than the screen |
 | Right trigger | Fire the selected energy weapon; starts with level 1 rapid shot (machine gun) |
 | RB | Quick-draw the neon-purple beam saber with blue electrical pulses; tap for a cut, hold then release for a charged wave |
-| Menu (P1's controller) | Open or close the pause menu |
+| Menu (P1's controller) | On the title, start (CONTINUE or NEW GAME, whichever is highlighted); in the creator, finish; in play, open or close the pause menu. P1 can start and play the whole game from a controller |
 | Right stick click (R3) | First- / third-person view |
 | LB / Y | Grapple / cycle traversal kit |
 | LT | Sprint |

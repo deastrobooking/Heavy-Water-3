@@ -113,6 +113,16 @@ window_height: f32 = 800,
 seconds: f32 = 0,
 /// The P1 pad's Menu button was pressed (opens or closes the pause menu).
 pad_menu: bool = false,
+/// GUI scrolling: how far tall panels are scrolled, which screen it belongs to, the focus last
+/// shown, and free scrolling asked for this frame (right stick, mouse wheel).
+ui_scroll: f32 = 0,
+ui_scroll_key: u32 = 0,
+ui_scroll_focus: ?[4]f32 = null,
+ui_scroll_free: f32 = 0,
+/// Controller menu navigation repeat: the direction held on each pad and the wait before the
+/// next step (a first step at once, then a pause, then a steady repeat).
+nav_held: [4]?Menu.Key = @splat(null),
+nav_wait: [4]f32 = @splat(0),
 /// Frames since a combat showcase was set up (its trigger rhythm).
 showcase_frame: u32 = 0,
 /// Where a combat showcase holds the player (saber lunges would carry them off).
@@ -910,6 +920,9 @@ pub fn update(self: *App, core: *mach.Core) void {
             self.engine.input.look_x += @as(f32, @floatCast(motion.dx)) * sensitivity;
             self.engine.input.look_y += @as(f32, @floatCast(motion.dy)) * sensitivity * (if (self.menu.settings.invert_y) @as(f32, -1) else 1);
         },
+        .mouse_scroll => |wheel| if (self.uiActive()) {
+            self.ui_scroll_free -= wheel.yoffset * 24;
+        },
         .mouse_motion => |motion| {
             // Window points to canvas units (the canvas is `ui_height` units tall).
             const scale = self.ui_height / @max(self.window_height, 1);
@@ -935,7 +948,13 @@ pub fn update(self: *App, core: *mach.Core) void {
     self.pollPads();
     if (self.pad_menu) {
         self.pad_menu = false;
-        if (self.menu.screen == .none and !self.uiActive()) self.menu.open(.pause) else if (self.menu.screen == .pause) self.menuKey(.back);
+        // Start: begins from the title (the highlighted CONTINUE or NEW GAME), finishes the
+        // creator, pauses during play, and resumes from the pause menu.
+        if (self.menu.screen == .title) {
+            self.uiNav(.confirm);
+        } else if (self.menu.screen == .none and self.sandbox.creator.open) {
+            self.uiNav(.confirm);
+        } else if (self.menu.screen == .none and !self.uiActive()) self.menu.open(.pause) else if (self.menu.screen == .pause) self.menuKey(.back);
     }
     if (self.interactive) {
         const fov = self.menu.settings.fovRadians();
@@ -1062,23 +1081,19 @@ fn routePads(self: *App) void {
         if (navigating) {
             if (!self.uiActive()) continue;
             if (c == self.menu_controller or p == 0) {
-                // A pad driving P1 through any GUI: D-pad moves, X chooses, B goes back.
-                if (cmd.up) self.uiNav(.up);
-                if (cmd.down) self.uiNav(.down);
-                if (cmd.left) self.uiNav(.left);
-                if (cmd.right) self.uiNav(.right);
+                // A pad driving P1 through any GUI: the D-pad or left stick moves (held, it
+                // repeats), A/X chooses, B goes back, and the right stick scrolls tall panels.
+                self.padNavigate(c, cmd);
                 if (cmd.interact) self.uiNav(.confirm);
                 if (cmd.input.dodge and self.uiActive()) self.uiNav(.back);
+                self.ui_scroll_free += cmd.input.look_y * 900 * Time.fixed_dt;
             }
             continue;
         }
         if (p == 0) {
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
             // P1 shares the same direct energy/saber path as the guests.
-            self.sandbox.trigger.fire = self.sandbox.trigger.fire or cmd.fire;
-            self.sandbox.trigger.saber = cmd.alt;
-            self.sandbox.trigger.direct = true;
-            if (cmd.fire or cmd.alt) self.sandbox.tools.tool = .weapon;
+            self.sandbox.padWeapons(cmd.fire, cmd.alt);
             self.actions.interact = self.actions.interact or cmd.interact;
             if (self.sandbox.hangar.piloting and cmd.interact) self.actions.leave_jet = true;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
@@ -1102,6 +1117,32 @@ fn routePads(self: *App) void {
     }
 }
 
+/// Menu movement from one pad: D-pad held, else the left stick pushed past 0.6 (the stronger
+/// axis wins). A new direction steps at once; held, it waits 0.38 s, then steps every 0.09 s.
+fn padNavigate(self: *App, c: usize, cmd: Gamepads.Command) void {
+    var dir: ?Menu.Key = null;
+    if (cmd.held[0] or cmd.up) dir = .up else if (cmd.held[1] or cmd.down) dir = .down else if (cmd.held[2] or cmd.left) dir = .left else if (cmd.held[3] or cmd.right) dir = .right;
+    if (dir == null) {
+        const x = cmd.input.right;
+        const y = cmd.input.forward;
+        if (@max(@abs(x), @abs(y)) > 0.6) dir = if (@abs(y) >= @abs(x)) (if (y > 0) .up else .down) else (if (x > 0) .right else .left);
+    }
+    const now = dir orelse {
+        self.nav_held[c] = null;
+        return;
+    };
+    if (self.nav_held[c] != now) {
+        self.nav_held[c] = now;
+        self.nav_wait[c] = 0.38;
+        return self.uiNav(now);
+    }
+    self.nav_wait[c] -= Time.fixed_dt;
+    if (self.nav_wait[c] <= 0) {
+        self.nav_wait[c] = 0.09;
+        self.uiNav(now);
+    }
+}
+
 /// F6: add the next free guest (idle unless a controller drives it), or remove the last.
 fn toggleGuest(self: *App) void {
     for (self.sandbox.guests, 0..) |g, i| if (!g.active) {
@@ -1122,7 +1163,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 55)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57)) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1395,6 +1436,21 @@ fn guiShowcase(self: *App, v: u32) void {
             self.menu.open(.pause);
             self.menu.open(if (v == 54) .party else .world_map);
             self.menu.hero_player = 2;
+        },
+        56 => {
+            // Interface size 150%: the Heroes screen is taller than the window and scrolls to
+            // its focused BACK button.
+            self.menu.settings.ui_scale = 1.5;
+            sb.progress.heroes = Sandbox.Heroes.starters();
+            self.menu.open(.pause);
+            self.menu.open(.heroes);
+            self.menu.row = Menu.heroes_back;
+        },
+        57 => {
+            // Interface size 150%: the pause menu scrolled to its last item.
+            self.menu.settings.ui_scale = 1.5;
+            self.menu.open(.pause);
+            self.menu.row = @intCast(Menu.pause_items.len - 1);
         },
         52 => {
             sb.progress.heroes = Sandbox.Heroes.starters() | 0b1011_0110_0000;
@@ -2285,6 +2341,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         .seed = sandbox.seed,
         .guests = guests[0..guest_count],
         .marks = marks[0..mark_count],
+        .scroll = self.ui_scroll,
         .special_keys = .{
             @import("game/Bindings.zig").keyName(self.menu.settings.bindings.key(.special_1), &special_keys[0]),
             @import("game/Bindings.zig").keyName(self.menu.settings.bindings.key(.special_2), &special_keys[1]),
@@ -2293,6 +2350,24 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
     });
     self.hit_len = ui.hit_len;
     @memcpy(self.hits[0..ui.hit_len], ui.hits[0..ui.hit_len]);
+    self.scrollGui(ui);
+}
+
+/// Next frame's GUI scroll: a new screen starts at the top; a new selection is scrolled into
+/// view; the right stick and mouse wheel scroll freely in between.
+fn scrollGui(self: *App, ui: *const @import("ui/Canvas.zig")) void {
+    const sb = &self.sandbox;
+    const key: u32 = @as(u32, @intFromEnum(self.menu.screen)) | @as(u32, @intFromBool(sb.creator.open)) << 8 | @as(u32, @intFromBool(sb.talk != null)) << 9 | @as(u32, @intFromBool(sb.shop != null)) << 10 | @as(u32, @intFromBool(sb.trading != null)) << 11;
+    if (key != self.ui_scroll_key) {
+        self.ui_scroll_key = key;
+        self.ui_scroll = 0;
+        self.ui_scroll_focus = null;
+    }
+    const focus: ?[4]f32 = if (ui.focused) |f| .{ f.x, f.y, f.w, f.h } else null;
+    const moved = !std.meta.eql(focus, self.ui_scroll_focus);
+    self.ui_scroll_focus = focus;
+    self.ui_scroll = ui.nextScroll(self.ui_scroll + self.ui_scroll_free, moved);
+    self.ui_scroll_free = 0;
 }
 
 pub fn stop(self: *App) void {

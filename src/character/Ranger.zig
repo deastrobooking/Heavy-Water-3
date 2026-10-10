@@ -107,13 +107,59 @@ pub fn sameAppearance(a: Profile, b: Profile) bool {
     y.name_len = 0;
     return std.meta.eql(x, y);
 }
-pub fn update(self: *Ranger, state: Pose) bool {
+/// GPU skinning: a character's bind-pose vertex (model space) with its four joint influences.
+/// The renderer uploads these once per appearance; each frame only the joint palette changes.
+pub const SkinnedVertex = extern struct {
+    position: [3]f32,
+    normal: [3]f32,
+    color: [3]f32,
+    joints: [4]u8,
+    weights: [4]f32,
+};
+/// Joints per character in the GPU palette (two vec4s, a dual quaternion, per joint).
+pub const max_palette_joints = 64;
+/// One character's palette in the uniform buffer, padded to the 256-byte dynamic-offset rule.
+pub const palette_bytes = max_palette_joints * 32;
+pub const Palette = [max_palette_joints * 2][4]f32;
+
+/// Whether this character fits the GPU palette (otherwise it is skinned on the CPU).
+pub fn gpuSkinnable(self: *const Ranger) bool {
+    return self.character.skeleton.count() <= max_palette_joints;
+}
+
+/// The bind-pose mesh for GPU skinning: positions, normals and influences from the generator,
+/// colours as baked for the CPU mesh (face decals included). The caller owns the slice.
+pub fn skinnedVertices(self: *const Ranger, a: std.mem.Allocator) ![]SkinnedVertex {
+    const out = try a.alloc(SkinnedVertex, self.mesh.vertices.len);
+    for (out, self.character.mesh.vertices.items, self.mesh.vertices) |*o, source, baked| {
+        var joints: [4]u8 = undefined;
+        for (&joints, source.joints) |*j, s| j.* = @intCast(s);
+        o.* = .{ .position = .{ source.pos.x, source.pos.y, source.pos.z }, .normal = .{ source.normal.x, source.normal.y, source.normal.z }, .color = baked.color, .joints = joints, .weights = source.weights };
+    }
+    return out;
+}
+
+/// Poses the skeleton for `state` and writes the joint dual quaternions into `palette` (real
+/// part, then dual part, per joint), without touching the mesh. False when the pose is unchanged
+/// since the last call (the palette already holds it).
+pub fn posePalette(self: *Ranger, state: Pose, palette: *Palette) bool {
+    if (!self.solvePose(state)) return false;
+    self.instance.pose.skinDualQuats(&self.character.skeleton, self.instance.dqs);
+    for (self.instance.dqs, 0..) |dq, j| {
+        palette[j * 2] = .{ dq.real.x, dq.real.y, dq.real.z, dq.real.w };
+        palette[j * 2 + 1] = .{ dq.dual.x, dq.dual.y, dq.dual.z, dq.dual.w };
+    }
+    return true;
+}
+
+/// The pose for `state` (clip blend, then actions), unless it is the one already solved.
+fn solvePose(self: *Ranger, state: Pose) bool {
     const p = &self.instance.pose;
     const blend = self.controller.update(clipFor(state.motion, state.walk_amount), state.time);
     var key = state;
     const timed_pose = state.motion == .climb or state.motion == .hang or state.motion == .mantle or state.motion == .wall_slide;
     if (state.motion == .idle and state.action == .none) {
-        // Keep the subtle idle breath while avoiding a full mesh skin on every 60 Hz frame.
+        // Keep the subtle idle breath while avoiding a re-skin on every 60 Hz frame.
         key.time = @floor(state.time * 12) / 12;
     } else if (!timed_pose) {
         key.time = 0;
@@ -122,13 +168,19 @@ pub fn update(self: *Ranger, state: Pose) bool {
         if (std.meta.eql(previous, key) and std.meta.eql(old_blend, blend)) return false;
     };
     poseSkeletonBlended(p, &self.character.skeleton, key, blend);
+    self.last_pose = key;
+    self.last_blend = blend;
+    return true;
+}
+
+/// CPU skinning: poses and skins the whole mesh into `mesh` (the fallback, and what tests use).
+pub fn update(self: *Ranger, state: Pose) bool {
+    if (!self.solvePose(state)) return false;
     self.instance.skin(&self.character);
     for (self.mesh.vertices, self.instance.pos, self.instance.nrm) |*v, pos, normal| {
         v.position = .{ pos.x, pos.y, pos.z };
         v.normal = .{ normal.x, normal.y, normal.z };
     }
-    self.last_pose = key;
-    self.last_blend = blend;
     return true;
 }
 

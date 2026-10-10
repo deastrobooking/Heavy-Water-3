@@ -46,17 +46,53 @@ commands: [capacity]Command = undefined,
 len: usize = 0,
 hits: [hit_capacity]Hit = undefined,
 hit_len: usize = 0,
+/// Scrolling panels: while `scrolling`, everything drawn moves up by `shift` units (hits too),
+/// and the extent drawn and the focused element are recorded in unshifted units, so the
+/// application can keep the focus on screen and let tall panels scroll.
+scrolling: bool = false,
+shift: f32 = 0,
+extent: ?[2]f32 = null,
+focused: ?Rect = null,
 
 pub fn reset(self: *Canvas, width: f32, height: f32) void {
     self.width = width;
     self.height = height;
     self.len = 0;
     self.hit_len = 0;
+    self.scrolling = false;
+    self.extent = null;
+    self.focused = null;
+}
+
+/// Starts drawing scrolled content (panels and menus), shifted up by `shift` units.
+pub fn beginScroll(self: *Canvas, shift: f32) void {
+    self.scrolling = true;
+    self.shift = shift;
+}
+
+pub fn endScroll(self: *Canvas) void {
+    self.scrolling = false;
+}
+
+/// Marks the selected element (a row, card or button): scrolling keeps it in view.
+pub fn focus(self: *Canvas, r: Rect) void {
+    if (self.scrolling) self.focused = r;
+}
+
+fn track(self: *Canvas, top: f32, bottom: f32) void {
+    if (!self.scrolling) return;
+    const e = self.extent orelse [2]f32{ top, bottom };
+    self.extent = .{ @min(e[0], top), @max(e[1], bottom) };
+}
+
+fn shifted(self: *const Canvas, y: f32) f32 {
+    return if (self.scrolling) y - self.shift else y;
 }
 
 pub fn rect(self: *Canvas, r: Rect, color: Color) void {
     if (self.len == capacity or r.w <= 0 or r.h <= 0) return;
-    self.commands[self.len] = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h, .color = color };
+    self.track(r.y, r.y + r.h);
+    self.commands[self.len] = .{ .x = r.x, .y = self.shifted(r.y), .w = r.w, .h = r.h, .color = color };
     self.len += 1;
 }
 
@@ -72,7 +108,8 @@ pub fn frame(self: *Canvas, r: Rect, t: f32, color: Color) void {
 pub fn text(self: *Canvas, x: f32, y: f32, value: []const u8, scale: f32, color: Color) void {
     if (self.len == capacity or value.len == 0) return;
     const n = @min(value.len, text_capacity);
-    var c: Command = .{ .kind = .text, .x = x, .y = y, .color = color, .cell = 2 * scale, .len = @intCast(n) };
+    self.track(y, y + line_height * scale);
+    var c: Command = .{ .kind = .text, .x = x, .y = self.shifted(y), .color = color, .cell = 2 * scale, .len = @intCast(n) };
     @memcpy(c.text[0..n], value[0..n]);
     self.commands[self.len] = c;
     self.len += 1;
@@ -95,7 +132,9 @@ pub fn centered(self: *Canvas, cx: f32, y: f32, value: []const u8, scale: f32, c
 
 pub fn hit(self: *Canvas, r: Rect, id: u16) void {
     if (self.hit_len == hit_capacity) return;
-    self.hits[self.hit_len] = .{ .rect = r, .id = id };
+    var moved = r;
+    moved.y = self.shifted(r.y);
+    self.hits[self.hit_len] = .{ .rect = moved, .id = id };
     self.hit_len += 1;
 }
 
@@ -152,4 +191,55 @@ test "hits resolve topmost first and text is measured in units" {
     try std.testing.expectApproxEqAbs(@as(f32, 22), textWidth("ABC", 1), 1e-6);
     c.text(0, 0, "x" ** 200, 1, .{ 1, 1, 1, 1 });
     try std.testing.expectEqual(@as(u8, text_capacity), c.commands[0].len);
+}
+
+/// The next frame's scroll for content drawn with `beginScroll`: kept inside the content's
+/// extent, and moved only as far as needed to show the focused element when `follow` is set
+/// (a new selection). Content that fits needs no scroll.
+pub fn nextScroll(self: *const Canvas, current: f32, follow: bool) f32 {
+    const margin: f32 = 16;
+    const e = self.extent orelse return 0;
+    const top = e[0] - margin;
+    const bottom = e[1] + margin;
+    // Everything fits where it was laid out: no scrolling.
+    if (top >= 0 and bottom <= self.height) return 0;
+    var s = current;
+    if (follow) if (self.focused) |f| {
+        if (f.y - margin < s) s = f.y - margin;
+        if (f.y + f.h + margin > s + self.height) s = f.y + f.h + margin - self.height;
+    };
+    // Never past either end of the content.
+    const lo = @min(top, 0);
+    const hi = @max(bottom - self.height, lo);
+    return std.math.clamp(s, lo, hi);
+}
+
+test "tall scrolled content follows its focus, stays within its extent, and fits without scroll" {
+    var c: Canvas = .{};
+    c.reset(1280, 400);
+    c.beginScroll(0);
+    c.rect(.{ .x = 0, .y = -100, .w = 10, .h = 900 }, .{ 1, 1, 1, 1 });
+    c.focus(.{ .x = 0, .y = 600, .w = 10, .h = 30 });
+    c.hit(.{ .x = 0, .y = 600, .w = 10, .h = 30 }, 7);
+    c.endScroll();
+    // The focus at 600 needs the view moved down so it shows at the bottom.
+    const s = c.nextScroll(0, true);
+    try std.testing.expect(s >= 600 + 30 - 400 and s <= 600);
+    // Drawn with that shift, the hit moves up by the same amount.
+    c.reset(1280, 400);
+    c.beginScroll(s);
+    c.hit(.{ .x = 0, .y = 600, .w = 10, .h = 30 }, 7);
+    try std.testing.expectEqual(@as(?u16, 7), c.hitAt(5, 600 - s + 5));
+    c.endScroll();
+    // Never past the ends.
+    c.reset(1280, 400);
+    c.beginScroll(0);
+    c.rect(.{ .x = 0, .y = -100, .w = 10, .h = 900 }, .{ 1, 1, 1, 1 });
+    try std.testing.expect(c.nextScroll(5000, false) <= 900 - 100 + 16 - 400 + 0.01);
+    try std.testing.expect(c.nextScroll(-5000, false) >= -116 - 0.01);
+    // Content that fits needs no scroll.
+    c.reset(1280, 400);
+    c.beginScroll(50);
+    c.rect(.{ .x = 0, .y = 50, .w = 10, .h = 200 }, .{ 1, 1, 1, 1 });
+    try std.testing.expectEqual(@as(f32, 0), c.nextScroll(50, true));
 }

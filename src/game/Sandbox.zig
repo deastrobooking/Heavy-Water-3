@@ -781,6 +781,15 @@ pub fn halve(size: [3]f32) Physics.Vec3 {
     return .{ size[0] / 2, size[1] / 2, size[2] / 2 };
 }
 
+/// P1's controller weapons for the coming step: the right trigger fires the energy gun, the
+/// right bumper quick-draws the beam saber. Either draws the weapon tool.
+pub fn padWeapons(self: *Sandbox, fire: bool, saber: bool) void {
+    self.trigger.fire = self.trigger.fire or fire;
+    self.trigger.saber = self.trigger.saber or saber;
+    self.trigger.direct = true;
+    if (fire or saber) self.tools.tool = .weapon;
+}
+
 /// A body's passives on top of the party's suit: a Wildkin hero's run speed, and wings that
 /// make flight cheap and long.
 pub fn heroSuit(base: Player.Suit, profile: Profile) Player.Suit {
@@ -3671,4 +3680,45 @@ test "travel searches around obstructions and leaves state untouched when no arr
     try std.testing.expect(!sb.fastTravel(0, 0, &camera));
     try std.testing.expectEqualDeep(before, sb.player);
     try std.testing.expectEqualDeep(eye, camera.position);
+}
+
+test "P1's controller: the right trigger fires the energy gun and the right bumper swings the saber" {
+    const Gamepads = @import("../engine/Gamepads.zig");
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    var pads: Gamepads = .{};
+    var samples: [4]Gamepads.Sample = @splat(.{});
+    // Settle on the ground first.
+    for (0..30) |_| try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+    // Right trigger held: the energy gun fires a stream of bolts.
+    samples[0] = .{ .connected = 1, .rt = 1 };
+    var fired: usize = 0;
+    for (0..30) |_| {
+        pads.sample(samples);
+        sb.trigger = .{};
+        sb.padWeapons(pads.commands[Gamepads.playerIndex(0)].fire, pads.commands[0].alt);
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        for (sb.combat.arsenals[0].system.projectiles.items) |p| fired += @intFromBool(p.active and p.kind == .mg_bolt);
+        pads.consume();
+    }
+    try std.testing.expect(pads.commands[0].fire);
+    try std.testing.expectEqual(@as(?@import("../combat/Weapon.zig").WeaponKind, .machine_gun), sb.combat.arsenals[0].active);
+    try std.testing.expect(fired > 0);
+    // Right bumper: the saber is drawn and swings.
+    samples[0] = .{ .connected = 1, .buttons = 1 << 5 };
+    var swung = false;
+    for (0..10) |_| {
+        pads.sample(samples);
+        sb.trigger = .{};
+        sb.padWeapons(pads.commands[0].fire, pads.commands[0].alt);
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        swung = swung or sb.combat.arsenals[0].melee.swing != null;
+        pads.consume();
+    }
+    try std.testing.expect(pads.commands[0].alt);
+    try std.testing.expect(swung);
 }

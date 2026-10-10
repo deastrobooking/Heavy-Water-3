@@ -186,6 +186,8 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 48–51 | The Wildkin, eight at a time, on the meadow |
 | 52 | The Heroes screen |
 | 53 | The Starbowl arena, wave 1, as Bolt Quill |
+| 56 | The Heroes screen at 150% interface size, scrolled to BACK |
+| 57 | The pause menu at 150% interface size, scrolled to its last item |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.
 
@@ -201,6 +203,7 @@ Captures need a visible, unlocked screen. macOS stops presenting frames to a hid
 
 ## Troubleshooting
 
+- **A change works in tests or `build run` but not in the game you launch:** `build run` and `build test` run from the build cache and do not update `zig-out/bin/heavy-water`. Only `python3 tools/zig.py build` (with any `-Doptimize`) reinstalls it. Compare `ls -la zig-out/bin/heavy-water` with the date of your last change. For example, an Oct 5 install predated the Oct 6 controller change that put the energy gun on the right trigger and the saber on the right bumper.
 - **Segmentation fault at startup in Mach `Modules.init` (Debug):** a stack overflow. A module state has grown too large; move big arrays to the heap (see Optimization modes).
 - **A capture or smoke never finishes:** the screen is locked or the window is hidden, or a second instance is running. Check `ps aux | grep heavy-water`.
 - **The test suite runs for many minutes:** sample the test process (`sample <pid> 2`) to find the hot spot before waiting longer.

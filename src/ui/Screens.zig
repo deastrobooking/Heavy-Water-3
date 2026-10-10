@@ -62,6 +62,8 @@ pub const Hud = struct {
 
     /// Flight marks on P1's view: the Kestrel's nose, and the missile lock (with progress).
     marks: []const Mark = &.{},
+    /// How far tall panels and menus are scrolled (canvas units), kept by the application.
+    scroll: f32 = 0,
     /// P1's keys for class specials 1–3.
     special_keys: [3][]const u8 = .{ "Z", "C", "H" },
 
@@ -89,11 +91,13 @@ fn panel(c: *Canvas, r: Rect, title: []const u8) void {
 
 fn rowBack(c: *Canvas, r: Rect, selected: bool) void {
     if (!selected) return;
+    c.focus(r);
     c.rect(r, alpha(accent, 0.16));
     c.rect(.{ .x = r.x, .y = r.y, .w = 3, .h = r.h }, accent);
 }
 
 fn button(c: *Canvas, r: Rect, label: []const u8, id: u16, hot: bool) void {
+    if (hot) c.focus(r);
     c.rect(r, if (hot) alpha(accent, 0.3) else alpha(accent, 0.1));
     c.frame(r, 1, alpha(accent, 0.7));
     c.centered(r.x + r.w / 2, r.y + (r.h - Canvas.line_height) / 2, label, 1, ink);
@@ -107,7 +111,11 @@ fn bar(c: *Canvas, r: Rect, fraction: f32, color: Color) void {
 
 /// Everything for this frame, in draw order: HUD, then panels, then menus on top.
 pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
-    if (menu.screen == .title or (menu.base == .title and menu.screen != .none)) return drawTitle(c, menu, hud);
+    if (menu.screen == .title or (menu.base == .title and menu.screen != .none)) {
+        c.beginScroll(hud.scroll);
+        defer c.endScroll();
+        return drawTitle(c, menu, hud);
+    }
     for (hud.guests) |g| drawGuest(c, sb, g);
     for (hud.marks) |mark| switch (mark.kind) {
         .nose => {
@@ -124,6 +132,10 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     };
     const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or menu.screen != .none;
     if (!sb.creator.open) drawHud(c, sb, hud, panels);
+    // Panels and menus scroll as one when they are taller than the screen (larger interface
+    // sizes); the HUD above never moves.
+    c.beginScroll(hud.scroll);
+    defer c.endScroll();
     if (sb.creator.open) drawCreator(c, sb, hud.view) else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
         .upgrades => drawUpgrades(c, sb, shop.row, hud.view),
         .wardrobe => drawWardrobe(c, sb, shop.row, hud.view),
@@ -132,7 +144,10 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     switch (menu.screen) {
         .none, .title => {},
         else => {
+            // The dimming stays put and is not part of what scrolls.
+            c.endScroll();
             c.rect(.{ .x = 0, .y = 0, .w = c.width, .h = c.height }, shade);
+            c.beginScroll(hud.scroll);
             drawMenu(c, menu, sb);
         },
     }
@@ -234,37 +249,48 @@ fn wherePlaceFound(home: Heroes.Home, hero: u8, buffer: []u8) []const u8 {
 /// The roster: player tabs, a card per hero (locked ones say where to find them), and the
 /// chosen card's details: who they are, their powers and passives.
 fn drawHeroes(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
-    const r = menuRect(c, @min(c.width - 40, 1140), @min(c.height - 30, 700));
+    // Natural height: taller than a small or scaled-up window, the screen scrolls.
+    const narrow = c.width - 40 < 1000;
+    const r = menuRect(c, @min(c.width - 40, 1140), if (narrow) 760 else 700);
     panel(c, r, "HEROES");
     var count_buffer: [48]u8 = undefined;
     const joined = @popCount(sb.progress.heroes);
     c.text(r.x + 140, r.y + 20, std.fmt.bufPrint(&count_buffer, "{d} OF {d} WILDKIN JOINED", .{ joined, Heroes.count }) catch "", 1, gold);
     // Player tabs.
-    var tx = r.x + r.w - 4 * 170 - 12;
+    // Tabs beside the title when there is room, else on their own row beneath it.
+    const tab_w: f32 = if (narrow) (r.w - 24 - 3 * 8) / 4 else 160;
+    var tx = if (narrow) r.x + 12 else r.x + r.w - 4 * 170 - 12;
+    const tab_y = if (narrow) r.y + 44 else r.y + 12;
     for (0..Menu.heroes_tabs) |p| {
         const on = menu.enabled(p);
-        const tab: Rect = .{ .x = tx, .y = r.y + 12, .w = 160, .h = 30 };
+        const tab: Rect = .{ .x = tx, .y = tab_y, .w = tab_w, .h = 30 };
         c.rect(tab, if (menu.hero_player == p) alpha(accent, 0.32) else alpha(accent, 0.08));
-        if (menu.row == p) c.frame(tab, 1, accent);
+        if (menu.row == p) {
+            c.frame(tab, 1, accent);
+            c.focus(tab);
+        }
         var label: [40]u8 = undefined;
         const who = playing(sb, p) orelse "NOT JOINED";
         c.text(tab.x + 10, tab.y + 10, std.fmt.bufPrint(&label, "P{d} {s}", .{ p + 1, who }) catch "", 0.9, if (!on) alpha(dim, 0.5) else if (menu.hero_player == p) accent else ink);
         if (on) c.hit(tab, hitId(.menu, p));
-        tx += 170;
+        tx += tab_w + 8;
     }
     // Cards: your own ranger, then every Wildkin.
     const columns: usize = Menu.heroes_columns;
     const gap: f32 = 8;
     const card_w = (r.w - 24 - gap * @as(f32, @floatFromInt(columns - 1))) / @as(f32, @floatFromInt(columns));
     const card_h: f32 = 74;
-    const top = r.y + 54;
+    const top = if (narrow) r.y + 86 else r.y + 54;
     for (Menu.heroes_ranger..Menu.heroes_back) |row| {
         const k = row - Menu.heroes_ranger;
         const card: Rect = .{ .x = r.x + 12 + @as(f32, @floatFromInt(k % columns)) * (card_w + gap), .y = top + @as(f32, @floatFromInt(k / columns)) * (card_h + gap), .w = card_w, .h = card_h };
         const selected = menu.row == row;
         const unlocked = menu.enabled(row);
         c.rect(card, if (selected) alpha(accent, 0.22) else .{ 1, 1, 1, 0.05 });
-        if (selected) c.frame(card, 2, accent);
+        if (selected) {
+            c.frame(card, 2, accent);
+            c.focus(card);
+        }
         c.hit(card, hitId(.menu, row));
         if (row == Menu.heroes_ranger) {
             const own = sb.own_profiles[menu.hero_player] orelse sb.profile;
@@ -1150,7 +1176,10 @@ fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: 
     occupied[count.*] = tag;
     count.* += 1;
     c.rect(.{ .x = x - 2, .y = y - 2, .w = 4, .h = 4 }, color);
-    if (selected) c.frame(.{ .x = x - 5, .y = y - 5, .w = 10, .h = 10 }, 1, ink);
+    if (selected) {
+        c.frame(.{ .x = x - 5, .y = y - 5, .w = 10, .h = 10 }, 1, ink);
+        c.focus(.{ .x = x - 5, .y = y - 5, .w = 10, .h = 10 });
+    }
     c.rect(tag, .{ 0.015, 0.025, 0.035, 0.95 });
     c.text(tag.x + 3, tag.y + 2, text, 0.8, color);
 }
