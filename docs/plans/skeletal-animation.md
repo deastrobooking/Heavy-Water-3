@@ -7,12 +7,14 @@
 - **Characters:** `character/Ranger.zig` builds weighted humanoid geometry, applies profile clothing and armor, and CPU-skins it from a fixed humanoid skeleton. Player, keeper, pedestrian and Hive trooper rendering already uses this path.
 - **Procedural poses:** traversal uses walk phase and motion state; combat maps aim, saber swing, guard, cast and throw actions onto joints. Troopers now add tactical cover, timed melee strike and grenade-throw poses on the same rig.
 - **Importer:** the glTF importer rejects skins and animations.
-- **Renderer:** character vertices are CPU-skinned into per-character meshes; the main instance pipeline has no GPU joint palette.
-- **Still needed:** reusable sampled clips and blending, a motion controller, glTF skin/animation import, GPU skinning, named attachments, and per-bone combat hitboxes.
+- **Renderer:** characters are skinned on the GPU. `render/skin.wgsl` is a vertex stage that blends per-joint dual quaternions from a palette uniform; `render/Characters.zig` uploads each character's bind-pose mesh once and writes its palette every frame. `-Dcpu-skinning` keeps the old CPU path.
+- **Still needed:** glTF skin/animation import (`HWAN`), named attachments, and per-bone combat hitboxes.
 
 ## Progress
 
 The first gameplay slice reuses the established skeleton and renderer: a wounded trooper crouches behind cover, melee timing drives a shoulder/elbow/chest/hip strike, and the arm throw pose follows grenade launch progress. An allocation-free rotation-track sampler drives keyed walk, run and climb cycles; a per-character fixed-step controller maps traversal states and crossfades between clip groups. Headless tests verify action poses, key interpolation, loop seams, blend weights, traversal mapping and transitions. The `HWAN` format and glTF animation import are still pending.
+
+**GPU skinning (slice 2), 2026-10-10:** `Ranger.skinnedVertices` builds the bind-pose mesh with joints and weights (colours baked in), and `Ranger.posePalette` writes the pose as 64 dual quaternions (2 KiB) into a 32-slot palette buffer, bound per character with a dynamic offset. The shader blends exactly as the CPU `Pose.skinDualQuats` path does (antipodality against the first joint, normalized by the real part). A test skins a human, a lion, a spider and an armored eagle in run and swing poses through a WGSL mirror and matches the CPU to under 1e-4 m. Characters with more than 64 joints fall back to the CPU path. Frontier benchmark skinning p99 dropped from 2.05 ms to 0.15 ms.
 
 ## Design
 
@@ -32,7 +34,7 @@ The first gameplay slice reuses the established skeleton and renderer: a wounded
 
 ### Rendering
 
-- **Pipeline:** a skinned-mesh pipeline variant whose vertex shader reads a bone palette from a uniform buffer: 64 matrices × 64 bytes = 4 KiB per character, well within Mach's 64 KiB uniform binding limit. Each character's palette is selected with a dynamic offset, which Mach's Metal backend supports.
+- **Pipeline:** a skinned-mesh pipeline variant whose vertex shader reads a bone palette from a uniform buffer: 64 dual quaternions × 32 bytes = 2 KiB per character (as built; matrices would be 4 KiB), well within Mach's 64 KiB uniform binding limit. Each character's palette is selected with a dynamic offset, which Mach's Metal backend supports.
 - **Batching:** one draw per character submesh. With four players, eight pedestrians, and three keepers that is under 100 draws.
 - **Fallback:** if a needed shader feature fails on the pinned Mach, skin on the CPU into a per-frame vertex buffer (correct, slower), measured and reported.
 - **Profiles:** the creator's colors and proportions become material tints and joint scales on the skinned ranger, keeping save compatibility through `Profile`.
@@ -44,7 +46,7 @@ A rigged ranger is generated in Zig, not downloaded: the block avatar's proporti
 ## Slices
 
 1. **Import and pose math.** The glTF skin and animation importer, the `HWSK` and `HWAN` formats, sampling, and the global and skin matrix pipeline, all tested headlessly.
-2. **GPU skinning.** The skinned pipeline, palette uniforms, the generated ranger replacing the block avatar for players, and Metal validation in smoke.
+2. **GPU skinning — done.** The skinned pipeline, palette uniforms, the generated ranger replacing the block avatar for players, and Metal validation in smoke.
 3. **Controller and attachments.** The Motion → clip mapping with crossfades and the locomotion blend, sockets and attachments (carried crate, tools), and hitbox capsules for combat.
 4. **Crowds.** Pedestrians and keepers use skinned characters, with skinning for distant or culled characters skipped.
 

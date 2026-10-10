@@ -49,7 +49,8 @@ fn quat_mul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
         dual = dual / len;
     }
     // Translation = 2 * (dual * conjugate(real)).
-    let t = quat_mul(dual, vec4<f32>(-real.xyz, real.w));
+    // Mach's WGSL compiler cannot negate a swizzle; conjugate by a sign multiply instead.
+    let t = quat_mul(dual, real * vec4<f32>(-1.0, -1.0, -1.0, 1.0));
     let local = rotate(real, position) + 2.0 * t.xyz;
     let bent = rotate(real, normal);
     var out: VertexOut;

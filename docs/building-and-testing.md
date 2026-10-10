@@ -58,6 +58,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |
+| `-Dcpu-skinning=true` | false | Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback). |
 | `-Dhot-reload=true` | false | Watch model, blueprint and mod script sources and reload them live. |
 | `-Dreload-smoke=true` | false | Reload test: edits an isolated crate fixture under `zig-out/reload-smoke` and checks the swap. |
 | `-Dupload-budget-kib=N` | 320 | Terrain upload budget per frame (at least 278). |

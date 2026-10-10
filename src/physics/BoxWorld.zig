@@ -214,7 +214,9 @@ pub fn castRayObjects(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_
 
 fn castRayImpl(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distance: f32, ignore: Physics.Rigid, include_ground: bool) ?Physics.SurfaceHit {
     var best: ?Physics.SurfaceHit = null;
-    // Terrain: march in 5 cm steps, then bisect the crossing.
+    // Terrain: march with steps a third of the height above the ground (5 cm near it, at most
+    // 6 m), which cannot step through slopes up to about 60°, then bisect the crossing. A fixed
+    // 5 cm march cost hundreds of terrain samples per ray, each several noise fields deep.
     const below = struct {
         fn f(world: *const BoxWorld, p: Vec3) bool {
             const g = world.ground.at(p) orelse return false;
@@ -223,12 +225,17 @@ fn castRayImpl(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
     }.f;
     if (include_ground) {
         var t: f32 = 0;
+        // Height above the ground at the march point (unknown inside hollow space: half a metre).
+        var clearance: ?f32 = if (self.ground.at(origin)) |g| origin[1] - g.height else null;
         if (!below(self, origin)) while (t < max_distance) {
-            const next = @min(max_distance, t + 0.05);
-            if (below(self, R.add(origin, R.scale(direction, next)))) {
+            const stride = std.math.clamp((clearance orelse 1.5) * 0.35, 0.05, 6);
+            const next = @min(max_distance, t + stride);
+            const q = R.add(origin, R.scale(direction, next));
+            const ground = self.ground.at(q);
+            if (ground != null and q[1] < ground.?.height) {
                 var lo = t;
                 var hi = next;
-                for (0..8) |_| {
+                for (0..14) |_| {
                     const mid = (lo + hi) / 2;
                     if (below(self, R.add(origin, R.scale(direction, mid)))) hi = mid else lo = mid;
                 }
@@ -237,6 +244,7 @@ fn castRayImpl(self: *const BoxWorld, origin: Vec3, direction: Vec3, max_distanc
                 break;
             }
             t = next;
+            clearance = if (ground) |g| q[1] - g.height else null;
         };
     }
     var live = self.bodies.live.iterator(.{});

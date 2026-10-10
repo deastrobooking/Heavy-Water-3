@@ -295,6 +295,19 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## GPU skinning and the air-war budget — 2026-10-10
+
+- **GPU skinning (phase 14 slice 2):** characters are skinned in a vertex stage (`render/skin.wgsl`) from a per-character dual-quaternion palette; see the [plan](plans/skeletal-animation.md). The skinned module reuses the scene shader's fragment stage. `-Dcpu-skinning` keeps the CPU path. The GPU and CPU captures of `-Dshowcase=49` look identical.
+- **Air war:** terrain ray casts march adaptively (stride from the terrain clearance, 5 cm to 6 m, then 14 bisection steps) instead of a fixed small step, and the wasps' structure check casts against objects only (the terrain check already ran separately).
+- **Verification:** **357/357 tests pass**, plus the app check. A new test matches GPU-style palette skinning to the CPU skin for four species in two poses (under 1e-4 m, normals within 0.999). The Metal-validated ReleaseSafe smoke (`MTL_DEBUG_LAYER=1`, 400 ticks) passes every stage.
+- **Frontier benchmark** (`tools/benchmark.py --frontier --frames 600`, M3 Pro, ReleaseFast, window visible), before → after:
+  - simulation p50/p95/p99: 3.55 / 6.27 / 6.72 → **2.15 / 3.57 / 3.99 ms** (budget 4 ms: now passes);
+  - air war mean 2.09 → **0.11 ms** (wasps 0.63 → 0.03, air projectiles 0.68 → 0.04);
+  - character skinning p50/p99: 0.86 / 2.05 → **0.08 / 0.15 ms**; character prepare p99 **0.19 ms**;
+  - render CPU p50/p95/p99 **2.56 / 3.83 / 4.48 ms**; presentation interval p95 20.94 ms.
+- The largest stages are now physics (0.79 ms mean, 1.82 max) and Hive AI (0.29 mean, 1.00 max); p99 sits just under budget, so either can push it over as content grows.
+- A run with the window occluded or the screen locked is throttled by macOS (presentation p95 above 1 s) and fails `presentation_unthrottled` and `active_ring_covered`; keep the window visible when benchmarking.
+
 ## Controller weapons, controller start and scrolling GUIs — 2026-10-10
 
 - **Right trigger and right bumper:** the energy gun and saber were routed correctly in code, but the installed `zig-out/bin/heavy-water` dated from Oct 5, before the Oct 6 controller change; `build run` and tests never reinstall it. It is reinstalled now. A new test drives a raw controller sample through the real mapping and P1 routing into a full Sandbox step: the right trigger fires energy-gun bolts and the right bumper swings the saber. P1's pad weapon routing is now one shared function (`Sandbox.padWeapons`). The build doc's troubleshooting covers stale installs.

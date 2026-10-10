@@ -78,6 +78,12 @@ character_prepare_times: FrameStats = .{},
 character_skin_times: FrameStats = .{},
 percentiles: FrameStats.Summary = .{ .p50 = 0, .p95 = 0, .p99 = 0, .worst = 0, .mean = 0 },
 pipeline: ?*gpu.RenderPipeline = null,
+/// GPU character skinning: the skinned pipeline, its palette bind group layout, buffer and
+/// group (null with `-Dcpu-skinning=true`).
+skin_pipeline: ?*gpu.RenderPipeline = null,
+skin_layout: ?*gpu.BindGroupLayout = null,
+skin_palette: ?*gpu.Buffer = null,
+skin_group: ?*gpu.BindGroup = null,
 overlay_pipeline: ?*gpu.RenderPipeline = null,
 scene_layout: ?*gpu.BindGroupLayout = null,
 uniforms: [max_views]?*gpu.Buffer = @splat(null),
@@ -208,6 +214,7 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         self.pipeline.?.release();
         self.pipeline = null;
     }
+    if (!options.cpu_skinning) try self.setupSkinning(device, window.framebuffer_format, layout);
     self.scene.setup(device, window.queue);
 
     // Silhouette outlines: a fullscreen pass sampling scene depth, blended over the frame.
@@ -252,6 +259,59 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     }
     std.log.info("Heavy Water: seed={d}, generator={d}, streaming pool=49 chunks, GPU pool=25 chunks, upload budget={d}", .{ self.seed, Seed.generator_version, options.upload_budget });
     self.timer.reset();
+}
+
+/// The skinned shader module: `scene.wgsl` with its `vertex_main` cut out (Mach's WGSL compiler
+/// takes one vertex entry point per module) and `skin.wgsl` in its place, before the shared
+/// fragment stage.
+const skinned_wgsl = blk: {
+    @setEvalBranchQuota(200_000);
+    const scene = @embedFile("scene.wgsl");
+    const vertex = std.mem.indexOf(u8, scene, "@vertex fn vertex_main").?;
+    const fragment = std.mem.indexOf(u8, scene, "@fragment fn frag_main").?;
+    break :blk scene[0..vertex] ++ @embedFile("skin.wgsl") ++ scene[fragment..];
+};
+
+/// The skinned-character pipeline: `scene.wgsl` plus `skin.wgsl` (its `vertex_skinned` entry
+/// and the shared fragment), the frame bind group, and a palette group selected per character by
+/// a dynamic offset into one uniform buffer of `Ranger.capacity` palettes.
+fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Format, frame_layout: *gpu.BindGroupLayout) !void {
+    const shader = device.createShaderModuleWGSL("skinned.wgsl", skinned_wgsl);
+    defer shader.release();
+    self.skin_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
+        gpu.BindGroupLayout.Entry.initBuffer(0, .{ .vertex = true }, .uniform, true, Ranger.palette_bytes),
+    } }));
+    const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{ frame_layout, self.skin_layout.? } }));
+    defer pipeline_layout.release();
+    const buffers = [_]gpu.VertexBufferLayout{
+        gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Ranger.SkinnedVertex), .attributes = &.{
+            .{ .format = .float32x3, .offset = @offsetOf(Ranger.SkinnedVertex, "position"), .shader_location = 0 },
+            .{ .format = .float32x3, .offset = @offsetOf(Ranger.SkinnedVertex, "normal"), .shader_location = 1 },
+            .{ .format = .float32x3, .offset = @offsetOf(Ranger.SkinnedVertex, "color"), .shader_location = 5 },
+            .{ .format = .uint8x4, .offset = @offsetOf(Ranger.SkinnedVertex, "joints"), .shader_location = 8 },
+            .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "weights"), .shader_location = 9 },
+        } }),
+        gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Instance), .step_mode = .instance, .attributes = &.{
+            .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
+            .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
+            .{ .format = .float32x4, .offset = 32, .shader_location = 6 },
+            .{ .format = .float32x4, .offset = 48, .shader_location = 7 },
+        } }),
+    };
+    const fragment = gpu.FragmentState.init(.{ .module = shader, .entry_point = "frag_main", .targets = &.{.{ .format = format }} });
+    self.skin_pipeline = device.createRenderPipeline(&.{
+        .label = "skinned characters",
+        .layout = pipeline_layout,
+        .vertex = gpu.VertexState.init(.{ .module = shader, .entry_point = "vertex_skinned", .buffers = &buffers }),
+        .fragment = &fragment,
+        .primitive = .{ .cull_mode = .none },
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .greater },
+    });
+    self.skin_palette = device.createBuffer(&.{ .label = "character palettes", .size = Ranger.capacity * Ranger.palette_bytes, .usage = .{ .uniform = true, .copy_dst = true } });
+    self.skin_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.skin_layout.?, .entries = &.{
+        gpu.BindGroup.Entry.initBuffer(0, self.skin_palette.?, 0, Ranger.palette_bytes, Ranger.palette_bytes),
+    } }));
+    self.characters.skinning = .{ .pipeline = self.skin_pipeline.?, .palette = self.skin_palette.?, .group = self.skin_group.? };
 }
 
 /// Per-view camera uniform, bind group, and instance buffer.
@@ -444,7 +504,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pass.setBindGroup(0, self.bind_groups[i].?, &.{});
         pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
         scenes[i].draw(pass);
-        self.characters.draw(pass, self.views[i].hide_owner);
+        self.characters.draw(pass, self.views[i].hide_owner, self.bind_groups[i].?, self.pipeline.?);
         if (i == 0) if (self.field != null) {
             pass.setVertexBuffer(1, self.field_buffer.?, 0, self.field.?.gpuBytes());
             const near = self.scene.gpuMesh(self.scene.catalog.content.crate);
@@ -691,6 +751,10 @@ pub fn deinit(self: *Renderer) void {
     for (0..max_views) |i| self.releaseViewResources(i);
     if (self.scene_layout) |p| p.release();
     if (self.pipeline) |p| p.release();
+    if (self.skin_group) |p| p.release();
+    if (self.skin_palette) |p| p.release();
+    if (self.skin_pipeline) |p| p.release();
+    if (self.skin_layout) |p| p.release();
     if (self.overlay_pipeline) |p| p.release();
     if (self.field_buffer) |p| p.release();
     if (self.capture_pipeline) |p| p.release();

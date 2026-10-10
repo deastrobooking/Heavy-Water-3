@@ -33,7 +33,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 
 - **Missile lock on a reused slot:** fixed by giving each spawned ground Hive unit a generation number and checking `(slot, generation)` when resolving missile and HUD targets.
 - **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
-- **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. The M3 Pro ReleaseFast run meets render, skinning, and audio budgets; simulation P99 improved from 7.11 ms to 6.72 ms but still exceeds its 4 ms target. Projectile terrain raycasts are optimized; the next profile pass should target remaining wasp and Hive AI spikes.
+- **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. After GPU skinning and adaptive terrain ray marching (2026-10-10), simulation p95/p99 is 3.57 / 3.99 ms against the 4 ms target and skinning p99 is 0.15 ms. Physics and Hive AI are the largest remaining stages.
 - **Guests:** they can't pilot, talk, or open the fabricator.
 - **Save versioning:** saves are at format v12, which persists the seeded sprint course's best lap. When a field changes meaning, bump the format and record it in the migration notes.
 
@@ -138,7 +138,7 @@ Acceptance: a four-local-player session completes combat → loot → extraction
 
 ## Risks
 
-- **Frame cost.** CPU skinning (24 characters), many probes, and wasps all scale with content. Mitigation: milestone A's benchmark budgets, and GPU skinning in phase 14.
+- **Frame cost.** CPU skinning (24 characters), many probes, and wasps all scale with content. Mitigation: milestone A's benchmark budgets; GPU skinning (done) removed most of the skinning cost.
 - **Tuning without play.** Values are set from tests and captures, not feel. Mitigation: hand-play in milestone A before adding depth.
 - **Monolithic modules.** `Sandbox.zig` (about 3,300 lines) and `App.zig` (about 1,400) keep growing. Mitigation: continue the `Frontier`, `Garage`, `Hangar` and `Skies` pattern, and move showcase and smoke code out of `App.zig` into `game/Showcase.zig` in milestone A.
 - **Test time.** The catalog allocation-failure test grows with every generated mesh (the suite takes about 2 minutes). Mitigation: cache generated vehicle meshes across that test's iterations, or sample failure points.

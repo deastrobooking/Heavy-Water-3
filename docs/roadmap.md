@@ -90,7 +90,7 @@ The fabricable Kestrel VTOL fighter flies with wing aerodynamics, lift jets, and
 
 Next:
 - continue air-war playtesting and tuning;
-- extend phase 14 with clips for the remaining traversal states, glTF animation import, named attachments and GPU skinning; tune trooper pacing in the planned hand-play pass.
+- extend phase 14 with clips for the remaining traversal states, glTF animation import and named attachments (GPU skinning is done); tune trooper pacing in the planned hand-play pass.
 
 ## Wildkin heroes, the Heroes menu and the Starbowl arena — implemented
 
@@ -337,12 +337,15 @@ The next phases close the gaps to a production engine, in this order. [Engine al
 
 Acceptance: renames keep identity; only changed sources reimport; invalid references are rejected without mutation; a 64-asset pack loads within the frame budget; a model edited on disk swaps in a running session. See [plan](plans/asset-pipeline.md).
 
-### 14. Skeletal animation — planned
+### 14. Skeletal animation — in progress
+
+Progress: keyed walk, run and climb clips with a crossfading traversal controller; GPU dual-quaternion skinning from a 64-joint uniform palette per character (one dynamic-offset bind group, `-Dcpu-skinning` keeps the CPU path). Remaining: `HWAN`/glTF import, sockets and attachments, per-bone hitboxes.
+
 
 - **Import:** glTF skins and clips into `HWSK` and `HWAN`.
 - **Runtime:** allocation-free pose sampling and blending, GPU skinning from a 64-bone uniform palette (with a CPU fallback), and `Player.Motion` mapped to clips as data.
 - **Attachments:** sockets for attachments and per-bone hitboxes for combat.
-- **First content:** the generated ranger (`src/character/`) already supplies a skeleton, skin weights, rigid armor bindings and CPU skinning; this phase adds imported clips, blending, GPU skinning and sockets on top of it.
+- **First content:** the generated ranger (`src/character/`) already supplies a skeleton, skin weights, rigid armor bindings and CPU skinning; this phase adds imported clips, blending, GPU skinning (done) and sockets on top of it.
 
 Acceptance: exact import round trips, pose-math reference tests, the controller selecting the right clip for every traversal state, a carried crate held at the hand socket within 1 cm, and render CPU within budget with 20 animated characters. See [plan](plans/skeletal-animation.md).
 

@@ -931,3 +931,62 @@ test "rootweave and skyguard profiles generate distinct armor meshes and save va
     try std.testing.expectEqualDeep(rootweave.profile, try Profile.fromDoc(rootweave.profile.toDoc()));
     try std.testing.expectEqualDeep(skyguard.profile, try Profile.fromDoc(skyguard.profile.toDoc()));
 }
+
+/// The skinned vertex shader (`render/skin.wgsl`, `vertex_skinned`) in Zig, reading the packed
+/// palette exactly as the GPU does: for testing that both paths put every vertex in one place.
+fn shaderSkin(palette: *const Palette, v: SkinnedVertex) [2]V {
+    const q = struct {
+        fn get(p: *const Palette, i: usize) Q {
+            return .{ .x = p[i][0], .y = p[i][1], .z = p[i][2], .w = p[i][3] };
+        }
+    }.get;
+    const pivot = q(palette, @as(usize, v.joints[0]) * 2);
+    var real: Q = .{ .x = 0, .y = 0, .z = 0, .w = 0 };
+    var dual: Q = .{ .x = 0, .y = 0, .z = 0, .w = 0 };
+    for (0..4) |k| {
+        var w = v.weights[k];
+        if (w == 0) continue;
+        const r = q(palette, @as(usize, v.joints[k]) * 2);
+        const d = q(palette, @as(usize, v.joints[k]) * 2 + 1);
+        if (r.dot(pivot) < 0) w = -w;
+        real = .{ .x = real.x + r.x * w, .y = real.y + r.y * w, .z = real.z + r.z * w, .w = real.w + r.w * w };
+        dual = .{ .x = dual.x + d.x * w, .y = dual.y + d.y * w, .z = dual.z + d.z * w, .w = dual.w + d.w * w };
+    }
+    const len = @sqrt(real.dot(real));
+    if (len > 0.000001) {
+        real = .{ .x = real.x / len, .y = real.y / len, .z = real.z / len, .w = real.w / len };
+        dual = .{ .x = dual.x / len, .y = dual.y / len, .z = dual.z / len, .w = dual.w / len };
+    }
+    const t = dual.mul(real.conjugate());
+    const p = real.rotate(V.init(v.position[0], v.position[1], v.position[2])).add(V.init(2 * t.x, 2 * t.y, 2 * t.z));
+    return .{ p, real.rotate(V.init(v.normal[0], v.normal[1], v.normal[2])) };
+}
+
+test "the GPU palette skins every vertex where the CPU skinning puts it" {
+    const a = std.testing.allocator;
+    const poses = [_]Pose{
+        .{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.3, .motion = .run, .time = 2 },
+        .{ .feet = .{ 0, 0, 0 }, .yaw = 0, .action = .swing, .action_t = 0.6, .arc = .overhead, .time = 3 },
+    };
+    for ([_]Profile{ .{}, .{ .species = .lion }, .{ .species = .spider }, .{ .species = .eagle, .clothing = .hardsuit } }) |profile| {
+        var r = try init(a, profile);
+        defer r.deinit(a);
+        try std.testing.expect(r.gpuSkinnable());
+        const vertices = try r.skinnedVertices(a);
+        defer a.free(vertices);
+        for (poses) |pose| {
+            r.last_pose = null;
+            _ = r.update(pose);
+            var palette: Palette = undefined;
+            r.last_pose = null;
+            try std.testing.expect(r.posePalette(pose, &palette));
+            var worst: f32 = 0;
+            for (vertices, r.instance.pos, r.instance.nrm) |v, cpu_pos, cpu_nrm| {
+                const gpu_skin = shaderSkin(&palette, v);
+                worst = @max(worst, gpu_skin[0].sub(cpu_pos).length());
+                try std.testing.expect(gpu_skin[1].normalizeOr(V.unit_y).dot(cpu_nrm.normalizeOr(V.unit_y)) > 0.999);
+            }
+            try std.testing.expect(worst < 1e-4);
+        }
+    }
+}

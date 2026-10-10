@@ -559,7 +559,8 @@ fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet
         }
         const here = w.ground_here;
         const floor = w.ground_ahead;
-        if (w.check % 4 == 0) blocked = physics.castRay(w.position, w.forward, 40, .none) != null;
+        // Structures only: the terrain ahead is already covered by the sampled heights above.
+        if (w.check % 4 == 0) blocked = physics.castRayObjects(w.position, w.forward, 40, .none) != null;
         if (blocked or w.position[1] < floor + 24) desired = R.add(R.normalize(desired), .{ 0, 2.5, 0 });
         const turn_scale: f32 = switch (w.kind) {
             .wasp => 1,
