@@ -39,6 +39,13 @@ pub fn carvedHeight(seed: u64, x: f32, z: f32, base: f32) f32 {
     return @min(base, base + (bed - base) * weight);
 }
 
+/// The river surface over (x, z), or null on dry ground. Waterfall curtains are not included.
+pub fn waterAt(seed: u64, x: f32, z: f32) ?f32 {
+    const nearest: i64 = @intFromFloat(@round((z - lane_offset) / lane_spacing));
+    if (@abs(z - centerZ(seed, nearest, x)) > water_width * 0.5) return null;
+    return level(seed, nearest, x);
+}
+
 pub fn color() [3]f32 {
     return .{ 0.12, 0.57, 0.68 };
 }
@@ -51,4 +58,12 @@ test "river channels and flow are continuous at chunk boundaries and drop at fal
     const phase = @floor(Seed.unit(lane_seed) * fall_period / 4) * 4;
     const event_x = fall_period - phase;
     try std.testing.expectApproxEqAbs(fall_drop, level(42, 0, event_x - 0.01) - level(42, 0, event_x + 0.01), 0.1);
+}
+
+test "the river surface lies over the carved channel and nowhere else" {
+    const z = centerZ(42, 0, 300);
+    const surface = waterAt(42, 300, z).?;
+    const bed = carvedHeight(42, 300, z, Noise.baseHeight(42, 300, z));
+    try std.testing.expect(surface > bed + 1);
+    try std.testing.expect(waterAt(42, 300, z + water_width) == null);
 }

@@ -43,6 +43,8 @@ pub const Content = struct {
     plant: MeshHandle,
     flora: [Vegetation.variant_count]MeshHandle,
     tree_trunk: MeshHandle,
+    /// Faceted field stones scattered over rough ground.
+    boulders: [Vegetation.boulder_count]MeshHandle,
     crate: MeshHandle,
     /// Centered unit cube; machine parts and device bodies scale it per axis.
     block: MeshHandle,
@@ -215,10 +217,10 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.* = .{};
     errdefer self.deinit(allocator);
     self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.cube(allocator), .named("relic", .{ 1, 1, 1, 1 })));
-    const flora_colors = [_][4]f32{ .{ 0.30, 0.56, 0.22, 1 }, .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 }, .{ 0.18, 0.43, 0.20, 1 }, .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 } };
-    for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (i < Vegetation.tree_first) try Vegetation.plant(allocator, @intCast(i)) else try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)), .named(Vegetation.names[i], flora_colors[i])));
+    for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (i < Vegetation.tree_first) try Vegetation.plant(allocator, @intCast(i)) else try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)), .named(Vegetation.names[i], Vegetation.colors[i])));
     self.content.plant = self.content.flora[0];
     self.content.tree_trunk = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator), .named("canopy trunk", .{ 0.24, 0.15, 0.09, 1 })));
+    for (&self.content.boulders, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.boulder(allocator, @intCast(i)), .named(Vegetation.boulder_names[i], Vegetation.stone ++ [_]f32{1})));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
     self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
@@ -300,7 +302,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "fern", .handle = self.content.flora[1] },                                           .{ .name = "wildflower", .handle = self.content.flora[2] },
         .{ .name = "broadleaf", .handle = self.content.flora[3] },                                      .{ .name = "needleleaf", .handle = self.content.flora[4] },
         .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "canopy_trunk", .handle = self.content.tree_trunk },
-        .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
+        .{ .name = "boulder_round", .handle = self.content.boulders[0] },                                .{ .name = "boulder_tall", .handle = self.content.boulders[1] },
+        .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
         .{ .name = "test_arbor", .handle = self.content.test_arbor },                                   .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
         .{ .name = "district", .handle = self.content.district },                                       .{ .name = "arbor_1", .handle = self.arbors[0].mesh },
         .{ .name = "arbor_1_lod", .handle = self.arbors[0].lod },                                       .{ .name = "arbor_2", .handle = self.arbors[1].mesh },

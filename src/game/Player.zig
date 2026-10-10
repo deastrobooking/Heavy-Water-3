@@ -7,6 +7,7 @@ const R = Physics.Rotation;
 const V = Physics.Vec3;
 const Camera = @import("../world/Camera.zig");
 const Input = @import("../engine/Input.zig");
+const Biome = @import("../procedural/Biome.zig");
 const Player = @This();
 pub const Mode = enum { walk, fly };
 pub const Traversal = enum { grapple, hover_jet, flight, hoverboard };
@@ -25,7 +26,29 @@ pub const Suit = struct {
     stamina_regen: f32 = 20,
     grapple_range: f32 = 96,
 };
-pub const Environment = struct { water: []const Water = &.{} };
+/// What surrounds a body this step: authored water volumes, the ground it stands on, and the
+/// river surface over it (null on dry land), all supplied by the caller.
+pub const Environment = struct { water: []const Water = &.{}, ground: Biome.Kind = .grass, river: ?f32 = null };
+/// River water deeper than this floats a walker; a swimmer keeps swimming down to `float_depth`.
+pub const swim_depth: f32 = 0.95;
+pub const float_depth: f32 = 0.5;
+pub const Footing = struct { speed: f32 = 1, traction: f32 = 1 };
+
+/// How the ground underfoot changes running: snow is slow and slides (less traction to start
+/// and stop), marsh and sand drag, and wading water slows with its depth.
+pub fn footing(ground: Biome.Kind, wading: f32) Footing {
+    var f: Footing = switch (ground) {
+        .grass, .rock => .{},
+        .sand => .{ .speed = 0.9, .traction = 0.85 },
+        .marsh => .{ .speed = 0.85, .traction = 0.8 },
+        .snow => .{ .speed = 0.8, .traction = 0.45 },
+    };
+    if (wading > 0) {
+        f.speed *= 1 - @min(wading, swim_depth) * 0.5;
+        f.traction *= 0.8;
+    }
+    return f;
+}
 pub const Grapple = struct {
     mode: enum { ready, windup, zip, swing, cooldown } = .ready,
     point: V = @splat(0),
@@ -67,6 +90,10 @@ boost_cooldown: f32 = 0,
 landing: f32 = 0,
 grapple: Grapple = .{},
 suit: Suit = .{},
+/// The ground underfoot and the depth of river water around the feet (0 when dry), as of the
+/// last step.
+ground: Biome.Kind = .grass,
+wading: f32 = 0,
 
 pub fn eye(self: Player) math.Vec3 {
     return math.vec3(self.feet[0], self.feet[1] + @min(eye_height, self.shape.height - 0.12), self.feet[2]);
@@ -195,16 +222,30 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     }
     const sprinting = input.fast and strength > 0.82 and self.stamina > 0;
     self.stamina = std.math.clamp(self.stamina + (if (sprinting and self.grounded) @as(f32, -15) else self.suit.stamina_regen) * dt, 0, 100);
-    // Optional authored water volumes use the same collision controller as dry traversal.
+    self.ground = env.ground;
+    self.wading = 0;
+    // Authored water volumes and rivers use the same collision controller as dry traversal.
+    var water_top: ?f32 = null;
     for (env.water) |water| {
         if (self.feet[0] < water.min[0] or self.feet[0] > water.max[0] or self.feet[2] < water.min[2] or self.feet[2] > water.max[2] or self.feet[1] < water.min[1] or self.feet[1] > water.max[1] - 0.3) continue;
+        water_top = water.max[1];
+        break;
+    }
+    if (water_top == null) if (env.river) |level| {
+        const depth = level - self.feet[1];
+        if (depth > (if (self.motion == .swim) float_depth else swim_depth)) water_top = level else if (depth > 0.05) {
+            self.wading = depth;
+        }
+    };
+    if (water_top) |top| {
+        self.wading = top - self.feet[1];
         self.motion = .swim;
         self.releaseGrapple();
         self.grounded = false;
-        const submerged = self.feet[1] + 1.35 < water.max[1];
+        const submerged = self.feet[1] + 1.35 < top;
         self.breath = std.math.clamp(self.breath + (if (submerged) @as(f32, -1) else 4) * dt, 0, 12);
         h = approach(h, R.scale(wish, if (input.fast) 5 else 3.5), 14 * dt);
-        const vy = if (input.jump or self.breath < 2) @as(f32, 4) else if (input.dodge_held) @as(f32, -3) else std.math.clamp((water.max[1] - 0.72 - self.feet[1]) * 3, -2.5, 3);
+        const vy = if (input.jump or self.breath < 2) @as(f32, 4) else if (input.dodge_held) @as(f32, -3) else std.math.clamp((top - 0.72 - self.feet[1]) * 3, -2.5, 3);
         self.velocity = approach(self.velocity, .{ h[0], vy, h[2] }, 18 * dt);
         self.move(physics, dt);
         camera.position = self.eye();
@@ -303,6 +344,11 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         }
         var target = R.scale(wish, (if (sprinting) self.suit.sprint else walk_speed) * strength * (if (board) @as(f32, 1.65) else 1) * (if (self.boost_timer > 0) @as(f32, 2.35) else 1));
         var acceleration: f32 = if (self.grounded) (if (strength > 0.05) @as(f32, 45) else 55) else (if (strength > 0.05) @as(f32, 12) else 2);
+        if (self.grounded and !board) {
+            const f = footing(self.ground, self.wading);
+            target = R.scale(target, f.speed);
+            acceleration *= f.traction;
+        } else if (board and self.grounded and self.ground == .snow) target = R.scale(target, 1.15);
         if (self.wall_lock > 0 or self.grab_cooldown > 0) acceleration *= 0.22;
         if (self.roll_timer > 0) {
             self.motion = .roll;
@@ -575,4 +621,55 @@ test "three quick jump taps toggle hover" {
         runFor(&p, &physics, &camera, .{}, 5);
     }
     try std.testing.expect(p.hover_enabled);
+}
+
+fn runIn(p: *Player, physics: *Physics, camera: *Camera, input: Input, env: Environment, steps: usize) void {
+    for (0..steps) |_| {
+        p.stepIn(physics, camera, input, env, test_dt);
+        physics.step(test_dt);
+    }
+}
+
+fn groundSpeed(p: Player) f32 {
+    return @sqrt(p.velocity[0] * p.velocity[0] + p.velocity[2] * p.velocity[2]);
+}
+
+test "snow, marsh and shallow water slow a runner; snow slides further to a stop" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .yaw = 0, .pitch = 0 };
+    var speeds: [4]f32 = undefined;
+    var slides: [2]f32 = undefined;
+    for ([_]Environment{ .{ .ground = .grass }, .{ .ground = .snow }, .{ .ground = .marsh }, .{ .ground = .grass, .river = 0.6 } }, 0..) |env, i| {
+        var p: Player = .{ .feet = .{ 0, 0, 0 } };
+        runIn(&p, &physics, &camera, .{ .forward = 1 }, env, 120);
+        speeds[i] = groundSpeed(p);
+        if (i < 2) {
+            const start = p.feet[2];
+            runIn(&p, &physics, &camera, .{}, env, 120);
+            slides[i] = p.feet[2] - start;
+        }
+    }
+    try std.testing.expectApproxEqAbs(walk_speed, speeds[0], 0.05);
+    try std.testing.expect(speeds[1] < speeds[0] * 0.85 and speeds[2] < speeds[0] * 0.9);
+    // Wading thigh-deep halves the pace or so.
+    try std.testing.expect(speeds[3] < speeds[0] * 0.8);
+    try std.testing.expect(slides[1] > slides[0] * 1.5);
+}
+
+test "a river deep enough floats a walker into a swim, and the bank walks them out" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .yaw = 0, .pitch = 0 };
+    var p: Player = .{ .feet = .{ 0, 0, 0 } };
+    // Shallow: wading, still on the bed.
+    runIn(&p, &physics, &camera, .{}, .{ .river = 0.5 }, 30);
+    try std.testing.expect(p.motion != .swim and p.wading > 0.4 and p.grounded);
+    // Deep: the body rises and swims at the surface, breath intact.
+    runIn(&p, &physics, &camera, .{ .forward = 1 }, .{ .river = 1.4 }, 120);
+    try std.testing.expectEqual(Motion.swim, p.motion);
+    try std.testing.expect(p.feet[1] > 0.4 and p.breath > 11);
+    // Back on dry ground the swim ends.
+    runIn(&p, &physics, &camera, .{}, .{}, 90);
+    try std.testing.expect(p.motion != .swim and p.grounded and p.wading == 0);
 }

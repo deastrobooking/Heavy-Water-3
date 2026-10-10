@@ -25,7 +25,7 @@ comptime {
 }
 const Sky = @import("../engine/Sky.zig");
 /// Matches `Frame` in scene.wgsl.
-const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32 };
+const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32 };
 const Field = @import("Field.zig");
 const Memory = @import("../engine/Memory.zig");
 const Visibility = @import("Visibility.zig");
@@ -78,6 +78,13 @@ character_prepare_times: FrameStats = .{},
 character_skin_times: FrameStats = .{},
 percentiles: FrameStats.Summary = .{ .p50 = 0, .p95 = 0, .p99 = 0, .worst = 0, .mean = 0 },
 pipeline: ?*gpu.RenderPipeline = null,
+/// Nature stages over the scene shader: ground detail, swaying flora, and blended water.
+terrain_pipeline: ?*gpu.RenderPipeline = null,
+foliage_pipeline: ?*gpu.RenderPipeline = null,
+water_pipeline: ?*gpu.RenderPipeline = null,
+/// Seconds of animation (wind, water), wrapped; frame-counted in smoke and benchmark runs so
+/// captures repeat exactly.
+clock: f32 = 0,
 /// GPU character skinning: the skinned pipeline, its palette bind group layout, buffer and
 /// group (null with `-Dcpu-skinning=true`).
 skin_pipeline: ?*gpu.RenderPipeline = null,
@@ -214,6 +221,9 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         self.pipeline.?.release();
         self.pipeline = null;
     }
+    self.terrain_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, terrain_wgsl, "terrain", "vertex_main", false);
+    self.foliage_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, foliage_wgsl, "foliage", "vertex_foliage", false);
+    self.water_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, water_wgsl, "water", "vertex_main", true);
     if (!options.cpu_skinning) try self.setupSkinning(device, window.framebuffer_format, layout);
     self.scene.setup(device, window.queue);
 
@@ -261,16 +271,44 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     self.timer.reset();
 }
 
-/// The skinned shader module: `scene.wgsl` with its `vertex_main` cut out (Mach's WGSL compiler
-/// takes one vertex entry point per module) and `skin.wgsl` in its place, before the shared
-/// fragment stage.
-const skinned_wgsl = blk: {
+/// `scene.wgsl` cut into its shared prelude, `vertex_main` and `frag_main`, so other stages can
+/// be spliced in (Mach's WGSL compiler takes one entry point per stage per module).
+const scene_parts = blk: {
     @setEvalBranchQuota(200_000);
     const scene = @embedFile("scene.wgsl");
     const vertex = std.mem.indexOf(u8, scene, "@vertex fn vertex_main").?;
     const fragment = std.mem.indexOf(u8, scene, "@fragment fn frag_main").?;
-    break :blk scene[0..vertex] ++ @embedFile("skin.wgsl") ++ scene[fragment..];
+    break :blk .{ .prelude = scene[0..vertex], .vertex = scene[vertex..fragment], .fragment = scene[fragment..] };
 };
+const terrain_wgsl = scene_parts.prelude ++ scene_parts.vertex ++ @embedFile("terrain.wgsl");
+const water_wgsl = scene_parts.prelude ++ scene_parts.vertex ++ @embedFile("water.wgsl");
+const foliage_wgsl = scene_parts.prelude ++ @embedFile("foliage.wgsl") ++ scene_parts.fragment;
+
+/// A scene-layout pipeline over a spliced module. Water blends over the opaque scene and does
+/// not write depth.
+fn naturePipeline(self: *Renderer, device: *gpu.Device, layout: *gpu.PipelineLayout, buffers: []const gpu.VertexBufferLayout, format: gpu.Texture.Format, comptime code: [:0]const u8, comptime label: [:0]const u8, comptime vertex: [:0]const u8, blended: bool) *gpu.RenderPipeline {
+    _ = self;
+    const shader = device.createShaderModuleWGSL(label ++ ".wgsl", code);
+    defer shader.release();
+    const blend: gpu.BlendState = .{
+        .color = .{ .operation = .add, .src_factor = .src_alpha, .dst_factor = .one_minus_src_alpha },
+        .alpha = .{ .operation = .add, .src_factor = .zero, .dst_factor = .one },
+    };
+    const fragment = gpu.FragmentState.init(.{ .module = shader, .entry_point = "frag_main", .targets = &.{.{ .format = format, .blend = if (blended) &blend else null }} });
+    return device.createRenderPipeline(&.{
+        .label = label,
+        .layout = layout,
+        .vertex = gpu.VertexState.init(.{ .module = shader, .entry_point = vertex, .buffers = buffers }),
+        .fragment = &fragment,
+        .primitive = .{ .cull_mode = .none },
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = if (blended) .false else .true, .depth_compare = .greater },
+    });
+}
+
+/// The skinned shader module: `scene.wgsl` with its `vertex_main` cut out (Mach's WGSL compiler
+/// takes one vertex entry point per module) and `skin.wgsl` in its place, before the shared
+/// fragment stage.
+const skinned_wgsl = scene_parts.prelude ++ @embedFile("skin.wgsl") ++ scene_parts.fragment;
 
 /// The skinned-character pipeline: `scene.wgsl` plus `skin.wgsl` (its `vertex_skinned` entry
 /// and the shared fragment), the frame bind group, and a palette group selected per character by
@@ -405,6 +443,13 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     else
         self.time_of_day;
     const light = Sky.at(sky_time);
+    self.clock = if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)
+        @as(f32, @floatFromInt(self.frames % 216_000)) / 60
+    else
+        @mod(self.clock + @as(f32, @floatCast(@min(elapsed, 0.25))), 3600);
+    // A breeze that swells and eases, and slowly turns.
+    const heading = self.clock * 0.004 + 0.6;
+    const params = [4]f32{ self.clock, 0.7 + 0.3 * @sin(self.clock * 0.05), @cos(heading), @sin(heading) };
     const encoder = window.device.createCommandEncoder(&.{ .label = "frame" });
     defer encoder.release();
     const measure_character_prepare = options.benchmark_frontier and self.frames >= warmup_frames and self.frames < warmup_frames + options.benchmark_frames;
@@ -470,6 +515,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             .ambient_ground = light.ambient_ground ++ [_]f32{0},
             .horizon = light.horizon ++ [_]f32{light.night},
             .planes = Visibility.frustumPlanes(vp),
+            .params = params,
         };
         if (i == 0) if (self.field) |*f| {
             // Stream instances under their own byte budget, then plan visible cells. Uploads go
@@ -503,7 +549,12 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pass.setScissorRect(px[0], px[1], px[2], px[3]);
         pass.setBindGroup(0, self.bind_groups[i].?, &.{});
         pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
-        scenes[i].draw(pass);
+        pass.setPipeline(self.terrain_pipeline.?);
+        scenes[i].drawTerrain(pass);
+        pass.setPipeline(self.foliage_pipeline.?);
+        scenes[i].drawFlora(pass);
+        pass.setPipeline(self.pipeline.?);
+        scenes[i].drawSolids(pass);
         self.characters.draw(pass, self.views[i].hide_owner, self.bind_groups[i].?, self.pipeline.?);
         if (i == 0) if (self.field != null) {
             pass.setVertexBuffer(1, self.field_buffer.?, 0, self.field.?.gpuBytes());
@@ -511,6 +562,11 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             const far = self.scene.gpuMesh(self.scene.catalog.content.block);
             for (self.field_last.slice()) |run| if (if (run.lod == .near) near else far) |mesh| mesh.draw(pass, run.count, run.first);
         };
+        // Water last, blended over everything opaque in this view.
+        pass.setPipeline(self.water_pipeline.?);
+        pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
+        scenes[i].drawWater(pass);
+        pass.setPipeline(self.pipeline.?);
     }
     pass.end();
     {
@@ -751,6 +807,7 @@ pub fn deinit(self: *Renderer) void {
     for (0..max_views) |i| self.releaseViewResources(i);
     if (self.scene_layout) |p| p.release();
     if (self.pipeline) |p| p.release();
+    for ([_]?*gpu.RenderPipeline{ self.terrain_pipeline, self.foliage_pipeline, self.water_pipeline }) |maybe| if (maybe) |p| p.release();
     if (self.skin_group) |p| p.release();
     if (self.skin_palette) |p| p.release();
     if (self.skin_pipeline) |p| p.release();

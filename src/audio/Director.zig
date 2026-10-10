@@ -10,6 +10,7 @@ const Player = @import("../game/Player.zig");
 const Sandbox = @import("../game/Sandbox.zig");
 const Camera = @import("../world/Camera.zig");
 const Terrain = @import("../procedural/Terrain.zig");
+const Biome = @import("../procedural/Biome.zig");
 const Director = @This();
 
 pub const max_bodies = Sandbox.max_players;
@@ -22,6 +23,9 @@ pub const Body = struct {
     walk_phase: f32 = 0,
     walk_amount: f32 = 0,
     grapple_windup: bool = false,
+    /// The ground underfoot and the river depth at the feet (0 when dry).
+    ground: Biome.Kind = .grass,
+    wading: f32 = 0,
 };
 pub const Snapshot = struct {
     listener: [3]f32 = @splat(0),
@@ -82,7 +86,7 @@ pub fn snapshot(sb: *const Sandbox, camera: Camera, paused: bool) Snapshot {
 }
 
 fn body(p: Player, phase: f32, amount: f32) Body {
-    return .{ .active = true, .position = p.feet, .velocity = p.velocity, .motion = p.motion, .grounded = p.grounded, .walk_phase = phase, .walk_amount = amount, .grapple_windup = p.grapple.mode == .windup };
+    return .{ .active = true, .position = p.feet, .velocity = p.velocity, .motion = p.motion, .grounded = p.grounded, .walk_phase = phase, .walk_amount = amount, .grapple_windup = p.grapple.mode == .windup, .ground = p.ground, .wading = p.wading };
 }
 
 /// Distance attenuation and stereo pan of a point heard from the listener.
@@ -151,8 +155,20 @@ pub fn update(self: *Director, sink: anytype, now: Snapshot) void {
         // A footfall each half stride while running on the ground.
         const step_now: i32 = @intFromFloat(@floor(b.walk_phase / std.math.pi));
         const step_was: i32 = @intFromFloat(@floor(before.walk_phase / std.math.pi));
-        if (step_now != step_was and b.grounded and b.walk_amount > 0.25 and (b.motion == .run or b.motion == .sprint or b.motion == .board))
-            play(sink, .footstep, where.gain * (0.35 + 0.25 * b.walk_amount), where.pan, if (@mod(step_now, 2) == 0) 1 else 0.92);
+        const alternate: f32 = if (@mod(step_now, 2) == 0) 1 else 0.92;
+        // Footfalls sound like the ground: splashes in the shallows, crunch on snow, a soft
+        // scuff on sand and marsh, plain steps elsewhere.
+        if (step_now != step_was and b.grounded and b.walk_amount > 0.25 and (b.motion == .run or b.motion == .sprint)) {
+            const gain = where.gain * (0.35 + 0.25 * b.walk_amount);
+            if (b.wading > 0.05) play(sink, .splash, gain * 0.7, where.pan, alternate * 1.3) else switch (b.ground) {
+                .snow => play(sink, .crunch, gain, where.pan, alternate),
+                .sand, .marsh => play(sink, .footstep, gain * 0.7, where.pan, alternate * 0.8),
+                .grass, .rock => play(sink, .footstep, gain, where.pan, alternate),
+            }
+        } else if (step_now != step_was and b.grounded and b.walk_amount > 0.25 and b.motion == .board) play(sink, .footstep, where.gain * (0.35 + 0.25 * b.walk_amount), where.pan, alternate);
+        // Swimming: a stroke every stride; falling in: a splash by the speed of the fall.
+        if (b.motion == .swim and step_now != step_was and b.walk_amount > 0.1) play(sink, .splash, where.gain * 0.35, where.pan, alternate * 1.15);
+        if (b.motion == .swim and before.motion != .swim) play(sink, .splash, where.gain * std.math.clamp(-before.velocity[1] / 10, 0.35, 1), where.pan, 0.85);
         if (before.grounded and !b.grounded and b.velocity[1] > 2) play(sink, .jump, where.gain * 0.5, where.pan, 1);
         if (!before.grounded and b.grounded and before.velocity[1] < -4) play(sink, .land, where.gain * std.math.clamp(-before.velocity[1] / 18, 0.25, 1), where.pan, 1);
         if (b.motion != before.motion) switch (b.motion) {
@@ -242,4 +258,31 @@ test "game changes become sounds once, with guests placed by distance and side" 
     s.parts = 9;
     d.update(&r, s);
     try std.testing.expectEqual(@as(usize, 0), r.played(.salvage));
+}
+
+test "footfalls and splashes follow the ground and the water" {
+    const cases = [_]struct { ground: Biome.Kind, wading: f32, expect: Mixer.Sound }{
+        .{ .ground = .snow, .wading = 0, .expect = .crunch },
+        .{ .ground = .grass, .wading = 0.4, .expect = .splash },
+        .{ .ground = .rock, .wading = 0, .expect = .footstep },
+    };
+    for (cases) |c| {
+        var d: Director = .{};
+        var r: Recorder = .{};
+        var s: Snapshot = .{};
+        s.bodies[0] = .{ .active = true, .motion = .run, .grounded = true, .walk_phase = 3.0, .walk_amount = 1, .ground = c.ground, .wading = c.wading };
+        d.update(&r, s);
+        s.bodies[0].walk_phase = 3.3;
+        d.update(&r, s);
+        try std.testing.expectEqual(@as(usize, 1), r.played(c.expect));
+    }
+    // Falling into the river splashes.
+    var d: Director = .{};
+    var r: Recorder = .{};
+    var s: Snapshot = .{};
+    s.bodies[0] = .{ .active = true, .motion = .fall, .grounded = false, .velocity = .{ 0, -9, 0 } };
+    d.update(&r, s);
+    s.bodies[0].motion = .swim;
+    d.update(&r, s);
+    try std.testing.expectEqual(@as(usize, 1), r.played(.splash));
 }

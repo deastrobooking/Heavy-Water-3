@@ -115,10 +115,11 @@ fn fillRivers(seed: u64, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u
         const high = Hydrology.level(seed, lane, fall_x - 0.01);
         const low = Hydrology.level(seed, lane, fall_x + 0.01);
         const half = Hydrology.water_width * 0.5;
-        vertices[vertex_at] = waterVertex(fall_x, high, center_z - half, cells + 1, 0);
-        vertices[vertex_at + 1] = waterVertex(fall_x, high, center_z + half, cells + 1, 1);
-        vertices[vertex_at + 2] = waterVertex(fall_x, low, center_z - half, cells + 1, 0);
-        vertices[vertex_at + 3] = waterVertex(fall_x, low, center_z + half, cells + 1, 1);
+        // The curtain faces downstream (+x), which also tells the water shader it is falling.
+        for ([_]f32{ high, high, low, low }, [_]f32{ -half, half, -half, half }, 0..) |y, dz, k| {
+            vertices[vertex_at + k] = waterVertex(fall_x, y, center_z + dz, cells + 1, @intCast(k % 2));
+            vertices[vertex_at + k].normal = .{ 1, 0, 0 };
+        }
         const a: u32 = @intCast(vertex_at);
         const base = index_at;
         @memcpy(indices[base..][0..6], &[_]u32{ a, a + 2, a + 1, a + 1, a + 2, a + 3 });

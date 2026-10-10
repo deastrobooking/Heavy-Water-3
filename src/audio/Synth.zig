@@ -30,6 +30,8 @@ pub const Sound = enum {
     hive_zap,
     pickup,
     hurt,
+    crunch,
+    splash,
     // Loops.
     wind,
     jet,
@@ -147,7 +149,7 @@ fn makeLoop(buffer: []f32, fade: usize) []f32 {
 
 /// Synthesizes `sound`; the caller owns the returned samples.
 pub fn generate(allocator: std.mem.Allocator, sound: Sound) ![]f32 {
-    const durations = [sound_count]f32{ 0.035, 0.12, 0.1, 0.16, 0.7, 0.03, 0.09, 0.2, 0.22, 0.26, 0.24, 0.9, 2.4, 0.9, 0.16, 0.22, 0.12, 0.9, 0.2, 0.35, 0.25, 6.25, 1.25, 8, 1.0 };
+    const durations = [sound_count]f32{ 0.035, 0.12, 0.1, 0.16, 0.7, 0.03, 0.09, 0.2, 0.22, 0.26, 0.24, 0.9, 2.4, 0.9, 0.16, 0.22, 0.12, 0.9, 0.2, 0.35, 0.25, 0.14, 0.5, 6.25, 1.25, 8, 1.0 };
     const loop_fade = frames(0.25);
     const extra = if (sound.loops()) loop_fade else 0;
     const buffer = try allocator.alloc(f32, frames(durations[@intFromEnum(sound)]) + extra);
@@ -167,6 +169,17 @@ pub fn generate(allocator: std.mem.Allocator, sound: Sound) ![]f32 {
         .footstep => {
             whoosh(out, 0x51ed, 0.35, 0.15, 0.002, 0.025);
             thud(out, 95, 0.03, 0.8);
+        },
+        // Packed snow: a dry, bright crackle over a soft, low press.
+        .crunch => {
+            whoosh(out, 0xc4c4, 0.75, 0.45, 0.004, 0.045);
+            thud(out, 70, 0.04, 0.4);
+        },
+        // Water: a dark slap and a long, falling spray.
+        .splash => {
+            whoosh(out, 0x5b1a, 0.25, 0.6, 0.003, 0.05);
+            whoosh(out[frames(0.02)..], 0x5b1b, 0.6, 0.12, 0.02, 0.16);
+            thud(out, 120, 0.05, 0.5);
         },
         .land => {
             whoosh(out, 0x1a2d, 0.3, 0.08, 0.002, 0.06);

@@ -295,6 +295,41 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Nature pass: ground, water, foliage and footing — 2026-10-10
+
+- **What changed:**
+  - terrain, foliage and water have their own shading stages (`terrain.wgsl`, `foliage.wgsl`, `water.wgsl`), spliced onto the scene shader's shared prelude;
+  - the mountain panorama and caves are shaded as terrain (they had shown the props' checker);
+  - boulders are added as new scatter candidates, and snow thins and frosts plants;
+  - rivers can be waded and swum; snow, marsh and sand change footing;
+  - footsteps are voiced by the ground, with new `crunch` and `splash` sounds.
+- **Tests:** **364/364 pass**, plus the app check. New tests cover:
+  - footing kinds from cover;
+  - the river surface over its channel;
+  - boulder meshes (closed, outward normals, sunk) and placement (IDs above the old candidates, sizes, all shapes);
+  - runner speed on grass, snow, marsh and in shallows, and the longer slide to a stop on snow;
+  - wading, then floating into a swim, then walking out;
+  - ground-voiced footfalls and the fall-in splash.
+- **Smoke:** Metal-validated ReleaseSafe smoke runs (`MTL_DEBUG_LAYER=1`, 300 frames) passed every stage with the three new pipelines. The first ran 399 ticks; the final run was throttled by macOS (8,062 ticks) but clean.
+- **Mach WGSL compiler, newly hit:** `reflect` is unimplemented (written out as `reflected`), and `patch` is reserved.
+- **Captures** (`-Dshowcase=36`, `41`, `42`, `48`), reviewed and retuned:
+  - River water at grazing angles washed out to grey stripes. Fixed: the reflection is bluer and capped, and ripples are gentler and fade with distance.
+  - Meadow colour patches were too strong; they are now subtler.
+  - The mountain panorama showed the props' checker. Fixed: the landscape meshes use the terrain stage.
+  - Stone strata aliased into moiré on the distant ranges and striped the low riverbanks grey. Fixed: bands fade by 260 m, and low steep ground stays earthy.
+  - Close up, the strata were too regular. Each bed now has its own tone and crack.
+  - Final captures show clean snow caps, earthy banks, natural rock beds by the cave mouth, and soft meadow grass.
+- **Frontier benchmark** (window visible, before the cheaper ground lookup):
+  - presentation p50/p95 **20.84 / 21.01 ms**, unchanged;
+  - render CPU p50/p99 **2.35 / 3.83 ms**;
+  - simulation p95/p99 **3.57 / 4.07 ms**: p99 is just over the 4 ms budget, so `simulation_step_budget` failed.
+  - `Sandbox.surroundings` then stopped taking five extra height samples per player per step and reuses the terrain sample's normal.
+  - Two reruns after that were throttled (presentation p95 above 1.3 s), so the effect is **not yet measured**.
+- **Not checked:**
+  - the wind sway and water motion in a live window;
+  - GPU time of the new stages (the pinned Mach has no timestamp queries; presentation did not slow);
+  - hand play of wading, swimming and snow footing.
+
 ## GPU skinning and the air-war budget — 2026-10-10
 
 - **GPU skinning (phase 14 slice 2):** characters are skinned in a vertex stage (`render/skin.wgsl`) from a per-character dual-quaternion palette; see the [plan](plans/skeletal-animation.md). The skinned module reuses the scene shader's fragment stage. `-Dcpu-skinning` keeps the CPU path. The GPU and CPU captures of `-Dshowcase=49` look identical.

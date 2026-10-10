@@ -3,6 +3,8 @@ const mach = @import("mach");
 const math = @import("mach").math;
 const Physics = @import("../physics/Physics.zig");
 const Terrain = @import("../procedural/Terrain.zig");
+const Biome = @import("../procedural/Biome.zig");
+const Hydrology = @import("../procedural/Hydrology.zig");
 const Scatter = @import("../procedural/Scatter.zig");
 const Catalog = @import("../asset/Catalog.zig");
 const Key = @import("../world/ChunkKey.zig");
@@ -814,6 +816,19 @@ fn groundHollow(context: ?*const anyopaque, p: Physics.Vec3) bool {
 }
 
 /// The terrain height under a point, or null inside a cave (where it is overhead, not below).
+/// The ground and river around a body's feet. Only the open terrain has a cover: decks,
+/// bridges, the arena and cave floors count as firm stone, and a river counts only for feet in
+/// or just above its channel (not on a bridge over it, nor in a cave under it).
+pub fn surroundings(self: *const Sandbox, feet: Physics.Vec3) Player.Environment {
+    const terrain = Terrain.surface(self.seed, feet[0], feet[2]);
+    const river = if (Hydrology.waterAt(self.seed, feet[0], feet[2])) |level| (if (feet[1] < level + 0.1 and feet[1] > level - 3) level else null) else null;
+    if (@abs(feet[1] - terrain.height) >= 0.6) return .{ .ground = .rock, .river = river };
+    // Slope as rise over run, from the surface normal (no further height samples).
+    const n = terrain.normal;
+    const slope = @sqrt(n[0] * n[0] + n[2] * n[2]) / @max(n[1], 0.05);
+    return .{ .ground = Biome.cover(self.seed, feet[0], feet[2], terrain.height, slope).kind(), .river = river };
+}
+
 pub fn groundBelow(self: *const Sandbox, p: Physics.Vec3) ?f32 {
     if (Caves.hollow(&self.caves, p)) return null;
     return Terrain.surface(self.seed, p[0], p[2]).height;
@@ -905,12 +920,12 @@ fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
         };
         const d = R.sub(self.stallPosition(stall), g.player.feet);
         if (@sqrt(d[0] * d[0] + d[2] * d[2]) > reach + 4) g.trading = null;
-        g.player.step(&self.physics, &g.camera, .{}, dt);
+        g.player.stepIn(&self.physics, &g.camera, .{}, self.surroundings(g.player.feet), dt);
         if (g.view == .third) self.chase(g.player.eye(), &g.camera);
         return;
     }
     g.camera.turn(g.input.look_x, g.input.look_y, dt);
-    g.player.step(&self.physics, &g.camera, g.input, dt);
+    g.player.stepIn(&self.physics, &g.camera, g.input, self.surroundings(g.player.feet), dt);
     g.body_yaw = g.camera.yaw;
     stride(g.player, &g.walk_phase, &g.walk_amount, dt);
     if (g.view == .third) self.chase(g.player.eye(), &g.camera);
@@ -970,7 +985,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
         primary = false;
     }
     if (timing != null) stage_timer.reset();
-    if (self.seated == null and self.garage.piloting == null and !self.hangar.piloting) self.player.step(&self.physics, camera, input, dt);
+    if (self.seated == null and self.garage.piloting == null and !self.hangar.piloting) self.player.stepIn(&self.physics, camera, input, self.surroundings(self.player.feet), dt);
     if (!frozen) self.body_yaw = camera.yaw;
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
     for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);

@@ -16,22 +16,55 @@ pub const Weights = struct {
     }
 };
 
+/// What covers the ground at a spot: the biome mix, how much bare alpine rock shows on steep
+/// high faces, and how much snow lies above the snowline. Terrain colour and the gameplay
+/// footing (`Kind`) both come from this, so what a player sees underfoot is what they walk on.
+pub const Cover = struct {
+    weights: Weights,
+    exposed: f32,
+    snow: f32,
+
+    pub fn kind(self: Cover) Kind {
+        if (self.snow > 0.5) return .snow;
+        if (self.exposed > 0.45) return .rock;
+        const w = self.weights;
+        if (w.arid > w.meadow and w.arid > w.wetland) return .sand;
+        if (w.wetland > w.meadow) return .marsh;
+        return .grass;
+    }
+};
+
+/// The footing a cover gives: snow slows and slides, marsh and sand drag a little.
+pub const Kind = enum { grass, sand, marsh, rock, snow };
+
 /// Altitude and exposed steep faces transition through alpine stone into permanent snow.
-pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
-    const weights = sample(seed, x, z);
-    const base = weights.color();
+pub fn cover(seed: u64, x: f32, z: f32, height: f32, slope: f32) Cover {
     const alpine = std.math.clamp((height - 12) / 24, 0, 1);
     const exposed = std.math.clamp((slope - 0.72) / 0.9, 0, 1) * alpine;
     // The great ranges carry their snow higher, on their peaks rather than their flanks.
     const range = @import("Mountains.zig").sample(seed, x, z).influence;
     const snowline = 27 + range * 165 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
     const snow = std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
+    return .{ .weights = sample(seed, x, z), .exposed = exposed, .snow = snow };
+}
+
+/// The cover of the generated terrain at (x, z), with height and slope measured exactly as the
+/// chunk mesh measures them.
+pub fn coverAt(seed: u64, x: f32, z: f32) Cover {
+    const nx = Noise.height(seed, x - 0.5, z) - Noise.height(seed, x + 0.5, z);
+    const nz = Noise.height(seed, x, z - 0.5) - Noise.height(seed, x, z + 0.5);
+    return cover(seed, x, z, Noise.height(seed, x, z), @sqrt(nx * nx + nz * nz));
+}
+
+pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
+    const c = cover(seed, x, z, height, slope);
+    const base = c.weights.color();
     const rock = [3]f32{ 0.42, 0.48, 0.49 };
     const snow_color = [3]f32{ 0.86, 0.91, 0.94 };
     var result: [3]f32 = undefined;
     for (&result, 0..) |*channel, i| {
-        const alpine_color = base[i] * (1 - exposed) + rock[i] * exposed;
-        channel.* = alpine_color * (1 - snow) + snow_color[i] * snow;
+        const alpine_color = base[i] * (1 - c.exposed) + rock[i] * c.exposed;
+        channel.* = alpine_color * (1 - c.snow) + snow_color[i] * c.snow;
     }
     return result;
 }
@@ -62,4 +95,13 @@ test "terrain color adds exposed alpine rock and persistent snow above the snowl
     const snowy = terrainColor(42, 10, 20, 70, 0.4);
     try std.testing.expect(snowy[0] > low[0]);
     try std.testing.expect(snowy[1] > low[1]);
+}
+
+test "footing follows the cover: snow above the snowline, the biome's ground below" {
+    const snowy = cover(42, 10, 20, 400, 0.2);
+    try std.testing.expectEqual(Kind.snow, snowy.kind());
+    try std.testing.expectEqual(Kind.rock, (Cover{ .weights = .{ .arid = 0, .meadow = 1, .wetland = 0 }, .exposed = 0.8, .snow = 0 }).kind());
+    try std.testing.expectEqual(Kind.sand, (Cover{ .weights = .{ .arid = 0.7, .meadow = 0.3, .wetland = 0 }, .exposed = 0, .snow = 0 }).kind());
+    try std.testing.expectEqual(Kind.marsh, (Cover{ .weights = .{ .arid = 0, .meadow = 0.3, .wetland = 0.7 }, .exposed = 0, .snow = 0 }).kind());
+    try std.testing.expect(cover(42, 10, 20, -3, 0.1).kind() != .snow);
 }

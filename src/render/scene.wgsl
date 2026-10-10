@@ -1,6 +1,10 @@
 // Painterly cel shading: a soft two-step toon ramp under a warm key and a cool hemispheric
 // fill, rim light, emissive lumen (instance tint alpha above 1), and height-aware haze tinted
-// by the sky. Mach's WGSL compiler lacks `cross` and `pow`, so both are written out.
+// by the sky. Mach's WGSL compiler lacks `cross`, `pow` and `reflect`, so they are written out.
+//
+// Everything before `vertex_main` is shared: the renderer splices other stages in place of
+// `vertex_main` (skin.wgsl, foliage.wgsl) or of `frag_main` (terrain.wgsl, water.wgsl), since
+// Mach takes one entry point of each stage per module.
 struct Frame {
     view_projection: mat4x4<f32>,
     eye: vec4<f32>,
@@ -17,6 +21,8 @@ struct Frame {
     plane3: vec4<f32>,
     plane4: vec4<f32>,
     plane5: vec4<f32>,
+    // x: seconds (wraps), y: wind strength, zw: wind direction on the ground plane.
+    params: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var surface_texture: texture_2d<f32>;
@@ -41,6 +47,61 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 
 fn outside(p: vec4<f32>, c: vec3<f32>, r: f32) -> bool {
     return dot(p.xyz, c) + p.w < -r;
+}
+
+// World positions run to thousands of metres; hashing them directly loses float precision on
+// the GPU, so patterns wrap every 1024 m (seams fall on whole cells and are invisible).
+fn wrap(p: vec2<f32>) -> vec2<f32> {
+    return p - floor(p / 1024.0) * 1024.0;
+}
+
+// `reflect` is not implemented in Mach's WGSL compiler.
+fn reflected(i: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    return i - 2.0 * dot(n, i) * n;
+}
+
+fn hash2(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+
+// Smooth value noise in [0, 1].
+fn vnoise(q: vec2<f32>) -> f32 {
+    let p = wrap(q);
+    let i = floor(p);
+    let f = p - i;
+    let u = f * f * (vec2<f32>(3.0, 3.0) - 2.0 * f);
+    let a = hash2(i);
+    let b = hash2(i + vec2<f32>(1.0, 0.0));
+    let c = hash2(i + vec2<f32>(0.0, 1.0));
+    let d = hash2(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The cel ramp: two soft steps (shadow, half-lit, lit) of the key light.
+fn band(n: vec3<f32>) -> f32 {
+    let ndl = dot(n, frame.light_direction.xyz);
+    return smoothstep(-0.04, 0.06, ndl) * 0.6 + smoothstep(0.42, 0.52, ndl) * 0.4;
+}
+
+// Toon key, hemispheric fill and rim light on a base colour.
+fn lit(base: vec3<f32>, n: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    let b = band(n);
+    let hemi = n.y * 0.5 + 0.5;
+    let ambient = mix(frame.ambient_ground.rgb, frame.ambient_sky.rgb, hemi);
+    let view = normalize(frame.eye.xyz - world);
+    let facing = 1.0 - max(dot(n, view), 0.0);
+    let rim = facing * facing * facing * 0.45;
+    return base * (ambient + frame.light_color.rgb * b) + frame.light_color.rgb * rim * (0.25 + 0.75 * b);
+}
+
+// Height-aware haze: ground haze hides the streamed terrain's edge (~320 m), tall shapes
+// rise out of it, and everything picks up aerial tint with distance. Lumen resists haze.
+fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
+    let d = distance(world, frame.eye.xyz);
+    let ground = clamp((d - 40.0) / 340.0, 0.0, 1.0) * exp(-max(world.y, 0.0) / 90.0);
+    let aerial = 1.0 - exp(-d / 2200.0);
+    let fog = clamp(max(ground, aerial), 0.0, 0.95) * (1.0 - 0.6 * emissive);
+    return mix(color, frame.horizon.rgb, fog);
 }
 
 @vertex fn vertex_main(
@@ -86,27 +147,11 @@ fn outside(p: vec4<f32>, c: vec3<f32>, r: f32) -> bool {
     // Negative tint alpha selects unlit shading without expanding the 64-byte instance record.
     // Keep this branch in the shared pipeline so material choice adds no draw or pipeline switch.
     if (in.tint.a >= 0.0) {
-        let n = normalize(in.normal);
-        let ndl = dot(n, frame.light_direction.xyz);
-        // Two soft steps: shadow, half-lit, lit.
-        let band = smoothstep(-0.04, 0.06, ndl) * 0.6 + smoothstep(0.42, 0.52, ndl) * 0.4;
-        let hemi = n.y * 0.5 + 0.5;
-        let ambient = mix(frame.ambient_ground.rgb, frame.ambient_sky.rgb, hemi);
-        let view = normalize(frame.eye.xyz - in.world);
-        let facing = 1.0 - max(dot(n, view), 0.0);
-        let rim = facing * facing * facing * 0.45;
-        color = base * (ambient + frame.light_color.rgb * band) + frame.light_color.rgb * rim * (0.25 + 0.75 * band);
+        color = lit(base, normalize(in.normal), in.world);
         // Lumen: tint alpha above 1 glows, more so at night.
         emissive = clamp(in.tint.a - 1.0, 0.0, 1.0);
         let glow = base * (0.9 + 0.8 * frame.horizon.a);
         color = mix(color, glow, emissive);
     }
-
-    // Height-aware haze: ground haze hides the streamed terrain's edge (~320 m), tall shapes
-    // rise out of it, and everything picks up aerial tint with distance. Lumen resists haze.
-    let d = distance(in.world, frame.eye.xyz);
-    let ground = clamp((d - 40.0) / 340.0, 0.0, 1.0) * exp(-max(in.world.y, 0.0) / 90.0);
-    let aerial = 1.0 - exp(-d / 2200.0);
-    let fog = clamp(max(ground, aerial), 0.0, 0.95) * (1.0 - 0.6 * emissive);
-    return vec4<f32>(mix(color, frame.horizon.rgb, fog), 1.0);
+    return vec4<f32>(hazed(color, in.world, emissive), 1.0);
 }

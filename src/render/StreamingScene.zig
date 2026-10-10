@@ -19,7 +19,8 @@ const Scene = @This();
 pub const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32, stretch: [4]f32 = .{ 1, 1, 1, 0 }, rotation: [4]f32 = .{ 0, 0, 0, 1 } };
 pub const max_instances = Streamer.render_capacity * Scatter.capacity + 1 + World.max_props * Model.max_submeshes;
 /// One instanced draw of a catalog submesh.
-const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32 };
+/// `ground` draws (the mountain panorama and cave meshes) are shaded as terrain.
+const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32, ground: bool = false };
 const max_draws = Catalog.mesh_capacity * Model.max_submeshes;
 pub const chunk_bytes = Chunk.vertex_count * @sizeOf(Mesh.Vertex) + Chunk.index_count * 4;
 pub const gpu_pool_bytes = Streamer.render_capacity * chunk_bytes;
@@ -48,6 +49,7 @@ instance_count: u32 = 1,
 relic_count: u32 = 0,
 plant_count: u32 = 0,
 flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @splat(0),
+boulder_counts: [@import("../procedural/Vegetation.zig").boulder_count]u32 = @splat(0),
 resident_count: usize = 0,
 peak_resident_count: usize = 0,
 active_missing: usize = 0,
@@ -200,12 +202,17 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         count.* = self.gather(.vegetation, vp, culling, removed, @intCast(variant));
         self.plant_count += count.*;
     }
+    for (&self.boulder_counts, 0..) |*count, variant| count.* = self.gather(.boulder, vp, culling, removed, @intCast(variant));
     self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
 
 fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, variant: ?u8) u32 {
     const first = self.instance_count;
-    const handle = if (kind == .relic) self.catalog.content.relic else self.catalog.content.flora[variant.?];
+    const handle = switch (kind) {
+        .relic => self.catalog.content.relic,
+        .vegetation => self.catalog.content.flora[variant.?],
+        .boulder => self.catalog.content.boulders[variant.?],
+    };
     const color = self.baseColor(handle);
     for (self.residents) |resident| {
         if (!resident.visible) continue;
@@ -246,19 +253,36 @@ fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32,
             }
             if (self.instance_count == first) break;
             if (s == 0) self.prop_count += self.instance_count - first;
-            self.draws[self.draw_count] = .{ .mesh = mesh, .first_index = submesh.first_index, .index_count = submesh.index_count, .first_instance = first, .instances = self.instance_count - first };
+            self.draws[self.draw_count] = .{ .mesh = mesh, .first_index = submesh.first_index, .index_count = submesh.index_count, .first_instance = first, .instances = self.instance_count - first, .ground = self.isGround(handle) };
             self.draw_count += 1;
         }
     }
+}
+
+/// Generated landscape (the ranges' far panorama, cave shells): coloured like the terrain.
+fn isGround(self: *const Scene, handle: Catalog.MeshHandle) bool {
+    if (handle.eql(self.catalog.ranges)) return true;
+    for (self.catalog.cave_meshes) |cave| if (handle.eql(cave)) return true;
+    return false;
 }
 
 fn multiply(a: [4]f32, b: [4]f32) [4]f32 {
     return .{ a[0] * b[0], a[1] * b[1], a[2] * b[2], a[3] * b[3] };
 }
 
-pub fn draw(self: *Scene, pass: *gpu.RenderPassEncoder) void {
-    for (self.residents) |resident| if (resident.visible) resident.mesh.draw(pass, 1, 0);
-    if (self.relic_count > 0) if (self.gpuMesh(self.catalog.content.relic)) |mesh| mesh.draw(pass, self.relic_count, 1);
+/// The ground of every visible chunk (each chunk mesh holds its terrain first, then water).
+pub fn drawTerrain(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
+    for (self.residents) |resident| if (resident.visible) resident.mesh.drawRange(pass, 0, Chunk.terrain_index_count, 1, 0);
+    for (self.draws[0..self.draw_count]) |d| if (d.ground) d.mesh.drawRange(pass, d.first_index, d.index_count, d.instances, d.first_instance);
+}
+
+/// Rivers and waterfalls of every visible chunk, for the blended water pipeline.
+pub fn drawWater(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
+    for (self.residents) |resident| if (resident.visible) resident.mesh.drawRange(pass, Chunk.terrain_index_count, Chunk.index_count - Chunk.terrain_index_count, 1, 0);
+}
+
+/// Scattered plants and trees (with their trunks), for the swaying foliage pipeline.
+pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
     var next: u32 = 1 + self.relic_count;
     for (self.flora_counts, 0..) |count, variant| {
         if (count == 0) continue;
@@ -269,7 +293,18 @@ pub fn draw(self: *Scene, pass: *gpu.RenderPassEncoder) void {
         if (self.gpuMesh(handle)) |mesh| mesh.draw(pass, count, next);
         next += count;
     }
-    for (self.draws[0..self.draw_count]) |d| d.mesh.drawRange(pass, d.first_index, d.index_count, d.instances, d.first_instance);
+}
+
+/// Relics, boulders and props, for the main pipeline.
+pub fn drawSolids(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
+    if (self.relic_count > 0) if (self.gpuMesh(self.catalog.content.relic)) |mesh| mesh.draw(pass, self.relic_count, 1);
+    var next: u32 = 1 + self.relic_count + self.plant_count;
+    for (self.boulder_counts, 0..) |count, variant| {
+        if (count == 0) continue;
+        if (self.gpuMesh(self.catalog.content.boulders[variant])) |mesh| mesh.draw(pass, count, next);
+        next += count;
+    }
+    for (self.draws[0..self.draw_count]) |d| if (!d.ground) d.mesh.drawRange(pass, d.first_index, d.index_count, d.instances, d.first_instance);
 }
 
 pub fn destroy(self: *Scene) void {

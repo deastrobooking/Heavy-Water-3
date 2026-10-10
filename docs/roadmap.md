@@ -116,6 +116,23 @@ Next:
 - guests picking heroes from their own pads;
 - a hero gallery viewer.
 
+## Nature: ground, water, foliage and footing — implemented
+
+The terrain, rivers and plants get their own shading stages over the cel shader, and the ground now matters underfoot.
+- **Ground:** world-space grass drift and tufts, stone strata on steep faces (and on the mountain panorama and cave walls), snow on the flats with blue shadows and sun glints. No textures, no chunk seams.
+- **Water:** rivers ripple downstream, mirror the sky, glint, and foam along the banks; waterfalls streak white. Blended, drawn last.
+- **Foliage:** grass, flowers and trees sway in a slowly turning wind with gusts.
+- **Scatter:** faceted boulders on high, steep and dry ground; snow thins the flora and frosts trees and stones. Older scatter IDs (and saves) are unchanged.
+- **Footing:** rivers can be waded and swum; snow is slow and slides, marsh and sand drag, the hoverboard is quicker on snow. Footsteps crunch on snow and splash in water; falling in splashes.
+
+Acceptance: tests for ground cover and footing, the river surface, boulder meshes and placement, runner speed and stopping on each ground, the wade-to-swim transition, and ground-voiced footsteps; a clean Metal-validated smoke; captures `-Dshowcase=36` (river and waterfall), `41` (a range from the foothills) and `48` (meadow).
+
+Next:
+- footprints and wakes;
+- shoreline wetness and reeds;
+- snowfall and rain with the day cycle;
+- boulder colliders for climbing.
+
 ## Mountain ranges and cave dungeons — implemented
 
 Four seeded mountain ranges, peaks of 160–260 m with snow on their summits, stand 1.3–1.7 km from the hub. Rivers cut passes through them, and a far panorama keeps them on the horizon. Each range holds up to two cave dungeons: a mouth in the mountainside opens into a descending tree of chambers and tunnels. Halls and caches hold loot, lumen crystals light the chambers, and a Hive nest with troopers guards each heart. The caves are meshed watertight from a distance field. The streamed terrain opens over their mouths, and physics treats cave air as hollow, so players, troopers, drops and rays all work underground.
