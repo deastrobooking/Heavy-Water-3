@@ -39,7 +39,7 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Name: 1–20 letters, digits, spaces, or hyphens.
 - Proportions: height 1.62–1.98 m, build 85–115%.
 - Palettes chosen to suit the painterly direction: eight skin tones, eight hair colors, eight outfit colors, and five bioluminescent accents (the visor and belt glow like Arbor lumen).
-- Hair: short, ponytail, long, crest (anime), or ranger hood.
+- Hair: short, ponytail, long, anime crest/mohawk, ranger hood, bob, twin tails, bun, paired braids, curls, or undercut. Styles are generated as skinned clumps; longer tails and locks can use spring chains.
 
 - Clothing: undersuit, field jacket, exo rig, hardsuit, or vanguard. The field jacket has modeled utility pockets; the armor silhouettes use rigid plates rather than cloth shells.
 - Armor style: none, scout, sentinel, rootweave (bark-green plates with lumen tracery), or skyguard (streamlined blue-green plates and light strips). Helmet: open, visor, or sealed; the visor is a curved wraparound shield with an inset lumen slit.

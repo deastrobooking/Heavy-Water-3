@@ -2,6 +2,11 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Ranger hairstyles — 2026-10-11
+
+- Expanded the character creator from five hair entries to eleven: short, ponytail, long, crest, hood, bob, twin tails, bun, braids, curls and undercut. Ponytail, paired braid, bun, curly, cropped and mohawk silhouettes now have separate procedural generation paths. New enum tags are appended so existing profile JSON names remain valid.
+- The pinned Debug check and ReleaseFast build passed; `zig-out/bin/heavy-water` was reinstalled. A Metal API Validation ReleaseSafe character preview for braids completed on Apple M3 Pro and was visually inspected. Headless tests were not run.
+
 ## Solar-system roster, fusion-pulse travel and democratic campaign — 2026-10-11
 
 - Added `procedural/SolarSystem.zig`, cataloging Mercury through Neptune, twelve visitable moon concepts, settlement/governance hooks, and one Scalari mining front per planet. Added a low-threat Scalari Talus Prospector enemy near the distant surface nest, with a compact drill rendering, 45 health, 20 XP and 2 scrap on defeat. Its mining-site records specify 4 abstract resource units/minute; a functioning mining economy is not connected.

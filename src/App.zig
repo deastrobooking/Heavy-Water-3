@@ -170,12 +170,17 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.loadMods();
     if (options.character_showcase > 0) {
         self.sandbox.profile.presentation = if (options.character_showcase == 4) .feminine else .masculine;
-        self.sandbox.profile.armor = switch (options.character_showcase) {
+        self.sandbox.profile.armor = if (options.character_showcase >= 6) .none else switch (options.character_showcase) {
             2 => .sentinel,
             3, 4, 5 => .none,
             else => .scout,
         };
         self.sandbox.profile.helmet = if (options.character_showcase == 2) .sealed else .open;
+        if (options.character_showcase >= 6) {
+            const looks = [_]Profile.HairStyle{ .short, .ponytail, .long, .crest, .hood, .bob, .twin_tails, .bun, .braids, .curly, .undercut };
+            const i = @min(@as(usize, options.character_showcase - 6), looks.len - 1);
+            self.sandbox.profile.hair_style = looks[i];
+        }
         self.sandbox.profile.outfit = 2;
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;

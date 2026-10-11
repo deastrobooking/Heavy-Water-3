@@ -61,7 +61,8 @@ pub const Species = enum {
     scorpion,
 };
 pub const species_count = enum_compat.fields(Species).len;
-pub const HairStyle = enum { short, ponytail, long, crest, hood };
+// Keep the original tags so existing JSON save profiles continue to decode unchanged.
+pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut };
 pub const Presentation = enum { masculine, feminine };
 /// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
 /// Synthetics are engineered humans with powers (phase dash, kinetic slam, lumen lance): a

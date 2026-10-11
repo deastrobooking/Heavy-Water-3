@@ -148,13 +148,23 @@ fn backPath(c: Ctx, phi: f32, lift: f32, len_h: f32, curl_in: f32) [6]Vec3 {
     const side = @sin(phi);
     var p4 = Vec3.init(leave.x * 1.05 + side * 0.04 * H, m.lerp(leave.y, y_end, 0.45), @min(leave.z, back_clear * @abs(@cos(phi))));
     var p5 = Vec3.init(leave.x * (1.0 - curl_in * 0.5) + side * 0.06 * H, y_end, @min(leave.z, back_clear * @abs(@cos(phi))) * (1 - curl_in * 0.3));
-    if (c.spec.style == .short_spiky) {
+    if (c.spec.style == .short_spiky or c.spec.style == .mohawk or c.spec.style == .undercut) {
         // spiky: clumps leave the scalp and kick outward/back into points
         // spikes kick out mostly at the back; at the sides they hug the head
         const spike = c.spec.spikiness;
         const backness = m.smoothstep(1.6, 2.6, @min(@abs(phi), m.tau - @abs(phi)));
-        p4 = c.s.point(phi, -0.40, (0.06 + 0.06 * spike * backness) * H * v);
-        p5 = c.s.point(phi * 1.03, m.lerp(-0.75, -0.50, backness), (0.05 + (0.06 + 0.12 * spike) * backness) * H * v);
+        if (c.spec.style == .undercut) {
+            p4 = c.s.point(phi, -0.68, 0.035 * H * v);
+            p5 = c.s.point(phi, -0.88, 0.025 * H * v);
+        } else {
+            const crest: f32 = if (c.spec.style == .mohawk) 0.45 else 1.0;
+            p4 = c.s.point(phi, -0.40, (0.06 + 0.06 * spike * backness * crest) * H * v);
+            p5 = c.s.point(phi * 1.03, m.lerp(-0.75, -0.50, backness), (0.05 + (0.06 + 0.12 * spike * crest) * backness) * H * v);
+        }
+    } else if (c.spec.style == .curly) {
+        // Loose S-shaped locks create a soft, rounded curl silhouette instead of straight panels.
+        p4 = Vec3.init(leave.x + @sin(phi * 3.0) * 0.12 * H, m.lerp(leave.y, y_end, 0.46), leave.z - 0.035 * H);
+        p5 = Vec3.init(leave.x - @sin(phi * 3.0) * 0.10 * H, y_end, leave.z - 0.08 * H);
     } else if (len_h < 0.4) {
         // short hair: end just below where it leaves the head, curling in
         p4 = leave.lerp(c.s.point(phi, -0.9, 0.04 * H), 0.5);
@@ -214,8 +224,12 @@ pub fn buildHair(
     const long_len: f32 = switch (hs.style) {
         .long_straight => hs.length,
         .twin_tails => 0.5,
+        .ponytail => 0.12,
+        .braids => 0.12,
+        .curly => 0.62,
+        .bun => 0.08,
         .bob => 0.1,
-        .short_spiky => 0.0,
+        .short_spiky, .undercut, .mohawk => 0.0,
     };
     const curl_in: f32 = if (hs.style == .bob) 1.0 else 0.15;
 
@@ -279,7 +293,7 @@ pub fn buildHair(
     }
 
     // ---- side locks framing the face (long-ish, own chains)
-    if (hs.style != .short_spiky) {
+    if (hs.style != .short_spiky and hs.style != .undercut and hs.style != .mohawk and hs.style != .braids) {
         for ([_]f32{ 1, -1 }) |side| {
             const phi = 1.28 * side;
             const end_y = if (hs.style == .bob) lm.chin_y + 0.05 * H else lm.chin_y - 0.30 * H;
@@ -301,10 +315,12 @@ pub fn buildHair(
     }
 
     // ---- twin tails
-    if (hs.style == .twin_tails) {
-        for ([_]f32{ 1, -1 }) |side| {
-            const anchor = c.s.point(2.15 * side, 0.55, 0.05 * H);
-            const out_dir = Vec3.init(side, 0, -0.35).normalize();
+    if (hs.style == .twin_tails or hs.style == .ponytail) {
+        const tails: usize = if (hs.style == .twin_tails) 2 else 1;
+        for (0..tails) |tail_index| {
+            const side: f32 = if (hs.style == .twin_tails) (if (tail_index == 0) @as(f32, 1) else -1) else 0;
+            const anchor = if (hs.style == .twin_tails) c.s.point(2.15 * side, 0.55, 0.05 * H) else c.s.point(m.pi, 0.78, 0.04 * H);
+            const out_dir = if (hs.style == .twin_tails) Vec3.init(side, 0, -0.35).normalize() else Vec3.init(0.12, 0, -1).normalize();
             const tail_len = hs.length * H;
             const center = [6]Vec3{
                 anchor,
@@ -333,11 +349,50 @@ pub fn buildHair(
         }
     }
 
+    // Paired woven locks run down the chest. Alternating lateral crossings make each one read
+    // as a braid at the same stylized scale as the surrounding hair clumps.
+    if (hs.style == .braids) {
+        for ([_]f32{ -1, 1 }) |side| {
+            for (0..2) |strand| {
+                var pts: [6]Vec3 = undefined;
+                for (&pts, 0..) |*p, i| {
+                    const t = @as(f32, @floatFromInt(i)) / 5.0;
+                    const crossing = @sin(t * m.tau * 2 + @as(f32, @floatFromInt(strand)) * m.pi) * 0.065 * H;
+                    const x = side * (0.23 * H + crossing);
+                    const y = m.lerp(lm.chin_y + 0.12 * H, lm.chin_y - 0.96 * H, t);
+                    const z = 0.10 * H + @cos(t * m.tau * 2 + @as(f32, @floatFromInt(strand)) * m.pi) * 0.025 * H;
+                    p.* = Vec3.init(x, y, z);
+                }
+                try clumps.append(gpa, .{ .pts = pts, .width = 0.12 * H, .thickness = 0.045 * H, .taper = 1.5, .ref_normal = Vec3.init(side, 0, 1) });
+            }
+        }
+    }
+
+    // A compact coiled knot at the back of the crown gives the bun a distinct tied-up profile.
+    if (hs.style == .bun) {
+        const root = c.s.point(m.pi, 0.72, 0.05 * H);
+        const center = root.add(Vec3.init(0, 0.12 * H, -0.20 * H));
+        for (0..10) |i| {
+            const a = @as(f32, @floatFromInt(i)) / 10.0 * m.tau;
+            const radial = Vec3.init(@cos(a), @sin(a), -0.45).normalize();
+            const pts = [6]Vec3{
+                root,
+                root.lerp(center, 0.35),
+                center.add(radial.scale(0.04 * H)),
+                center.add(radial.scale(0.14 * H)),
+                center.add(radial.scale(0.20 * H)),
+                center.add(radial.scale(0.10 * H)),
+            };
+            try clumps.append(gpa, .{ .pts = pts, .width = 0.11 * H, .thickness = 0.045 * H, .taper = 1.8, .ref_normal = radial });
+        }
+    }
+
     // ---- spiky crown: a few clumps that stand up and sweep back
-    if (hs.style == .short_spiky) {
+    if (hs.style == .short_spiky or hs.style == .mohawk) {
         for (0..6) |i| {
-            const phi = m.lerp(-0.8, 0.8, @as(f32, @floatFromInt(i)) / 5) + m.pi + jitter(rnd, 0.1);
-            const tip_lift = (0.06 + 0.10 * spiky) * H;
+            const spread: f32 = if (hs.style == .mohawk) 0.28 else 0.8;
+            const phi = m.lerp(-spread, spread, @as(f32, @floatFromInt(i)) / 5) + m.pi + jitter(rnd, 0.1);
+            const tip_lift = (0.06 + 0.10 * spiky) * H * (if (hs.style == .mohawk) @as(f32, 1.5) else 1);
             try clumps.append(gpa, .{
                 .pts = .{
                     c.s.point(phi * 0.2, 1.40, 0),
@@ -450,7 +505,9 @@ fn buildCap(gpa: Allocator, out: *Mesh, c: Ctx, spec: spec_mod.CharacterSpec) !v
     const cols = spec.res(36, 12);
     const rows = spec.res(14, 6);
     const keys_phi = [_]f32{ 0, 0.9, 1.6, 2.4, m.pi };
-    const keys_el = [_]f32{ 0.62, 0.42, -0.12, -0.75, -0.95 };
+    var keys_el = [_]f32{ 0.62, 0.42, -0.12, -0.75, -0.95 };
+    if (spec.hair.style == .undercut) keys_el = .{ 0.62, 0.42, 0.34, -0.65, -0.92 };
+    if (spec.hair.style == .mohawk) keys_el = .{ 0.62, 0.20, -0.30, -0.88, -0.95 };
     const first = out.vertexCount();
     for (0..rows) |r| {
         const rt = @as(f32, @floatFromInt(r + 1)) / @as(f32, @floatFromInt(rows));
