@@ -649,6 +649,7 @@ pub fn setMaxProgressionTest(self: *Sandbox, enabled: bool) void {
     const armor_count = enum_compat.fields(Profile.Armor).len;
     for (&self.kits, 0..) |*kit, player_index| {
         kit.levels = @splat(Kit.max_level);
+        kit.combat_xp = (Kit.max_combat_level - 1) * 250;
         kit.suits = (@as(u8, 1) << @intCast(clothing_count)) - 1;
         kit.armors = (@as(u8, 1) << @intCast(armor_count)) - 1;
         kit.weapons = all_weapons;
@@ -2156,7 +2157,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     var known: [max_players]bool = .{ true, false, false, false };
     var characters: [max_players]?Profile = @splat(null);
     var owns: [max_players]?Profile = @splat(null);
-    if (doc.format < Save.format_version) {
+    if (doc.format < 13) {
         kits[0] = Progress.legacyKit(doc.progress, doc.wallet) catch return error.InvalidSave;
     } else for (doc.members) |m| {
         kits[m.slot] = Kit.fromDoc(m.kit) catch return error.InvalidSave;

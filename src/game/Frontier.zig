@@ -66,6 +66,13 @@ pub fn init(sb: *Sandbox) void {
     avoid[a] = Sandbox.spawn;
     a += 1;
     sb.enemies = Enemies.init(sb.seed, Sandbox.spawn, avoid[0..a], 140);
+    // A distant bio-titan foreshadows the Scalari's engineered ground war; the practice patrol
+    // near the spawn is deliberately much weaker.
+    if (sb.enemies.nest_count > 0) {
+        const nest = sb.enemies.nests[0].position;
+        _ = sb.enemies.spawnAt(.scalari_titan, 0, R.add(nest, .{ 18, 0, 14 }), 1);
+        _ = sb.enemies.spawnAt(.scalari_miner, 0, R.add(nest, .{ -15, 0, -16 }), 1);
+    }
     const surface = sb.enemies.nest_count;
     var nest_sites: [Enemies.max_nests]V = undefined;
     for (sb.enemies.nests[0..surface], 0..) |nest, i| nest_sites[i] = nest.position;
@@ -601,11 +608,39 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
         },
         .unit_down => |u| {
             const random = sb.enemies.rng.random();
-            sb.collectibles.drop(.hive_alloy, u.position);
-            if (u.kind == .sentinel or u.kind == .bulwark) {
-                sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ 1.2, 0, 0 }));
-                sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ -1.2, 0, 0.6 }));
-            } else if (random.float(f32) < 0.35) sb.collectibles.drop(.lumen_shard, R.add(u.position, .{ 0.8, 0, 0 }));
+            const scalari = u.kind == .scalari_scout or u.kind == .scalari_stinger or u.kind == .scalari_titan or u.kind == .scalari_miner;
+            const xp: u32 = switch (u.kind) {
+                .scalari_scout => 30,
+                .scalari_stinger => 55,
+                .scalari_titan => 300,
+                .scalari_miner => 20,
+                .drone, .skirmisher => 40,
+                .trooper => 65,
+                .sentinel, .bulwark => 100,
+            };
+            var winner: ?usize = null;
+            var winner_distance = std.math.inf(f32);
+            for (0..Sandbox.max_players) |p| if (sb.present(p)) {
+                const delta = R.sub(sb.feetOf(p), u.position);
+                const distance = delta[0] * delta[0] + delta[2] * delta[2];
+                if (distance < winner_distance) {
+                    winner = p;
+                    winner_distance = distance;
+                }
+            };
+            if (winner) |player_index| {
+                const kit = &sb.kits[player_index];
+                const leveled = kit.awardCombatXP(xp);
+                if (scalari) kit.wallet.scrap +|= switch (u.kind) { .scalari_scout => 3, .scalari_stinger => 6, .scalari_titan => 40, .scalari_miner => 2, else => 0 };
+                if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
+            }
+            if (!scalari) {
+                sb.collectibles.drop(.hive_alloy, u.position);
+                if (u.kind == .sentinel or u.kind == .bulwark) {
+                    sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ 1.2, 0, 0 }));
+                    sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ -1.2, 0, 0.6 }));
+                } else if (random.float(f32) < 0.35) sb.collectibles.drop(.lumen_shard, R.add(u.position, .{ 0.8, 0, 0 }));
+            }
             // Drops fall to the floor below.
             for (&sb.collectibles.drops) |*slot| if (slot.*) |*d| {
                 if (d.age == 0) if (sb.physics.castRay(d.position, .{ 0, -1, 0 }, 80, .none)) |floor| {
@@ -613,8 +648,13 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 };
             };
             sb.cue(.boom, u.position);
-            sb.progress.setFlag("hive_fought");
-            sb.say("hive {s} down", .{@tagName(u.kind)});
+            if (scalari) {
+                sb.progress.setFlag("scalari_fought");
+                sb.say("scalari {s} down: +{d} XP", .{ @tagName(u.kind), xp });
+            } else {
+                sb.progress.setFlag("hive_fought");
+                sb.say("hive {s} down: +{d} XP", .{ @tagName(u.kind), xp });
+            }
             petLearns(sb, u.position);
         },
         .deflected => |d| {
@@ -755,6 +795,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .fire = armed and sb.trigger.fire,
         .alt = armed and sb.trigger.alt,
         .saber = armed and sb.trigger.saber,
+        .weapon_accent = rgb3(Profile.accent_colors[sb.profile.accent]),
         .direct = sb.trigger.direct,
         .cycle = armed and actions.next_item,
     }, dt, &out);
@@ -776,6 +817,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .airborne = !g.player.grounded,
             .fire = !frozen and g.fire and g.trading == null,
             .saber = !frozen and g.alt and g.trading == null,
+            .weapon_accent = rgb3(Profile.accent_colors[g.profile.accent]),
             .direct = true,
             .cycle = !frozen and g.next_weapon and g.trading == null,
         }, dt, &out);
@@ -1192,6 +1234,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     // Ground Hive units are skinned characters (ids 16–23), drawn only near P1 to bound cost.
     var trooper_id: u8 = 16;
     for (sb.enemies.units) |slot| if (slot) |u| if (Enemies.isGround(u.kind)) {
+        if (u.kind == .scalari_scout or u.kind == .scalari_miner) continue;
         if (trooper_id >= hero_first_id or !room(out, n, 1)) break;
         const d = R.sub(u.position, sb.player.feet);
         if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
@@ -1206,9 +1249,17 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .trooper => trooper_profile,
             .skirmisher => skirmisher_profile,
             .bulwark => bulwark_profile,
+            .scalari_scout => scalari_scout_profile,
+            .scalari_stinger => scalari_stinger_profile,
+            .scalari_titan => scalari_titan_profile,
             else => trooper_profile,
         };
-        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else .{ 1, 1, 1, 1 };
+        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else switch (u.kind) {
+            .scalari_scout => .{ 0.38, 1.2, 1.35, 1 },
+            .scalari_stinger => .{ 1.15, 0.72, 0.22, 1 },
+            .scalari_titan => .{ 1.2, 0.4, 0.25, 1 },
+            else => .{ 1, 1, 1, 1 },
+        };
         out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = tint, .character = .{
             .profile = profile,
             .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t, .action = action, .action_t = action_t },
@@ -1216,6 +1267,28 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         } };
         trooper_id += 1;
         n += 1;
+    };
+    // Prospector droids use a compact, readable drill silhouette rather than the ranger rig.
+    for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .scalari_miner and room(out, n, 6)) {
+        const at = u.position;
+        const heading = yawQuat(u.yaw);
+        const pulse = 0.7 + 0.3 * @sin(t * 8 + u.orbit);
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 0.62, 0 }) }, .tint = .{ 0.22, 0.24, 0.28, 1 }, .size = .{ 0.9, 0.72, 0.72 }, .rotation = heading };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 1.16, 0.08 }) }, .tint = .{ 0.48, 0.38, 0.22, 1 }, .size = .{ 0.57, 0.34, 0.46 }, .rotation = heading };
+        out[n + 2] = .{ .mesh = c.gem, .transform = .{ .position = R.add(at, .{ 0, 1.48, 0.12 }) }, .tint = Material.emissive(.{ 0.95, 0.62, 0.16, 1 }, pulse), .size = @splat(0.22), .rotation = yawQuat(t * 0.8) };
+        out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ -0.62, 0.62, 0.18 }) }, .tint = .{ 0.35, 0.3, 0.24, 1 }, .size = .{ 0.62, 0.18, 0.22 }, .rotation = heading };
+        out[n + 4] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0.62, 0.62, 0.18 }) }, .tint = .{ 0.35, 0.3, 0.24, 1 }, .size = .{ 0.62, 0.18, 0.22 }, .rotation = heading };
+        out[n + 5] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 0.37, 0.42 }) }, .tint = Material.emissive(.{ 1, 0.47, 0.08, 1 }, pulse * 1.2), .size = .{ 0.5, 0.09, 0.14 }, .rotation = yawQuat(t * 3 + u.orbit) };
+        n += 6;
+    };
+    // Scalari scout drones are low, four-footed machines rather than scaled-down Hive people.
+    for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .scalari_scout and room(out, n, 2)) {
+        const p = R.add(u.position, .{ 0, 0.48, 0 });
+        const body_tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else .{ 0.26, 0.92, 1.18, 1 };
+        const facing = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, u.yaw));
+        out[n] = .{ .mesh = c.drone, .transform = .{ .position = p }, .tint = body_tint, .size = .{ 0.82, 0.48, 1.08 }, .rotation = facing };
+        out[n + 1] = .{ .mesh = c.drone_glow, .transform = .{ .position = p }, .tint = Material.emissive(.{ 0.12, 0.95, 1, 1 }, if (u.state == .hunt) @as(f32, 0.95) else 0.3), .size = .{ 0.82, 0.48, 1.08 }, .rotation = facing };
+        n += 2;
     };
     for (sb.enemies.units) |slot| if (slot) |u| {
         if (Enemies.isGround(u.kind)) continue;
@@ -1323,8 +1396,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         n += 1;
     };
     // Held weapons, at each armed player's right hand.
-    for (&sb.combat.arsenals) |*arsenal| if (arsenal.grip) |g| if (arsenal.active) |kind| if (room(out, n, max_weapon_parts)) {
-        n += heldWeapon(out[n..], c.block, kind, g, arsenal, t);
+    for (&sb.combat.arsenals, 0..) |*arsenal, player| if (arsenal.grip) |g| if (arsenal.active) |kind| if (room(out, n, max_weapon_parts)) {
+        n += heldWeapon(out[n..], c.block, kind, g, arsenal, t, rgb3(Profile.accent_colors[sb.profileOf(player).accent]));
     };
     // Ranger sentries (a squat body, a head turned toward its target) and arc grenades.
     for (sb.specials.sentries) |slot| if (slot) |s| if (room(out, n, 3)) {
@@ -1339,7 +1412,12 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         n += 1;
     };
     // Player shots and effects.
-    for (sb.combat.arsenals) |arsenal| for (arsenal.system.projectiles.items) |p| if (p.active and room(out, n, 1)) {
+    for (sb.combat.arsenals) |arsenal| for (arsenal.system.projectiles.items) |p| if (p.active) {
+        if (p.kind == .saber_wave) {
+            if (room(out, n, 14)) n += saberWave(out[n..], c.block, p.position, p.velocity, p.visual_tint orelse .{ 0.3, 0.95, 1 }, p.radius, t);
+            continue;
+        }
+        if (!room(out, n, 1)) continue;
         const color = @import("../combat/Weapon.zig").Element.color(p.element);
         const s = p.radius * 0.8;
         out[n] = .{ .mesh = c.block, .transform = .{ .position = p.position }, .tint = Material.emissive(.{ color[0], color[1], color[2], 1 }, 1), .size = .{ s, s, @max(0.6, s * 3) }, .rotation = facing(p.velocity) };
@@ -1419,7 +1497,7 @@ fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) u
     return n;
 }
 
-const max_weapon_parts = 5;
+const max_weapon_parts = 8;
 /// A part of a held weapon: offset along the weapon's frame (+Z along the barrel or blade), size,
 /// colour, and glow (0 for plain metal).
 const Part = struct { at: [3]f32, size: [3]f32, color: [3]f32, glow: f32 = 0 };
@@ -1427,16 +1505,20 @@ const gunmetal: [3]f32 = .{ 0.16, 0.17, 0.2 };
 const plate: [3]f32 = .{ 0.62, 0.64, 0.68 };
 
 /// A held weapon built from blocks: hilt and blade, or a gun's body, barrel and lumen strips.
-fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32) usize {
+fn rgb3(c: [4]f32) [3]f32 { return .{ c[0], c[1], c[2] }; }
+
+fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
     const hum = 0.85 + 0.15 * @sin(t * 30);
     const heat = arsenal.charge();
     const parts: []const Part = switch (kind) {
         .beam_saber => &.{
             .{ .at = .{ 0, 0, -0.02 }, .size = .{ 0.06, 0.06, 0.26 }, .color = gunmetal },
             .{ .at = .{ 0, 0, 0.13 }, .size = .{ 0.09, 0.09, 0.04 }, .color = plate },
-            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.055, 0.055, 1.35 }, .color = .{ 0.8, 0.06, 1 }, .glow = hum },
-            .{ .at = .{ 0.035 * @sin(t * 43), 0.035 * @cos(t * 37), 0.2 + @mod(t * 2.4, 1.25) }, .size = .{ 0.065, 0.065, 0.19 }, .color = .{ 0.05, 0.55, 1 }, .glow = 1 },
-            .{ .at = .{ -0.035 * @cos(t * 39), 0.03 * @sin(t * 47), 0.2 + @mod(t * 2.4 + 0.62, 1.25) }, .size = .{ 0.065, 0.065, 0.14 }, .color = .{ 0.1, 0.7, 1 }, .glow = hum },
+            .{ .at = .{ 0.12, 0, 0.17 }, .size = .{ 0.24, 0.035, 0.045 }, .color = plate },
+            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.07, 0.07, 1.35 }, .color = accent, .glow = hum },
+            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.028, 0.028, 1.3 }, .color = .{ 0.92, 0.98, 1 }, .glow = 1.2 },
+            .{ .at = .{ 0.035 * @sin(t * 43), 0.035 * @cos(t * 37), 0.2 + @mod(t * 2.4, 1.25) }, .size = .{ 0.055, 0.055, 0.19 }, .color = accent, .glow = 1 },
+            .{ .at = .{ -0.035 * @cos(t * 39), 0.03 * @sin(t * 47), 0.2 + @mod(t * 2.4 + 0.62, 1.25) }, .size = .{ 0.05, 0.05, 0.14 }, .color = .{ 0.85, 0.96, 1 }, .glow = hum },
         },
         .blaster => &.{
             .{ .at = .{ 0, 0.03, 0.05 }, .size = .{ 0.08, 0.13, 0.32 }, .color = plate },
@@ -1504,6 +1586,25 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         out[i] = .{ .mesh = block, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = rotation };
     }
     return parts.len;
+}
+
+/// A curved energy slash built from short overlapping facets: the outer ribbon follows the
+/// selected suit accent and a narrower pale edge gives it a bright anime-style cutting crest.
+fn saberWave(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, at: V, velocity: V, accent: [3]f32, radius: f32, t: f32) usize {
+    const forward = R.normalize(velocity);
+    const side = R.normalize(R.cross(.{ 0, 1, 0 }, forward));
+    const rotation = facing(velocity);
+    const span = @max(1.8, radius * 1.65);
+    const thick = @max(0.08, radius * 0.12);
+    const bob = @sin(t * 16) * 0.06;
+    for (0..7) |i| {
+        const u = @as(f32, @floatFromInt(i)) / 6 * 2 - 1;
+        const pos = R.add(at, R.add(R.scale(side, u * span), .{ 0, 0.15 + (1 - u * u) * radius * 0.52 + bob, (1 - u * u) * 0.28 }));
+        const width = span / 3.0 + 0.08;
+        out[i] = .{ .mesh = block, .transform = .{ .position = pos }, .tint = Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 1.65), .size = .{ width, thick, 0.12 }, .rotation = rotation };
+        out[i + 7] = .{ .mesh = block, .transform = .{ .position = R.add(pos, .{ 0, 0.045, 0.015 }) }, .tint = Material.emissive(.{ 0.92, 0.98, 1, 1 }, 1.9), .size = .{ width * 0.57, thick * 0.34, 0.13 }, .rotation = rotation };
+    }
+    return 14;
 }
 
 /// The Starbowl: a floating slab with a lit ring, low walls, four corner pylons with beacons,
@@ -1640,6 +1741,9 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
 const trooper_profile: @import("Profile.zig") = .{ .outfit = 3, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 2, .skin = 7, .build = 1.1, .height = 1.05 };
 const skirmisher_profile: @import("Profile.zig") = .{ .outfit = 7, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 3, .skin = 7, .build = 0.92, .height = 0.96 };
 const bulwark_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 1, .skin = 7, .build = 1.18, .height = 1.15 };
+const scalari_scout_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 4, .skin = 5, .build = 0.7, .height = 0.78 };
+const scalari_stinger_profile: @import("Profile.zig") = .{ .outfit = 4, .clothing = .hardsuit, .armor = .vanguard, .helmet = .sealed, .accent = 5, .skin = 6, .build = 0.95, .height = 1.05 };
+const scalari_titan_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 5, .skin = 4, .build = 2.7, .height = 4.8 };
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {
     const color = Collectibles.tint(kind);

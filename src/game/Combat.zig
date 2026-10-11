@@ -78,6 +78,8 @@ pub const Aim = struct {
     alt: bool = false,
     cycle: bool = false,
     saber: bool = false,
+    /// Profile accent used by the saber blade and its released wave.
+    weapon_accent: [3]f32 = .{ 0.3, 0.95, 1 },
     direct: bool = false,
 };
 
@@ -511,8 +513,19 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
         self.effect(.{ .kind = .burst, .position = center, .life = 0.32, .size = radius, .color = .{ 0.25, 0.9, 1 } });
     }
     if (arc == .charged) {
-        // A crescent of light that flies on through everything in its path.
-        if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, 40, c.damage * (if (s.slots[0].level >= 3) @as(f32, 0.85) else 0.6), .solar_lumen, 0.6, null)) |i| s.projectiles.items[i].pierce = 8;
+        // A charged edge launches a broad, player-coloured crescent; each upgrade widens and
+        // sustains the visual and lets the wave travel farther through the Hive.
+        const tier = s.slots[0].level;
+        if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, if (tier >= 3) 48 else 40, c.damage * (if (tier >= 3) @as(f32, 0.85) else 0.6), s.slots[0].element, if (tier >= 3) 0.82 else 0.6, null)) |i| {
+            s.projectiles.items[i].pierce = if (tier >= 3) 12 else 8;
+            s.projectiles.items[i].radius = if (tier >= 3) 2.0 else 1.35;
+            const element_color = Weapon.Element.color(s.slots[0].element);
+            s.projectiles.items[i].visual_tint = .{
+                aim.weapon_accent[0] * 0.72 + element_color[0] * 0.28,
+                aim.weapon_accent[1] * 0.72 + element_color[1] * 0.28,
+                aim.weapon_accent[2] * 0.72 + element_color[2] * 0.28,
+            };
+        }
         push(out, n, .{ .fired = .beam_saber });
     }
     // A unit just ahead pulls the cut toward it.

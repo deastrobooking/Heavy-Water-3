@@ -2,6 +2,7 @@
 //! gameplay remains in a local streamed frame so terrain, physics, and f32 transforms stay stable.
 const std = @import("std");
 const Seed = @import("Seed.zig");
+pub const solar_system = @import("SolarSystem.zig");
 
 pub const player_capacity = 4;
 pub const catalog_version: u32 = 1;
@@ -220,6 +221,7 @@ pub fn arenaSeed(campaign_seed: u64, id: ArenaId) u64 {
 }
 
 pub fn validate() bool {
+    if (!solar_system.validate()) return false;
     for (worlds, 0..) |spec, i| {
         if (@as(usize, @intFromEnum(spec.id)) != i or spec.arena_diameter_m == 0) return false;
         if (spec.form == .artificial_globe and (spec.planet_radius_m <= 0 or spec.sky_clearance_m <= 0 or !spec.geodesic_shell or spec.rotation_hours <= 0)) return false;

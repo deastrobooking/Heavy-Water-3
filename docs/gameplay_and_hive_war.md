@@ -19,8 +19,8 @@ To match anime-level heroism and freedom across vertical ecosystems:
 
 1. **Jetpacks & Hover Jets:**
    - Sustained vertical and forward thrust for ascending trunks, hovering across open canopies, and hovering during gun battles.
-2. **Sonic Fast Dashes & Afterimages:**
-   - High-speed omnidirectional ground and air dashes (42+ m/s) with afterimage trails, passing through enemy fire and repositioning instantly.
+2. **Sonic Double-Tap Dashes:**
+   - Double-tap dodge within 0.30 s to burst at 42 m/s in the chosen ground or air direction. Repeat the double-tap within the 1.35 s chain window for up to four bursts per chain. A single dodge still rolls on foot or boosts the board; dashing does not grant invulnerability.
 3. **Superman / DBZ 3D Aerial Flight:**
    - Full 3D free-flight mode with supersonic boost, mid-air hover-braking, and dogfighting against Hive aerial swarms around Arbors and sky towers.
 4. **Flying Jumps & Warp-Strikes:**
@@ -51,6 +51,8 @@ To match anime-level heroism and freedom across vertical ecosystems:
 
 Fabricate each base weapon at the garage before buying its upgrades. Install Mk II before Mk III; tiers cost lumen, Hive alloy, scrap, and some recipes also require rotor cores. Weapon tiers persist in the world save and apply to every local player's arsenal. The weapon HUD shows the equipped Mk tier and charge meter.
 
+The saber now takes its lumen color from the player's customizable armor accent, blended with the weapon element's color for the charged wave. A charged cut throws a broad, faceted crescent with a white-hot cutting edge; Mk III sends it faster, farther, and with a wider impact envelope. Armor adds articulated shoulder shells and luminous heel runners with paired energy rollers. The selectable Energy Skate traversal reuses terrain-resistant board control, reaches 16 m/s (23 m/s while sprinting), gives a stronger superhuman jump, and spends suit fuel while holding jump for an air-assist burst.
+
 ### Elemental Customization & Core Sockets
 - **Elements:** Kinetic, Solar-Lumen (fire/anti-synth), Cryo-Deuterium (freeze/slow), Rootsong (disrupt/overload).
 - **Modular Upgrade Cores:** Plasma Edge, Accelerator, Quantum Warp, Hydra Swarm, Aegis Reflector, Overdrive Core.
@@ -63,6 +65,8 @@ Fabricate each base weapon at the garage before buying its upgrades. Install Mk 
 
 - **The Scalarians:** An ancient reptilian people who left Earth long ago. They modified ancient insects and established the first Hive lineages on their homeworld. Their armor, ships and capital architecture carry a dragon motif: horned profiles, layered scales, long prow forms and swept blade wings.
 - **The Hive:** A distinct civilization descended from the engineered insects. Its brood network now fields drones, troopers, wasps and Brood carriers. The Hive is biological at its core, with machinery and Scalari technology grafted into its structures; it is not simply an autonomous robot intelligence.
+- **Scalari ground war:** cyan scout drones and fast amber stingers patrol a renewable practice pocket near the Frontier spawn; each has low health and melee-only attacks. A distant, 1,850-health bio-titan is the first kaiju-scale Scalari mutant. The starter patrol replenishes to three units at a slow pace so new players can learn movement and earn combat XP without fighting the titan.
+- **Ranger levels:** each local ranger's Kit stores combat XP. Every 250 XP advances one of 50 levels and adds 2 maximum health. A Scalari scout gives 30 XP, a stinger 55, and the titan 300; Hive roles give 40–100. The nearest active ranger to a takedown gets its XP and Scalari scrap bounty.
 - **The central mystery:** The Scalarians' original purpose for the Hive, and whether the Hive still obeys them, can drive the campaign's discoveries. Preserve room for players to learn this through city archives and brood sites instead of explaining it all in the opening.
 
 ### Scalari fleet and campaign arc

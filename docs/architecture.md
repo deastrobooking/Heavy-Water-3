@@ -141,7 +141,10 @@ With a hardsuit or vanguard, the old ellipsoid `armor` plates (scout and sentine
 
 Each suit has its own two-tone scheme (`Ranger.suitTones`), with the outfit colour always showing: the exo rig is a light frame in the outfit colour over graphite, the hardsuit ivory plate with outfit-coloured secondary panels, the vanguard gunmetal with outfit-coloured trim. `suitDetail` adds the hard-surface kit, all rigid `armor` on its joint:
 - every suit: over-bright lumen strips down the forearms and shins, domed knee and elbow cops, a lit belt buckle, and (with an open face) a headset of earpieces with lit rings;
-- the hardsuit and vanguard: a collar ring, a sternum plate with a core light, and a back power pack with lit vents; the vanguard's pack carries twin thrusters.
+- the hardsuit and vanguard: articulated shoulder shells, a collar ring, a sternum plate with a core light, and a back power pack with lit vents; the vanguard's pack carries twin thrusters;
+- each armor suit: articulated heel housings, twin luminous energy rollers, and toe rails for the Energy Skate traversal mode.
+
+Energy Skate is a selectable ground traversal mode using the hoverboard's low-traction, terrain-resistant movement with distinct run posing and an air-assist jump. It reaches 16 m/s, 23 m/s while sprinting, jumps 1.52× the base impulse, and consumes suit fuel while boosting upward in the air. The saber blade follows the player's accent palette; its charged crescent blends the profile accent with the weapon slot's selected element and grows faster, wider and longer-lived at Mk III. The renderer builds each wave from a faceted accent ribbon and a narrower white-hot edge.
 
 Faces shade from a smoothed sphere (`softenFace`): head and face skin normals are pulled 80% of the way onto an upward-leaning sphere around the head. Without it the cel ramp's shadow band lay across every jaw and chin and read as a beard.
 
@@ -161,7 +164,7 @@ The avatar appears in your own view in third person (F2), the creator, conversat
 - **Settings:** `game/Settings.zig` holds look sensitivity, invert Y, field of view, interface size, third-person start, the performance overlay, keyboard bindings and the active controller mapping. Values are checked on load and written to `saves/settings.json` after edits.
 - **Controller mappings:** `engine/PadBindings.zig` maps gameplay actions to buttons and axes, with per-axis inversion, stick deadzone and trigger threshold. Controls → Gamepad Setup captures buttons, changes axis sources, and imports/exports versioned JSON profiles. macOS uses Apple's Extended/Micro GameController profiles plus an IOKit HID fallback for joystick/gamepad/multi-axis devices, with AppKit file dialogs for community preset exchange. The active mapping is shared by connected pads. Hardware hidden from those OS interfaces, and Windows/Linux, still need native backends; the community website must host the exported files.
 - **Indoor maps:** `procedural/Interiors.zig` creates deterministic, connected room-module graphs for residences, commerce, industry, enemy bases and dungeons. Stable room roles, grid positions, door sides, dimensions, entry and objective indices give building generation, minimaps and pathing a shared schema. The current slice supplies the layout data and validation; visible room geometry, streaming portals, door state, AI population and dungeon rewards still need runtime integration.
-- **Campaign destinations:** `procedural/Worlds.zig` defines the Arbor Frontier, Hive/Scalari Homeworld and Gaia, with bounded four-player arena concepts, city-region descriptors and one capital per destination. Frontier has five canopy/river records and two ocean-city concepts; Hive and Gaia have five each. The Hive Homeworld records the Scalarians as the ancient founders; the Obsidian Coil is the final-boss capital. World and arena seeds are deterministic and scoped. Gaia's Earth-radius and one-mile geodesic-sky envelope remain design metadata; routing, city geometry/interiors, globe streaming, world-specific saves and RTS structures are not connected yet. The ocean locations are catalog-only; underwater traversal, rendering and city runtime are also unimplemented. See [Planetary frontier](plans/planetary-frontier.md) and [Ocean cities](plans/ocean-cities.md).
+- **Campaign destinations:** `procedural/Worlds.zig` defines the Arbor Frontier, Hive/Scalari Homeworld and Gaia, with bounded four-player arena concepts, city-region descriptors and one capital per destination. `procedural/SolarSystem.zig` catalogs the eight planets, twelve moons, local station hooks, governance, and Scalari mining fronts. The intended travel loop is fast travel between bodies and local 6DOF flight around each body/moon and its stations; no continuous system-scale flight or orbital simulation. The fictional 0.5c fusion-pulse rating belongs to strategic fast travel, not local transforms. No chart UI or gameplay transition exists yet. Frontier has five canopy/river records and two ocean-city concepts; Hive and Gaia have five each. The Hive Homeworld records the Scalarians as the ancient founders; the Obsidian Coil is the final-boss capital. World and arena seeds are deterministic and scoped. Gaia's Earth-radius and one-mile geodesic-sky envelope remain design metadata; routing, city geometry/interiors, globe streaming, world-specific saves and RTS structures are not connected yet. See [Planetary frontier](plans/planetary-frontier.md), [Solar democracy](plans/solar-democracy.md), and [Ocean cities](plans/ocean-cities.md).
 - **Conversations:** `game/Dialogue.zig` loads `game/conversations.json` (embedded) and validates it at `Sandbox.init`: speakers, unique ids, node and next references, text lengths, choice counts and flag names. A conversation starts at its first entry whose flag conditions hold. Nodes set flags; choices are gated by `requires`/`unless`, can set flags and give scrap, and either move on, end, or end by opening a panel. Text reveals at 70 characters a second, and the first confirm completes it. Conversation `keeper_<stall>` belongs to a market keeper; pedestrians cycle through the `walker_` conversations. While talking, the player is frozen, a pedestrian stops (`Life.chatting`) and turns, and the camera frames the partner over the right shoulder.
 - **Progression:** `game/Progress.zig` holds six suit upgrades (three levels each, priced in scrap and, from level 2, parts), the owned clothing bits, and up to 48 story flags. `Progress.suit()` becomes `Player.suit` for every player each step: fuel capacity, a fuel burn multiplier, sprint speed, stamina recovery and grapple reach. The salvage kit adds parts per relic. Flags also come from the world: `salvaged`, `shrine_complete`, `bridge_built`. Progress saves as an optional `progress` field (levels as a list, so later upgrades load old saves), and an older save without it loads as a fresh start.
 - **Showcases:** `-Dshowcase=18..32` captures each GUI screen for review: title, conversation, upgrades, shop, wardrobe, customization, pause, settings, HUD, four-player split screen, and controls while rebinding. They also cover the garage with all three cars, a Hive nest under attack, the fabricator, and the Skimmer in flight.
@@ -295,6 +298,8 @@ The Wildkin are 26 collectible animal and insect heroes. The roster, powers, hom
     - **Heavy rifle:** slow bolts that pierce two; holding the alternate charges a 2.5× bolt that pierces four.
     - **Energy bazooka:** an arcing orb (projectile gravity) that bursts for area damage, a stun and a throw; the alternate detonates it early.
   - **Hits:** player shots sweep through units and nests before meeting the world; charged plasma and missiles burst on impact. Piercing shots remember which unit slots they passed (`Enemies.strikeThrough`), so they never hit the same unit twice.
+  - **Traversal and progression:** a dodge double-tap within 0.30 s starts a 42 m/s dash; four double-tap activations can chain inside 1.35 s. Each `Kit` stores combat XP; 250 XP grants a level and +2 maximum health, capped at level 50. Takedown XP goes to the nearest active ranger.
+  - **Scalari ground roles:** the starter patrol replenishes to three melee-only scout/stinger units, with 34/58 health and 5/11 base melee damage. A 1,850-health titan uses a 42-damage close attack at a slower cadence. Its scale, armor and mass make it a distant escalation rather than a starter enemy.
   - **Poses and held weapons:** each arsenal reports a stance (aim, swing with its arc and progress, guard, cast) that the player's drawn pose takes, and a grip (hand and direction) where its weapon is drawn from block parts. Shots leave the held weapon. In first person the held weapon is the viewmodel.
   - **Health:** players have health, which recovers after 5 quiet seconds. A downed P1 is restored at the spawn, and a downed guest beside P1.
 - **Classes and specials:** a profile is a Ranger (human, tech) or a Synthetic (engineered human, powers), chosen in the creator and saved (`Profile.class`, defaulting to Ranger for older saves). `game/Specials.zig` gives each player energy (100, regenerating at 10/s for Rangers and 7/s for Synthetics) and three specials with costs and cooldowns:
@@ -405,7 +410,7 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 
 ## Saves
 
-`game/Save.zig` writes JSON format v13 (content version 7). It records:
+`game/Save.zig` writes JSON format v14 (content version 7). It records:
 - the format, seed, generator and content versions, and the tick;
 - the player's pose and mode, and their profile;
 - every crate by slot, and the removed relic IDs;
@@ -413,17 +418,18 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 - the captured prefab library;
 - player bridge endpoint pairs (bridges already closing are left out);
 - every known player (`members`, by slot): the character they play, their own ranger if they are playing a Wildkin hero, and their kit;
+- each player's combat XP and derived level, as part of their kit;
 - each stall's stock with its market day;
 - the installed mods by name and version.
 - the best completed lap time on the seeded sprint circuit.
 
-Optional fields in format 13 have defaults for documents that omit them:
+Optional fields in format 14 have defaults for documents that omit them:
 - **progress:** what the team shares: story flags (including destroyed nests and carriers), the hero roster, collected pickup IDs, the cars, and the fighter with its upgrades and paint;
 - **cars:** each hover car's pose;
 - **fighter:** the Kestrel's pose.
 - **race_best:** the saved course best, or zero until a lap is completed.
 
-Format 12 saves migrate: their one wallet and the personal fields they kept in `progress` become P1's kit (`Progress.legacyKit`). Formats before v12 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. Guests' positions and who is joined are not saved (controllers decide that), nor are city life, Hive units, wasps and shots.
+Format 12 saves migrate: their one wallet and the personal fields they kept in `progress` become P1's kit (`Progress.legacyKit`). Format 13 saves keep their four-player kits and default combat XP to zero. Formats before v12 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. Guests' positions and who is joined are not saved (controllers decide that), nor are city life, Hive/Scalari units, wasps and shots.
 
 Writes go to a temporary file, then rename over `saves/quicksave.json`. Loading validates everything before tearing down and rebuilding the session:
 - versions, seed, slot ranges and duplicates;

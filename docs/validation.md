@@ -2,12 +2,33 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Solar-system roster, fusion-pulse travel and democratic campaign — 2026-10-11
+
+- Added `procedural/SolarSystem.zig`, cataloging Mercury through Neptune, twelve visitable moon concepts, settlement/governance hooks, and one Scalari mining front per planet. Added a low-threat Scalari Talus Prospector enemy near the distant surface nest, with a compact drill rendering, 45 health, 20 XP and 2 scrap on defeat. Its mining-site records specify 4 abstract resource units/minute; a functioning mining economy is not connected.
+- Fusion-pulse drive rating is fictional 0.5c for fast travel between bodies. The selected campaign scope is local flight around a planet/moon and its stations; continuous interplanetary flight and orbital mechanics are out of scope. Planet-scale metadata does not enter local physics or rendering. Gaia remains a constructed globe in Saturn space, and the Hive/Scalari homeworld stays interstellar.
+- Updated the Solar Assembly / voluntary Galactic Democratic Compact framework and campaign plan for mining stations, staged city-planet growth, Venus terraforming, and an original winged transforming-mecha art direction.
+- This is catalog/design groundwork plus one unverified ground enemy. No Kestrel form transition, mech locomotion/combat, mining production simulation, station building, space HUD, planetary fast-travel UI, or democracy interaction is playable. No build, tests, smoke or benchmark was run; compilation and behavior are unverified.
+
+## Weapon visuals, suit runners and Energy Skate — 2026-10-11
+
+- Saber blades use each player's profile accent. Charged waves use the saber slot's weapon element, and render as 14 overlapping facets forming a broad colored crescent with a white-hot inner edge. Mk III increases speed, radius, lifetime and pierce count.
+- Hardsuits add joint-bound shoulder shells and luminous twin-roller heel runners. Energy Skate uses low-traction board movement on all current ground types, 16/23 m/s walk/sprint speeds, a 1.52× base jump and fuel-consuming air assist. It has a run animation pose and a distinct sound cue.
+- No build, tests, smoke, visual capture or hands-on controller check was run for this pass. Zig compilation and the in-game look/feel remain unverified.
+
 ## Planet feature packs and maximum-progression test setting — 2026-10-11
 
 - `Worlds.zig` now catalogs per-destination traversal, hazards, interactive city systems, enemy roles and mission objectives for Arbor Frontier, Hive Homeworld and Gaia. This remains typed design data; it does not add planetary travel or playable regions.
-- Settings has a persistent `MAX PROGRESSION TEST MODE` toggle. Runtime test unlocks max out each player's gear, upgrades, pets and materials, plus team vehicles, aircraft, hero roster and Kestrel progression. Objective-completion flags remain untouched so the story can still be played in sequence.
+- Settings has a persistent `MAX PROGRESSION TEST MODE` toggle. Runtime test unlocks max out each player's gear, upgrades, combat level, pets and materials, plus team vehicles, aircraft, hero roster and Kestrel progression. Objective-completion flags remain untouched so the story can still be played in sequence.
 - The application holds a full serialized pre-test world snapshot in memory, restores it when the toggle is turned off, and refuses world/ranger quicksaves while the toggle is on. Existing save data is not modified by enabling or exercising the mode.
 - Build, tests and smoke were not run for this pass. Zig syntax, UI fit, unlock coverage, restore behavior and save blocking remain unverified.
+
+## Chained dashes, Scalari practice patrol and ranger combat levels — 2026-10-11
+
+- Dodge double-taps now start a 42 m/s directional dash on ground or in air. Further double-taps chain up to four bursts inside a 1.35-second window; single-dodge ground roll and board boost behavior remain available.
+- Added low-health melee-only Scalari scout and stinger roles. A patrol near the spawn replenishes at 16-second intervals up to three active units; a Scalari bio-titan with 1,850 health and a heavy melee attack is placed beside a distant surface nest.
+- Combat XP is stored in each player's Kit and ranger file/save shape. Every 250 XP advances a level, up to 50, and adds 2 maximum health. The nearest active player gets XP on a takedown; Scalari defeats also award personal scrap. Save format 14 reads formats 12 and 13 with their existing migration/default rules.
+- Added cyan low-profile scout drone rendering, amber stinger and oversized titan character profiles, separate Scalari reward handling, and updated combat/world docs.
+- No build, tests, smoke, benchmark, save round-trip, dash handling check or visual review was run. These changes are implementation-only and remain unverified on macOS.
 
 ## City modules and enemy damage audit — 2026-10-11
 

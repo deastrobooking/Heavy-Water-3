@@ -10,12 +10,12 @@ const Input = @import("../engine/Input.zig");
 const Biome = @import("../procedural/Biome.zig");
 const Player = @This();
 pub const Mode = enum { walk, fly };
-pub const Traversal = enum { grapple, hover_jet, flight, hoverboard };
-pub const Motion = enum { idle, run, sprint, jump, fall, roll, stomp, wall_slide, climb, hang, mantle, jet, hover, glide, dash, board, grapple_zip, grapple_swing, swim };
+pub const Traversal = enum { grapple, hover_jet, flight, hoverboard, energy_skate };
+pub const Motion = enum { idle, run, sprint, jump, fall, roll, stomp, wall_slide, climb, hang, mantle, jet, hover, glide, dash, board, skate, grapple_zip, grapple_swing, swim };
 pub const eye_height: f32 = 1.62;
-pub const walk_speed: f32 = 5;
-pub const sprint_speed: f32 = 9;
-pub const jump_speed: f32 = 7.5;
+pub const walk_speed: f32 = 5.8;
+pub const sprint_speed: f32 = 10.8;
+pub const jump_speed: f32 = 9.4;
 pub const Water = struct { min: V, max: V };
 /// Suit tuning from purchased upgrades (see `Progress`); the defaults are the base suit.
 pub const Suit = struct {
@@ -85,6 +85,11 @@ hang_timer: f32 = 0,
 roll_timer: f32 = 0,
 dash_timer: f32 = 0,
 dash_cooldown: f32 = 0,
+/// Dodge double-tap chain: up to four short boosts, grounded or airborne.
+dodge_tap_window: f32 = 0,
+dash_chain_timer: f32 = 0,
+dash_chain_count: u8 = 0,
+dash_direction: V = .{ 0, 0, 1 },
 boost_timer: f32 = 0,
 boost_cooldown: f32 = 0,
 landing: f32 = 0,
@@ -153,7 +158,7 @@ fn jump(self: *Player, speed: f32) void {
     self.motion = .jump;
 }
 fn wallJump(self: *Player) void {
-    self.jump(8.5);
+    self.jump(9.2);
     const push = R.scale(self.wall_normal, 8);
     self.velocity[0] = push[0];
     self.velocity[2] = push[2];
@@ -185,7 +190,8 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const pressed = input.jump_pressed or (input.jump and !self.previous_jump);
     const released = !input.jump and self.previous_jump;
     self.previous_jump = input.jump;
-    for ([_]*f32{ &self.jump_buffer, &self.coyote, &self.wall_lock, &self.grab_cooldown, &self.roll_timer, &self.dash_timer, &self.dash_cooldown, &self.boost_timer, &self.boost_cooldown, &self.tap_timer, &self.landing, &self.grapple.timer }) |timer| decay(timer, dt);
+    for ([_]*f32{ &self.jump_buffer, &self.coyote, &self.wall_lock, &self.grab_cooldown, &self.roll_timer, &self.dash_timer, &self.dash_cooldown, &self.dodge_tap_window, &self.dash_chain_timer, &self.boost_timer, &self.boost_cooldown, &self.tap_timer, &self.landing, &self.grapple.timer }) |timer| decay(timer, dt);
+    if (self.dash_chain_timer == 0) self.dash_chain_count = 0;
     self.grapple.heat = @max(0, self.grapple.heat - 24 * dt);
     if (self.grapple.mode == .cooldown and self.grapple.timer == 0) self.grapple.mode = .ready;
     if (input.cycle_mode) {
@@ -210,9 +216,25 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const raw = R.add(R.scale(forward, input.forward), R.scale(right, input.right));
     const strength = @min(1, R.length(raw));
     const wish = R.normalize(raw);
+    var dash_started = false;
+    if (input.dodge) {
+        if (self.dodge_tap_window > 0 and self.dash_chain_count < 4) {
+            self.dodge_tap_window = 0;
+            self.dash_chain_count += 1;
+            self.dash_chain_timer = 1.35;
+            self.dash_timer = 0.2;
+            self.roll_timer = 0;
+            self.shape.height = 1.8;
+            self.dash_direction = if (strength > 0.1) wish else forward;
+            dash_started = true;
+        } else if (self.dash_chain_count < 4) {
+            self.dodge_tap_window = 0.3;
+        }
+    }
     var h = horizontal(self.velocity);
     const speed = R.length(h);
-    const board = self.traversal == .hoverboard;
+    const skating = self.traversal == .energy_skate;
+    const board = self.traversal == .hoverboard or skating;
     const was_grounded = self.grounded;
     if (self.grounded) {
         self.coyote = 0.16;
@@ -325,9 +347,9 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         }
     }
     if (!controlled and self.motion != .hang and self.motion != .climb) {
-        if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) self.wallJump() else if (self.jump_buffer > 0 and self.coyote > 0) self.jump(jump_speed * (if (board) @as(f32, 1.32) else 1));
+        if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) self.wallJump() else if (self.jump_buffer > 0 and self.coyote > 0) self.jump(jump_speed * (if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
         h = horizontal(self.velocity);
-        if (input.dodge and self.grounded and self.boost_cooldown == 0) {
+        if (input.dodge and !dash_started and self.grounded and self.boost_cooldown == 0) {
             if (board) {
                 self.boost_timer = 0.72;
                 self.boost_cooldown = 1;
@@ -342,7 +364,11 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.velocity[1] = -22;
             self.releaseGrapple();
         }
-        var target = R.scale(wish, (if (sprinting) self.suit.sprint else walk_speed) * strength * (if (board) @as(f32, 1.65) else 1) * (if (self.boost_timer > 0) @as(f32, 2.35) else 1));
+        const skate_speed: f32 = if (sprinting) 23 else 16;
+        const base_speed = if (skating) skate_speed else if (sprinting) self.suit.sprint else walk_speed;
+        const board_scale: f32 = if (board and !skating) 1.65 else 1;
+        const boost_scale: f32 = if (self.boost_timer > 0) (if (skating) @as(f32, 1.5) else 2.35) else 1;
+        var target = R.scale(wish, base_speed * strength * board_scale * boost_scale);
         var acceleration: f32 = if (self.grounded) (if (strength > 0.05) @as(f32, 45) else 55) else (if (strength > 0.05) @as(f32, 12) else 2);
         if (self.grounded and !board) {
             const f = footing(self.ground, self.wading);
@@ -372,7 +398,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             const gravity: f32 = -15 * (if (self.velocity[1] < 0) @as(f32, 1.35) else 1) * (if (@abs(self.velocity[1]) < 1) @as(f32, 0.55) else 1) * (if (board) @as(f32, 0.42) else 1);
             self.velocity[1] = @max(-35, self.velocity[1] + gravity * dt);
         } else self.velocity[1] = Physics.gravity * dt;
-        if (self.motion != .stomp and self.roll_timer == 0) self.motion = if (self.grounded) (if (board) .board else if (strength < 0.05) .idle else if (sprinting) .sprint else .run) else if (self.velocity[1] > 0) .jump else .fall;
+        if (self.motion != .stomp and self.roll_timer == 0) self.motion = if (self.grounded) (if (skating) .skate else if (board) .board else if (strength < 0.05) .idle else if (sprinting) .sprint else .run) else if (self.velocity[1] > 0) .jump else .fall;
         if (contact != null and pushing and !self.grounded and self.velocity[1] < 0 and self.motion != .stomp and self.grab_cooldown == 0) {
             self.velocity[1] = @max(self.velocity[1], if (self.stamina > 0) @as(f32, -3.5) else -5);
             self.stamina = @max(0, self.stamina - 28 * dt);
@@ -386,11 +412,6 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                     self.motion = if (self.hover_enabled) .hover else .jet;
                 },
                 .flight => {
-                    if (input.dodge and self.dash_cooldown == 0 and self.fuel >= 8 * self.suit.burn) {
-                        self.dash_timer = 0.18;
-                        self.dash_cooldown = 0.55;
-                        self.fuel -= 8 * self.suit.burn;
-                    }
                     if (self.hover_enabled) {
                         self.velocity[1] *= @exp(-8.5 * dt);
                         self.motion = .hover;
@@ -408,10 +429,15 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                     self.fuel = @max(0, self.fuel - 2 * self.suit.burn * dt);
                     self.motion = .board;
                 },
+                .energy_skate => {
+                    self.velocity[1] = @min(7, self.velocity[1] + 28 * dt);
+                    self.fuel = @max(0, self.fuel - 8 * self.suit.burn * dt);
+                    self.motion = .skate;
+                },
             }
         }
         if (self.dash_timer > 0) {
-            self.velocity = R.add(R.scale(forward, 25), .{ 0, @max(0, self.velocity[1]), 0 });
+            self.velocity = R.add(R.scale(self.dash_direction, 42), .{ 0, self.velocity[1], 0 });
             self.motion = .dash;
         }
         if (board and self.velocity[1] < 0) if (physics.castRay(R.add(self.feet, .{ 0, 0.2, 0 }), .{ 0, -1, 0 }, 3, .none)) |hit| {

@@ -136,6 +136,7 @@ pub fn update(self: *Director, sink: anytype, now: Snapshot) void {
     sink.send(.{ .loop = .{ .sound = .canopy, .gain = 0.3 * pause_dip } });
     const jet: f32 = if (now.paused or !p1.active) 0 else switch (p1.motion) {
         .jet, .hover, .board => 0.55,
+        .skate => 0.38,
         .glide => 0.25,
         else => 0,
     };
@@ -165,7 +166,8 @@ pub fn update(self: *Director, sink: anytype, now: Snapshot) void {
                 .sand, .marsh => play(sink, .footstep, gain * 0.7, where.pan, alternate * 0.8),
                 .grass, .rock => play(sink, .footstep, gain, where.pan, alternate),
             }
-        } else if (step_now != step_was and b.grounded and b.walk_amount > 0.25 and b.motion == .board) play(sink, .footstep, where.gain * (0.35 + 0.25 * b.walk_amount), where.pan, alternate);
+        } else if (step_now != step_was and b.grounded and b.walk_amount > 0.25 and (b.motion == .board or b.motion == .skate)) play(sink, .footstep, where.gain * (0.35 + 0.25 * b.walk_amount), where.pan, if (b.motion == .skate) alternate * 1.35 else alternate);
+        if (b.motion == .skate and before.motion != .skate) play(sink, .dash, where.gain * 0.35, where.pan, 1.5);
         // Swimming: a stroke every stride; falling in: a splash by the speed of the fall.
         if (b.motion == .swim and step_now != step_was and b.walk_amount > 0.1) play(sink, .splash, where.gain * 0.35, where.pan, alternate * 1.15);
         if (b.motion == .swim and before.motion != .swim) play(sink, .splash, where.gain * std.math.clamp(-before.velocity[1] / 10, 0.35, 1), where.pan, 0.85);

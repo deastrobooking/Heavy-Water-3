@@ -20,10 +20,11 @@ const Kit = @import("Kit.zig");
 /// state; the solver-verified layout is regenerated from the seed); v10 records installed mods;
 /// v11 records each player bridge's structural style; v12 records the sprint course's best lap;
 /// v13 saves every player on the team on their own (`members`: their character and their kit of
-/// upgrades, gear, pickups, pets and wallet), leaving only what the team shares in `progress`.
+/// upgrades, gear, pickups, pets and wallet), leaving only what the team shares in `progress`;
+/// v14 adds per-ranger combat experience to each kit.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 13;
+pub const format_version: u32 = 14;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -99,7 +100,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     const parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format != format_version and doc.format != format_version - 1) return error.UnsupportedSaveFormat;
+    if (doc.format != format_version and doc.format != format_version - 1 and doc.format != format_version - 2) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) return error.GeneratorMismatch;
     if (doc.content != Catalog.content_version) return error.ContentMismatch;

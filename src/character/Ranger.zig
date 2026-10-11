@@ -235,6 +235,7 @@ fn clipFor(motion: Player.Motion, amount: f32) Animation.ClipId {
         .sprint => if (amount < 0.08) .idle else .run,
         .climb, .hang, .mantle => .climb,
         .jump, .fall, .roll, .stomp, .wall_slide, .jet, .hover, .glide, .dash, .board, .grapple_zip, .grapple_swing, .swim => .air,
+        .skate => if (amount < 0.08) .idle else .run,
     };
 }
 
@@ -272,7 +273,7 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
         }
     }
     p.local[sk.Joint.hips.idx()].translation.y += @sin(state.time * 2) * 0.003 * (1 - amount);
-    if (state.motion == .roll or state.motion == .dash or state.motion == .board) p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.35));
+    if (state.motion == .roll or state.motion == .dash or state.motion == .board or state.motion == .skate) p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.35));
     const t = std.math.clamp(state.action_t, 0, 1);
     switch (state.action) {
         .none => {},
@@ -741,6 +742,20 @@ fn suitDetail(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         try plateWithMaterial(a, ch, shin, knee.add(V.init(0, 0.004 * h, 0.04 * h * bulk)), V.init(0.034 * h * bulk, 0.032 * h, 0.022 * h), t.plate, .armor);
         try plateWithMaterial(a, ch, forearm, elbow.add(V.init(side * 0.006 * h, 0, -0.03 * h * bulk)), V.init(0.026 * h * bulk, 0.03 * h, 0.02 * h), t.trim, .armor);
     }
+    // Proto-human skate hardware: articulated heel housings, paired energy rollers and a
+    // bright toe rail. The runners sit on the feet so the gait animation carries them naturally.
+    inline for ([_]sk.Joint{ .foot_l, .foot_r }, .{ @as(f32, 1), @as(f32, -1) }) |foot, side| {
+        const ankle = s.worldPos(foot);
+        const heel = ankle.add(V.init(0, -0.012 * h, -0.045 * h));
+        try plateWithMaterial(a, ch, foot, heel, V.init(0.07 * h * bulk, 0.035 * h, 0.11 * h), t.trim, .armor);
+        inline for ([_]f32{ -1, 1 }) |lateral| {
+            try plateWithMaterial(a, ch, foot, heel.add(V.init(lateral * 0.047 * h * bulk, -0.036 * h, -0.018 * h)), V.init(0.024 * h, 0.025 * h, 0.035 * h), t.plate, .armor);
+            try plateWithMaterial(a, ch, foot, heel.add(V.init(lateral * 0.047 * h * bulk, -0.036 * h, -0.018 * h)), V.init(0.009 * h, 0.01 * h, 0.038 * h), t.glow, .armor);
+        }
+        try plateWithMaterial(a, ch, foot, heel.add(V.init(0, 0.018 * h, 0.05 * h)), V.init(0.045 * h * bulk, 0.012 * h, 0.014 * h), t.glow, .armor);
+        // Side-facing ankle fins give the runner a directional silhouette.
+        try plateWithMaterial(a, ch, foot, heel.add(V.init(side * 0.068 * h * bulk, 0.008 * h, 0)), V.init(0.012 * h, 0.025 * h, 0.075 * h), t.trim, .armor);
+    }
     // Belt buckle.
     try plateWithMaterial(a, ch, .hips, V.init(0, lm.waist_y - 0.08 * h, lm.waist_half_depth + 0.03 + 0.012 * h), V.init(0.032 * h, 0.022 * h, 0.008 * h), t.glow, .armor);
     if (p.helmet == .open and p.species == .human) {
@@ -752,6 +767,12 @@ fn suitDetail(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         }
     }
     if (!full) return;
+    // Segmented shoulder shells extend the exo-rig into a readable, layered combat silhouette.
+    inline for ([_]sk.Joint{ .upper_arm_l, .upper_arm_r }, .{ @as(f32, 1), @as(f32, -1) }) |arm, side| {
+        const shoulder = s.worldPos(arm);
+        try plateWithMaterial(a, ch, arm, shoulder.add(V.init(side * 0.012 * h, 0.045 * h, 0)), V.init(0.075 * h * bulk, 0.052 * h * bulk, 0.065 * h * bulk), t.plate, .armor);
+        try plateWithMaterial(a, ch, arm, shoulder.add(V.init(side * 0.02 * h, 0.046 * h, 0.036 * h)), V.init(0.012 * h, 0.03 * h, 0.01 * h), t.glow, .armor);
+    }
     const chest = s.worldPos(.chest);
     const neck = s.worldPos(.neck);
     // Collar ring.

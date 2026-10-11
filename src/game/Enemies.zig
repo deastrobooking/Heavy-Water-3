@@ -20,7 +20,7 @@ const R = Physics.Rotation;
 const V = Physics.Vec3;
 const Enemies = @This();
 
-pub const Kind = enum { drone, sentinel, trooper, skirmisher, bulwark };
+pub const Kind = enum { drone, sentinel, trooper, skirmisher, bulwark, scalari_scout, scalari_stinger, scalari_titan, scalari_miner };
 pub const Stats = struct {
     health: f32,
     speed: f32,
@@ -40,9 +40,10 @@ pub const Stats = struct {
     grenade_fuse: f32 = 1.25,
     grenade_cooldown: f32 = 7,
     grenade_enabled: bool = false,
+    height: f32 = 1.8,
 };
 
-/// Combat and pacing values for the Hive. Keep encounter balance edits here.
+/// Combat and pacing values for Hive and Scalari ground roles. Keep balance edits here.
 pub const tuning = .{
     .surface_nests = 3,
     .cave_troopers = 4,
@@ -60,14 +61,20 @@ pub const tuning = .{
         .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32, .melee_damage = 18, .guarded_melee_damage = 9, .grenade_enabled = true },
         .{ .health = 72, .speed = 8.2, .accel = 19, .radius = 0.62, .standoff = 10, .sight = 42, .cooldown = 1.5, .burst = 1, .damage = 3, .bolt_speed = 37, .melee_damage = 12, .guarded_melee_damage = 6, .melee_cooldown = 0.82 },
         .{ .health = 250, .speed = 3.2, .accel = 7, .radius = 1.0, .standoff = 15, .sight = 42, .cooldown = 2.4, .burst = 1, .damage = 6, .bolt_speed = 28, .melee_damage = 26, .guarded_melee_damage = 13, .melee_cooldown = 1.65 },
+        .{ .health = 34, .speed = 4.1, .accel = 13, .radius = 0.42, .standoff = 8, .sight = 30, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 5, .guarded_melee_damage = 2, .melee_cooldown = 1.8, .height = 0.9 },
+        .{ .health = 58, .speed = 9.5, .accel = 22, .radius = 0.55, .standoff = 9, .sight = 38, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 11, .guarded_melee_damage = 5, .melee_cooldown = 1.05, .height = 1.4 },
+        .{ .health = 1850, .speed = 4.8, .accel = 8, .radius = 3.2, .standoff = 3, .sight = 54, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 42, .guarded_melee_damage = 28, .melee_cooldown = 2.2, .height = 8.5 },
+        .{ .health = 45, .speed = 2.8, .accel = 8, .radius = 0.7, .standoff = 8, .sight = 30, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 2, .guarded_melee_damage = 1, .melee_cooldown = 2.4, .height = 1.5 },
     },
 };
 
 /// Three nests on the surface, then one in the heart of each cave system.
 pub const surface_nests = tuning.surface_nests;
 pub const max_seeded_nests = 3;
-/// Surface, seeded and cave nests, then one home nest for the arena's bots.
-pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems + 1;
+/// Surface, seeded and cave nests, plus stable slots for Scalari practice and arena bots.
+pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems + 2;
+/// Stable private slot for the renewable early-game Scalari practice patrol.
+pub const training_nest: u8 = max_nests - 2;
 comptime {
     // Blades and dashes remember nests cut per swing in a u16.
     std.debug.assert(max_nests <= 16);
@@ -88,7 +95,7 @@ pub fn stats(k: Kind) Stats {
 }
 
 pub fn isGround(k: Kind) bool {
-    return k == .trooper or k == .skirmisher or k == .bulwark;
+    return k == .trooper or k == .skirmisher or k == .bulwark or k == .scalari_scout or k == .scalari_stinger or k == .scalari_titan or k == .scalari_miner;
 }
 
 pub fn mass(k: Kind) f32 {
@@ -98,6 +105,10 @@ pub fn mass(k: Kind) f32 {
         .trooper => 1.6,
         .skirmisher => 0.9,
         .bulwark => 3,
+        .scalari_scout => 0.5,
+        .scalari_stinger => 0.8,
+        .scalari_titan => 24,
+        .scalari_miner => 1.2,
     };
 }
 
@@ -137,7 +148,7 @@ pub const Unit = struct {
 
     /// Where the unit is hit and shoots from: ground units' chests, fliers' centres.
     pub fn center(u: Unit) V {
-        return if (isGround(u.kind)) R.add(u.position, .{ 0, 1.2, 0 }) else u.position;
+        return if (isGround(u.kind)) R.add(u.position, .{ 0, stats(u.kind).height * 0.68, 0 }) else u.position;
     }
 };
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
@@ -167,12 +178,14 @@ units: [max_units]?Unit = @splat(null),
 unit_generations: [max_units]u32 = @splat(0),
 bolts: [max_bolts]?Bolt = @splat(null),
 grenades: [16]?Grenade = @splat(null),
+training_timer: f32 = 2,
+training_enabled: bool = false,
 rng: std.Random.DefaultPrng = .init(0),
 
 /// Picks nest sites on the terrain at least `clear` metres from every point in `avoid`
 /// (Arbors, plazas, shrines, the spawn), on a ring around the spawn.
 pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
-    var self: Enemies = .{ .seed = seed, .rng = .init(Seed.mix(seed ^ 0x48495645)) };
+    var self: Enemies = .{ .seed = seed, .rng = .init(Seed.mix(seed ^ 0x48495645)), .training_enabled = true };
     const random = self.rng.random();
     var attempts: usize = 0;
     while (self.nest_count < surface_nests and attempts < 400) : (attempts += 1) {
@@ -190,6 +203,9 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
         self.nests[self.nest_count] = .{ .position = .{ x, Terrain.surface(seed, x, z).height, z } };
         self.nest_count += 1;
     }
+    const practice_x = spawn[0] + 110;
+    const practice_z = spawn[2] + 35;
+    self.nests[training_nest] = .{ .position = .{ practice_x, Terrain.surface(seed, practice_x, practice_z).height, practice_z }, .alive = false, .health = 0, .spawn_timer = 2 };
     return self;
 }
 
@@ -302,6 +318,20 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
     }.f;
     const random = self.rng.random();
 
+    // Renewable low-threat ground practice patrol, kept separate from the Hive nest quota.
+    if (self.training_enabled and nearAny(players, self.nests[training_nest].position, 160)) {
+        self.training_timer = @max(0, self.training_timer - dt);
+        var practice_count: usize = 0;
+        for (self.units) |slot| if (slot) |u| practice_count += @intFromBool(u.nest == training_nest);
+        if (practice_count < 3 and self.training_timer == 0) {
+            const center = self.nests[training_nest].position;
+            const offset: V = if (practice_count == 1) .{ 3, 0, 0 } else if (practice_count == 2) .{ -3, 0, 0 } else .{ 0, 0, 3 };
+            const kind: Kind = if (practice_count == 2) .scalari_stinger else .scalari_scout;
+            _ = self.spawnAt(kind, training_nest, R.add(center, offset), 1);
+            self.training_timer = 16;
+        }
+    }
+
     // Nests: wake near players and fabricate up to their quota.
     for (self.nests[0..self.nest_count], 0..) |*nest, ni| {
         nest.flash = @max(0, nest.flash - dt);
@@ -392,7 +422,7 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
             if (u.state == .hunt) {
                 const target = players[u.target];
                 const distance = horizontal(R.sub(target.chest, u.position));
-                if (distance < 2.5) {
+                if (distance < 2.5 + s.radius * 0.55) {
                     u.tactic = .melee;
                     u.cover_goal = null;
                     goal = target.chest;

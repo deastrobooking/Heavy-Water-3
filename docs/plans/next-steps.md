@@ -9,7 +9,7 @@ The systems now in place:
 - fabrication;
 - procedural audio.
 
-The current user-directed content priority is an underwater Frontier region: human pressure-dome and fully submerged cetacean cities, a playable orca-form Tideborn champion, swim traversal, and underwater Hive/Scalari encounters. Pelaglass and Sonorous Reef now have stable catalog records, but no ocean terrain, movement, or city is playable. See [Ocean cities](ocean-cities.md). The broader planetary campaign spans the Arbor Frontier, Hive/Scalari Homeworld, and Gaia; five Scalari dragon-armor ships have procedural 3D shell/glow assets, but still need piloting and combat. See [Planetary frontier](planetary-frontier.md).
+The current user-directed campaign expansion is the Solar frontier and voluntary Galactic Democratic Compact, anchored by a transforming, winged Kestrel. `procedural/SolarSystem.zig` now records all eight planet destinations, twelve moons, and Scalari mining fronts. The planned travel loop is fast travel between bodies plus local flight and stations; no transition or transforming form is playable yet. See [Solar democracy](solar-democracy.md). The underwater Frontier region remains a linked content priority: human pressure-dome and fully submerged cetacean cities, a playable orca-form Tideborn champion, swim traversal, and underwater Hive/Scalari encounters. Pelaglass and Sonorous Reef have stable catalog records, but no ocean terrain, movement, or city is playable. See [Ocean cities](ocean-cities.md). The existing campaign foundations for the Arbor Frontier, Hive/Scalari Homeworld, and Gaia are in [Planetary frontier](planetary-frontier.md).
 
 This plan orders the work. The [roadmap](../roadmap.md) stays the record of what is implemented.
 
@@ -27,6 +27,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 | Fighting | Timed saber combos with guard and parry, four energy firearms, Ranger and Synthetic classes with three specials each. Untuned by hand. |
 | Audio | Synthesized sounds and loops, positional cues, four volume buses. Nobody has listened to it yet. |
 | Planetary campaign | Three world descriptors, seventeen city-region concepts (including two ocean cities), three capitals, nine arena concepts and five Scalari ship assets are authored; world generation, flight/combat integration, ship-blueprint progression, RTS construction and world saves are not integrated. |
+| Solar campaign | Eight planet and twelve moon records, Scalari mining fronts, governance hooks, and a voluntary Galactic Democratic Compact are authored; fast travel, local planet/moon flight, stations, transforming Kestrel forms and political interactions remain unimplemented. |
 | Engine phases | 1–13 done; 14 (skeletal animation), 15 (scenes), 16 (networking) planned. |
 
 ## Known gaps from review
@@ -35,7 +36,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 - **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
 - **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. After GPU skinning and adaptive terrain ray marching (2026-10-10), simulation p95/p99 is 3.57 / 3.99 ms against the 4 ms target and skinning p99 is 0.15 ms. Physics and Hive AI are the largest remaining stages.
 - **Guests:** they can't pilot, talk, or open the fabricator.
-- **Save versioning:** saves are at format v12, which persists the seeded sprint course's best lap. When a field changes meaning, bump the format and record it in the migration notes.
+- **Save versioning:** saves are at format v14, which persists per-player loadouts (v13) and combat XP (v14). Formats 12 and 13 migrate with default XP. When a field changes meaning, bump the format and record it in the migration notes.
 
 ## Milestones
 
@@ -49,6 +50,7 @@ The game has had no hands-on pass since vehicles and the Hive arrived. Everythin
 2. **Hand-play checklist (yours):**
    - fly each car and the Kestrel (takeoff, transition, dogfight, landing);
    - fight at a nest with each weapon, the saber combo and guard, and both classes' specials;
+   - double-tap dash on ground and in the air, chain all four boosts, then fight the Scalari practice patrol and distant bio-titan; confirm XP, level-up health, and saved per-player progression;
    - play co-op with a controller;
    - listen through every sound.
 

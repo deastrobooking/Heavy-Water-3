@@ -36,6 +36,8 @@ pub const free_armors: u8 = armorBit(.none) | armorBit(.scout);
 pub const health_per_cell: f32 = 20;
 
 wallet: Market.Wallet = .{},
+/// Per-ranger combat experience. It stays in this kit across saves and ranger-file export.
+combat_xp: u32 = 0,
 levels: [upgrade_count]u8 = @splat(0),
 /// Owned clothing, one bit per `Profile.Clothing`; the undersuit and field jacket are free.
 suits: u8 = free_suits,
@@ -77,7 +79,20 @@ pub fn count(self: *const Kit, k: Collectibles.Kind) u32 {
 }
 /// Maximum health with every collected vital cell installed.
 pub fn maxHealth(self: *const Kit) f32 {
-    return 100 + health_per_cell * @as(f32, @floatFromInt(self.count(.vital_cell)));
+    return 100 + 2 * @as(f32, @floatFromInt(self.combatLevel() - 1)) + health_per_cell * @as(f32, @floatFromInt(self.count(.vital_cell)));
+}
+
+pub const max_combat_level: u32 = 50;
+pub fn combatLevel(self: *const Kit) u32 {
+    return @min(max_combat_level, 1 + self.combat_xp / 250);
+}
+
+/// Awards combat experience without allowing save values or repeated farming to overflow.
+pub fn awardCombatXP(self: *Kit, amount: u32) bool {
+    const before = self.combatLevel();
+    const cap = (max_combat_level - 1) * 250;
+    self.combat_xp = @min(cap, self.combat_xp +| amount);
+    return self.combatLevel() > before;
 }
 
 pub fn level(self: *const Kit, u: Upgrade) u8 {
@@ -173,6 +188,7 @@ pub fn petLevel(self: *const Kit, s: Pets.Species) u8 {
 /// JSON shape stored in saves and ranger files.
 pub const Doc = struct {
     wallet: Market.Wallet = .{},
+    combat_xp: u32 = 0,
     /// One level per upgrade, in `Upgrade` order; shorter in saves from before an upgrade existed.
     levels: []const u8 = &.{},
     /// Held pickups in `Collectibles.Kind` order.
@@ -199,6 +215,7 @@ pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
     for (std.enums.values(Pets.Species)) |sp| if (self.hasPet(sp)) try pets.append(arena, .{ .name = Pets.info(sp).name, .xp = self.pet_xp[@intFromEnum(sp)] });
     return .{
         .wallet = self.wallet,
+        .combat_xp = self.combat_xp,
         .levels = try arena.dupe(u8, &self.levels),
         .inventory = try arena.dupe(u32, &self.inventory),
         .armors = armors.items,
@@ -216,7 +233,8 @@ fn petNamed(name: []const u8) ?Pets.Species {
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidKit}!Kit {
-    var result: Kit = .{ .wallet = doc.wallet };
+    if (doc.combat_xp > (max_combat_level - 1) * 250) return error.InvalidKit;
+    var result: Kit = .{ .wallet = doc.wallet, .combat_xp = doc.combat_xp };
     if (doc.levels.len > upgrade_count) return error.InvalidKit;
     for (doc.levels) |l| if (l > max_level) return error.InvalidKit;
     @memcpy(result.levels[0..doc.levels.len], doc.levels);

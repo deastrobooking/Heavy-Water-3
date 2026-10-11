@@ -36,26 +36,26 @@ pub fn generate(sites: []const Site, out: []Piece) usize {
         const ladder_height = @max(5, low_y - site.ground);
         const ladder_center = R.add(start, .{ 0, site.ground + ladder_height / 2, 0 });
         const across = acrossRotation(lateral);
-        put(out, &count, .{ .center = R.add(ladder_center, R.scale(lateral, -0.72)), .size = .{ 0.14, ladder_height, 0.14 }, .rotation = across, .color = Palette{}.ladder });
-        put(out, &count, .{ .center = R.add(ladder_center, R.scale(lateral, 0.72)), .size = .{ 0.14, ladder_height, 0.14 }, .rotation = across, .color = Palette{}.ladder });
+        put(out, &count, .{ .center = R.add(ladder_center, R.scale(lateral, -0.72)), .size = .{ 0.14, ladder_height, 0.14 }, .rotation = across, .color = (Palette{}).ladder });
+        put(out, &count, .{ .center = R.add(ladder_center, R.scale(lateral, 0.72)), .size = .{ 0.14, ladder_height, 0.14 }, .rotation = across, .color = (Palette{}).ladder });
         var rung_y = site.ground + 0.7;
         while (rung_y < low_y - 0.4) : (rung_y += 1.15) {
             const rung: V = .{ start[0], rung_y, start[2] };
-            put(out, &count, .{ .center = rung, .size = .{ 1.5, 0.11, 0.12 }, .rotation = across, .color = Palette{}.ladder });
+            put(out, &count, .{ .center = rung, .size = .{ 1.5, 0.11, 0.12 }, .rotation = across, .color = (Palette{}).ladder });
         }
 
-        patio(out, &count, low, radial, 8, Palette{}.deck);
-        ramp(out, &count, low, mid, 4, Palette{}.deck);
-        patio(out, &count, mid, radial, 7, Palette{}.deck);
-        miniBridge(out, &count, mid, far, 2.6, Palette{}.deck, Palette{}.rail);
-        patio(out, &count, far, radial, 7, Palette{}.deck);
-        ladder(out, &count, far, top, lateral, Palette{}.ladder);
-        patio(out, &count, top, radial, 6, Palette{}.deck);
+        patio(out, &count, low, radial, 8, (Palette{}).deck);
+        ramp(out, &count, low, mid, 4, (Palette{}).deck);
+        patio(out, &count, mid, radial, 7, (Palette{}).deck);
+        miniBridge(out, &count, mid, far, 2.6, (Palette{}).deck, (Palette{}).rail);
+        patio(out, &count, far, radial, 7, (Palette{}).deck);
+        ladder(out, &count, far, top, lateral, (Palette{}).ladder);
+        patio(out, &count, top, radial, 6, (Palette{}).deck);
         // A deliberate three-meter jump gap returns the route to a second landing.
-        patio(out, &count, jump, radial, 5, Palette{}.deck);
-        anchor(out, &count, low, Palette{}.anchor);
-        anchor(out, &count, mid, Palette{}.anchor);
-        anchor(out, &count, top, Palette{}.anchor);
+        patio(out, &count, jump, radial, 5, (Palette{}).deck);
+        anchor(out, &count, low, (Palette{}).anchor);
+        anchor(out, &count, mid, (Palette{}).anchor);
+        anchor(out, &count, top, (Palette{}).anchor);
     }
     return count;
 }
@@ -73,7 +73,7 @@ fn patio(out: []Piece, count: *usize, center: V, radial: V, width: f32, color: V
     const edge = width * 0.48;
     for ([_]f32{ -edge, edge }) |side| {
         const along = R.add(center, R.scale(radial, side));
-        put(out, count, .{ .center = R.add(along, .{ 0, 0.62, 0 }), .size = .{ width, 0.24, 0.18 }, .rotation = yaw, .color = Palette{}.rail });
+        put(out, count, .{ .center = R.add(along, .{ 0, 0.62, 0 }), .size = .{ width, 0.24, 0.18 }, .rotation = yaw, .color = (Palette{}).rail });
     }
 }
 

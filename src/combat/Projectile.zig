@@ -25,6 +25,8 @@ pub const Projectile = struct {
     velocity: V = @splat(0),
     damage: f32 = 0,
     element: Weapon.Element = .kinetic,
+    /// Optional player-selected lumen colour, carried into the world slash rendering.
+    visual_tint: ?[3]f32 = null,
     lifetime: f32 = 0,
     max_lifetime: f32 = 3.0,
     radius: f32 = 0.2,
@@ -78,6 +80,7 @@ pub const ProjectilePool = struct {
                     .velocity = R.scale(norm_dir, speed),
                     .damage = damage,
                     .element = element,
+                    .visual_tint = null,
                     .lifetime = lifetime,
                     .max_lifetime = lifetime,
                     .radius = switch (kind) {

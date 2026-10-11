@@ -218,7 +218,7 @@ const Writer = struct {
             const first = R.add(center, if (side == 0) b else c);
             const second = R.add(center, if (side == 0) c else b);
             const normal = R.normalize(R.cross(R.sub(first, a), R.sub(second, a)));
-            const shade = if (side == 0) 1.0 else 0.72;
+            const shade: f32 = if (side == 0) 1.0 else 0.72;
             const facet = R.scale(color, shade * (0.92 + 0.08 * @sin(a0 * 2 + phase)));
             const base = self.v;
             for ([_]V{ a, first, second }) |point| self.vertex(point, normal, facet);
