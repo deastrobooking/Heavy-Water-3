@@ -75,7 +75,9 @@ pub const Class = enum { ranger, synthetic };
 /// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
 /// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
-pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, starforge, deep_prism };
+/// Armor sets. Each tag names an `ArmorSetDef` in `character/armor.zig`; tags are only ever
+/// appended and saves store the tag by name, so older saves read unchanged.
+pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, starforge, deep_prism, mobile_suit, buster, iron_titan, battle_plate };
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed };
@@ -271,4 +273,20 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     bad = p.toDoc();
     bad.height = 2;
     try std.testing.expectError(error.InvalidProfile, fromDoc(bad));
+}
+
+test "every armor set round-trips through a save document by name, and old saves keep their armor" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (std.enums.values(Armor)) |armor| {
+        var p: Profile = .{};
+        p.armor = armor;
+        const json = try std.json.Stringify.valueAlloc(arena.allocator(), p.toDoc(), .{});
+        try std.testing.expect(std.mem.indexOf(u8, json, @tagName(armor)) != null);
+        const back = try fromDoc((try std.json.parseFromSlice(Doc, arena.allocator(), json, .{})).value);
+        try std.testing.expectEqual(armor, back.armor);
+    }
+    // A save written before the mecha sets existed names an old tag and still loads unchanged.
+    const old = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0,\"armor\":\"deep_prism\"}", .{});
+    try std.testing.expectEqual(Armor.deep_prism, (try fromDoc(old.value)).armor);
 }

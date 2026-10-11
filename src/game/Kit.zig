@@ -32,7 +32,7 @@ const base_scrap = [upgrade_count]u32{ 40, 50, 30, 30, 45, 35 };
 
 pub const starter_weapons: u16 = (1 << @intFromEnum(WeaponKind.machine_gun)) | (1 << @intFromEnum(WeaponKind.beam_saber));
 pub const free_suits: u8 = bit(.undersuit) | bit(.field_jacket);
-pub const free_armors: u8 = armorBit(.none) | armorBit(.scout);
+pub const free_armors: u16 = armorBit(.none) | armorBit(.scout);
 pub const health_per_cell: f32 = 20;
 
 wallet: Market.Wallet = .{},
@@ -44,7 +44,7 @@ suits: u8 = free_suits,
 /// Collected pickups held (vital cells count as installed health upgrades).
 inventory: [Collectibles.kind_count]u32 = @splat(0),
 /// Armor accents and weapons owned (bit per enum value).
-armors: u8 = free_armors,
+armors: u16 = free_armors,
 weapons: u16 = starter_weapons,
 /// Installed weapon tiers beyond Mk I, indexed by `WeaponKind`.
 weapon_upgrades: [enum_compat.fields(WeaponKind).len]u8 = @splat(0),
@@ -57,8 +57,8 @@ pub fn bit(c: Profile.Clothing) u8 {
     return @as(u8, 1) << @intCast(@intFromEnum(c));
 }
 
-pub fn armorBit(a: Profile.Armor) u8 {
-    return @as(u8, 1) << @intCast(@intFromEnum(a));
+pub fn armorBit(a: Profile.Armor) u16 {
+    return @as(u16, 1) << @intCast(@intFromEnum(a));
 }
 
 fn petBit(s: Pets.Species) u8 {
@@ -299,7 +299,7 @@ test "suits are bought once, and a kit round-trips through its save shape" {
     k.inventory = .{ 5, 1, 7, 2 };
     k.weapons = 0b11;
     k.weapon_upgrades[@intFromEnum(WeaponKind.beam_saber)] = 2;
-    k.armors |= armorBit(.skyguard);
+    k.armors |= armorBit(.skyguard) | armorBit(.battle_plate);
     _ = k.freePet(.falcon);
     k.pet_xp[@intFromEnum(Pets.Species.falcon)] = 200;
 
@@ -311,7 +311,7 @@ test "suits are bought once, and a kit round-trips through its save shape" {
     try std.testing.expect(back.owns(.exo_rig) and back.level(.grapple_reel) == 2);
     try std.testing.expectEqual(k.inventory, back.inventory);
     try std.testing.expectEqual(k.weapon_upgrades, back.weapon_upgrades);
-    try std.testing.expect(back.ownsArmor(.skyguard) and back.ownsArmor(.scout));
+    try std.testing.expect(back.ownsArmor(.skyguard) and back.ownsArmor(.scout) and back.ownsArmor(.battle_plate) and !back.ownsArmor(.buster));
     try std.testing.expectEqual(@as(f32, 140), back.maxHealth());
     try std.testing.expectEqual(@as(u8, 3), back.petLevel(.falcon));
     try std.testing.expectEqual(Pets.Species.falcon, back.pet_active.?);

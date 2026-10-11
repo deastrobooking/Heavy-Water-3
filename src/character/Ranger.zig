@@ -11,6 +11,7 @@ const cm = @import("mesh.zig");
 const m = @import("math.zig");
 const toon = @import("toon.zig");
 const Beasts = @import("Beasts.zig");
+const armor_kit = @import("armor.zig");
 const Mesh = @import("../render/Mesh.zig");
 const V = m.Vec3;
 const Q = m.Quat;
@@ -499,17 +500,18 @@ pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
                 else => unreachable,
             };
             const tones = suitTones(profile);
+            const shape = armorDef(profile).shape;
             const steel = tones.plate;
             const trim = tones.trim;
             Add.one(out, &n, .{ .coverage = .gauntlets, .color = trim, .layer = 2, .looseness = 0.002, .hard = true, .bulge = 0.002 });
             Add.one(out, &n, .{ .coverage = .sabatons, .color = trim, .layer = 3, .looseness = 0.004, .hard = true, .bulge = 0.003 });
-            Add.one(out, &n, .{ .coverage = .vambraces, .color = steel, .layer = 3, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .segments = 2, .coverage_extent = extent });
-            Add.one(out, &n, .{ .coverage = .greaves, .color = steel, .layer = 4, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .segments = 2, .coverage_extent = extent });
-            Add.one(out, &n, .{ .coverage = .pauldrons, .color = steel, .layer = 4, .looseness = 0.003 + lift, .hard = true, .bulge = bulge, .segments = if (profile.clothing == .exo_rig) 1 else 2, .coverage_extent = extent });
+            Add.one(out, &n, .{ .coverage = .vambraces, .color = steel, .layer = 3, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .shape = shape, .segments = 2, .coverage_extent = extent });
+            Add.one(out, &n, .{ .coverage = .greaves, .color = steel, .layer = 4, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .shape = shape, .segments = 2, .coverage_extent = extent });
+            Add.one(out, &n, .{ .coverage = .pauldrons, .color = steel, .layer = 4, .looseness = 0.003 + lift, .hard = true, .bulge = bulge, .shape = shape, .segments = if (profile.clothing == .exo_rig) 1 else 2, .coverage_extent = extent });
             if (profile.clothing != .exo_rig) {
-                Add.one(out, &n, .{ .coverage = .cuirass, .color = steel, .layer = 4, .looseness = 0.003 + lift, .hard = true, .bulge = bulge, .segments = if (profile.clothing == .vanguard) 3 else 2, .neckline = .high });
-                Add.one(out, &n, .{ .coverage = .faulds, .color = trim, .layer = 3, .looseness = 0.004 + lift, .hard = true, .bulge = bulge * 0.7, .segments = 2, .coverage_extent = extent });
-                Add.one(out, &n, .{ .coverage = .cuisses, .color = steel, .layer = 3, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .segments = 2, .coverage_extent = extent });
+                Add.one(out, &n, .{ .coverage = .cuirass, .color = steel, .layer = 4, .looseness = 0.003 + lift, .hard = true, .bulge = bulge, .shape = shape, .segments = if (profile.clothing == .vanguard) 3 else 2, .neckline = .high });
+                Add.one(out, &n, .{ .coverage = .faulds, .color = trim, .layer = 3, .looseness = 0.004 + lift, .hard = true, .bulge = bulge * 0.7, .shape = shape, .segments = 2, .coverage_extent = extent });
+                Add.one(out, &n, .{ .coverage = .cuisses, .color = steel, .layer = 3, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .shape = shape, .segments = 2, .coverage_extent = extent });
             }
         },
     }
@@ -659,35 +661,6 @@ fn fittedPanel(a: std.mem.Allocator, ch: *gen.Character, center: V, half_width: 
     }
 }
 
-/// Curved face shield with a camera-facing normal, narrower upper/lower corners, and a wrap at
-/// the temples. Its separate palette entry lets the inset light slit read cleanly over the lens.
-fn visorSurface(a: std.mem.Allocator, ch: *gen.Character, center: V, half_width: f32, half_height: f32, depth: f32, color: spec.Rgb, rows: u32, cols: u32) !void {
-    const base = ch.mesh.vertexCount();
-    const joint = sk.Joint.head.idx();
-    const palette: u8 = @intCast(ch.palette.items.len);
-    try ch.palette.append(a, color);
-    for (0..rows + 1) |row| for (0..cols + 1) |column| {
-        const v = @as(f32, @floatFromInt(row)) / @as(f32, @floatFromInt(rows)) * 2 - 1;
-        const u = @as(f32, @floatFromInt(column)) / @as(f32, @floatFromInt(cols)) * 2 - 1;
-        const width_scale = 1 - 0.10 * v * v;
-        const x = u * half_width * width_scale;
-        const y = center.y + v * half_height;
-        const z = center.z + depth * (1 - u * u);
-        const normal = V.init(2 * depth * u / (half_width * width_scale), 0.18 * v, 1).normalize();
-        _ = try ch.mesh.addVertex(a, .{ .pos = .{ .x = x, .y = y, .z = z }, .normal = normal, .joints = .{ joint, 0, 0, 0 }, .material = .armor });
-        try ch.color_index.append(a, palette);
-    };
-    const stride = cols + 1;
-    for (0..rows) |row| for (0..cols) |column| {
-        const a0: u32 = base + @as(u32, @intCast(row)) * stride + @as(u32, @intCast(column));
-        const b0 = a0 + 1;
-        const d0 = a0 + stride;
-        const c0 = d0 + 1;
-        try ch.mesh.addTri(a, a0, b0, c0);
-        try ch.mesh.addTri(a, a0, c0, d0);
-    };
-}
-
 fn gemstoneColor(stone: Profile.Gemstone) spec.Rgb {
     return switch (stone) {
         .lumen => spec.Rgb.hex(0x52f4fa),
@@ -699,32 +672,29 @@ fn gemstoneColor(stone: Profile.Gemstone) spec.Rgb {
     };
 }
 
-/// A chest-set jewel with a raised table and individually colored radial facets.
-fn gemstone(a: std.mem.Allocator, ch: *gen.Character, joint: sk.Joint, center: V, radius: f32, stone: Profile.Gemstone, cut: Profile.GemCut) !void {
-    const base_color = gemstoneColor(stone);
-    const base_channels = [4]f32{ base_color.r, base_color.g, base_color.b, 1 };
-    const colors = [_]spec.Rgb{ mix(base_channels, spec.Rgb.hex(0xffffff), 0.48), base_color, mix(base_channels, spec.Rgb.hex(0x102033), 0.32) };
-    const palette: [3]u8 = .{ @intCast(ch.palette.items.len), @intCast(ch.palette.items.len + 1), @intCast(ch.palette.items.len + 2) };
-    try ch.palette.appendSlice(a, &colors);
-    const facets: usize = switch (cut) { .brilliant => 8, .star => 5, .teardrop => 6 };
-    const rx = radius * (if (cut == .teardrop) @as(f32, 0.78) else 1);
-    const ry = radius * (if (cut == .teardrop) @as(f32, 1.25) else 0.82);
-    const top = center.add(V.init(0, 0, radius * 0.32));
-    for (0..facets) |i| {
-        const segment: f32 = @floatFromInt(i);
-        const next_segment: f32 = @floatFromInt(i + 1);
-        const phase: f32 = if (cut == .star) @as(f32, std.math.pi) / 2.0 else 0;
-        const a0 = phase + 2 * std.math.pi * segment / @as(f32, @floatFromInt(facets));
-        const a1 = phase + 2 * std.math.pi * next_segment / @as(f32, @floatFromInt(facets));
-        const p0 = center.add(V.init(@cos(a0) * rx, @sin(a0) * ry, 0));
-        const p1 = center.add(V.init(@cos(a1) * rx, @sin(a1) * ry, 0));
-        const shade = palette[i % 3];
-        const v0 = try ch.mesh.addVertex(a, .{ .pos = top, .normal = V.unit_z, .joints = .{ joint.idx(), 0, 0, 0 }, .material = .armor });
-        const v1 = try ch.mesh.addVertex(a, .{ .pos = p0, .normal = V.unit_z, .joints = .{ joint.idx(), 0, 0, 0 }, .material = .armor });
-        const v2 = try ch.mesh.addVertex(a, .{ .pos = p1, .normal = V.unit_z, .joints = .{ joint.idx(), 0, 0, 0 }, .material = .armor });
-        try ch.color_index.appendSlice(a, &.{ palette[0], shade, palette[(i + 1) % 3] });
-        try ch.mesh.addTri(a, v0, v1, v2);
-    }
+/// The data definition for a profile's armor tag; scout is the fallback for a tag with no entry.
+fn armorDef(p: Profile) *const armor_kit.ArmorSetDef {
+    return armor_kit.find(&armor_kit.builtin_sets, @tagName(p.armor)) orelse &armor_kit.builtin_sets[1];
+}
+
+fn armorContext(p: Profile, lm: @import("body.zig").Landmarks) armor_kit.Context {
+    return .{
+        .scale = lm.height / 1.8,
+        .build = p.build,
+        .accent = rgb(Profile.accent_colors[p.accent], 1),
+        .helmet = switch (p.helmet) {
+            .open => .open,
+            .visor => .visor,
+            .sealed => .sealed,
+        },
+        .suited = p.clothing == .hardsuit or p.clothing == .vanguard,
+        .gem = gemstoneColor(p.gemstone),
+        .gem_cut = switch (p.gem_cut) {
+            .brilliant => .brilliant,
+            .star => .star,
+            .teardrop => .teardrop,
+        },
+    };
 }
 
 fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
@@ -733,15 +703,8 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     const h = p.height;
     const w = p.build;
     const dark = spec.Rgb.hex(0x17242f);
-    const metal = switch (p.armor) {
-        .sentinel => spec.Rgb.hex(0xc1cbd0),
-        .rootweave => spec.Rgb.hex(0x66815a),
-        .skyguard => spec.Rgb.hex(0x477b88),
-        .gem_aegis => spec.Rgb.hex(0x9baebc),
-        .starforge => spec.Rgb.hex(0x8d719f),
-        .deep_prism => spec.Rgb.hex(0x397982),
-        else => spec.Rgb.hex(0x71868e),
-    };
+    const def = armorDef(p);
+    const metal = def.metal;
     const accent = rgb(Profile.accent_colors[p.accent], 1.2);
     // Belt, boot cuffs and wrist seals bridge fabric transitions.
     try plate(a, ch, .hips, V.init(0, lm.waist_y - 0.08 * h, 0), V.init(lm.waist_half_width + 0.035, 0.035 * h, lm.waist_half_depth + 0.028), dark);
@@ -769,81 +732,8 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         };
     }
     if (p.clothing == .exo_rig or p.clothing == .hardsuit or p.clothing == .vanguard) try suitDetail(a, ch, p);
-    // A full armor suit already plates the limbs and torso; only its chest lights are added.
-    const suited = p.clothing == .hardsuit or p.clothing == .vanguard;
-    if (p.armor != .none and suited) {
-        const chest = s.worldPos(.chest);
-        try plate(a, ch, .chest, chest.add(V.init(0, 0.06 * h, -0.185 * h)), V.init(0.038 * h, 0.10 * h, 0.012 * h), accent);
-        try plate(a, ch, .chest, chest.add(V.init(0, 0.045 * h, 0.17 * h)), V.init(0.027 * h, 0.058 * h, 0.009 * h), accent);
-    }
-    if (p.armor != .none and !suited) {
-        const bulk: f32 = if (p.armor == .sentinel) 1.15 else 1;
-        const chest = s.worldPos(.chest);
-        for ([_]f32{ -1, 1 }) |side| try plate(a, ch, .chest, chest.add(V.init(side * 0.09 * w, 0.005 * h, 0.075 * h)), V.init(0.105 * w, 0.16 * h, 0.09 * bulk * h), metal);
-        try plate(a, ch, .chest, chest.add(V.init(0, 0.01 * h, -0.09 * h)), V.init(0.15 * w, 0.20 * h, 0.095 * h), dark);
-        try plate(a, ch, .chest, chest.add(V.init(0, 0.06 * h, -0.185 * h)), V.init(0.038 * h, 0.10 * h, 0.012 * h), accent);
-        try plate(a, ch, .chest, chest.add(V.init(0, 0.045 * h, 0.168 * h)), V.init(0.027 * h, 0.058 * h, 0.009 * h), accent);
-        inline for ([_]sk.Joint{ .upper_arm_l, .upper_arm_r }, [_]sk.Joint{ .lower_arm_l, .lower_arm_r }, [_]sk.Joint{ .shin_l, .shin_r }, [_]sk.Joint{ .thigh_l, .thigh_r }, .{ @as(f32, 1), @as(f32, -1) }) |arm, forearm, shin, thigh, side| {
-            const dir = V.init(lm.arm_dir_l.x * side, lm.arm_dir_l.y, 0);
-            try plate(a, ch, arm, s.worldPos(arm).addScaled(dir, 0.04 * h), V.init(0.105 * w * bulk, 0.105 * h * bulk, 0.105 * h), metal);
-            try plate(a, ch, forearm, s.worldPos(forearm).addScaled(dir, 0.12 * h).add(V.init(0, 0, 0.035 * h)), V.init(0.060 * w, 0.12 * h, 0.065 * h), metal);
-            try plate(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.02 * h, 0.055 * h)), V.init(0.071 * w, 0.09 * h, 0.055 * h), metal);
-            if (p.armor == .sentinel) {
-                try plate(a, ch, thigh, s.worldPos(thigh).add(V.init(side * 0.035 * w, -0.16 * h, 0.04 * h)), V.init(0.090 * w, 0.15 * h, 0.075 * h), metal);
-                try plate(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.21 * h, 0.025 * h)), V.init(0.061 * w, 0.16 * h, 0.069 * h), metal);
-            }
-        }
-    }
-    switch (p.armor) {
-        .rootweave => {
-            const chest = s.worldPos(.chest);
-            for ([_]f32{ -1, 1 }) |side| {
-                try plateWithMaterial(a, ch, if (side > 0) .shoulder_l else .shoulder_r, s.worldPos(if (side > 0) .shoulder_l else .shoulder_r).add(V.init(side * 0.025 * h, 0, 0.035 * h)), V.init(0.13 * w, 0.075 * h, 0.105 * h), metal, .armor);
-                try plateWithMaterial(a, ch, if (side > 0) .lower_arm_l else .lower_arm_r, s.worldPos(if (side > 0) .lower_arm_l else .lower_arm_r).add(V.init(side * 0.035 * h, 0, 0.025 * h)), V.init(0.070 * w, 0.16 * h, 0.065 * h), spec.Rgb.hex(0x425c3c), .armor);
-                try plateWithMaterial(a, ch, .chest, chest.add(V.init(side * 0.065 * h, -0.035 * h, 0.153 * h)), V.init(0.012 * h, 0.13 * h, 0.010 * h), accent, .armor);
-            }
-        },
-        .skyguard => {
-            for ([_]f32{ -1, 1 }) |side| {
-                const shoulder: sk.Joint = if (side > 0) .shoulder_l else .shoulder_r;
-                const forearm: sk.Joint = if (side > 0) .lower_arm_l else .lower_arm_r;
-                const shin: sk.Joint = if (side > 0) .shin_l else .shin_r;
-                try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.045 * h, 0.015 * h, 0)), V.init(0.15 * w, 0.055 * h, 0.080 * h), metal, .armor);
-                try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(side * 0.022 * h, -0.025 * h, 0.026 * h)), V.init(0.046 * w, 0.14 * h, 0.036 * h), spec.Rgb.hex(0x31535f), .armor);
-                try plateWithMaterial(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.025 * h, 0.045 * h)), V.init(0.055 * w, 0.12 * h, 0.040 * h), metal, .armor);
-                try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(side * 0.018 * h, 0.035 * h, 0.061 * h)), V.init(0.008 * h, 0.085 * h, 0.006 * h), accent, .armor);
-            }
-        },
-        .gem_aegis, .starforge, .deep_prism => {
-            const chest = s.worldPos(.chest);
-            const scale: f32 = if (p.presentation == .feminine) 0.94 else 1.08;
-            for ([_]f32{ -1, 1 }) |side| {
-                const shoulder: sk.Joint = if (side > 0) .shoulder_l else .shoulder_r;
-                const forearm: sk.Joint = if (side > 0) .lower_arm_l else .lower_arm_r;
-                const hip: sk.Joint = if (side > 0) .hips else .hips;
-                if (p.armor == .gem_aegis) {
-                    try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.025 * h, 0.005 * h, 0.012 * h)), V.init(0.105 * w * scale, 0.065 * h, 0.075 * h), metal, .armor);
-                    try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(0, 0, 0.035 * h)), V.init(0.052 * w, 0.12 * h, 0.046 * h), metal, .armor);
-                } else if (p.armor == .starforge) {
-                    try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.045 * h, 0.005 * h, 0.01 * h)), V.init(0.16 * w * scale, 0.08 * h, 0.095 * h), metal, .armor);
-                    try plateWithMaterial(a, ch, hip, s.worldPos(.hips).add(V.init(side * 0.11 * h, -0.015 * h, 0.025 * h)), V.init(0.075 * w, 0.10 * h, 0.065 * h), metal, .armor);
-                } else {
-                    const shin: sk.Joint = if (side > 0) .shin_l else .shin_r;
-                    try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.04 * h, 0.005 * h, 0.01 * h)), V.init(0.13 * w * scale, 0.075 * h, 0.09 * h), metal, .armor);
-                    try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(0, 0, 0.036 * h)), V.init(0.064 * w, 0.145 * h, 0.055 * h), metal, .armor);
-                    try plateWithMaterial(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.02 * h, 0.042 * h)), V.init(0.075 * w, 0.14 * h, 0.05 * h), metal, .armor);
-                }
-            }
-            const jewel = chest.add(V.init(0, 0.045 * h, 0.177 * h));
-            try plateWithMaterial(a, ch, .chest, jewel, V.init(0.071 * h, 0.071 * h, 0.014 * h), spec.Rgb.hex(0x263b4d), .metal);
-            try gemstone(a, ch, .chest, jewel.add(V.init(0, 0, 0.015 * h)), 0.056 * h, p.gemstone, p.gem_cut);
-            for ([_]f32{ -1, 1 }) |side| {
-                const small = chest.add(V.init(side * 0.145 * h, 0.075 * h, 0.12 * h));
-                try gemstone(a, ch, .chest, small, 0.022 * h, p.gemstone, .brilliant);
-            }
-        },
-        else => {},
-    }
+    // Armor sets are data (`armor.zig`): the set's pieces fit to the body built so far.
+    try armor_kit.emitSet(a, ch, def, armorContext(p, lm));
     try bootDetails(a, ch, p, metal, accent);
     const wildkin = p.species != .human;
     if (p.helmet == .sealed or p.hair_style == .hood or wildkin) {
@@ -871,15 +761,7 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     }
     // Wildkin show their faces: no visor, and their own features.
     if (wildkin) return Beasts.build(a, ch, p);
-    if (p.helmet != .open) {
-        const center = V.init(0, lm.chin_y + 0.47 * lm.H, 0.41 * lm.H);
-        const visor_half_width = 0.65 * lm.head_half_width;
-        try visorSurface(a, ch, center, visor_half_width, 0.09 * lm.H, 0.04 * lm.H, dark, 8, 24);
-        try visorSurface(a, ch, center.add(V.init(0, 0.04 * lm.H, 0.004 * lm.H)), 0.72 * visor_half_width, 0.010 * lm.H, 0.044 * lm.H, accent, 2, 20);
-        for ([_]f32{ -1, 1 }) |side| {
-            try plateWithMaterial(a, ch, .head, center.add(V.init(side * visor_half_width, -0.01 * lm.H, -0.018 * lm.H)), V.init(0.035 * lm.H, 0.12 * lm.H, 0.045 * lm.H), metal, .armor);
-        }
-    }
+    if (p.helmet != .open) try armor_kit.emitVisor(a, ch, def.visor, metal, dark, accent);
 }
 
 fn bootDetails(a: std.mem.Allocator, ch: *gen.Character, p: Profile, metal: spec.Rgb, accent: spec.Rgb) !void {
@@ -1327,4 +1209,34 @@ test "suits carry lit strips, cops and a buckle; full suits add a core and a bac
     }
     // The power pack stands off the back; the vanguard's farthest.
     try std.testing.expect(backs[1] > backs[0] + 0.02 and backs[2] > backs[1]);
+}
+
+test "every armor set builds finite rigid meshes over each suit and helmet, and the mecha sets differ" {
+    const a = std.testing.allocator;
+    var counts: [std.enums.values(Profile.Armor).len]usize = undefined;
+    for (std.enums.values(Profile.Armor), 0..) |armor, k| {
+        for ([_]Profile.Clothing{ .undersuit, .hardsuit }) |clothing| for ([_]Profile.Helmet{ .open, .sealed }) |helmet| {
+            var r = try init(a, .{ .armor = armor, .clothing = clothing, .helmet = helmet });
+            defer r.deinit(a);
+            _ = r.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 1, .walk_phase = 1.1 });
+            for (r.mesh.vertices) |v| for (v.position) |c| try std.testing.expect(std.math.isFinite(c) and @abs(c) < 3);
+            for (r.character.mesh.vertices.items) |v| if (v.material == .armor) {
+                try std.testing.expectEqual(@as(f32, 1), v.weights[0]);
+            };
+            if (clothing == .hardsuit and helmet == .sealed) counts[k] = r.character.mesh.vertices.items.len;
+        };
+    }
+    // Mecha sets (the last four tags) add geometry beyond the plain hardsuit and differ from each other.
+    const first_mecha = @intFromEnum(Profile.Armor.mobile_suit);
+    for (first_mecha..counts.len) |i| {
+        try std.testing.expect(counts[i] > counts[@intFromEnum(Profile.Armor.none)] + 1500);
+        for (first_mecha..i) |j| try std.testing.expect(counts[i] != counts[j]);
+    }
+}
+
+test "every Profile.Armor tag has a valid armor set definition" {
+    inline for (std.meta.fields(Profile.Armor)) |f| {
+        const def = armor_kit.find(&armor_kit.builtin_sets, f.name) orelse return error.MissingArmorSet;
+        try def.validate();
+    }
 }

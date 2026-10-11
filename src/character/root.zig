@@ -17,6 +17,7 @@ pub const Animation = @import("Animation.zig");
 pub const spec = @import("spec.zig");
 pub const body = @import("body.zig");
 pub const clothing = @import("clothing.zig");
+pub const armor = @import("armor.zig");
 pub const hair = @import("hair.zig");
 pub const ik = @import("ik.zig");
 pub const spring = @import("spring.zig");
@@ -49,6 +50,7 @@ test {
     _ = spec;
     _ = body;
     _ = clothing;
+    _ = armor;
     _ = hair;
     _ = ik;
     _ = spring;

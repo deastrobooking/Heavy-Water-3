@@ -92,13 +92,13 @@ pub fn coverage(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
         // abdomen bands spaced over the whole span so no band ends at a region border.
         .cuirass => switch (v.region) {
             .chest => yes,
-            .belly, .hips => @min(y - (lm.waist_y - 0.04 * B), segment(g.segments, (lm.shoulder_y - y) / (lm.shoulder_y - lm.waist_y + 0.04 * B))),
+            .belly, .hips => @min(y - (lm.waist_y - 0.04 * B), segmentFor(g, (lm.shoulder_y - y) / (lm.shoulder_y - lm.waist_y + 0.04 * B))),
             else => no,
         },
         .pauldrons => switch (v.region) {
             .upper_arm_l, .upper_arm_r => blk: {
                 const span = @min(0.95, 0.34 * @max(g.coverage_extent, 0.1));
-                break :blk @min(span - t, segment(g.segments, t / span));
+                break :blk @min(span - t, segmentFor(g, t / span));
             },
             else => no,
         },
@@ -113,7 +113,7 @@ pub fn coverage(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
         },
         // A continuous cut just above the waist (not the region border) keeps the top edge smooth.
         .faulds => switch (v.region) {
-            .belly, .hips => @min(lm.waist_y + 0.03 * B - y, segment(g.segments, (lm.waist_y + 0.03 * B - y) / (0.30 * B))),
+            .belly, .hips => @min(lm.waist_y + 0.03 * B - y, segmentFor(g, (lm.waist_y + 0.03 * B - y) / (0.30 * B))),
             .thigh_l, .thigh_r => 0.16 * @max(g.coverage_extent, 0.1) - t,
             else => no,
         },
@@ -142,14 +142,91 @@ fn centeredPlate(g: GarmentSpec, t: f32, center: f32, base_span: f32) f32 {
     const span = @min(1.0, base_span * @max(g.coverage_extent, 0.1));
     const start = @max(0, center - span * 0.5);
     const end = @min(1, center + span * 0.5);
-    return @min(@min(t - start, end - t), segment(g.segments, (t - start) / (end - start)));
+    return @min(@min(t - start, end - t), segmentFor(g, (t - start) / (end - start)));
+}
+
+/// Gap between plates as a fraction of one plate; overlapping plates nearly touch and ride up.
+fn plateGap(g: GarmentSpec) f32 {
+    return m.lerp(0.035, 0.01, m.saturate(g.shape.overlap));
+}
+
+fn segmentFor(g: GarmentSpec, s: f32) f32 {
+    return segmentGap(g.segments, s, plateGap(g));
+}
+
+fn segment(n: u8, s: f32) f32 {
+    return segmentGap(n, s, 0.035);
+}
+
+/// Position of a body vertex along its hard-surface plate: 0 at the plate's near edge, 1 at the far
+/// edge (toward the hem), or -1 where the coverage has no plate span. Mirrors `coverage`.
+fn plateLocal(g: GarmentSpec, v: Vertex, lm: body.Landmarks) f32 {
+    const t = v.uv.y;
+    const B = lm.B;
+    const y = v.pos.y;
+    const n = @as(f32, @floatFromInt(@max(g.segments, 1)));
+    const span01: f32 = switch (g.coverage) {
+        .cuirass => switch (v.region) {
+            .belly, .hips => (lm.shoulder_y - y) / (lm.shoulder_y - lm.waist_y + 0.04 * B),
+            else => return -1,
+        },
+        .pauldrons => switch (v.region) {
+            .upper_arm_l, .upper_arm_r => t / @min(0.95, 0.34 * @max(g.coverage_extent, 0.1)),
+            else => return -1,
+        },
+        .faulds => switch (v.region) {
+            .belly, .hips => (lm.waist_y + 0.03 * B - y) / (0.30 * B),
+            else => return -1,
+        },
+        .vambraces, .cuisses, .greaves => blk: {
+            const c: struct { c: f32, s: f32 } = switch (g.coverage) {
+                .vambraces => .{ .c = 0.50, .s = 0.80 },
+                .cuisses => .{ .c = 0.53, .s = 0.66 },
+                else => .{ .c = 0.49, .s = 0.82 },
+            };
+            const span = @min(1.0, c.s * @max(g.coverage_extent, 0.1));
+            const start = @max(0, c.c - span * 0.5);
+            const end = @min(1, c.c + span * 0.5);
+            break :blk (t - start) / (end - start);
+        },
+        else => return -1,
+    };
+    const f = n * std.math.clamp(span01, 0, 0.9999);
+    return f - @floor(f);
+}
+
+/// Extra outward standoff of a hard-surface vertex from the garment's `ShapeSpec`, on top of the
+/// base layer offset and the plain dome. `inside` is the coverage value (0 on a rim, rising toward
+/// the plate center), `local` is `plateLocal`. Never negative past the dome (see below), and it is
+/// 0 on rims so neighbouring plates and cut edges stay put. The caller clamps
+/// dome + lift at zero, so a negative lift (angular plates) only flattens the dome.
+fn shapeLift(g: GarmentSpec, v: Vertex, inside: f32, local: f32, ref: f32) f32 {
+    const sh = g.shape;
+    const width = 0.03 + 0.15 * m.saturate(sh.roundness);
+    const prof = m.smoothstep(0, width, inside);
+    const l = if (local < 0) 0.5 else local;
+    var lift: f32 = 0;
+    // Each plate's far edge kicks out (flare) and rides up over the next plate (overlap).
+    lift += sh.flare * 0.012 * m.smoothstep(0.55, 1, l) + sh.overlap * 0.004 * l;
+    const n = v.normal;
+    // Fins go to the outside of the body: left parts have x > 0, right parts x < 0.
+    const outward = if (@abs(v.pos.x) > 0.03) n.x * std.math.sign(v.pos.x) else @abs(n.x);
+    const up = if (g.coverage == .pauldrons) n.y else n.z;
+    const crest = @max(sh.crest, 0) * ref;
+    switch (sh.silhouette) {
+        .round => {},
+        .dome => lift += (g.bulge * (1.2 + sh.flare) + 0.25 * crest) * prof,
+        .angular => lift += crest * prof * std.math.pow(f32, @max(up, 0), 3) - 0.5 * g.bulge * prof * (1 - sh.roundness),
+        .finned => lift += crest * prof * std.math.pow(f32, @max(outward, 0), 3),
+        .wedge => lift += crest * prof * (1 - l) * std.math.pow(f32, @max(up, 0), 2),
+    }
+    return lift;
 }
 
 /// Splits a 0..1 span into `n` plates with gaps between them: > 0 on a plate, < 0 in a gap.
 /// Continuous, so `buildShell` clips plate edges as smooth curves like any hem.
-fn segment(n: u8, s: f32) f32 {
+fn segmentGap(n: u8, s: f32, gap: f32) f32 {
     if (n <= 1) return 1;
-    const gap: f32 = 0.035;
     const f = @as(f32, @floatFromInt(n)) * std.math.clamp(s, 0, 0.9999);
     const local = f - @floor(f);
     return @min(local - gap, 1 - gap - local) / @as(f32, @floatFromInt(n));
@@ -244,11 +321,21 @@ pub fn buildShell(gpa: Allocator, out: *Mesh, body_mesh: *const Mesh, g: Garment
         /// Hard armor: rigid binding and a domed plate profile.
         hard: bool,
         bulge: f32,
+        g: GarmentSpec,
+        lm: body.Landmarks,
+        /// Body scale against the 1.8 m reference, for the shape's crest height.
+        ref: f32,
 
         fn finishVertex(e: @This(), v0: Vertex, inside: f32) Vertex {
             var v = v0;
-            // Plates dome toward their centers; rims (coverage ~0) sit at the base offset.
-            const dome = if (e.hard) e.bulge * m.smoothstep(0, 0.12, inside) else 0;
+            // Plates dome toward their centers; rims (coverage ~0) sit at the base offset. The
+            // shape adds fins, keels and flares on top; a rim stays at the base offset.
+            var dome: f32 = 0;
+            if (e.hard) {
+                const width = 0.03 + 0.15 * m.saturate(e.g.shape.roundness);
+                dome = e.bulge * m.smoothstep(0, width, inside);
+                if (inside > 0) dome = @max(dome + shapeLift(e.g, v, inside, plateLocal(e.g, v, e.lm), e.ref), 0);
+            }
             v.pos = v.pos.addScaled(v.normal, e.offset + dome);
             if (e.hard) {
                 // Bind to the single most influential joint so the plate never stretches.
@@ -286,7 +373,7 @@ pub fn buildShell(gpa: Allocator, out: *Mesh, body_mesh: *const Mesh, g: Garment
             return gop.value_ptr.*;
         }
     };
-    const e: Emit = .{ .gpa = gpa, .out = out, .bv = bv, .cov = cov, .remap = remap, .cuts = &cuts, .offset = offset, .mat = mat, .shoes = g.coverage == .shoes or g.coverage == .sabatons, .hard = g.hard, .bulge = g.bulge };
+    const e: Emit = .{ .gpa = gpa, .out = out, .bv = bv, .cov = cov, .remap = remap, .cuts = &cuts, .offset = offset, .mat = mat, .shoes = g.coverage == .shoes or g.coverage == .sabatons, .hard = g.hard, .bulge = g.bulge, .g = g, .lm = lm, .ref = lm.height / 1.8 };
 
     var i: usize = 0;
     const idx = body_mesh.indices.items;
@@ -663,4 +750,31 @@ test "armor segments split a span into plates with gaps, continuously" {
         try std.testing.expect(@abs(v - previous) < 0.01);
         previous = v;
     }
+}
+
+test "a finned shape raises fins on hard plates and the default shape changes nothing" {
+    const gpa = std.testing.allocator;
+    const spec: spec_mod.CharacterSpec = .{ .detail = 0.6 };
+    const lm = body.computeLandmarks(spec);
+    var skel = try body.buildSkeleton(gpa, spec, lm);
+    defer skel.deinit(gpa);
+    var bm: Mesh = .{};
+    defer bm.deinit(gpa);
+    try body.buildBody(gpa, &bm, spec, lm, &skel);
+    var reach: [3]f32 = undefined;
+    const shapes = [_]spec_mod.ShapeSpec{ .{}, .{ .silhouette = .round }, .{ .silhouette = .finned, .crest = 0.08, .flare = 0.5, .overlap = 0.5 } };
+    for (shapes, 0..) |shape, i| {
+        var shin: Mesh = .{};
+        defer shin.deinit(gpa);
+        try buildShell(gpa, &shin, &bm, .{ .coverage = .greaves, .hard = true, .segments = 2, .shape = shape }, lm);
+        var far: f32 = 0;
+        for (shin.vertices.items) |v| {
+            try std.testing.expect(std.math.isFinite(v.pos.x + v.pos.y + v.pos.z));
+            far = @max(far, @abs(v.pos.x));
+        }
+        reach[i] = far;
+    }
+    try std.testing.expectEqual(reach[0], reach[1]);
+    try std.testing.expect(reach[2] > reach[0] + 0.01);
+    try std.testing.expect(reach[2] < reach[0] + 0.2);
 }

@@ -191,6 +191,13 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.gemstone = stones[i];
             self.sandbox.profile.gem_cut = if (i == 1) .star else .brilliant;
         }
+        if (options.character_showcase >= 30 and options.character_showcase <= 33) {
+            // The mecha armor sets over a hardsuit: mobile suit, buster, iron titan, battle plate.
+            const sets = [_]Profile.Armor{ .mobile_suit, .buster, .iron_titan, .battle_plate };
+            self.sandbox.profile.armor = sets[options.character_showcase - 30];
+            self.sandbox.profile.clothing = .hardsuit;
+            self.sandbox.profile.helmet = if (options.character_showcase == 31 or options.character_showcase == 33) .visor else .sealed;
+        }
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
