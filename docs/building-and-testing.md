@@ -19,6 +19,8 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `python3 tools/zig.py build test` | Runs every deterministic test, headless. Add `--summary all` to see the pass count. |
 | `python3 tools/zig.py build assets` | Compiles source assets (glTF models, blueprints) into `zig-out/assets/`. |
 | `python3 tools/zig.py build import` | Creates missing `.meta` sidecars (new GUIDs) and refreshes source hashes under `assets/source`. Run it after adding or changing a source asset. |
+| `zig-out/bin/asset-compiler trace <source.glb|source.gltf> <source.meta> <report.json>` | Writes a GUID/hash-linked inventory of scene parts, material slots, dependencies, authored/generated normals and importer gaps. Build the tool with `python3 tools/zig.py build` first. |
+| `zig-out/bin/asset-compiler split <source.glb|source.gltf> <source.meta> <output-dir>` | Exports one validated `.hwmesh` per selected-scene node/mesh/primitive and writes `modules.json` with lineage, hashes, material names, normal provenance, counts and bounds. |
 | `python3 tools/zig.py build mods` | Builds the example WebAssembly mod's scripts into `mods/`. |
 | `python3 tools/zig.py build sounds` | Writes every synthesized sound to `zig-out/sounds/*.wav` for listening. |
 | `python3 tools/zig.py build heightmap -- <in.pgm> <out.hwmh> [width depth elevation base]` | Imports a PGM heightmap to the runtime terrain format. |

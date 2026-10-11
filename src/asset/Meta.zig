@@ -11,7 +11,7 @@ pub const format_version: u32 = 1;
 pub const Kind = enum { model, blueprint, heightmap, scene, animation, texture };
 /// Current importer versions; raising one makes every asset of that kind stale.
 pub const importers = struct {
-    pub const gltf: u32 = 1;
+    pub const gltf: u32 = 2;
     pub const blueprint: u32 = 1;
     pub const heightmap: u32 = 1;
 };

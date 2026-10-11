@@ -54,6 +54,8 @@ python3 tools/zig.py build test       # headless tests
 python3 tools/zig.py build check      # compile the application
 python3 tools/zig.py build assets     # compile models and validate blueprints
 python3 tools/zig.py build import     # after adding or changing a source asset: create/refresh its .meta sidecar (GUID, hash)
+zig-out/bin/asset-compiler trace assets/source/crate.gltf assets/source/crate.gltf.meta zig-out/crate.trace.json # inspect stable source/module lineage
+zig-out/bin/asset-compiler split assets/source/crate.gltf assets/source/crate.gltf.meta zig-out/crate-parts # export individual HWMS mesh modules
 python3 tools/zig.py build mods       # build the example WebAssembly mod
 python3 tools/zig.py build sounds     # write the synthesized sounds to zig-out/sounds/*.wav
 python3 tools/zig.py build run -Daudio=false  # run without opening an audio device

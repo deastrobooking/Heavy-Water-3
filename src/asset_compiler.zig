@@ -12,6 +12,10 @@ const Synth = @import("audio/Synth.zig");
 ///   asset-compiler compile <source> <source.meta> <output>
 ///       check the sidecar (GUID, kind, importer, settings, unchanged source), then compile a
 ///       glTF model, validate a blueprint, or compile a PGM heightmap
+///   asset-compiler trace <source.glb|source.gltf> <source.meta> <output.json>
+///       validate asset identity and write a source-to-module report for 3D review/mod packaging
+///   asset-compiler split <source.glb|source.gltf> <source.meta> <output-directory>
+///       write one validated HWMS module per selected-scene node/mesh/primitive and modules.json
 ///   asset-compiler manifest <output> (<source.meta> <name> <output-name>)...
 ///       write the asset manifest the runtime registry loads
 ///   asset-compiler import <directory>
@@ -25,11 +29,13 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     const io = init.io;
     if (args.len >= 2 and std.mem.eql(u8, args[1], "compile") and args.len == 5) return compile(init.gpa, io, args[2], args[3], args[4]);
+    if (args.len == 5 and std.mem.eql(u8, args[1], "trace")) return trace(init.gpa, io, args[2], args[3], args[4]);
+    if (args.len == 5 and std.mem.eql(u8, args[1], "split")) return split(init.gpa, io, args[2], args[3], args[4]);
     if (args.len >= 3 and std.mem.eql(u8, args[1], "manifest") and (args.len - 3) % 3 == 0) return manifest(init.gpa, io, args[2], args[3..]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "import")) return import(init.gpa, io, args[2]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "sounds")) return writeSounds(init.gpa, io, args[2]);
     if (args.len == 4 or args.len == 8) if (std.mem.eql(u8, args[1], "heightmap")) return compileHeightmap(init.gpa, io, args[2], args[3], args[4..]);
-    std.log.err("usage: asset-compiler compile <source> <meta> <output> | manifest <output> (<meta> <name> <output-name>)... | import <dir> | heightmap <source.pgm> <output.hwmh> [world-width world-depth elevation base-height]", .{});
+    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source.glb|source.gltf> <meta> <output.json> | split <source.glb|source.gltf> <meta> <output-dir> | manifest <output> (<meta> <name> <output-name>)... | import <dir> | heightmap <source.pgm> <output.hwmh> [world-width world-depth elevation base-height]", .{});
     return error.InvalidArguments;
 }
 
@@ -138,6 +144,113 @@ fn compile(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_pat
         },
         else => return error.UnsupportedKind,
     }
+}
+
+fn trace(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, output_path: []const u8) !void {
+    const source = try readFile(gpa, io, source_path);
+    defer gpa.free(source);
+    const meta_bytes = try readFile(gpa, io, meta_path);
+    defer gpa.free(meta_bytes);
+    const meta = try Meta.check(gpa, meta_bytes, source_path, source);
+    if (meta.kind != .model) return error.UnsupportedKind;
+    const provenance = .{
+        .source_path = source_path,
+        .guid = meta.guid,
+        .source_hash = Meta.hashSource(source),
+        .importer = "gltf",
+        .importer_version = Meta.importers.gltf,
+        .scale = meta.model.scale,
+    };
+    const json = try Gltf.traceJson(gpa, source, provenance);
+    defer gpa.free(json);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = json });
+    std.log.info("trace: {s} -> {s}", .{ source_path, output_path });
+}
+
+fn split(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, output_dir: []const u8) !void {
+    var arena_state: std.heap.ArenaAllocator = .init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const source = try readFile(arena, io, source_path);
+    const meta_bytes = try readFile(arena, io, meta_path);
+    const meta = try Meta.check(arena, meta_bytes, source_path, source);
+    if (meta.kind != .model) return error.UnsupportedKind;
+    const source_trace = try Gltf.inspect(arena, source);
+    var context: Context = .{ .io = io, .dir = std.fs.path.dirname(source_path) orelse "." };
+    const resolver: Gltf.Resolver = .{ .context = &context, .load = Context.load };
+    const Pending = struct { file: []const u8, bytes: []const u8 };
+    const ManifestModule = struct {
+        id: []const u8,
+        node: u32,
+        mesh: u32,
+        primitive: u32,
+        material: ?[]const u8,
+        generated_normals: bool,
+        file: []const u8,
+        content_hash: [71]u8,
+        vertex_count: usize,
+        triangle_count: usize,
+        bounds_min: [3]f32,
+        bounds_max: [3]f32,
+    };
+    const pending = try arena.alloc(Pending, source_trace.modules.len);
+    const manifest_modules = try arena.alloc(ManifestModule, source_trace.modules.len);
+    var count: usize = 0;
+    const source_hash = Meta.hashSource(source);
+    for (source_trace.modules) |part| {
+        if (!part.in_selected_scene) continue;
+        const model_file = try std.fmt.allocPrint(arena, "node-{d}-mesh-{d}-primitive-{d}.hwmesh", .{ part.node, part.mesh, part.primitive });
+        const converted = blk: {
+            var model = try Gltf.compileModule(gpa, source, resolver, .{ .node = part.node, .primitive = part.primitive });
+            defer model.deinit(gpa);
+            if (meta.model.scale != 1) {
+                for (model.mesh.vertices) |*vertex| {
+                    for (&vertex.position) |*coordinate| coordinate.* *= meta.model.scale;
+                }
+                model.computeBounds();
+            }
+            break :blk .{
+                .bytes = try model.encode(arena),
+                .vertex_count = model.mesh.vertices.len,
+                .triangle_count = model.mesh.indices.len / 3,
+                .bounds_min = model.bounds_min,
+                .bounds_max = model.bounds_max,
+            };
+        };
+        const relative = try std.fmt.allocPrint(arena, "{s}/{s}", .{ output_dir, model_file });
+        pending[count] = .{ .file = relative, .bytes = converted.bytes };
+        manifest_modules[count] = .{
+            .id = part.id,
+            .node = part.node,
+            .mesh = part.mesh,
+            .primitive = part.primitive,
+            .material = part.material,
+            .generated_normals = part.generated_normals,
+            .file = model_file,
+            .content_hash = Meta.hashSource(converted.bytes),
+            .vertex_count = converted.vertex_count,
+            .triangle_count = converted.triangle_count,
+            .bounds_min = converted.bounds_min,
+            .bounds_max = converted.bounds_max,
+        };
+        count += 1;
+    }
+    if (count == 0) return error.NoSceneModules;
+    const guid = meta.guid.format();
+    const manifest_json = try std.json.Stringify.valueAlloc(arena, .{
+        .format = 1,
+        .source_guid = &guid,
+        .source_hash = source_hash,
+        .importer_version = Meta.importers.gltf,
+        .module_count = count,
+        .modules = manifest_modules[0..count],
+        .source_trace = source_trace,
+    }, .{ .whitespace = .indent_2 });
+    try std.Io.Dir.cwd().createDirPath(io, output_dir);
+    for (pending[0..count]) |module| try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = module.file, .data = module.bytes });
+    const manifest_path = try std.fmt.allocPrint(arena, "{s}/modules.json", .{output_dir});
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = manifest_path, .data = manifest_json });
+    std.log.info("split: {s} -> {d} HWMS modules in {s}", .{ source_path, count, output_dir });
 }
 
 fn manifest(gpa: std.mem.Allocator, io: std.Io, output: []const u8, triples: []const []const u8) !void {

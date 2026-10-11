@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
-    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class previews, 6-16 hairstyle previews") orelse 0);
+    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-16 hairstyle, 17-19 gemstone armor previews") orelse 0);
     options.addOption(bool, "cpu_skinning", b.option(bool, "cpu-skinning", "Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback)") orelse false);
     options.addOption(bool, "hot_reload", b.option(bool, "hot-reload", "Watch model, blueprint and mod script sources during development") orelse false);
     options.addOption(bool, "reload_smoke", b.option(bool, "reload-smoke", "Exercise model reload using an isolated source fixture") orelse false);
@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(u32, "capture_frame", b.option(u32, "capture-frame", "Write rendered frame N to zig-out/capture.bmp, then exit (0 = off)") orelse 0);
-    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk, 16 armor lineup, 17 hardsuit close-up, 18-35 GUI/frontier/flight, 36 river and falls, 37-45 combat/caves/lock reticle, 46 gamepad controls, 47 Scalari fleet, 60 Rootdeep temples") orelse 0);
+    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk, 16 armor lineup, 17 hardsuit close-up, 18-35 GUI/frontier/flight, 36 river and falls, 37-45 combat/caves/lock reticle, 46 gamepad controls, 47 Scalari fleet, 60 Rootdeep temples, 61 jeweled armor lineup") orelse 0);
     options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
     options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);
@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) void {
     // output is embedded, so the app never parses glTF at runtime.
     const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
     compiler.root_module.addImport("enum_compat", enum_compat);
+    b.installArtifact(compiler);
     // Every source has a `.meta` sidecar (GUID, source hash, importer, settings); compiling checks
     // it, and `zig build import` creates or refreshes sidecars deliberately.
     const import = b.addRunArtifact(compiler);

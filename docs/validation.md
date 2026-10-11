@@ -2,6 +2,27 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## GLB source trace and modular export — 2026-10-11
+
+- The repository already had a static glTF/GLB-to-HWMS converter. Added `asset-compiler trace` to validate sidecars and report GUID/hash provenance, stable node/mesh/primitive addresses, material slots, buffer/image dependencies and features outside the static importer.
+- Added `asset-compiler split` to bake each selected-scene node/mesh/primitive into an independent HWMS model and write `modules.json` with source identity, content hash, material, triangle count and bounds. The bundled crate fixture exported two modules: hull (12 triangles) and band (12 triangles), with expected distinct bounds.
+- `python3 tools/zig.py build check` and `python3 tools/zig.py build` passed on the pinned compiler; the game and host asset compiler were installed. Manual `trace` and `split` commands completed on `assets/source/crate.gltf`; output is under ignored `zig-out/`.
+- Headless tests and cross-compiles were not run. Mod API 1 still cannot load or place exported model modules; texture maps, animation, audio and scene import are also outside this first static-model step.
+
+## Importer expansion review — 2026-10-11
+
+- glTF primitives without authored normals now import with deterministic area-weighted normals computed from transformed triangle faces. Trace and split manifests identify generated normals. The GLB reader rejects a mismatched declared file length, misaligned chunks, non-JSON first chunks, and duplicate JSON/BIN chunks.
+- `python3 tools/zig.py build import` refreshed the crate sidecar to glTF importer version 2, retaining its GUID. `python3 tools/zig.py build check` and `python3 tools/zig.py build` passed on the pinned compiler.
+- Manual CLI review used a temporary copy of the crate with NORMAL removed: trace and split completed, both modules were exported, and all 48 output vertex normals were finite and unit length. A 12-byte malformed GLB was rejected with `InvalidGlbLength`.
+- The headless suite, Metal smoke/capture, Zig 0.17 and cross-compiles were not run. No runtime or Mod API model installation was added. Additional formats, mesh optimization/LOD/meshlets, and guessed semantic labels were deferred; the current exporter preserves literal source primitive boundaries and stable hashes.
+
+## Jeweled armor customization — 2026-10-11
+
+- Added three armor unlocks to the fabricator and creator: Gem Aegis, Starforge and Deep Prism. All fit both existing body presentations. The player can customize the saved gemstone color (six options) and cut (three options); these appearance choices do not affect combat stats. New profile fields default for old saves, so no save version change was needed.
+- `python3 tools/zig.py build check` and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed on the pinned default Zig/Mach pair; the installed `zig-out/bin/heavy-water` was refreshed. The creator line-count expectation was updated for the two added appearance rows; tests were not run.
+- `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=61 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed and the capture `zig-out/gem-armor-review.png` was inspected. Metal API Validation produced no reported errors. The ruby setting and customization controls are visible; the creator obscures part of the lineup, so all three silhouettes still need a clean visual review.
+- Headless tests, full smoke, Zig 0.17, cross-compiles, benchmarks and Linux/Windows runtime checks were not run for this increment.
+
 ## Energy net and greatblade — 2026-10-11
 
 - Added a fabricable energy net. Its fast lattice shot reaches 120 m/s, damages every Hive flyer intersecting a broad capture corridor, and briefly freezes survivors for 1.45 seconds so they are easier to hit again. It has a 1.1-second firing cooldown and a distinct cyan lattice visual. The existing firearm shots still damage flyers through the shared Skies shot path.

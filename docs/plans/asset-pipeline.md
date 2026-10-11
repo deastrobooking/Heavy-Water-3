@@ -5,6 +5,7 @@
 ## Today
 
 - **Build-time compiler:** `asset-compiler` runs in the build graph. glTF compiles to versioned `HWMS` models, and blueprints are validated. Zig's build cache already skips unchanged inputs.
+- **Source trace and modules:** `asset-compiler trace` emits a GUID/hash-linked report of each glTF node/mesh/primitive boundary, material references, dependencies and features the static converter cannot import. `asset-compiler split` emits one HWMS per selected-scene primitive plus a module manifest; the regular build still uses the combined source model. Both paths preserve original source files and expose stable module hashes. The trace distinguishes authored normals from generated normals; absent normals are area-weighted from transformed triangle faces. The GLB reader checks container length, chunk alignment, and JSON-first ordering.
 - **Embedding:** the compiled outputs are embedded in the executable with `@embedFile`, and `Catalog` registers them at startup.
 - **Lookup:** typed generational handles (`MeshHandle`, `MaterialHandle`) index the catalog. Content is found through hard-coded fields (`catalog.content.crate`) or blueprint names.
 - **Implemented:** GUID sidecars, runtime registry, pack format, background loading and opt-in source reload. The slices below record shipped scope and deviations.
@@ -88,6 +89,9 @@ Each source file `X` gets a sidecar `X.meta` next to it:
    - Watches follow known paths; a live rename requires a manifest rebuild/restart. Heightmaps, generated assets, textures, shaders, mod manifests and mod blueprints are outside this slice.
    - `-Dreload-smoke=true -Dsmoke-frames=600` edits an isolated crate fixture under `zig-out/reload-smoke`, checks stale-handle rejection and the changed material, and requires GPU readiness within two seconds. The Metal validation run completed in 848 ms.
 
+4. **GLB tracing and modular export — first slice (2026-10-11).** The installed host tool writes a human-readable JSON map from source identity to stable node/mesh/primitive addresses, accumulated transforms, materials, geometry counts, buffer/image dependencies, and import limitations. `split` exports each selected-scene primitive as a separately validated HWMS model and records per-module hashes, material, generated-normal status, triangle count and bounds in `modules.json`. Mod API 1 still cannot install these modules. Next: package validation, runtime catalog installation, and mod-authored placement/crafting references for static models. Add texture, animation, audio and scene importers only alongside their runtime resource paths.
+
+5. **Importer expansion review — 2026-10-11.** Kept input scope on glTF/GLB and improved static mesh robustness: missing normals are generated deterministically, and malformed GLB containers are rejected before JSON parsing. Per-primitive output remains literal. Automatic labels such as `blade` or `grip` inferred from proportions are unreliable; semantic roles should come from explicit source metadata or author hints. LODs, meshlets, compression, extra formats, and generated Zig reconstructions need measured runtime demand and defined formats before implementation. Avoid C/C++ importer and optimizer dependencies under the native-Zig rule. Runtime package validation and model installation remain the next expansion boundary.
 ## Acceptance
 
 - Renaming or moving a source file keeps its GUID. Saves, scenes, and mods still resolve, and a test renames a fixture asset.

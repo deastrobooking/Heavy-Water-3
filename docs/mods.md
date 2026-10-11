@@ -64,7 +64,7 @@ Format 10 saves list the installed mods by name and version. Blueprints placed f
 
 ## Not in API 1
 
-Mods cannot yet add Arbor genomes, shrine templates, market wares, meshes, or textures. Scripts get no host functions: no world queries, logging, or randomness beyond their inputs. There is no dependency or load-order declaration (mods load in directory order and cannot reference each other), no package reload, and no sandboxing beyond the interpreter. A mod's blueprints are trusted to be as harmless as any blueprint a player could build. See the [scripting evaluation](scripting.md) for why scripting is a WebAssembly interpreter.
+Mods cannot yet add Arbor genomes, shrine templates, market wares, meshes, or textures. Static `.gltf`/`.glb` sources already compile to HWMS; `asset-compiler trace` records source lineage and `asset-compiler split` exports node/mesh/primitive modules, but model modules are not yet installable game content. Scripts get no host functions: no world queries, logging, or randomness beyond their inputs. There is no dependency or load-order declaration (mods load in directory order and cannot reference each other), no package reload, and no sandboxing beyond the interpreter. A mod's blueprints are trusted to be as harmless as any blueprint a player could build. See the [scripting evaluation](scripting.md) for why scripting is a WebAssembly interpreter.
 
 ## Development script reload
 

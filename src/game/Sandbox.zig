@@ -651,7 +651,7 @@ pub fn setMaxProgressionTest(self: *Sandbox, enabled: bool) void {
         kit.levels = @splat(Kit.max_level);
         kit.combat_xp = (Kit.max_combat_level - 1) * 250;
         kit.suits = (@as(u8, 1) << @intCast(clothing_count)) - 1;
-        kit.armors = (@as(u8, 1) << @intCast(armor_count)) - 1;
+        kit.armors = if (armor_count == @bitSizeOf(u8)) std.math.maxInt(u8) else (@as(u8, 1) << @intCast(armor_count)) - 1;
         kit.weapons = all_weapons;
         kit.weapon_upgrades = @splat(Kit.max_level - 1);
         kit.wallet = .{ .scrap = 999_999, .parts = 999_999 };

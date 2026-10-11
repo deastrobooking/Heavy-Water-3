@@ -621,6 +621,45 @@ fn visorSurface(a: std.mem.Allocator, ch: *gen.Character, center: V, half_width:
     };
 }
 
+fn gemstoneColor(stone: Profile.Gemstone) spec.Rgb {
+    return switch (stone) {
+        .lumen => spec.Rgb.hex(0x52f4fa),
+        .ruby => spec.Rgb.hex(0xf52f49),
+        .sapphire => spec.Rgb.hex(0x3978ff),
+        .emerald => spec.Rgb.hex(0x38e878),
+        .amethyst => spec.Rgb.hex(0xb66aff),
+        .citrine => spec.Rgb.hex(0xffb932),
+    };
+}
+
+/// A chest-set jewel with a raised table and individually colored radial facets.
+fn gemstone(a: std.mem.Allocator, ch: *gen.Character, joint: sk.Joint, center: V, radius: f32, stone: Profile.Gemstone, cut: Profile.GemCut) !void {
+    const base_color = gemstoneColor(stone);
+    const base_channels = [4]f32{ base_color.r, base_color.g, base_color.b, 1 };
+    const colors = [_]spec.Rgb{ mix(base_channels, spec.Rgb.hex(0xffffff), 0.48), base_color, mix(base_channels, spec.Rgb.hex(0x102033), 0.32) };
+    const palette: [3]u8 = .{ @intCast(ch.palette.items.len), @intCast(ch.palette.items.len + 1), @intCast(ch.palette.items.len + 2) };
+    try ch.palette.appendSlice(a, &colors);
+    const facets: usize = switch (cut) { .brilliant => 8, .star => 5, .teardrop => 6 };
+    const rx = radius * (if (cut == .teardrop) @as(f32, 0.78) else 1);
+    const ry = radius * (if (cut == .teardrop) @as(f32, 1.25) else 0.82);
+    const top = center.add(V.init(0, 0, radius * 0.32));
+    for (0..facets) |i| {
+        const segment: f32 = @floatFromInt(i);
+        const next_segment: f32 = @floatFromInt(i + 1);
+        const phase: f32 = if (cut == .star) @as(f32, std.math.pi) / 2.0 else 0;
+        const a0 = phase + 2 * std.math.pi * segment / @as(f32, @floatFromInt(facets));
+        const a1 = phase + 2 * std.math.pi * next_segment / @as(f32, @floatFromInt(facets));
+        const p0 = center.add(V.init(@cos(a0) * rx, @sin(a0) * ry, 0));
+        const p1 = center.add(V.init(@cos(a1) * rx, @sin(a1) * ry, 0));
+        const shade = palette[i % 3];
+        const v0 = try ch.mesh.addVertex(a, .{ .pos = top, .normal = V.unit_z, .joints = .{ joint.idx(), 0, 0, 0 }, .material = .armor });
+        const v1 = try ch.mesh.addVertex(a, .{ .pos = p0, .normal = V.unit_z, .joints = .{ joint.idx(), 0, 0, 0 }, .material = .armor });
+        const v2 = try ch.mesh.addVertex(a, .{ .pos = p1, .normal = V.unit_z, .joints = .{ joint.idx(), 0, 0, 0 }, .material = .armor });
+        try ch.color_index.appendSlice(a, &.{ palette[0], shade, palette[(i + 1) % 3] });
+        try ch.mesh.addTri(a, v0, v1, v2);
+    }
+}
+
 fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
     const lm = ch.landmarks;
     const s = &ch.skeleton;
@@ -631,6 +670,9 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         .sentinel => spec.Rgb.hex(0xc1cbd0),
         .rootweave => spec.Rgb.hex(0x66815a),
         .skyguard => spec.Rgb.hex(0x477b88),
+        .gem_aegis => spec.Rgb.hex(0x9baebc),
+        .starforge => spec.Rgb.hex(0x8d719f),
+        .deep_prism => spec.Rgb.hex(0x397982),
         else => spec.Rgb.hex(0x71868e),
     };
     const accent = rgb(Profile.accent_colors[p.accent], 1.2);
@@ -703,6 +745,34 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
                 try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(side * 0.022 * h, -0.025 * h, 0.026 * h)), V.init(0.046 * w, 0.14 * h, 0.036 * h), spec.Rgb.hex(0x31535f), .armor);
                 try plateWithMaterial(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.025 * h, 0.045 * h)), V.init(0.055 * w, 0.12 * h, 0.040 * h), metal, .armor);
                 try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(side * 0.018 * h, 0.035 * h, 0.061 * h)), V.init(0.008 * h, 0.085 * h, 0.006 * h), accent, .armor);
+            }
+        },
+        .gem_aegis, .starforge, .deep_prism => {
+            const chest = s.worldPos(.chest);
+            const scale: f32 = if (p.presentation == .feminine) 0.94 else 1.08;
+            for ([_]f32{ -1, 1 }) |side| {
+                const shoulder: sk.Joint = if (side > 0) .shoulder_l else .shoulder_r;
+                const forearm: sk.Joint = if (side > 0) .lower_arm_l else .lower_arm_r;
+                const hip: sk.Joint = if (side > 0) .hips else .hips;
+                if (p.armor == .gem_aegis) {
+                    try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.025 * h, 0.005 * h, 0.012 * h)), V.init(0.105 * w * scale, 0.065 * h, 0.075 * h), metal, .armor);
+                    try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(0, 0, 0.035 * h)), V.init(0.052 * w, 0.12 * h, 0.046 * h), metal, .armor);
+                } else if (p.armor == .starforge) {
+                    try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.045 * h, 0.005 * h, 0.01 * h)), V.init(0.16 * w * scale, 0.08 * h, 0.095 * h), metal, .armor);
+                    try plateWithMaterial(a, ch, hip, s.worldPos(.hips).add(V.init(side * 0.11 * h, -0.015 * h, 0.025 * h)), V.init(0.075 * w, 0.10 * h, 0.065 * h), metal, .armor);
+                } else {
+                    const shin: sk.Joint = if (side > 0) .shin_l else .shin_r;
+                    try plateWithMaterial(a, ch, shoulder, s.worldPos(shoulder).add(V.init(side * 0.04 * h, 0.005 * h, 0.01 * h)), V.init(0.13 * w * scale, 0.075 * h, 0.09 * h), metal, .armor);
+                    try plateWithMaterial(a, ch, forearm, s.worldPos(forearm).add(V.init(0, 0, 0.036 * h)), V.init(0.064 * w, 0.145 * h, 0.055 * h), metal, .armor);
+                    try plateWithMaterial(a, ch, shin, s.worldPos(shin).add(V.init(0, -0.02 * h, 0.042 * h)), V.init(0.075 * w, 0.14 * h, 0.05 * h), metal, .armor);
+                }
+            }
+            const jewel = chest.add(V.init(0, 0.045 * h, 0.177 * h));
+            try plateWithMaterial(a, ch, .chest, jewel, V.init(0.071 * h, 0.071 * h, 0.014 * h), spec.Rgb.hex(0x263b4d), .metal);
+            try gemstone(a, ch, .chest, jewel.add(V.init(0, 0, 0.015 * h)), 0.056 * h, p.gemstone, p.gem_cut);
+            for ([_]f32{ -1, 1 }) |side| {
+                const small = chest.add(V.init(side * 0.145 * h, 0.075 * h, 0.12 * h));
+                try gemstone(a, ch, .chest, small, 0.022 * h, p.gemstone, .brilliant);
             }
         },
         else => {},

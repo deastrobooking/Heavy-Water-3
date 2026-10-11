@@ -71,9 +71,11 @@ pub const Class = enum { ranger, synthetic };
 /// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
 /// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
-pub const Armor = enum { none, scout, sentinel, rootweave, skyguard };
+pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, starforge, deep_prism };
+pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
+pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, class, species, presentation, height, build, skin, coat, marking, hair_style, hair_color, outfit, clothing, armor, helmet, accent };
+pub const Field = enum { name, class, species, presentation, height, build, skin, coat, marking, hair_style, hair_color, outfit, clothing, armor, helmet, accent, gemstone, gem_cut };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -95,6 +97,8 @@ accent: u8 = 0,
 clothing: Clothing = .field_jacket,
 armor: Armor = .scout,
 helmet: Helmet = .visor,
+gemstone: Gemstone = .lumen,
+gem_cut: GemCut = .brilliant,
 
 pub fn name(self: *const Profile) []const u8 {
     return self.name_buffer[0..self.name_len];
@@ -145,6 +149,8 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, enum_compat.fields(Armor).len)),
         .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, 3)),
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
+        .gemstone => self.gemstone = @enumFromInt(cycle(@intFromEnum(self.gemstone), delta, enum_compat.fields(Gemstone).len)),
+        .gem_cut => self.gem_cut = @enumFromInt(cycle(@intFromEnum(self.gem_cut), delta, enum_compat.fields(GemCut).len)),
     }
 }
 
@@ -171,10 +177,12 @@ pub const Doc = struct {
     clothing: Clothing = .field_jacket,
     armor: Armor = .scout,
     helmet: Helmet = .visor,
+    gemstone: Gemstone = .lumen,
+    gem_cut: GemCut = .brilliant,
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet };
+    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .gemstone = self.gemstone, .gem_cut = self.gem_cut };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -198,6 +206,8 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.clothing = doc.clothing;
     result.armor = doc.armor;
     result.helmet = doc.helmet;
+    result.gemstone = doc.gemstone;
+    result.gem_cut = doc.gem_cut;
     return result;
 }
 

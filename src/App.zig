@@ -182,6 +182,15 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.hair_style = looks[i];
         }
         self.sandbox.profile.outfit = 2;
+        if (options.character_showcase >= 17 and options.character_showcase <= 19) {
+            const armors = [_]Profile.Armor{ .gem_aegis, .starforge, .deep_prism };
+            const stones = [_]Profile.Gemstone{ .ruby, .sapphire, .emerald };
+            const i = options.character_showcase - 17;
+            self.sandbox.profile.armor = armors[i];
+            self.sandbox.profile.presentation = if (i == 1) .feminine else .masculine;
+            self.sandbox.profile.gemstone = stones[i];
+            self.sandbox.profile.gem_cut = if (i == 1) .star else .brilliant;
+        }
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -1201,6 +1210,30 @@ fn showcase(self: *App) void {
         for (layout.buildings[0..layout.building_count]) |b| if (@abs(eye[0] - b.base[0]) < b.half[0] + 4 and @abs(eye[2] - b.base[2]) < b.half[1] + 4) {
             eye = .{ target[0] - side[0] * back, target[1] + 18, target[2] - side[2] * back };
         };
+    } else if (v == 61) {
+        const Sandbox_ = @import("game/Sandbox.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const armor_sets = [_]Profile.Armor{ .gem_aegis, .starforge, .deep_prism };
+        const stones = [_]Profile.Gemstone{ .ruby, .sapphire, .emerald };
+        for (&self.sandbox.guests, 0..) |*g, i| {
+            if (!g.active) self.sandbox.joinGuest(i);
+            g.profile.armor = armor_sets[i];
+            g.profile.gemstone = stones[i];
+            g.profile.gem_cut = if (i == 1) .star else .brilliant;
+            g.profile.presentation = if (i == 1) .feminine else .masculine;
+            g.profile.clothing = .field_jacket;
+            g.profile.helmet = .open;
+            g.profile.outfit = 5;
+            const x = Sandbox_.spawn[0] + (@as(f32, @floatFromInt(i)) - 1) * 1.15;
+            const z = Sandbox_.spawn[2] + 3;
+            g.player.feet = .{ x, Terrain.surface(self.sandbox.seed, x, z).height, z };
+            g.player.velocity = .{ 0, 0, 0 };
+            g.camera.yaw = 0;
+            g.view = .first;
+        }
+        const ground = Terrain.surface(self.sandbox.seed, Sandbox_.spawn[0], Sandbox_.spawn[2] + 3).height;
+        target = .{ Sandbox_.spawn[0], ground + 0.92, Sandbox_.spawn[2] + 3 };
+        eye = .{ Sandbox_.spawn[0] + 0.2, ground + 1.22, Sandbox_.spawn[2] - 1.6 };
     } else if (v == 16 or v == 17) {
         // Armor lineup: compare coverage tiers in the same neutral outfit and open-face pose.
         const Sandbox_ = @import("game/Sandbox.zig");

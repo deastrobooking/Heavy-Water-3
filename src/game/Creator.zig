@@ -106,6 +106,8 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
         .armor => @tagName(p.armor),
         .helmet => @tagName(p.helmet),
         .accent => std.fmt.bufPrint(buffer, "LUMEN {d} OF {d}", .{ p.accent + 1, Profile.accent_colors.len }) catch buffer,
+        .gemstone => @tagName(p.gemstone),
+        .gem_cut => @tagName(p.gem_cut),
     };
 }
 
@@ -158,7 +160,7 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     var panel: [24]Line = undefined;
     c.begin(result.confirmed);
     const count = c.lines(&panel);
-    try std.testing.expectEqual(@as(usize, 19), count);
+    try std.testing.expectEqual(@as(usize, 21), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
 }
 

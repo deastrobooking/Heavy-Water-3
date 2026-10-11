@@ -374,13 +374,14 @@ Acceptance evidence:
 
 The next phases close the gaps to a production engine, in this order. [Engine alignment](plans/alignment.md) records how each outside suggestion was weighed against the codebase. Native Zig is kept: C-library physics, audio, and animation were declined on 2026-10-01.
 
-### 13. Asset pipeline — slices 1–3 implemented (identity, packs, background loading, development reload)
+### 13. Asset pipeline — slices 1–5 implemented (identity, packs, background loading, development reload, GLB trace/modules and static importer hardening)
 
 - **Identity:** stable GUID asset references (`AssetRef`) with `.meta` sidecars holding the GUID, source hash, importer version, and typed import settings.
 - **Build output:** a manifest with dependencies, and content packs.
 - **Runtime:** a registry, async loading with progress and per-frame GPU budgets, and hot reload by GUID with generation-bumped handles.
+- **3D authoring:** the host `asset-compiler` converts static `.gltf`/`.glb` geometry into HWMS; `trace` maps source identity and scene parts, and `split` exports independently addressable selected-scene primitives with a content manifest. Missing normals are generated, and GLB container structure is validated.
 
-Acceptance: renames keep identity; only changed sources reimport; invalid references are rejected without mutation; a 64-asset pack loads within the frame budget; a model edited on disk swaps in a running session. See [plan](plans/asset-pipeline.md).
+Remaining: model modules are not yet accepted by Mod API 1 or placed/crafted in-game; texture, audio, scene and animation resources need their runtime paths. Acceptance: renames keep identity; only changed sources reimport; invalid references are rejected without mutation; a 64-asset pack loads within the frame budget; a model edited on disk swaps in a running session. See [plan](plans/asset-pipeline.md).
 
 ### 14. Skeletal animation — in progress
 

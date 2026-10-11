@@ -3,7 +3,7 @@ const Mesh = @import("../render/Mesh.zig");
 const Model = @import("Model.zig");
 
 /// glTF 2.0 importer for the asset compiler. Supports .gltf (data-URI or resolver-loaded buffers)
-/// and .glb; triangle primitives with POSITION and NORMAL (TEXCOORD_0 optional); u8/u16/u32
+/// and .glb; triangle primitives with POSITION (NORMAL and TEXCOORD_0 optional); u8/u16/u32
 /// indices; node TRS/matrix transforms; baseColorFactor materials. Textures, skins, morph
 /// targets, sparse accessors, and extensions are rejected or ignored explicitly.
 pub const Resolver = struct {
@@ -15,16 +15,22 @@ pub const Resolver = struct {
 const Doc = struct {
     asset: struct { version: []const u8 },
     scene: ?u32 = null,
-    scenes: []const struct { nodes: []const u32 = &.{} } = &.{},
+    scenes: []const struct { name: ?[]const u8 = null, nodes: []const u32 = &.{} } = &.{},
     nodes: []const Node = &.{},
-    meshes: []const struct { primitives: []const Primitive } = &.{},
+    meshes: []const struct { name: ?[]const u8 = null, primitives: []const Primitive } = &.{},
     materials: []const MaterialDef = &.{},
     accessors: []const Accessor = &.{},
     bufferViews: []const BufferView = &.{},
     buffers: []const struct { byteLength: usize, uri: ?[]const u8 = null } = &.{},
     extensionsRequired: []const []const u8 = &.{},
+    extensionsUsed: []const []const u8 = &.{},
+    skins: []const std.json.Value = &.{},
+    animations: []const std.json.Value = &.{},
+    images: []const ImageDef = &.{},
+    textures: []const std.json.Value = &.{},
 };
 const Node = struct {
+    name: ?[]const u8 = null,
     mesh: ?u32 = null,
     children: []const u32 = &.{},
     matrix: ?[16]f32 = null,
@@ -33,6 +39,7 @@ const Node = struct {
     scale: [3]f32 = .{ 1, 1, 1 },
     skin: ?u32 = null,
 };
+const ImageDef = struct { name: ?[]const u8 = null, uri: ?[]const u8 = null, mimeType: ?[]const u8 = null, bufferView: ?u32 = null };
 const Primitive = struct {
     attributes: struct { POSITION: u32, NORMAL: ?u32 = null, TEXCOORD_0: ?u32 = null },
     indices: ?u32 = null,
@@ -57,6 +64,177 @@ const BufferView = struct { buffer: u32, byteOffset: usize = 0, byteLength: usiz
 
 const Mat = [16]f32; // column-major, as glTF stores it
 
+pub const TraceModule = struct {
+    id: []const u8,
+    node: u32,
+    node_name: []const u8,
+    mesh: u32,
+    mesh_name: []const u8,
+    primitive: u32,
+    material: ?[]const u8,
+    vertex_count: ?usize,
+    index_count: ?usize,
+    has_normals: bool,
+    generated_normals: bool,
+    has_uv0: bool,
+    triangle_mode: bool,
+    has_morph_targets: bool,
+    in_selected_scene: bool,
+    world_transform: ?Mat,
+};
+pub const TraceDependency = struct { kind: []const u8, uri: ?[]const u8, embedded: bool, byte_length: ?usize = null };
+pub const Trace = struct {
+    trace_format: u32 = 2,
+    source_format: []const u8,
+    gltf_version: []const u8,
+    selected_scene: ?u32,
+    scene_count: usize,
+    node_count: usize,
+    mesh_count: usize,
+    material_count: usize,
+    modules: []const TraceModule,
+    dependencies: []const TraceDependency,
+    extensions_used: []const []const u8,
+    extensions_required: []const []const u8,
+    skin_count: usize,
+    animation_count: usize,
+    image_count: usize,
+    texture_count: usize,
+    import_notes: []const []const u8,
+};
+
+pub const ModuleAddress = struct { node: u32, primitive: u32 };
+
+/// Return the source map in caller-owned arena storage. Keep that arena alive while using names.
+pub fn inspect(arena: std.mem.Allocator, source: []const u8) !Trace {
+    return traceInArena(arena, source);
+}
+
+/// Produce a source map for static model import. Every node/mesh/primitive occurrence gets a
+/// stable address in the source asset, even though the current HWMS runtime flattens those parts.
+fn traceInArena(arena: std.mem.Allocator, source: []const u8) !Trace {
+    const is_glb = source.len >= 12 and std.mem.eql(u8, source[0..4], "glTF");
+    const json = if (is_glb) (try splitGlb(source)).json else source;
+    const doc = try std.json.parseFromSliceLeaky(Doc, arena, json, .{ .ignore_unknown_fields = true });
+    if (!std.mem.startsWith(u8, doc.asset.version, "2.")) return error.UnsupportedGltfVersion;
+    const active_nodes = try selectedNodes(arena, doc);
+
+    var modules: std.ArrayList(TraceModule) = .empty;
+    var notes: std.ArrayList([]const u8) = .empty;
+    for (doc.nodes, 0..) |node, node_index| if (node.mesh) |mesh_index| {
+        if (mesh_index >= doc.meshes.len) continue;
+        const mesh = doc.meshes[mesh_index];
+        const node_name = node.name orelse try std.fmt.allocPrint(arena, "node_{d}", .{node_index});
+        const mesh_name = mesh.name orelse try std.fmt.allocPrint(arena, "mesh_{d}", .{mesh_index});
+        for (mesh.primitives, 0..) |primitive, primitive_index| {
+            const id = try std.fmt.allocPrint(arena, "node/{d}:{s}/mesh/{d}:{s}/primitive/{d}", .{ node_index, node_name, mesh_index, mesh_name, primitive_index });
+            const material_name = if (primitive.material) |material_index| if (material_index < doc.materials.len) doc.materials[material_index].name else null else null;
+            const position_count = if (primitive.attributes.POSITION < doc.accessors.len) doc.accessors[primitive.attributes.POSITION].count else null;
+            const index_count = if (primitive.indices) |index| if (index < doc.accessors.len) doc.accessors[index].count else null else position_count;
+            try modules.append(arena, .{
+                .id = id,
+                .node = @intCast(node_index),
+                .node_name = node_name,
+                .mesh = mesh_index,
+                .mesh_name = mesh_name,
+                .primitive = @intCast(primitive_index),
+                .material = material_name,
+                .vertex_count = position_count,
+                .index_count = index_count,
+                .has_normals = primitive.attributes.NORMAL != null,
+                .generated_normals = primitive.attributes.NORMAL == null,
+                .has_uv0 = primitive.attributes.TEXCOORD_0 != null,
+                .triangle_mode = primitive.mode == 4,
+                .has_morph_targets = primitive.targets != null,
+                .in_selected_scene = active_nodes.active[node_index],
+                .world_transform = if (active_nodes.active[node_index]) active_nodes.world[node_index] else null,
+            });
+            if (primitive.attributes.NORMAL == null) try notes.append(arena, "A primitive has no NORMAL accessor; normals will be generated from its triangle faces.");
+            if (primitive.mode != 4) try notes.append(arena, "A primitive is not triangle-list geometry and cannot be converted by the current model importer.");
+            if (primitive.targets != null) try notes.append(arena, "Morph targets are present and are not supported by the current model importer.");
+        }
+    };
+
+    const dependencies = try arena.alloc(TraceDependency, doc.buffers.len + doc.images.len);
+    var dependency_count: usize = 0;
+    for (doc.buffers, 0..) |buffer, i| {
+        const embedded_glb = is_glb and i == 0 and buffer.uri == null;
+        const data_uri = if (buffer.uri) |uri| std.mem.startsWith(u8, uri, "data:") else false;
+        dependencies[dependency_count] = .{ .kind = "buffer", .uri = if (data_uri) null else buffer.uri, .embedded = embedded_glb or data_uri, .byte_length = buffer.byteLength };
+        dependency_count += 1;
+    }
+    for (doc.images) |image| {
+        const data_uri = if (image.uri) |uri| std.mem.startsWith(u8, uri, "data:") else false;
+        dependencies[dependency_count] = .{ .kind = "image", .uri = if (data_uri) null else image.uri, .embedded = image.bufferView != null or data_uri, .byte_length = null };
+        dependency_count += 1;
+    }
+    if (doc.extensionsRequired.len != 0) try notes.append(arena, "Required glTF extensions are not handled by the static mesh importer.");
+    var node_has_skin = false;
+    for (doc.nodes) |node| if (node.skin != null) {
+        node_has_skin = true;
+    };
+    if (doc.skins.len != 0 or node_has_skin) try notes.append(arena, "Skeletal skins are not supported by the static model importer.");
+    if (doc.animations.len != 0) try notes.append(arena, "Animations are traced but not imported into runtime clips yet.");
+    if (doc.textures.len != 0 or doc.images.len != 0) try notes.append(arena, "Image textures are traced but the current HWMS material path imports base-color factors only.");
+
+    return .{
+        .source_format = if (is_glb) "glb" else "gltf",
+        .gltf_version = doc.asset.version,
+        .selected_scene = doc.scene,
+        .scene_count = doc.scenes.len,
+        .node_count = doc.nodes.len,
+        .mesh_count = doc.meshes.len,
+        .material_count = doc.materials.len,
+        .modules = try modules.toOwnedSlice(arena),
+        .dependencies = dependencies[0..dependency_count],
+        .extensions_used = doc.extensionsUsed,
+        .extensions_required = doc.extensionsRequired,
+        .skin_count = doc.skins.len,
+        .animation_count = doc.animations.len,
+        .image_count = doc.images.len,
+        .texture_count = doc.textures.len,
+        .import_notes = try notes.toOwnedSlice(arena),
+    };
+}
+
+const SceneNodes = struct { active: []bool, world: []Mat };
+
+fn selectedNodes(arena: std.mem.Allocator, doc: Doc) !SceneNodes {
+    const active = try arena.alloc(bool, doc.nodes.len);
+    @memset(active, false);
+    const world = try arena.alloc(Mat, doc.nodes.len);
+    if (doc.scenes.len != 0) {
+        const scene_index = doc.scene orelse 0;
+        if (scene_index >= doc.scenes.len) return error.InvalidScene;
+        for (doc.scenes[scene_index].nodes) |root| try markActive(doc, active, world, root, identity, 0);
+    } else {
+        const referenced = try arena.alloc(bool, doc.nodes.len);
+        @memset(referenced, false);
+        for (doc.nodes) |node| for (node.children) |child| {
+            if (child < referenced.len) referenced[child] = true;
+        };
+        for (referenced, 0..) |is_child, i| if (!is_child) try markActive(doc, active, world, @intCast(i), identity, 0);
+    }
+    return .{ .active = active, .world = world };
+}
+
+fn markActive(doc: Doc, active: []bool, world: []Mat, index: u32, parent: Mat, depth: u32) anyerror!void {
+    if (index >= doc.nodes.len) return error.InvalidNode;
+    if (depth > 64) return error.NodeCycle;
+    if (active[index]) return;
+    const node = doc.nodes[index];
+    active[index] = true;
+    world[index] = mul(parent, node.matrix orelse trs(node.translation, node.rotation, node.scale));
+    for (node.children) |child| try markActive(doc, active, world, child, world[index], depth + 1);
+}
+
+pub fn traceJson(allocator: std.mem.Allocator, source: []const u8, provenance: anytype) ![]u8 {
+    var arena_state: std.heap.ArenaAllocator = .init(allocator);
+    defer arena_state.deinit();
+    const report = try traceInArena(arena_state.allocator(), source);
+    return std.json.Stringify.valueAlloc(allocator, .{ .provenance = provenance, .source = report }, .{ .whitespace = .indent_2 });
+}
+
 /// External buffer dependencies, owned by the supplied arena. Uses the same URI restrictions
 /// as compilation, so watchers never read a path compilation would refuse.
 pub fn externalBuffers(arena: std.mem.Allocator, source: []const u8) ![]const []const u8 {
@@ -72,6 +250,16 @@ pub fn externalBuffers(arena: std.mem.Allocator, source: []const u8) ![]const []
 }
 
 pub fn compile(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver) !Model {
+    return compileFiltered(allocator, source, resolver, null);
+}
+
+/// Compile one node's primitive into an independent HWMS module, retaining its accumulated
+/// ancestor transform. `inspect` supplies stable source addresses for these selectors.
+pub fn compileModule(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, address: ModuleAddress) !Model {
+    return compileFiltered(allocator, source, resolver, address);
+}
+
+fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, selector: ?ModuleAddress) !Model {
     var arena_state: std.heap.ArenaAllocator = .init(allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -91,7 +279,7 @@ pub fn compile(allocator: std.mem.Allocator, source: []const u8, resolver: Resol
         data.* = if (def.uri) |uri| try loadUri(arena, uri, resolver) else if (i == 0 and glb_bin != null) glb_bin.? else return error.MissingBuffer;
         if (data.len < def.byteLength) return error.BufferTooShort;
     }
-    var builder: Builder = .{ .doc = doc, .buffers = buffers, .arena = arena };
+    var builder: Builder = .{ .doc = doc, .buffers = buffers, .arena = arena, .selector = selector };
     if (doc.scene) |i| if (i >= doc.scenes.len) return error.InvalidScene;
     const roots: []const u32 = if (doc.scenes.len > 0) doc.scenes[doc.scene orelse 0].nodes else blk: {
         // Without scenes, every node not referenced as a child is a root.
@@ -131,6 +319,7 @@ const Builder = struct {
     materials: std.ArrayList(Model.Material) = .empty,
     /// glTF material index → runtime material index; the last slot is the default material.
     material_map: [Model.max_materials + 1]?u32 = @splat(null),
+    selector: ?ModuleAddress = null,
 
     fn visit(self: *Builder, index: u32, parent: Mat, depth: u32) !void {
         if (index >= self.doc.nodes.len) return error.InvalidNode;
@@ -141,7 +330,10 @@ const Builder = struct {
         const world = mul(parent, local);
         if (node.mesh) |m| {
             if (m >= self.doc.meshes.len) return error.InvalidMesh;
-            for (self.doc.meshes[m].primitives) |p| try self.primitive(p, world);
+            for (self.doc.meshes[m].primitives, 0..) |p, primitive_index| {
+                const selected = self.selector == null or (self.selector.?.node == index and @as(usize, self.selector.?.primitive) == primitive_index);
+                if (selected) try self.primitive(p, world);
+            }
         }
         for (node.children) |child| try self.visit(child, world, depth + 1);
     }
@@ -149,19 +341,18 @@ const Builder = struct {
     fn primitive(self: *Builder, p: Primitive, world: Mat) !void {
         if (p.mode != 4) return error.NonTrianglePrimitive;
         if (p.targets != null) return error.MorphTargetsUnsupported;
-        const normal_accessor = p.attributes.NORMAL orelse return error.MissingNormals;
         const positions = try self.accessor(p.attributes.POSITION, "VEC3");
-        const normals = try self.accessor(normal_accessor, "VEC3");
+        const normals: ?View = if (p.attributes.NORMAL) |normal_accessor| try self.accessor(normal_accessor, "VEC3") else null;
         const uvs: ?View = if (p.attributes.TEXCOORD_0) |t| try self.accessor(t, "VEC2") else null;
-        if (normals.count != positions.count or (uvs != null and uvs.?.count != positions.count)) return error.AttributeCountMismatch;
-        if (positions.component != 5126 or normals.component != 5126) return error.UnsupportedComponentType;
+        if ((normals != null and normals.?.count != positions.count) or (uvs != null and uvs.?.count != positions.count)) return error.AttributeCountMismatch;
+        if (positions.component != 5126 or (normals != null and normals.?.component != 5126)) return error.UnsupportedComponentType;
         if (uvs) |u| if (u.component != 5126) return error.UnsupportedComponentType;
 
         const base: u32 = @intCast(self.vertices.items.len);
         const normal_matrix = normalMatrix(world);
         for (0..positions.count) |i| {
             const pos = transformPoint(world, positions.vec(3, i));
-            const n = normalize(transformVector(normal_matrix, normals.vec(3, i)));
+            const n = if (normals) |view| normalize(transformVector(normal_matrix, view.vec(3, i))) else [3]f32{ 0, 1, 0 };
             const uv = if (uvs) |u| u.vec(2, i) else [2]f32{ 0, 0 };
             for (pos ++ n ++ uv) |v| if (!std.math.isFinite(v)) return error.NonFiniteValue;
             try self.vertices.append(self.arena, .{ .position = pos, .normal = n, .uv = uv });
@@ -189,6 +380,7 @@ const Builder = struct {
             var t = first;
             while (t < first + count) : (t += 3) std.mem.swap(u32, &self.indices.items[t + 1], &self.indices.items[t + 2]);
         }
+        if (normals == null) try self.generateNormals(base, first, count);
         const material_index = try self.material(p.material);
         if (self.submeshes.items.len > 0) {
             const last = &self.submeshes.items[self.submeshes.items.len - 1];
@@ -199,6 +391,31 @@ const Builder = struct {
         }
         if (self.submeshes.items.len == Model.max_submeshes) return error.TooManySubmeshes;
         try self.submeshes.append(self.arena, .{ .first_index = first, .index_count = count, .material = material_index });
+    }
+
+    fn generateNormals(self: *Builder, base: u32, first: u32, count: u32) !void {
+        const vertex_count = self.vertices.items.len - base;
+        const sums = try self.arena.alloc([3]f32, vertex_count);
+        @memset(sums, .{ 0, 0, 0 });
+        var triangle = first;
+        while (triangle < first + count) : (triangle += 3) {
+            const ia = self.indices.items[triangle];
+            const ib = self.indices.items[triangle + 1];
+            const ic = self.indices.items[triangle + 2];
+            const a = self.vertices.items[ia].position;
+            const b = self.vertices.items[ib].position;
+            const c = self.vertices.items[ic].position;
+            const face = cross(subtract(b, a), subtract(c, a));
+            for (face) |value| if (!std.math.isFinite(value)) return error.NonFiniteValue;
+            for ([3]u32{ ia, ib, ic }) |index| {
+                const local: usize = @intCast(index - base);
+                for (0..3) |axis| sums[local][axis] += face[axis];
+            }
+        }
+        for (sums, 0..) |sum, i| {
+            for (sum) |value| if (!std.math.isFinite(value)) return error.NonFiniteValue;
+            self.vertices.items[@as(usize, base) + i].normal = normalize(sum);
+        }
     }
 
     fn material(self: *Builder, index: ?u32) !u32 {
@@ -265,18 +482,29 @@ const View = struct {
 fn splitGlb(bytes: []const u8) !struct { json: []const u8, bin: ?[]const u8 } {
     if (std.mem.readInt(u32, bytes[4..8], .little) != 2) return error.UnsupportedGltfVersion;
     const total = std.mem.readInt(u32, bytes[8..12], .little);
-    if (total > bytes.len) return error.Truncated;
+    if (total < 12 or total != bytes.len) return error.InvalidGlbLength;
     var at: usize = 12;
     var json: ?[]const u8 = null;
     var bin: ?[]const u8 = null;
-    while (total - at >= 8) {
+    var chunk_count: usize = 0;
+    while (at < total) {
+        if (total - at < 8) return error.Truncated;
         const len = std.mem.readInt(u32, bytes[at..][0..4], .little);
         const kind = std.mem.readInt(u32, bytes[at + 4 ..][0..4], .little);
         at += 8;
         if (len > total - at) return error.Truncated;
+        if (len % 4 != 0) return error.InvalidChunkLength;
+        if (chunk_count == 0 and kind != 0x4E4F534A) return error.InvalidChunkOrder;
         const chunk = bytes[at..][0..len];
-        if (kind == 0x4E4F534A) json = chunk else if (kind == 0x004E4942 and bin == null) bin = chunk;
+        if (kind == 0x4E4F534A) {
+            if (json != null) return error.DuplicateJsonChunk;
+            json = chunk;
+        } else if (kind == 0x004E4942) {
+            if (bin != null) return error.DuplicateBinChunk;
+            bin = chunk;
+        }
         at += len;
+        chunk_count += 1;
     }
     return .{ .json = json orelse return error.MissingJsonChunk, .bin = bin };
 }
@@ -354,6 +582,14 @@ fn normalMatrix(m: Mat) [9]f32 {
 fn normalize(v: [3]f32) [3]f32 {
     const len = @sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     return if (len > 0) .{ v[0] / len, v[1] / len, v[2] / len } else .{ 0, 1, 0 };
+}
+
+fn subtract(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
+}
+
+fn cross(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
 }
 
 test "crate source compiles to two material submeshes with expected bounds" {
