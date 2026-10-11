@@ -1,5 +1,6 @@
-// Appended to scene.wgsl for the skinned-character pipeline (it uses Frame, VertexOut and
-// rotate from there, and the same fragment entry point).
+// Shared by the skinned-character modules (skin_lit.wgsl, skin_hull.wgsl), spliced after the
+// scene.wgsl prelude (Frame, VertexOut, rotate, hazed). Entry points live in those files because
+// Mach takes one per stage per module.
 // GPU skinning for characters: each joint is a unit dual quaternion (real, dual), blended per
 // vertex over four influences with antipodality kept to the first joint's hemisphere, matching
 // the CPU `skinDualQuat`. One character's palette is selected by a dynamic uniform offset.
@@ -17,17 +18,20 @@ fn quat_mul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
     );
 }
 
-@vertex fn vertex_skinned(
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(5) color: vec3<f32>,
-    @location(8) joints: vec4<u32>,
-    @location(9) weights: vec4<f32>,
-    @location(3) translation_scale: vec4<f32>,
-    @location(4) tint: vec4<f32>,
-    @location(6) stretch: vec4<f32>,
-    @location(7) rotation: vec4<f32>,
-) -> VertexOut {
+// Per-material cel style, laid out by character/CelStyle.zig `pack`: two header vec4s, then six
+// vec4s per material.
+struct CelTable {
+    v: array<vec4<f32>, 104>,
+};
+@group(1) @binding(1) var<uniform> cel: CelTable;
+
+struct Skinned {
+    local: vec3<f32>,
+    bent: vec3<f32>,
+    real: vec4<f32>,
+};
+
+fn skin_blend(joints: vec4<u32>, weights: vec4<f32>, position: vec3<f32>, normal: vec3<f32>) -> Skinned {
     let pivot = palette.joints[joints.x * 2u];
     var real = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     var dual = vec4<f32>(0.0, 0.0, 0.0, 0.0);
@@ -51,15 +55,9 @@ fn quat_mul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
     // Translation = 2 * (dual * conjugate(real)).
     // Mach's WGSL compiler cannot negate a swizzle; conjugate by a sign multiply instead.
     let t = quat_mul(dual, real * vec4<f32>(-1.0, -1.0, -1.0, 1.0));
-    let local = rotate(real, position) + 2.0 * t.xyz;
-    let bent = rotate(real, normal);
-    var out: VertexOut;
-    let world = rotate(rotation, local * stretch.xyz) * translation_scale.w + translation_scale.xyz;
-    out.clip = frame.view_projection * vec4<f32>(world, 1.0);
-    out.normal = rotate(rotation, bent / stretch.xyz);
-    out.uv = vec2<f32>(0.0, 0.0);
-    out.tint = vec4<f32>(tint.rgb * color, tint.a);
-    out.world = world;
+    var out: Skinned;
+    out.local = rotate(real, position) + 2.0 * t.xyz;
+    out.bent = rotate(real, normal);
+    out.real = real;
     return out;
 }
-

@@ -731,6 +731,8 @@ const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "HAIR", .first = .hair_style },
     .{ .title = "GEAR", .first = .outfit },
     .{ .title = "BOOTS", .first = .boot_style },
+    // Cel styles exist only as mod content, so this row cycles "default" plus installed mods.
+    .{ .title = "RENDER STYLE", .first = .cel_style },
 };
 
 fn swatch(field: Profile.Field, p: Profile) ?Color {
@@ -757,8 +759,11 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
 fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     const cr = &sb.creator;
     const fields = enum_compat.fields(Profile.Field);
-    const h = 120 + @as(f32, @floatFromInt(fields.len)) * row_height + sections.len * 22;
-    const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(20, (v.h - h) / 2), .w = 460, .h = h };
+    // Rows tighten (never below 19) so the longer list still fits a 720p window.
+    const avail = v.h - 24 - 96 - sections.len * 22;
+    const step = std.math.clamp(avail / @as(f32, @floatFromInt(fields.len)), 19, row_height);
+    const h = 96 + @as(f32, @floatFromInt(fields.len)) * step + sections.len * 22;
+    const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(8, (v.h - h) / 2), .w = 460, .h = h };
     panel(c, r, if (cr.confirmed) "CUSTOMIZE RANGER" else "CREATE YOUR RANGER");
     var y = r.y + 46;
     inline for (fields, 0..) |f, i| {
@@ -768,29 +773,30 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
             c.rect(.{ .x = r.x + 18 + Canvas.textWidth(s.title, 0.9) + 8, .y = y + 12, .w = r.w - 60 - Canvas.textWidth(s.title, 0.9), .h = 1 }, alpha(accent, 0.25));
             y += 22;
         };
-        const row: Rect = .{ .x = r.x + 10, .y = y, .w = r.w - 20, .h = row_height - 2 };
+        const row: Rect = .{ .x = r.x + 10, .y = y, .w = r.w - 20, .h = step - 2 };
         const selected = cr.field == field;
         rowBack(c, row, selected);
         c.hit(row, hitId(.creator_field, i));
         var label_buffer: [24]u8 = undefined;
-        c.text(row.x + 14, row.y + 8, pretty(&label_buffer, f.name), 1, if (selected) accent else dim);
+        const ty = row.y + (step - 10) / 2 - 1;
+        c.text(row.x + 14, ty, pretty(&label_buffer, f.name), 1, if (selected) accent else dim);
         var buffer: [40]u8 = undefined;
         var value = cr.value(field, &buffer);
         var pretty_buffer: [40]u8 = undefined;
         if (field != .name) value = pretty(&pretty_buffer, value);
         const vx = row.x + 196;
         if (field != .name) {
-            button(c, .{ .x = vx, .y = row.y + 2, .w = 20, .h = 20 }, "<", hitId(.creator_left, i), false);
-            button(c, .{ .x = row.x + row.w - 28, .y = row.y + 2, .w = 20, .h = 20 }, ">", hitId(.creator_right, i), false);
+            button(c, .{ .x = vx, .y = row.y + 1, .w = 20, .h = step - 4 }, "<", hitId(.creator_left, i), false);
+            button(c, .{ .x = row.x + row.w - 28, .y = row.y + 1, .w = 20, .h = step - 4 }, ">", hitId(.creator_right, i), false);
         }
         var tx = vx + 30;
         if (swatch(field, cr.draft)) |color| {
-            c.rect(.{ .x = tx, .y = row.y + 5, .w = 26, .h = 14 }, color);
-            c.frame(.{ .x = tx, .y = row.y + 5, .w = 26, .h = 14 }, 1, .{ 1, 1, 1, 0.4 });
+            c.rect(.{ .x = tx, .y = row.y + (step - 14) / 2 - 1, .w = 26, .h = 14 }, color);
+            c.frame(.{ .x = tx, .y = row.y + (step - 14) / 2 - 1, .w = 26, .h = 14 }, 1, .{ 1, 1, 1, 0.4 });
             tx += 34;
         }
-        c.text(tx, row.y + 8, value, 1, ink);
-        y += row_height;
+        c.text(tx, ty, value, 1, ink);
+        y += step;
     }
     const clothing_count = enum_compat.fields(Profile.Clothing).len;
     const all: u8 = @intCast((@as(u16, 1) << clothing_count) - 1);

@@ -22,6 +22,7 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `zig-out/bin/asset-compiler trace <source.glb|source.gltf> <source.meta> <report.json>` | Writes a GUID/hash-linked inventory of scene parts, material slots, dependencies, authored/generated normals and importer gaps. Build the tool with `python3 tools/zig.py build` first. |
 | `zig-out/bin/asset-compiler split <source.glb|source.gltf> <source.meta> <output-dir>` | Exports one validated `.hwmesh` per selected-scene node/mesh/primitive and writes `modules.json` with lineage, hashes, material names, normal provenance, counts and bounds. |
 | `python3 tools/zig.py build mods` | Builds the example WebAssembly mod's scripts into `mods/`. |
+| `python3 tools/zig.py build validate-mods [-- <dir>]` | Loads every mod under `mods/` (or one directory) as the game does and prints `file: key: reason` for each problem; non-zero exit on any rejection ([character content](mods.md#character-content)). |
 | `python3 tools/zig.py build sounds` | Writes every synthesized sound to `zig-out/sounds/*.wav` for listening. |
 | `python3 tools/zig.py build heightmap -- <in.pgm> <out.hwmh> [width depth elevation base]` | Imports a PGM heightmap to the runtime terrain format. |
 
@@ -62,7 +63,9 @@ Options are compiled in, so changing one rebuilds.
 | `-Dscale-objects=N` | 0 | Scale workload of N field objects. |
 | `-Dpack-stress=N` | 0 | Write and stream a pack of N meshes during the benchmark. |
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
+| `-Dcharacter-showcase=6..38` | 0 | Hairstyle review in the creator, in `Profile.HairStyle` order (6 = short, 30..38 = the anime cuts). |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
+| `-Dcel-style=0..3`, `-Dcel-debug=bits` | 0, 0 | Character look-dev: starting cel style (Heavy Water, Watercolor, Comic ink, Flat) and debug views (1 hide ink, 2 ramp bands, 4 face shadow mask). In any running build, F3 cycles the style, F8 toggles ink and F10 cycles normal, ramp bands and face mask (it logs the state). |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |
 | `-Dcpu-skinning=true` | false | Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback). |
 | `-Dhot-reload=true` | false | Watch model, blueprint and mod script sources and reload them live. |
@@ -163,7 +166,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 7, 8 | City overview, by day and at dusk |
 | 9 | Street level |
 | 10–15 | Roads 1–6 at dusk |
-| 16, 17 | Armor lineup; hardsuit close-up |
+| 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |
 | 20 | Suit upgrades |

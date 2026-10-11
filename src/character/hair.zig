@@ -14,6 +14,8 @@ const loft_mod = @import("loft.zig");
 const spec_mod = @import("spec.zig");
 const body = @import("body.zig");
 const spring = @import("spring.zig");
+const hair_style = @import("hair_style.zig");
+const hair_library = @import("hair_library.zig");
 
 const Vec3 = m.Vec3;
 const Mesh = mesh_mod.Mesh;
@@ -215,6 +217,10 @@ pub fn buildHair(
     lm: body.Landmarks,
 ) !void {
     const hs = spec.hair;
+    if (hs.custom orelse hair_library.lookup(hs.style)) |def| {
+        try buildFromDef(gpa, out, skel, chains_out, spec, lm, def.*);
+        return;
+    }
     const H = lm.H;
     const c: Ctx = .{ .s = .{ .c = lm.scalp_center, .r = lm.scalp_radii }, .lm = lm, .spec = hs, .H = H };
     var prng = std.Random.DefaultPrng.init(hs.seed);
@@ -251,6 +257,8 @@ pub fn buildHair(
         .bun => 0.08,
         .bob => 0.1,
         .short_spiky, .undercut, .mohawk, .nova_spike, .alien_crown => 0.0,
+        // data-driven styles never reach this procedural path (see `hair_library`)
+        .spiky_hero, .widow_flame, .fringe_spikes, .super_flare, .flip_bob, .pilot_sweep, .big_fringe, .topknot, .spike_tail => 0.0,
     };
     const curl_in: f32 = if (hs.style == .bob) 1.0 else 0.15;
 
@@ -502,6 +510,75 @@ pub fn buildHair(
     out.computeNormals();
 }
 
+/// The only place hair reads the head model: everything data-driven roots on this ellipsoid.
+fn headFrom(lm: body.Landmarks) hair_style.Head {
+    return .{ .center = lm.scalp_center, .radii = lm.scalp_radii, .H = lm.H, .chin_y = lm.chin_y, .half_width = lm.head_half_width };
+}
+
+/// Build a style from its clump data: a scalp cap with the style's hairline, then each clump
+/// lofted from a root on the scalp along its authored path.
+pub fn buildFromDef(
+    gpa: Allocator,
+    out: *Mesh,
+    skel: *Skeleton,
+    chains_out: *std.ArrayList(spring.Chain),
+    spec: spec_mod.CharacterSpec,
+    lm: body.Landmarks,
+    def: hair_style.StyleDef,
+) !void {
+    try hair_style.validate(def);
+    const head = headFrom(lm);
+    const H = head.H;
+    const hs = spec.hair;
+    const adj: hair_style.Adjust = .{
+        .spike = m.clamp(hs.spike_scale, 0.2, 2),
+        .volume = m.clamp(hs.volume_scale, 0.4, 2),
+        .length = m.clamp(hs.length_scale, 0.4, 2),
+    };
+    const girth = head.girth();
+    const s: Scalp = .{ .c = head.center, .r = head.radii };
+    try buildCapKeys(gpa, out, s, spec.res(36, 12), spec.res(14, 6), def.cap.hairline, def.cap.lift * H);
+
+    var chain_infos: std.ArrayList(ChainInfo) = .empty;
+    defer chain_infos.deinit(gpa);
+    const n_joints: usize = @min(hs.chain_joints, 15);
+    const rows = spec.res(16, 6);
+    const cols = spec.res(10, 5);
+    const line = try gpa.alloc(Vec3, rows);
+    defer gpa.free(line);
+
+    for (def.clumps) |def_clump| {
+        const pair = [2]hair_style.ClumpDef{ def_clump, hair_style.mirrored(def_clump) };
+        for (pair[0 .. if (def_clump.mirror) 2 else 1]) |cd| {
+            var cl: Clump = .{
+                .pts = hair_style.clumpPath(head, cd, adj),
+                .width = cd.width * H * girth * adj.volume,
+                .thickness = (if (cd.thickness > 0) cd.thickness else cd.width * 0.75) * H * girth * adj.volume,
+                .taper = cd.taper,
+                .pinch = 1.7,
+                .ref_normal = head.normalAt(hair_style.Head.direction(cd.az, cd.el)),
+            };
+            if (cd.sway and n_joints >= 2) {
+                cl.rig = .{ .a = chain_infos.items.len, .t_free = 0.3 };
+                try addChain(gpa, skel, chains_out, &chain_infos, &cl.pts, 0.3, n_joints, hairParams(H, 1.0));
+            }
+            curve.sampleCatmullRom(&cl.pts, line);
+            const ctx: HairCtx = .{ .clump = &cl, .chains = chain_infos.items };
+            _ = try loft_mod.loft(gpa, out, line, .{
+                .cols = cols,
+                .ref_normal = cl.ref_normal,
+                .region = .hair,
+                .material = .hair,
+                .cap_start = .dome,
+                .cap_end = .dome,
+                .cap_rings = 2,
+                .cap_length = 0.6,
+            }, &ctx);
+        }
+    }
+    out.computeNormals();
+}
+
 fn hairParams(H: f32, weight: f32) spring.Params {
     return .{ .stiffness = 0.12 / weight, .damping = 0.10, .gravity_scale = 0.45 * weight, .radius = 0.02 * H };
 }
@@ -536,13 +613,17 @@ fn addChain(
 /// Scalp cap: a partial ellipsoid down to an azimuth-dependent hairline,
 /// so gaps between clumps never reveal the skull.
 fn buildCap(gpa: Allocator, out: *Mesh, c: Ctx, spec: spec_mod.CharacterSpec) !void {
-    const cols = spec.res(36, 12);
-    const rows = spec.res(14, 6);
-    const keys_phi = [_]f32{ 0, 0.9, 1.6, 2.4, m.pi };
     var keys_el = [_]f32{ 0.62, 0.42, -0.12, -0.75, -0.95 };
     if (spec.hair.style == .undercut or spec.hair.style == .crew_cut or spec.hair.style == .curly_fade or spec.hair.style == .textured_crop) keys_el = .{ 0.62, 0.42, 0.34, -0.65, -0.92 };
     if (spec.hair.style == .mohawk or spec.hair.style == .nova_spike) keys_el = .{ 0.62, 0.20, -0.30, -0.88, -0.95 };
     if (spec.hair.style == .afro) keys_el = .{ 0.92, 0.72, 0.50, -0.18, -0.42 };
+    const cap_lift = if (spec.hair.style == .afro) 0.11 * c.H else if (spec.hair.style == .alien_crown) 0.045 * c.H else 0.006 * c.H;
+    try buildCapKeys(gpa, out, c.s, spec.res(36, 12), spec.res(14, 6), keys_el, cap_lift);
+}
+
+/// Cap ellipsoid down to the hairline `keys_el` (elevations at azimuth 0, 0.9, 1.6, 2.4, pi).
+fn buildCapKeys(gpa: Allocator, out: *Mesh, s: Scalp, cols: usize, rows: usize, keys_el: [5]f32, cap_lift: f32) !void {
+    const keys_phi = [_]f32{ 0, 0.9, 1.6, 2.4, m.pi };
     const first = out.vertexCount();
     for (0..rows) |r| {
         const rt = @as(f32, @floatFromInt(r + 1)) / @as(f32, @floatFromInt(rows));
@@ -551,15 +632,13 @@ fn buildCap(gpa: Allocator, out: *Mesh, c: Ctx, spec: spec_mod.CharacterSpec) !v
             const ap = @min(phi, m.tau - phi);
             const el_min = curve.spline1D(&keys_phi, &keys_el, ap);
             const el = m.lerp(m.pi / 2.0, el_min, rt);
-            const cap_lift = if (spec.hair.style == .afro) 0.11 * c.H else if (spec.hair.style == .alien_crown) 0.045 * c.H else 0.006 * c.H;
-            const p = c.s.point(phi, el, cap_lift);
+            const p = s.point(phi, el, cap_lift);
             _ = try out.addVertex(gpa, .{ .pos = p, .uv = .{ .x = phi / m.tau, .y = rt * 0.3 }, .region = .hair, .material = .hair, .joints = .{ Joint.head.idx(), 0, 0, 0 } });
         }
     }
     // ring order runs top->down, cols increase toward +X from front: stitch then flip as needed
     try out.stitchRings(gpa, first, @intCast(rows), @intCast(cols), true, true);
-    const cap_lift = if (spec.hair.style == .afro) 0.11 * c.H else if (spec.hair.style == .alien_crown) 0.045 * c.H else 0.006 * c.H;
-    const top = try out.addVertex(gpa, .{ .pos = c.s.point(0, m.pi / 2.0, cap_lift), .uv = .{ .x = 0.5, .y = 0 }, .region = .hair, .material = .hair, .joints = .{ Joint.head.idx(), 0, 0, 0 } });
+    const top = try out.addVertex(gpa, .{ .pos = s.point(0, m.pi / 2.0, cap_lift), .uv = .{ .x = 0.5, .y = 0 }, .region = .hair, .material = .hair, .joints = .{ Joint.head.idx(), 0, 0, 0 } });
     try out.capRing(gpa, first, @intCast(cols), top, false);
 }
 
@@ -590,4 +669,83 @@ test "hair builds for every style and stays above the shoulders except long hair
         if (style == .bob or style == .short_spiky) try std.testing.expect(bb.min.y > lm.shoulder_y - 0.1 * lm.H);
         for (mesh.vertices.items) |v| for (v.joints) |j| try std.testing.expect(j < skel.count());
     }
+}
+
+fn meshHash(mesh: *const Mesh) u64 {
+    var h: u64 = 0xcbf29ce484222325;
+    for (mesh.vertices.items) |v| {
+        for ([_]f32{ v.pos.x, v.pos.y, v.pos.z }) |f| {
+            h = (h ^ @as(u32, @bitCast(f))) *% 0x100000001b3;
+        }
+    }
+    return h;
+}
+
+test "data-driven styles: finite, rooted on the scalp, bounded, skinned and all different" {
+    const gpa = std.testing.allocator;
+    var hashes: [hair_library.all.len]u64 = undefined;
+    for (hair_library.all, 0..) |def, di| {
+        const spec: spec_mod.CharacterSpec = .{ .hair = .{ .custom = &def, .chain_joints = 3 }, .detail = 0.6 };
+        const lm = body.computeLandmarks(spec);
+        var skel = try body.buildSkeleton(gpa, spec, lm);
+        defer skel.deinit(gpa);
+        var chains: std.ArrayList(spring.Chain) = .empty;
+        defer {
+            for (chains.items) |*ch| ch.deinit(gpa);
+            chains.deinit(gpa);
+        }
+        var mesh: Mesh = .{};
+        defer mesh.deinit(gpa);
+        try buildHair(gpa, &mesh, &skel, &chains, spec, lm);
+        try std.testing.expect(mesh.vertices.items.len > 500);
+        const head = headFrom(lm);
+        for (mesh.vertices.items) |v| {
+            try std.testing.expect(std.math.isFinite(v.pos.x) and std.math.isFinite(v.pos.y) and std.math.isFinite(v.pos.z));
+            for (v.joints) |j| try std.testing.expect(j < skel.count());
+            // nothing strays further than 3.5 head heights from the scalp center
+            try std.testing.expect(v.pos.distance(head.center) < 3.5 * lm.H);
+        }
+        // every clump root sits on the scalp surface (within lift), none inside the skull
+        const adj: hair_style.Adjust = .{};
+        for (def.clumps) |cd| {
+            const pts = hair_style.clumpPath(head, cd, adj);
+            const r0 = head.radius(pts[0]);
+            try std.testing.expect(r0 > 0.9 and r0 < 1.25);
+            for (pts[1..]) |p| try std.testing.expect(head.radius(p) >= 1.03);
+        }
+        hashes[di] = meshHash(&mesh);
+    }
+    for (hashes, 0..) |a, i| for (hashes[i + 1 ..]) |b| try std.testing.expect(a != b);
+}
+
+test "style adjustments change the hair, and a head of a different width still fits" {
+    const gpa = std.testing.allocator;
+    const def = hair_library.lookup(.spiky_hero).?;
+    var heights: [2]f32 = undefined;
+    for ([_]f32{ 0.7, 1.3 }, 0..) |scale, i| {
+        const spec: spec_mod.CharacterSpec = .{ .hair = .{ .custom = def, .spike_scale = scale, .length_scale = scale }, .detail = 0.6 };
+        const lm = body.computeLandmarks(spec);
+        var skel = try body.buildSkeleton(gpa, spec, lm);
+        defer skel.deinit(gpa);
+        var chains: std.ArrayList(spring.Chain) = .empty;
+        defer chains.deinit(gpa);
+        var mesh: Mesh = .{};
+        defer mesh.deinit(gpa);
+        try buildHair(gpa, &mesh, &skel, &chains, spec, lm);
+        heights[i] = mesh.bounds().max.y;
+    }
+    try std.testing.expect(heights[1] > heights[0] + 0.01);
+
+    var wide: spec_mod.CharacterSpec = .{ .hair = .{ .custom = def }, .detail = 0.6 };
+    wide.body.head.cranium_width *= 1.3;
+    const lm = body.computeLandmarks(wide);
+    var skel = try body.buildSkeleton(gpa, wide, lm);
+    defer skel.deinit(gpa);
+    var chains: std.ArrayList(spring.Chain) = .empty;
+    defer chains.deinit(gpa);
+    var mesh: Mesh = .{};
+    defer mesh.deinit(gpa);
+    try buildHair(gpa, &mesh, &skel, &chains, wide, lm);
+    const head = headFrom(lm);
+    for (def.clumps) |cd| try std.testing.expect(@abs(head.radius(hair_style.clumpPath(head, cd, .{})[0]) - 1) < 0.25);
 }

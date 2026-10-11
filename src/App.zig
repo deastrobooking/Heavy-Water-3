@@ -3,6 +3,7 @@ const enum_compat = @import("enum_compat");
 const mach = @import("mach");
 const options = @import("options");
 const Engine = @import("engine/Engine.zig");
+const CelStyle = @import("character/CelStyle.zig");
 const Time = @import("engine/Time.zig");
 const Sky = @import("engine/Sky.zig");
 const World = @import("world/World.zig");
@@ -67,6 +68,9 @@ benchmark_ground_targets: u64 = 0,
 benchmark_air_targets: u64 = 0,
 window: mach.ObjectID = undefined,
 show_metrics: bool = true,
+/// Character look-dev (F3 cycles the cel style, F8 toggles ink, F10 cycles ramp/face-mask views).
+cel_style: usize = options.cel_style,
+cel_debug: CelStyle.Debug = @bitCast(options.cel_debug),
 culling: bool = true,
 captured: bool = false,
 rendered_frames_seen: u64 = 0,
@@ -177,7 +181,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.profile.helmet = if (options.character_showcase == 2) .sealed else .open;
         if (options.character_showcase >= 6) {
-            const looks = [_]Profile.HairStyle{ .short, .ponytail, .long, .crest, .hood, .bob, .twin_tails, .bun, .braids, .curly, .undercut, .short_curly, .curly_fade, .curly_coils, .afro, .long_curls, .textured_crop, .locs, .swept_back, .layered_shag, .nova_spike, .alien_crown, .crew_cut, .side_part };
+            const looks = [_]Profile.HairStyle{ .short, .ponytail, .long, .crest, .hood, .bob, .twin_tails, .bun, .braids, .curly, .undercut, .short_curly, .curly_fade, .curly_coils, .afro, .long_curls, .textured_crop, .locs, .swept_back, .layered_shag, .nova_spike, .alien_crown, .crew_cut, .side_part, .spiky_hero, .widow_flame, .fringe_spikes, .super_flare, .flip_bob, .pilot_sweep, .big_fringe, .topknot, .spike_tail };
             const i = @min(@as(usize, options.character_showcase - 6), looks.len - 1);
             self.sandbox.profile.hair_style = looks[i];
         }
@@ -190,6 +194,13 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.presentation = if (i == 1) .feminine else .masculine;
             self.sandbox.profile.gemstone = stones[i];
             self.sandbox.profile.gem_cut = if (i == 1) .star else .brilliant;
+        }
+        if (options.character_showcase >= 30 and options.character_showcase <= 33) {
+            // The mecha armor sets over a hardsuit: mobile suit, buster, iron titan, battle plate.
+            const sets = [_]Profile.Armor{ .mobile_suit, .buster, .iron_titan, .battle_plate };
+            self.sandbox.profile.armor = sets[options.character_showcase - 30];
+            self.sandbox.profile.clothing = .hardsuit;
+            self.sandbox.profile.helmet = if (options.character_showcase == 31 or options.character_showcase == 33) .visor else .sealed;
         }
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
@@ -819,8 +830,13 @@ fn loadMods(self: *App) void {
                 return files.dir.readFileAlloc(files.io, path, allocator, .limited(@import("mod/Mod.zig").max_file_bytes));
             }
         };
-        var pkg = @import("mod/Mod.zig").load(self.allocator, entry.name, Files{ .dir = sub, .io = self.io }) catch |err| {
+        var problems: @import("game/CharacterContent.zig").Report = .{};
+        var pkg = @import("mod/Mod.zig").loadReported(self.allocator, entry.name, Files{ .dir = sub, .io = self.io }, &problems) catch |err| {
             std.log.warn("mod {s} rejected: {s}", .{ entry.name, @errorName(err) });
+            for (problems.slice()) |*d| {
+                var line: [320]u8 = undefined;
+                std.log.warn("mod {s}: {s}", .{ entry.name, d.format(&line) });
+            }
             continue;
         };
         defer pkg.deinit();
@@ -829,7 +845,7 @@ fn loadMods(self: *App) void {
             continue;
         };
         if (self.reload != null and !options.reload_smoke) self.watchMod(&pkg, entry.name) catch |err| std.log.warn("mod watch {s}: {s}", .{ entry.name, @errorName(err) });
-        std.log.info("Mod {s} {d}.{d}.{d}: {d} blueprints, {d} scripts", .{ pkg.name(), pkg.version.major, pkg.version.minor, pkg.version.patch, pkg.blueprint_count, pkg.export_count });
+        std.log.info("Mod {s} {d}.{d}.{d}: {d} blueprints, {d} scripts, {d} character entries", .{ pkg.name(), pkg.version.major, pkg.version.minor, pkg.version.patch, pkg.blueprint_count, pkg.export_count, pkg.characterCount() });
     }
 }
 
@@ -849,6 +865,24 @@ pub fn start(self: *App, core: *mach.Core, app_mod: mach.Mod(App), core_mod: mac
     self.thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app);
 }
 
+/// Look-dev keys for artists tuning character shading. True when `key` was one of them.
+fn celKey(self: *App, key: mach.Core.KeyButtonID) bool {
+    switch (key) {
+        .f3 => self.cel_style = (self.cel_style + 1) % CelStyle.presets.len,
+        .f8 => self.cel_debug.outline_off = !self.cel_debug.outline_off,
+        .f10 => {
+            // Off, ramp bands, face shadow mask.
+            const view: u2 = @as(u2, @intFromBool(self.cel_debug.ramp_view)) + 2 * @as(u2, @intFromBool(self.cel_debug.face_mask_view));
+            const next = (view + 1) % 3;
+            self.cel_debug.ramp_view = next == 1;
+            self.cel_debug.face_mask_view = next == 2;
+        },
+        else => return false,
+    }
+    std.log.info("Character look: style {s}, ink {s}, view {s}", .{ CelStyle.presets[self.cel_style].name, if (self.cel_debug.outline_off) "off" else "on", if (self.cel_debug.ramp_view) "ramp" else if (self.cel_debug.face_mask_view) "face mask" else "normal" });
+    return true;
+}
+
 pub fn update(self: *App, core: *mach.Core) void {
     var events = core.events(.default);
     while (events.next()) |event| switch (event) {
@@ -859,7 +893,9 @@ pub fn update(self: *App, core: *mach.Core) void {
                 if (key.key == .backspace or key.key == .left or key.key == .right or key.key == .up or key.key == .down) self.creatorKey(key.key);
             } else if (key.key == .up or key.key == .down or key.key == .left or key.key == .right) self.uiNav(self.navKey(key.key).?);
         },
-        .key_press => |key| if (self.menu.screen == .controls and self.menu.capturing) {
+        .key_press => |key| if (self.celKey(key.key)) {
+            // Handled: character look-dev keys work everywhere, including the creator.
+        } else if (self.menu.screen == .controls and self.menu.capturing) {
             self.runCommand(self.menu.bindKey(key.key));
         } else if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
             // Number keys pick a conversation choice directly.
@@ -2446,6 +2482,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
     renderer.show_metrics = self.show_metrics;
+    renderer.cel_style = self.cel_style;
+    renderer.cel_debug = self.cel_debug;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {

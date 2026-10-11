@@ -59,7 +59,7 @@ pub fn scale(s: Profile.Species) Scale {
 /// Heads tall: Wildkin read as cartoon heroes, insects a little slimmer-headed.
 pub fn headRatio(s: Profile.Species) f32 {
     return switch (family(s)) {
-        .human => 7.5,
+        .human => 6.3, // anime action proportion; `Ranger.bodySpec` refines it per face style
         .insect, .arachnid => 5.4,
         else => 5.0,
     };

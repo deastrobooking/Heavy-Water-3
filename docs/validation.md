@@ -2,6 +2,12 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Anime face and head proportions — 2026-10-11
+
+- **Changed:** `HeadSpec` and the comptime `face_presets` table (six faces, with the new `hero`), keyframed head profile, short neck, 5.9 to 6.5 head ratio for humans, larger eyes, tapered brow strokes, flat nose with a shadow mark, adjustable mouth, `hand_scale` and `foot_scale`. `Profile.FaceStyle` gained `hero` at the end; no save format change (the tag is stored by name, old saves default to `classic`).
+- **Checked:** `python3 tools/zig.py build check` (default pair) and `HEAVYWATER_ZIG_CHANNEL=0.17 build check` pass. `build test`: 369 of 377 pass; the 8 failures (armor suits count, asset Meta sidecar, Save format rejection, Sandbox controller, Profile hair-style wrap, Creator height, Screens layout, Enemies nest) fail identically on the unmodified base commit and are not from this change. New tests that pass: head profile ordering and head-ratio range for every preset, preset and `FaceStyle` order, hero versus classic proportions, face decal brow, nose and mouth placement, and the `FaceStyle` JSON round trip with a legacy document. ReleaseSafe Metal smoke (300 frames, validation layer) passed. ReleaseFast captures with `-Dcharacter-showcase=3` and `4` for classic, hero, soft, angular, alien and heroic were inspected.
+- **Not checked:** the other platforms, benchmarks, helmet and hair fit across all styles (the visor and hair generators scale with head height and were only seen on the short hairstyle), profile and three-quarter views, and Wildkin visuals (they keep their own head ratio, neck and hand scale, only the tests exercise them). Captures are at creator distance, where the mouth and brows are only a few pixels.
+
 ## GLB source trace and modular export — 2026-10-11
 
 - The repository already had a static glTF/GLB-to-HWMS converter. Added `asset-compiler trace` to validate sidecars and report GUID/hash provenance, stable node/mesh/primitive addresses, material slots, buffer/image dependencies and features outside the static importer.
@@ -63,6 +69,11 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 
 - Expanded the character creator from five hair entries to eleven: short, ponytail, long, crest, hood, bob, twin tails, bun, braids, curls and undercut. Ponytail, paired braid, bun, curly, cropped and mohawk silhouettes now have separate procedural generation paths. New enum tags are appended so existing profile JSON names remain valid.
 - The pinned Debug check and ReleaseFast build passed; `zig-out/bin/heavy-water` was reinstalled. A Metal API Validation ReleaseSafe character preview for braids completed on Apple M3 Pro and was visually inspected. Headless tests were not run.
+
+## Anime action hair — 2026-10-11
+
+- Added data-driven hair (`hair_style.zig`, `hair_library.zig`): fat tapered clumps rooted on the scalp ellipsoid, a per-style hairline, `validate`, and `HairSpec.custom` for modded styles. Short and crest are now data; nine new styles (spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail). Profile gained `hair_spike`, `hair_volume`, `hair_length` (creator rows). New fields default on old saves and round-trip in a Profile test; `Save.format_version` was not bumped because nothing existing changes meaning (same policy as the face and boot additions).
+- Tests: every definition validates, builds finite vertices with in-range joints, roots sit on the scalp, extents are bounded, the styles produce different meshes, adjustments change height, and a wider head still fits. Pinned `build check` passed; ReleaseSafe Metal captures of short and the nine new styles were inspected (all read as distinct, spiky or swept, not a cap). Not reviewed: side and back views, non-brown colours, spring chains moving (`sway` clumps only move when `chain_joints` > 0, which the game sets to 0), the remaining procedural styles' cap look, 0.17 channel and cross-compiles.
 
 ## Anime hair shading — 2026-10-11
 
@@ -862,3 +873,21 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - Native Apple M3 Pro / Metal: `python3 tools/zig.py build run -Daudio=false -Dsmoke-frames=120` completed 120 frames and 199 simulation ticks, including co-op, vehicle motion, and save/restore stages.
 - `python3 tools/zig.py build run -Daudio=false -Dshowcase=55 -Dcapture-frame=3`: captured and inspected the map, separated four-player labels, elevation/distance rows, and framing control. Local preview: `zig-out/map-review.png` (generated, not tracked).
 - Physical controller playtest remains pending: judge jump buffering/coyote-time feel, grapple release, landings, camera transitions, and held-button behavior across menus. Automated traversal tests and scripted smoke do not establish subjective handling quality or hardware-specific input behavior.
+
+## Character cel shading and ink — 2026-10-11
+
+**What changed:** the GPU-skinned character path now has per-material cel ramps, the face shadow map on faces, a hard specular band and rim on armor and hair, emissive accent strips, and an inverted-hull ink outline (see [architecture](architecture.md)). `CelStyle` holds all tunables with four presets.
+
+**Checked:**
+- `python3 tools/zig.py build check` passes. `build test`: new tests for `CelStyle` (presets validate, bad values rejected, GPU table round-trips every material), `toon.shadeCel` (ramp ordering per material, hard specular on armor only, face map overrides N.L) and `toon.hullWidth` (equals `outlineWidth`, thinner on faces, zero for eyes) pass, as does the existing GPU-versus-CPU skinning test with the larger vertex.
+- ReleaseSafe Metal captures under `MTL_DEBUG_LAYER=1` of `-Dcharacter-showcase=1` and `2` (scout and sentinel), before and after, with no validation messages. Ink reads on the silhouette and on armor plate edges; the ramp view (`-Dcel-debug=2`) shows lit, shadow and deep bands and a clean face terminator; `-Dcel-style=2` (Comic ink) gives visibly heavier lines.
+
+The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminator with the nose wedge.
+
+**Not checked:** the Watercolor and Flat presets were not captured; hair and Wildkin and beasts were not reviewed closely; four-player split-screen ink widths (the view pixel height is per view but only one view was captured); dusk and night; Vulkan, OpenGL and D3D12 (compile-only for the shared Zig, WGSL not compiled there); the 0.17 channel; benchmarks (the hull doubles skinned-character draws). Ink on thin geometry such as hair strands can look busy at distance. The CPU-skinned fallback path (`-Dcpu-skinning`) still uses the scene ramp and has no ink.
+
+## Mecha armor sets and ShapeSpec review — 2026-10-11
+
+- New: `character/armor.zig` (data-driven sets, `ArmorSetDef.validate`, rigid fitted pieces), `ShapeSpec` on hard garments, four sets (mobile_suit, buster, iron_titan, battle_plate), 16-bit armor ownership masks, four fabricator recipes. Saves: armor is stored by tag name, old tags unchanged, so `Save.format_version` is not bumped; Profile and Kit round-trip tests cover the new tags. A save with a new tag will not load in an older build.
+- Tests: armor finite/rigid/winding/bounded for every set at two body sizes, fit test (fails if fitting is disabled; checked by mutation), shapes differ, determinism, validation errors, shell fin test, Ranger builds every armor over undersuit and hardsuit with open and sealed helmets while walking.
+- Looked at: ReleaseFast Metal captures `-Dcharacter-showcase=30..33` (front only, creator panel overlaps the left). Not looked at: back and side views, women, the 0.9 and 1.1 heights visually, MTL_DEBUG_LAYER capture, extreme poses (pauldrons can sink into the chest when arms are raised, since plates bind to one joint). Linux, Windows and the 0.17 channel were not run.

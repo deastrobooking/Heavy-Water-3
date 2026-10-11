@@ -1,0 +1,55 @@
+{
+  "format": 1,
+  "armor_pieces": [
+    {
+      "id": "wing_pauldron",
+      "name": "Wing Pauldron",
+      "part": "pauldron",
+      "attach_joint": "shoulder",
+      "silhouette": "fin",
+      "size": [0.28, 0.2, 0.36],
+      "offset": [0.06, 0.1, 0.0],
+      "flare": 1.4,
+      "fins": 3,
+      "bevel": 0.3,
+      "mirror": true,
+      "tint": "trim",
+      "emissive": 0.2
+    },
+    {
+      "id": "slit_visor",
+      "name": "Slit Visor",
+      "part": "helmet",
+      "attach_joint": "head",
+      "silhouette": "dome",
+      "size": [0.26, 0.24, 0.28],
+      "mirror": false,
+      "tint": "accent"
+    },
+    {
+      "id": "ash_greave",
+      "name": "Ash Greave",
+      "part": "greave",
+      "attach_joint": "shin",
+      "silhouette": "wedge",
+      "flare": 0.6
+    }
+  ],
+  "palettes": [
+    {
+      "id": "ember",
+      "name": "Ember",
+      "role": "outfit",
+      "colors": ["#2b0f0a", "#c8381a", [0.95, 0.62, 0.2]]
+    }
+  ],
+  "armor_sets": [
+    {
+      "id": "phoenix",
+      "name": "Phoenix Guard",
+      "base": "starforge",
+      "pieces": ["wing_pauldron", "slit_visor", "ash_greave"],
+      "palette": "ember"
+    }
+  ]
+}

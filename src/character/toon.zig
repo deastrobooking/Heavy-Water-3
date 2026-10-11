@@ -6,6 +6,7 @@
 const std = @import("std");
 const m = @import("math.zig");
 const spec_mod = @import("spec.zig");
+const CelStyle = @import("CelStyle.zig");
 const Vec2 = m.Vec2;
 const Vec3 = m.Vec3;
 const Rgb = spec_mod.Rgb;
@@ -70,6 +71,48 @@ pub fn outlineWidth(px: f32, view_depth: f32, fovy: f32, screen_h: f32, min_w: f
     return m.clamp(px * world_per_px, min_w, max_w);
 }
 
+
+// ---------------------------------------------------------------- per-material cel shading
+/// The character shader's lighting for one material, line for line what `render/skin_lit.wgsl`
+/// computes: a lit / shadow / deep ramp, a hard specular band, a hard rim, and emissive glow.
+/// `face_lit` replaces the N.L ramp on face vertices (1 = lit, from `faceLit`). `illum` is the
+/// scene light the ramp multiplies (hemispheric ambient plus key colour). `night` is 0..1.
+pub fn shadeCel(s: CelStyle.MaterialStyle, base: Rgb, n: Vec3, l: Vec3, v: Vec3, face_lit: ?f32, illum: Rgb, night: f32) Rgb {
+    const ndl = n.dot(l);
+    var lit = celBand(ndl, s.ramp.threshold, s.ramp.softness);
+    var deep = celBand(ndl, s.ramp.deep_threshold, s.ramp.softness);
+    if (face_lit) |mask| {
+        lit = mask;
+        deep = @max(deep, mask);
+    }
+    const shadow = mix(rgb3(s.ramp.deep_tint), rgb3(s.ramp.shadow_tint), deep);
+    const ramp = mix(shadow, Rgb.init(1, 1, 1), lit);
+    const h = l.add(v).normalize();
+    const spec = celBand(n.dot(h), s.specular.threshold, s.specular.softness) * lit * s.specular.strength;
+    const ndv = m.saturate(n.dot(v));
+    const rim = m.smoothstep(1 - s.rim.width, 1 - s.rim.width + 0.04, 1 - ndv) * m.saturate(ndl * 2 + 0.3) * s.rim.strength;
+    const body = addc(addc(mulc(base, ramp), scalec(base, rim)), scalec(rgb3(s.specular.tint), spec));
+    const shaded = mulc(body, illum);
+    return mix(shaded, scalec(base, 0.9 + 0.8 * night), s.emissive);
+}
+
+fn celBand(x: f32, edge: f32, soft: f32) f32 {
+    const w = @max(soft, 0.001);
+    return m.smoothstep(edge - w, edge + w, x);
+}
+
+fn rgb3(c: CelStyle.Rgb3) Rgb {
+    return Rgb.init(c[0], c[1], c[2]);
+}
+
+/// World-space ink extrusion for a character vertex, as `skin_hull.wgsl` computes it: the
+/// material's pixel width (face detail 0.6x, all scaled by the style) through `outlineWidth`.
+pub fn hullWidth(style: *const CelStyle.CelStyle, material: CelStyle.Material, face: bool, view_depth: f32, fovy: f32, screen_h: f32) f32 {
+    const px = style.get(material).outline.width_px * style.outline_scale * @as(f32, if (face) 0.6 else 1.0);
+    if (px <= 0) return 0;
+    return outlineWidth(px, view_depth, fovy, screen_h, style.outline_min_world, style.outline_max_world);
+}
+
 // ---------------------------------------------------------------- face shadows
 /// Analytic face shadow threshold map ("SDF face shadow" technique).
 /// For light arriving from the character's LEFT (+X), a texel at face UV
@@ -83,7 +126,7 @@ pub fn faceShadowMap(u: f32, v: f32) f32 {
     t += 0.06 * (1 - m.saturate(cy * cy));
     // Nose wedge: just right of the nose (u < 0.5) stays in shadow longer.
     const nx = (u - 0.44) / 0.07;
-    const ny = (v - 0.33) / 0.09;
+    const ny = (v - 0.29) / 0.08;
     const r2 = nx * nx + ny * ny;
     if (r2 < 1) t -= 0.10 * (1 - r2) * (1 - r2);
     // Eye sockets stay lit slightly longer (keeps eyes readable).
@@ -227,19 +270,37 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
         out = over(out, lash, a);
     }
 
-    // brows: thin arcs
-    const bc = Vec2.init(ec.x - w * 0.05, ec.y + w * eyes.aspect * 1.55 + expr.brow_raise * 0.03);
-    const d_brow = ellipse(p, Vec2.init(bc.x, bc.y - w * 0.6), w * 1.05, w * 0.6);
-    if (p.y > bc.y - w * 0.2 and @abs(p.x - bc.x) < w * 1.0) {
-        out = over(out, lash, (1 - m.smoothstep(aa * 0.6, aa * 1.8, @abs(d_brow))) * 0.68);
+    // brows: a tapered stroke, heavy at the inner end, tilted by `brow_tilt`. Distance to a
+    // segment minus a radius that thins toward the temple keeps it crisp at any size.
+    {
+        const half_len = w * eyes.brow_length;
+        const by = ec.y + w * eyes.aspect + eyes.brow_gap + expr.brow_raise * 0.03;
+        const inner = Vec2.init(ec.x - half_len * 0.85, by - eyes.brow_tilt * half_len);
+        const outer = Vec2.init(ec.x + half_len * 0.85, by + eyes.brow_tilt * half_len * 0.6);
+        const seg = outer.sub(inner);
+        const k = m.saturate(p.sub(inner).dot(seg) / seg.dot(seg));
+        const on = inner.add(seg.scale(k));
+        const radius = eyes.brow_weight * m.lerp(1.0, 0.4, k);
+        const d_brow = p.sub(on).length() - radius;
+        if (d_brow < aa * 2) out = over(out, scalec(lash, 0.9), (1 - m.smoothstep(-aa * 0.5, aa * 1.2, d_brow)) * 0.8);
+    }
+
+    // nose: only a short shadow under the tip plus a faint bridge line; the mesh carries the rest
+    if (eyes.nose_mark > 0.001) {
+        const nd = ellipse(uv, Vec2.init(0.5, eyes.nose_height - 0.012), 0.026, 0.014);
+        const arc = (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(nd))) * @as(f32, if (uv.y < eyes.nose_height - 0.012) 1 else 0);
+        out = over(out, Rgb.hex(0x7a4a40), arc * eyes.nose_mark);
+        const lx = (uv.x - 0.47) / 0.006;
+        const ly = (uv.y - (eyes.nose_height + 0.03)) / 0.035;
+        out = over(out, Rgb.hex(0x9a6a5e), m.saturate(1 - (lx * lx + ly * ly)) * eyes.nose_mark * 0.35);
     }
 
     // mouth (centered, not mirrored)
-    const mx = (uv.x - 0.5) / 0.07;
-    const my = uv.y - (0.205 + expr.smile * 0.012 * (mx * mx - 0.5));
+    const mx = (uv.x - 0.5) / eyes.mouth_width;
+    const my = uv.y - (eyes.mouth_height + expr.smile * 0.012 * (mx * mx - 0.5));
     if (@abs(mx) < 1.0) {
         if (expr.mouth_open > 0.05) {
-            const d_m = ellipse(uv, Vec2.init(0.5, 0.20), 0.045, 0.03 * expr.mouth_open);
+            const d_m = ellipse(uv, Vec2.init(0.5, eyes.mouth_height - 0.005), eyes.mouth_width * 0.65, 0.03 * expr.mouth_open);
             out = over(out, Rgb.hex(0x8a2f3c), 1 - m.smoothstep(-aa, aa, d_m));
         } else {
             out = over(out, Rgb.hex(0x8b5650), (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(my))) * 0.68 * (1 - @abs(mx)));
@@ -290,10 +351,94 @@ test "face lighting: front fully lit, back fully dark, side half" {
     try std.testing.expect(faceLit(.{ .x = 0.15, .y = 0.6 }, fwd, left, Vec3.unit_x.neg(), 0.01) > 0.99);
 }
 
+test "face marks follow the spec: brow above the eye, nose and mouth at their heights" {
+    const e: EyeSpec = .{};
+    // Brow: dark stroke sits above the eye top and is absent far above it.
+    const brow_y = e.height + 0.5 * e.size * e.aspect + e.brow_gap;
+    var found = false;
+    var x: f32 = 0.5 + e.spacing - 0.1;
+    while (x < 0.5 + e.spacing + 0.1) : (x += 0.005) {
+        if (faceDecal(.{ .x = x, .y = brow_y }, e, .{}, 0.002).alpha > 0.5) found = true;
+    }
+    try std.testing.expect(found);
+    try std.testing.expect(faceDecal(.{ .x = 0.5 + e.spacing, .y = brow_y + 0.12 }, e, .{}, 0.002).alpha < 0.01);
+    // Mouth line moves with its height; the nose mark vanishes when switched off.
+    var low = e;
+    low.mouth_height = 0.12;
+    try std.testing.expect(faceDecal(.{ .x = 0.5, .y = e.mouth_height }, e, .{ .smile = 0 }, 0.002).alpha > 0.5);
+    try std.testing.expect(faceDecal(.{ .x = 0.5, .y = e.mouth_height }, low, .{ .smile = 0 }, 0.002).alpha < 0.05);
+    var no_nose = e;
+    no_nose.nose_mark = 0;
+    const under_tip = Vec2.init(0.5, e.nose_height - 0.026);
+    try std.testing.expect(faceDecal(under_tip, e, .{}, 0.002).alpha > 0.1);
+    try std.testing.expect(faceDecal(under_tip, no_nose, .{}, 0.002).alpha < 0.01);
+}
+
 test "eye decal is symmetric and opaque in the iris" {
     const e: EyeSpec = .{};
     const a = faceDecal(.{ .x = 0.5 + e.spacing, .y = e.height - 0.02 }, e, .{ .smile = 0 }, 0.002);
     const b = faceDecal(.{ .x = 0.5 - e.spacing, .y = e.height - 0.02 }, e, .{ .smile = 0 }, 0.002);
     try std.testing.expect(a.alpha > 0.99);
     try std.testing.expectApproxEqAbs(a.color.b, b.color.b, 0.05);
+}
+
+test "cel ramp orders lit above shadow above deep, per material" {
+    const style = CelStyle.heavy_water;
+    const white = Rgb.init(0.8, 0.8, 0.8);
+    const illum = Rgb.init(1, 1, 1);
+    const v = Vec3.unit_z;
+    for ([_]CelStyle.Material{ .skin, .cloth_top, .hair, .armor }) |mat| {
+        const s = style.get(mat).*;
+        const lit = shadeCel(s, white, Vec3.unit_z, Vec3.unit_z, v, null, illum, 0);
+        const shadow = shadeCel(s, white, Vec3.unit_z, Vec3.init(0.995, 0, 0.1), v, null, illum, 0);
+        const deep = shadeCel(s, white, Vec3.unit_z, Vec3.unit_z.neg(), v, null, illum, 0);
+        try std.testing.expect(lit.g > shadow.g);
+        try std.testing.expect(shadow.g >= deep.g);
+        try std.testing.expect(lit.g > deep.g);
+    }
+}
+
+test "armor has a hard specular band and skin has none" {
+    const style = CelStyle.heavy_water;
+    const base = Rgb.init(0.5, 0.5, 0.5);
+    const illum = Rgb.init(1, 1, 1);
+    const n = Vec3.unit_z;
+    // Light and view both along the normal: N.H = 1, inside the band.
+    const armor = shadeCel(style.get(.armor).*, base, n, n, n, null, illum, 0);
+    var no_spec = style.get(.armor).*;
+    no_spec.specular.strength = 0;
+    const plain = shadeCel(no_spec, base, n, n, n, null, illum, 0);
+    try std.testing.expect(armor.r > plain.r + 0.2);
+    const skin = style.get(.skin).*;
+    try std.testing.expectEqual(@as(f32, 0), skin.specular.strength);
+    // Off the band the highlight vanishes completely (hard edge).
+    const off = shadeCel(style.get(.armor).*, base, n, Vec3.init(0.95, 0, 0.31), n, null, illum, 0);
+    var off_plain = style.get(.armor).*;
+    off_plain.specular.strength = 0;
+    try std.testing.expectApproxEqAbs(off.r, shadeCel(off_plain, base, n, Vec3.init(0.95, 0, 0.31), n, null, illum, 0).r, 1e-6);
+}
+
+test "the face shadow map decides face lighting, not the normal" {
+    const s = CelStyle.heavy_water.get(.skin).*;
+    const base = Rgb.init(0.8, 0.6, 0.5);
+    const illum = Rgb.init(1, 1, 1);
+    const n = Vec3.unit_z;
+    const l = Vec3.unit_z;
+    const lit = shadeCel(s, base, n, l, n, 1, illum, 0);
+    const dark = shadeCel(s, base, n, l, n, 0, illum, 0);
+    try std.testing.expect(lit.r > dark.r);
+    // Shadow is a tint of the base: cooler (blue falls less than red).
+    try std.testing.expect(dark.b / lit.b > dark.r / lit.r - 0.15);
+}
+
+test "ink width matches outlineWidth and thins on faces" {
+    const style = CelStyle.heavy_water;
+    const body = hullWidth(&style, .armor, false, 3, 1.0, 1080);
+    try std.testing.expectApproxEqAbs(outlineWidth(2.4, 3, 1.0, 1080, 0.0006, 0.02), body, 1e-7);
+    try std.testing.expect(hullWidth(&style, .skin, true, 3, 1.0, 1080) < hullWidth(&style, .skin, false, 3, 1.0, 1080));
+    try std.testing.expectEqual(@as(f32, 0), hullWidth(&style, .iris, false, 3, 1.0, 1080));
+    // Pixel width stays constant until the world clamps bite.
+    const near = hullWidth(&style, .armor, false, 1.5, 1.0, 1080);
+    const far = hullWidth(&style, .armor, false, 3, 1.0, 1080);
+    try std.testing.expectApproxEqRel(near * 2, far, 1e-4);
 }

@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "name": "emberwear",
+  "version": "1.0.0",
+  "api": 1,
+  "description": "Example character content: a hairstyle, a phoenix armor set, an ember palette, and an ink cel style.",
+  "character": ["character/hair.json", "character/armor.json", "character/style.json"]
+}

@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "hair_styles": [
+    {
+      "id": "flame_crest",
+      "name": "Flame Crest",
+      "base": "crest",
+      "length": 1.2,
+      "volume": 1.4,
+      "spike": 0.8,
+      "cards": 32,
+      "tip_color": "#ff7a18"
+    },
+    {
+      "id": "wind_swept",
+      "name": "Wind Swept",
+      "base": "swept_back",
+      "curl": 0.3,
+      "parting": -0.4
+    }
+  ],
+  "face_presets": [
+    {
+      "id": "ember_eyes",
+      "name": "Ember Eyes",
+      "base": "angular",
+      "eye_size": 1.2,
+      "eye_tilt": 0.35,
+      "jaw_width": 0.9
+    }
+  ]
+}

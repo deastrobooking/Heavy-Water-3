@@ -27,7 +27,7 @@ pub const SkinnedMesh = struct {
 };
 /// The skinned pipeline's resources, owned by the renderer: the pipeline, the palette uniform
 /// buffer (one `Ranger.palette_bytes` slot per character id) and its bind group.
-pub const Skinning = struct { pipeline: *gpu.RenderPipeline, palette: *gpu.Buffer, group: *gpu.BindGroup };
+pub const Skinning = struct { pipeline: *gpu.RenderPipeline, hull: *gpu.RenderPipeline, palette: *gpu.Buffer, group: *gpu.BindGroup };
 const Slot = struct { ranger: Ranger, gpu_mesh: ?GpuMesh = null, skinned: ?SkinnedMesh = null };
 slots: [Ranger.capacity]?Slot = @splat(null),
 /// Set by the renderer when the skinned pipeline exists; null skins every character on the CPU.
@@ -112,15 +112,18 @@ pub fn draw(self: *const Characters, pass: *gpu.RenderPassEncoder, hide_owner: u
     }
     const skinning = self.skinning orelse return;
     if (!any_skinned) return;
-    pass.setPipeline(skinning.pipeline);
-    pass.setBindGroup(0, frame_group, &.{});
-    for (self.slots, self.visible, self.owners, 0..) |slot, visible, owner, i| {
-        if (!visible or (hide_owner != 0 and owner == hide_owner)) continue;
-        const m = (slot orelse continue).skinned orelse continue;
-        pass.setBindGroup(1, skinning.group, &.{@as(u32, @intCast(i * Ranger.palette_bytes))});
-        pass.setVertexBuffer(0, m.vertices, 0, m.vertex_bytes);
-        pass.setIndexBuffer(m.indices, .uint32, 0, m.index_count * 4);
-        pass.drawIndexed(m.index_count, 1, 0, 0, @intCast(i));
+    // The lit body first, then the ink hull over the same buffers (it hides behind the body).
+    for ([_]*gpu.RenderPipeline{ skinning.pipeline, skinning.hull }) |pipeline| {
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, frame_group, &.{});
+        for (self.slots, self.visible, self.owners, 0..) |slot, visible, owner, i| {
+            if (!visible or (hide_owner != 0 and owner == hide_owner)) continue;
+            const m = (slot orelse continue).skinned orelse continue;
+            pass.setBindGroup(1, skinning.group, &.{@as(u32, @intCast(i * Ranger.palette_bytes))});
+            pass.setVertexBuffer(0, m.vertices, 0, m.vertex_bytes);
+            pass.setIndexBuffer(m.indices, .uint32, 0, m.index_count * 4);
+            pass.drawIndexed(m.index_count, 1, 0, 0, @intCast(i));
+        }
     }
     pass.setPipeline(scene_pipeline);
     pass.setBindGroup(0, frame_group, &.{});

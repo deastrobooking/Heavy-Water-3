@@ -8,7 +8,9 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
-    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-29 hairstyle, 17-19 gemstone armor previews") orelse 0);
+    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-38 hairstyle, 17-19 gemstone armor previews") orelse 0);
+    options.addOption(u8, "cel_style", b.option(u8, "cel-style", "Character look-dev: starting cel style preset (0 Heavy Water, 1 Watercolor, 2 Comic ink, 3 Flat)") orelse 0);
+    options.addOption(u8, "cel_debug", b.option(u8, "cel-debug", "Character look-dev: debug view bits (1 hide ink, 2 ramp bands, 4 face shadow mask)") orelse 0);
     options.addOption(bool, "cpu_skinning", b.option(bool, "cpu-skinning", "Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback)") orelse false);
     options.addOption(bool, "hot_reload", b.option(bool, "hot-reload", "Watch model, blueprint and mod script sources during development") orelse false);
     options.addOption(bool, "reload_smoke", b.option(bool, "reload-smoke", "Exercise model reload using an isolated source fixture") orelse false);
@@ -90,6 +92,20 @@ pub fn build(b: *std.Build) void {
     mods.addCopyFileToSource(glowworks.getEmittedBin(), "mods/glowworks/glowworks.wasm");
     b.step("mods", "Build the example mod's scripts into mods/").dependOn(&mods.step);
 
+    // `zig build validate-mods` loads every mod under mods/ (or `-- <dir>`) exactly as the game does
+    // and prints problems as `file: key: reason`; it exits non-zero if any mod is rejected.
+    const validator = b.addExecutable(.{ .name = "mod-validate", .root_module = b.createModule(.{ .root_source_file = b.path("src/mod_validate.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
+    validator.root_module.addImport("enum_compat", enum_compat);
+    const validate = b.addRunArtifact(validator);
+    validate.step.dependOn(&mods.step);
+    validate.has_side_effects = true;
+    if (builtin.zig_version.minor >= 17) {
+        validate.addPassthruArgs();
+    } else if (b.args) |args| {
+        validate.addArgs(args);
+    }
+    b.step("validate-mods", "Validate every mod under mods/ (or the directory given after --)").dependOn(&validate.step);
+
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
     app.addImport("enum_compat", enum_compat);
@@ -128,6 +144,10 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addAnonymousImport("glowworks.wasm", .{ .root_source_file = glowworks.getEmittedBin() });
     tests.root_module.addAnonymousImport("glowworks.mod", .{ .root_source_file = b.path("mods/glowworks/mod.json") });
     tests.root_module.addAnonymousImport("glowworks.lamp", .{ .root_source_file = b.path("mods/glowworks/blueprints/breathing_lamp.json") });
+    tests.root_module.addAnonymousImport("emberwear.mod", .{ .root_source_file = b.path("mods/emberwear/mod.json") });
+    tests.root_module.addAnonymousImport("emberwear.hair", .{ .root_source_file = b.path("mods/emberwear/character/hair.json") });
+    tests.root_module.addAnonymousImport("emberwear.armor", .{ .root_source_file = b.path("mods/emberwear/character/armor.json") });
+    tests.root_module.addAnonymousImport("emberwear.style", .{ .root_source_file = b.path("mods/emberwear/character/style.json") });
     b.step("test", "Run deterministic engine tests (no window)").dependOn(&b.addRunArtifact(tests).step);
     b.step("check", "Compile the application").dependOn(&exe.step);
 }
