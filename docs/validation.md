@@ -862,3 +862,15 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - Native Apple M3 Pro / Metal: `python3 tools/zig.py build run -Daudio=false -Dsmoke-frames=120` completed 120 frames and 199 simulation ticks, including co-op, vehicle motion, and save/restore stages.
 - `python3 tools/zig.py build run -Daudio=false -Dshowcase=55 -Dcapture-frame=3`: captured and inspected the map, separated four-player labels, elevation/distance rows, and framing control. Local preview: `zig-out/map-review.png` (generated, not tracked).
 - Physical controller playtest remains pending: judge jump buffering/coyote-time feel, grapple release, landings, camera transitions, and held-button behavior across menus. Automated traversal tests and scripted smoke do not establish subjective handling quality or hardware-specific input behavior.
+
+## Character cel shading and ink — 2026-10-11
+
+**What changed:** the GPU-skinned character path now has per-material cel ramps, the face shadow map on faces, a hard specular band and rim on armor and hair, emissive accent strips, and an inverted-hull ink outline (see [architecture](architecture.md)). `CelStyle` holds all tunables with four presets.
+
+**Checked:**
+- `python3 tools/zig.py build check` passes. `build test`: new tests for `CelStyle` (presets validate, bad values rejected, GPU table round-trips every material), `toon.shadeCel` (ramp ordering per material, hard specular on armor only, face map overrides N.L) and `toon.hullWidth` (equals `outlineWidth`, thinner on faces, zero for eyes) pass, as does the existing GPU-versus-CPU skinning test with the larger vertex.
+- ReleaseSafe Metal captures under `MTL_DEBUG_LAYER=1` of `-Dcharacter-showcase=1` and `2` (scout and sentinel), before and after, with no validation messages. Ink reads on the silhouette and on armor plate edges; the ramp view (`-Dcel-debug=2`) shows lit, shadow and deep bands and a clean face terminator; `-Dcel-style=2` (Comic ink) gives visibly heavier lines.
+
+The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminator with the nose wedge.
+
+**Not checked:** the Watercolor and Flat presets were not captured; hair and Wildkin and beasts were not reviewed closely; four-player split-screen ink widths (the view pixel height is per view but only one view was captured); dusk and night; Vulkan, OpenGL and D3D12 (compile-only for the shared Zig, WGSL not compiled there); the 0.17 channel; benchmarks (the hull doubles skinned-character draws). Ink on thin geometry such as hair strands can look busy at distance. The CPU-skinned fallback path (`-Dcpu-skinning`) still uses the scene ramp and has no ink.

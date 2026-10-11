@@ -9,6 +9,8 @@ pub fn build(b: *std.Build) void {
     const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
     options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-29 hairstyle, 17-19 gemstone armor previews") orelse 0);
+    options.addOption(u8, "cel_style", b.option(u8, "cel-style", "Character look-dev: starting cel style preset (0 Heavy Water, 1 Watercolor, 2 Comic ink, 3 Flat)") orelse 0);
+    options.addOption(u8, "cel_debug", b.option(u8, "cel-debug", "Character look-dev: debug view bits (1 hide ink, 2 ramp bands, 4 face shadow mask)") orelse 0);
     options.addOption(bool, "cpu_skinning", b.option(bool, "cpu-skinning", "Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback)") orelse false);
     options.addOption(bool, "hot_reload", b.option(bool, "hot-reload", "Watch model, blueprint and mod script sources during development") orelse false);
     options.addOption(bool, "reload_smoke", b.option(bool, "reload-smoke", "Exercise model reload using an isolated source fixture") orelse false);

@@ -3,6 +3,7 @@ const enum_compat = @import("enum_compat");
 const mach = @import("mach");
 const options = @import("options");
 const Engine = @import("engine/Engine.zig");
+const CelStyle = @import("character/CelStyle.zig");
 const Time = @import("engine/Time.zig");
 const Sky = @import("engine/Sky.zig");
 const World = @import("world/World.zig");
@@ -67,6 +68,9 @@ benchmark_ground_targets: u64 = 0,
 benchmark_air_targets: u64 = 0,
 window: mach.ObjectID = undefined,
 show_metrics: bool = true,
+/// Character look-dev (F3 cycles the cel style, F8 toggles ink, F10 cycles ramp/face-mask views).
+cel_style: usize = options.cel_style,
+cel_debug: CelStyle.Debug = @bitCast(options.cel_debug),
 culling: bool = true,
 captured: bool = false,
 rendered_frames_seen: u64 = 0,
@@ -849,6 +853,24 @@ pub fn start(self: *App, core: *mach.Core, app_mod: mach.Mod(App), core_mod: mac
     self.thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app);
 }
 
+/// Look-dev keys for artists tuning character shading. True when `key` was one of them.
+fn celKey(self: *App, key: mach.Core.KeyButtonID) bool {
+    switch (key) {
+        .f3 => self.cel_style = (self.cel_style + 1) % CelStyle.presets.len,
+        .f8 => self.cel_debug.outline_off = !self.cel_debug.outline_off,
+        .f10 => {
+            // Off, ramp bands, face shadow mask.
+            const view: u2 = @as(u2, @intFromBool(self.cel_debug.ramp_view)) + 2 * @as(u2, @intFromBool(self.cel_debug.face_mask_view));
+            const next = (view + 1) % 3;
+            self.cel_debug.ramp_view = next == 1;
+            self.cel_debug.face_mask_view = next == 2;
+        },
+        else => return false,
+    }
+    std.log.info("Character look: style {s}, ink {s}, view {s}", .{ CelStyle.presets[self.cel_style].name, if (self.cel_debug.outline_off) "off" else "on", if (self.cel_debug.ramp_view) "ramp" else if (self.cel_debug.face_mask_view) "face mask" else "normal" });
+    return true;
+}
+
 pub fn update(self: *App, core: *mach.Core) void {
     var events = core.events(.default);
     while (events.next()) |event| switch (event) {
@@ -859,7 +881,9 @@ pub fn update(self: *App, core: *mach.Core) void {
                 if (key.key == .backspace or key.key == .left or key.key == .right or key.key == .up or key.key == .down) self.creatorKey(key.key);
             } else if (key.key == .up or key.key == .down or key.key == .left or key.key == .right) self.uiNav(self.navKey(key.key).?);
         },
-        .key_press => |key| if (self.menu.screen == .controls and self.menu.capturing) {
+        .key_press => |key| if (self.celKey(key.key)) {
+            // Handled: character look-dev keys work everywhere, including the creator.
+        } else if (self.menu.screen == .controls and self.menu.capturing) {
             self.runCommand(self.menu.bindKey(key.key));
         } else if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
             // Number keys pick a conversation choice directly.
@@ -2446,6 +2470,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
     renderer.show_metrics = self.show_metrics;
+    renderer.cel_style = self.cel_style;
+    renderer.cel_debug = self.cel_debug;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {

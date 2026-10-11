@@ -191,6 +191,11 @@ pub const SkinnedVertex = extern struct {
     color: [3]f32,
     joints: [4]u8,
     weights: [4]f32,
+    /// Cel shading: material index into the `CelStyle` table, 1 on face vertices that carry a
+    /// face UV (the face shadow map reads it), two spare bytes.
+    kind: [4]u8,
+    /// Face UV (u across the face, v chin to crown); -1 where the vertex has none.
+    face_uv: [2]f32,
 };
 /// Joints per character in the GPU palette (two vec4s, a dual quaternion, per joint).
 pub const max_palette_joints = 64;
@@ -210,7 +215,7 @@ pub fn skinnedVertices(self: *const Ranger, a: std.mem.Allocator) ![]SkinnedVert
     for (out, self.character.mesh.vertices.items, self.mesh.vertices) |*o, source, baked| {
         var joints: [4]u8 = undefined;
         for (&joints, source.joints) |*j, s| j.* = @intCast(s);
-        o.* = .{ .position = .{ source.pos.x, source.pos.y, source.pos.z }, .normal = .{ source.normal.x, source.normal.y, source.normal.z }, .color = baked.color, .joints = joints, .weights = source.weights };
+        o.* = .{ .position = .{ source.pos.x, source.pos.y, source.pos.z }, .normal = .{ source.normal.x, source.normal.y, source.normal.z }, .color = baked.color, .joints = joints, .weights = source.weights, .kind = .{ @intFromEnum(source.material), @intFromBool(source.region == .face and source.uv.x >= 0 and source.uv.y >= 0), 0, 0 }, .face_uv = .{ source.uv.x, source.uv.y } };
     }
     return out;
 }

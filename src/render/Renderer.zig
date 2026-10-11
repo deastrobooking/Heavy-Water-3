@@ -15,6 +15,7 @@ const options = @import("options");
 const Renderer = @This();
 const Characters = @import("Characters.zig");
 const Ranger = @import("../character/Ranger.zig");
+const CelStyle = @import("../character/CelStyle.zig");
 
 pub const mach_module = .renderer;
 pub const mach_systems = .{ .init, .render, .deinit };
@@ -94,6 +95,13 @@ clock: f32 = 0,
 /// GPU character skinning: the skinned pipeline, its palette bind group layout, buffer and
 /// group (null with `-Dcpu-skinning=true`).
 skin_pipeline: ?*gpu.RenderPipeline = null,
+hull_pipeline: ?*gpu.RenderPipeline = null,
+/// The packed `CelStyle` uniform, rewritten when `cel_style`/`cel_debug` change.
+cel_buffer: ?*gpu.Buffer = null,
+/// Look-dev state for character shading: which preset, and debug views. Set by the app.
+cel_style: usize = 0,
+cel_debug: CelStyle.Debug = .{},
+cel_uploaded: ?struct { usize, u8 } = null,
 skin_layout: ?*gpu.BindGroupLayout = null,
 skin_palette: ?*gpu.Buffer = null,
 skin_group: ?*gpu.BindGroup = null,
@@ -314,7 +322,9 @@ fn naturePipeline(self: *Renderer, device: *gpu.Device, layout: *gpu.PipelineLay
 /// The skinned shader module: `scene.wgsl` with its `vertex_main` cut out (Mach's WGSL compiler
 /// takes one vertex entry point per module) and `skin.wgsl` in its place, before the shared
 /// fragment stage.
-const skinned_wgsl = scene_parts.prelude ++ @embedFile("skin.wgsl") ++ scene_parts.fragment;
+const skinned_wgsl = scene_parts.prelude ++ @embedFile("skin.wgsl") ++ @embedFile("skin_lit.wgsl");
+/// The ink hull module: the same skinning, a pushed-out vertex stage and a flat ink fragment.
+const hull_wgsl = scene_parts.prelude ++ @embedFile("skin.wgsl") ++ @embedFile("skin_hull.wgsl");
 
 /// The skinned-character pipeline: `scene.wgsl` plus `skin.wgsl` (its `vertex_skinned` entry
 /// and the shared fragment), the frame bind group, and a palette group selected per character by
@@ -324,6 +334,7 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
     defer shader.release();
     self.skin_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
         gpu.BindGroupLayout.Entry.initBuffer(0, .{ .vertex = true }, .uniform, true, Ranger.palette_bytes),
+        gpu.BindGroupLayout.Entry.initBuffer(1, .{ .vertex = true, .fragment = true }, .uniform, false, CelStyle.table_bytes),
     } }));
     const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{ frame_layout, self.skin_layout.? } }));
     defer pipeline_layout.release();
@@ -334,6 +345,8 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
             .{ .format = .float32x3, .offset = @offsetOf(Ranger.SkinnedVertex, "color"), .shader_location = 5 },
             .{ .format = .uint8x4, .offset = @offsetOf(Ranger.SkinnedVertex, "joints"), .shader_location = 8 },
             .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "weights"), .shader_location = 9 },
+            .{ .format = .uint8x4, .offset = @offsetOf(Ranger.SkinnedVertex, "kind"), .shader_location = 10 },
+            .{ .format = .float32x2, .offset = @offsetOf(Ranger.SkinnedVertex, "face_uv"), .shader_location = 11 },
         } }),
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Instance), .step_mode = .instance, .attributes = &.{
             .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
@@ -342,7 +355,7 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
             .{ .format = .float32x4, .offset = 48, .shader_location = 7 },
         } }),
     };
-    const fragment = gpu.FragmentState.init(.{ .module = shader, .entry_point = "frag_main", .targets = &.{.{ .format = format }} });
+    const fragment = gpu.FragmentState.init(.{ .module = shader, .entry_point = "frag_skinned", .targets = &.{.{ .format = format }} });
     self.skin_pipeline = device.createRenderPipeline(&.{
         .label = "skinned characters",
         .layout = pipeline_layout,
@@ -351,11 +364,26 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
         .primitive = .{ .cull_mode = .none },
         .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .greater },
     });
+    // Ink hull: same vertex layout minus the face UV (the stage does not read it), both faces,
+    // no depth writes so the hull never occludes water or the field drawn after it.
+    const hull_shader = device.createShaderModuleWGSL("skin_hull.wgsl", hull_wgsl);
+    defer hull_shader.release();
+    const hull_fragment = gpu.FragmentState.init(.{ .module = hull_shader, .entry_point = "frag_hull", .targets = &.{.{ .format = format }} });
+    self.hull_pipeline = device.createRenderPipeline(&.{
+        .label = "character ink hull",
+        .layout = pipeline_layout,
+        .vertex = gpu.VertexState.init(.{ .module = hull_shader, .entry_point = "vertex_hull", .buffers = &buffers }),
+        .fragment = &hull_fragment,
+        .primitive = .{ .cull_mode = .none },
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .false, .depth_compare = .greater },
+    });
+    self.cel_buffer = device.createBuffer(&.{ .label = "character cel style", .size = CelStyle.table_bytes, .usage = .{ .uniform = true, .copy_dst = true } });
     self.skin_palette = device.createBuffer(&.{ .label = "character palettes", .size = Ranger.capacity * Ranger.palette_bytes, .usage = .{ .uniform = true, .copy_dst = true } });
     self.skin_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.skin_layout.?, .entries = &.{
         gpu.BindGroup.Entry.initBuffer(0, self.skin_palette.?, 0, Ranger.palette_bytes, Ranger.palette_bytes),
+        gpu.BindGroup.Entry.initBuffer(1, self.cel_buffer.?, 0, CelStyle.table_bytes, CelStyle.table_bytes),
     } }));
-    self.characters.skinning = .{ .pipeline = self.skin_pipeline.?, .palette = self.skin_palette.?, .group = self.skin_group.? };
+    self.characters.skinning = .{ .pipeline = self.skin_pipeline.?, .hull = self.hull_pipeline.?, .palette = self.skin_palette.?, .group = self.skin_group.? };
 }
 
 /// Per-view camera uniform, bind group, and instance buffer.
@@ -476,6 +504,15 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             }
         }
     }
+    if (self.cel_buffer) |buffer| {
+        // Rewritten only when look-dev changes it; the table is a few hundred bytes.
+        const key: struct { usize, u8 } = .{ self.cel_style, @bitCast(self.cel_debug) };
+        if (self.cel_uploaded == null or !std.meta.eql(self.cel_uploaded.?, key)) {
+            const table = CelStyle.pack(CelStyle.presets[self.cel_style % CelStyle.presets.len].style, self.cel_debug);
+            encoder.writeBuffer(buffer, 0, &table);
+            self.cel_uploaded = key;
+        }
+    }
     try self.characters.prepare(self.allocator, self.timer.io, window.device, encoder, self.props[0..self.prop_count], character_visible, if (measure_character_prepare) &self.character_skin_times else null);
     if (measure_character_prepare) self.character_prepare_times.record(character_timer.lap() * 1000);
     // Catalog meshes installed after startup (deferred builds, reloads) upload under a budget.
@@ -515,8 +552,9 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         const frame = Frame{
             .vp = vp,
             .eye = .{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z(), 1 },
-            .light_direction = light.direction ++ [_]f32{0},
-            .light_color = light.color ++ [_]f32{0},
+            // The spare w lanes carry the view's pixel height and tan(fovy / 2) for ink widths.
+            .light_direction = light.direction ++ [_]f32{@floatFromInt(pixels[i][3])},
+            .light_color = light.color ++ [_]f32{@tan(view.camera.fov / 2)},
             .ambient_sky = light.ambient_sky ++ [_]f32{0},
             .ambient_ground = light.ambient_ground ++ [_]f32{0},
             .horizon = light.horizon ++ [_]f32{light.night},
@@ -815,6 +853,8 @@ pub fn deinit(self: *Renderer) void {
     if (self.pipeline) |p| p.release();
     for ([_]?*gpu.RenderPipeline{ self.terrain_pipeline, self.foliage_pipeline, self.water_pipeline }) |maybe| if (maybe) |p| p.release();
     if (self.skin_group) |p| p.release();
+    if (self.hull_pipeline) |p| p.release();
+    if (self.cel_buffer) |p| p.release();
     if (self.skin_palette) |p| p.release();
     if (self.skin_pipeline) |p| p.release();
     if (self.skin_layout) |p| p.release();

@@ -21,6 +21,7 @@ pub const hair = @import("hair.zig");
 pub const ik = @import("ik.zig");
 pub const spring = @import("spring.zig");
 pub const toon = @import("toon.zig");
+pub const CelStyle = @import("CelStyle.zig");
 pub const raster = @import("raster.zig");
 pub const character = @import("character.zig");
 pub const preview = @import("preview.zig");
@@ -53,6 +54,7 @@ test {
     _ = ik;
     _ = spring;
     _ = toon;
+    _ = CelStyle;
     _ = raster;
     _ = character;
     _ = preview;
