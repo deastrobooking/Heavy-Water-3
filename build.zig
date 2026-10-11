@@ -9,6 +9,11 @@ pub fn build(b: *std.Build) void {
     const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
     options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-38 hairstyle, 17-19 gemstone armor previews") orelse 0);
+    options.addOption(u8, "character_view", b.option(u8, "character-view", "Character review camera: 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up") orelse 0);
+    options.addOption(u8, "character_pose", b.option(u8, "character-pose", "Character review pose: 0 rest, 1 aim, 2 overhead swing, 3 cast, 4 guard") orelse 0);
+    options.addOption(u8, "character_tweak", b.option(u8, "character-tweak", "Character review variations, bits: 1 feminine, 2 height 0.9, 4 height 1.1, 8 open helmet, 16 sealed helmet, 32 visor helmet") orelse 0);
+    options.addOption(u8, "character_face", b.option(u8, "character-face", "Character review face style, 1-based in Profile.FaceStyle order (0 keeps the default)") orelse 0);
+    options.addOption(u8, "character_hair_color", b.option(u8, "character-hair-color", "Character review hair color, 1-based (0 keeps the default)") orelse 0);
     options.addOption(u8, "cel_style", b.option(u8, "cel-style", "Character look-dev: starting cel style preset (0 Heavy Water, 1 Watercolor, 2 Comic ink, 3 Flat)") orelse 0);
     options.addOption(u8, "cel_debug", b.option(u8, "cel-debug", "Character look-dev: debug view bits (1 hide ink, 2 ramp bands, 4 face shadow mask)") orelse 0);
     options.addOption(bool, "cpu_skinning", b.option(bool, "cpu-skinning", "Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback)") orelse false);

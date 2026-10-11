@@ -273,6 +273,8 @@ tap_links: [max_machines][Blueprint.max_devices]?SapLink = @splat(@splat(null)),
 arbor_colliders: [5]Physics.MeshCollider = @splat(.none),
 profile: Profile = .{},
 creator: Creator = .{},
+/// Character review captures hold the avatar in a fixed arm pose (`-Dcharacter-pose`).
+pose_override: ?Combat.Stance = null,
 view: View = .first,
 /// The body's facing; follows the camera except while the creator is open.
 body_yaw: f32 = 0,
@@ -1974,7 +1976,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and self.player.mode == .walk and n < out.len) {
-        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
+        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);

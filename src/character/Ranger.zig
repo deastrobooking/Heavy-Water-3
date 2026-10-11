@@ -981,19 +981,27 @@ test "armor suits are rigid, segmented plates that never stretch and grow with t
         var r = try init(a, .{ .clothing = clothing, .armor = .none, .helmet = .open });
         defer r.deinit(a);
         var armor: usize = 0;
+        var boots: usize = 0;
         var far: f32 = 0;
         const chest = r.character.skeleton.worldPos(.chest);
         for (r.character.mesh.vertices.items) |v| {
             if (v.material != .armor) continue;
-            armor += 1;
             // Rigid: one joint at full weight.
             try std.testing.expectEqual(@as(f32, 1), v.weights[0]);
             try std.testing.expectEqual(@as(f32, 0), v.weights[1] + v.weights[2] + v.weights[3]);
+            // Boots are footwear the player picks (`Profile.BootStyle`), rigid plates on the feet
+            // under any suit; the counts below are the suit's own armor.
+            if (v.joints[0] == sk.Joint.foot_l.idx() or v.joints[0] == sk.Joint.foot_r.idx()) {
+                boots += 1;
+                continue;
+            }
+            armor += 1;
             // How far the chest plate stands out in front, at chest height.
             if (@abs(v.pos.y - chest.y) < 0.04 and @abs(v.pos.x) < 0.05) far = @max(far, v.pos.z - chest.z);
         }
         counts[k] = armor;
         reach[k] = far;
+        try std.testing.expect(boots > 0);
         if (clothing == .hardsuit) {
             // Walking moves the plates without changing their shape: two vertices on the same
             // joint keep their distance exactly.
