@@ -4,29 +4,30 @@
     {
       "id": "flame_crest",
       "name": "Flame Crest",
-      "base": "crest",
-      "length": 1.2,
-      "volume": 1.4,
-      "spike": 0.8,
-      "cards": 32,
-      "tip_color": "#ff7a18"
+      "clumps": [
+        { "az": 0, "el": 1.3, "pitch": 1.35, "length": 0.95, "width": 0.34, "taper": 1.0, "stand": 0.6, "layer": 2 },
+        { "az": 0.5, "el": 1.1, "yaw": 0.55, "pitch": 1.2, "length": 1.05, "width": 0.34, "taper": 1.0, "flick": 0.25, "stand": 0.6, "layer": 2, "mirror": true },
+        { "az": 1.1, "el": 0.95, "yaw": 1.2, "pitch": 0.95, "length": 1.0, "width": 0.32, "taper": 1.0, "flick": 0.3, "layer": 1, "mirror": true },
+        { "az": 1.8, "el": 0.85, "yaw": 2.0, "pitch": 0.55, "length": 1.05, "width": 0.32, "taper": 1.0, "flick": 0.35, "mirror": true },
+        { "az": 2.6, "el": 0.6, "yaw": 2.7, "pitch": 0.1, "length": 1.0, "width": 0.32, "taper": 1.0, "flick": 0.4, "mirror": true, "sway": true },
+        { "az": 3.14159, "el": 1.0, "yaw": 3.14159, "pitch": 0.5, "length": 1.3, "width": 0.38, "taper": 1.0, "flick": 0.45, "layer": 1, "sway": true },
+        { "az": 3.14159, "el": 0.35, "yaw": 3.14159, "pitch": -0.4, "length": 1.2, "width": 0.36, "taper": 1.0, "flick": 0.5, "sway": true },
+        { "az": 0.1, "el": 0.9, "yaw": 0.2, "pitch": -1.1, "length": 0.7, "width": 0.2, "taper": 1.0, "curl": 0.5, "stand": 0.3, "layer": 1 },
+        { "az": 0.65, "el": 0.8, "yaw": 0.95, "pitch": -0.9, "length": 0.6, "width": 0.22, "taper": 1.0, "stand": 0.3, "mirror": true }
+      ]
     },
     {
       "id": "wind_swept",
       "name": "Wind Swept",
-      "base": "swept_back",
-      "curl": 0.3,
-      "parting": -0.4
-    }
-  ],
-  "face_presets": [
-    {
-      "id": "ember_eyes",
-      "name": "Ember Eyes",
-      "base": "angular",
-      "eye_size": 1.2,
-      "eye_tilt": 0.35,
-      "jaw_width": 0.9
+      "cap": { "hairline": [0.7, 0.45, -0.1, -0.7, -0.9], "lift": 0.006 },
+      "clumps": [
+        { "az": 0.0, "el": 1.2, "yaw": 0.9, "pitch": -0.2, "length": 0.85, "width": 0.34, "taper": 1.3, "curl": 0.6, "stand": 0.5, "flick": -0.5, "layer": 2 },
+        { "az": 0.3, "el": 1.0, "yaw": 1.0, "pitch": -0.5, "length": 0.8, "width": 0.32, "taper": 1.3, "curl": 0.7, "stand": 0.4, "flick": -0.3, "layer": 1 },
+        { "az": 0.9, "el": 0.8, "yaw": 1.2, "pitch": -0.6, "length": 0.55, "width": 0.3, "taper": 1.3, "curl": 0.5, "stand": 0.3 },
+        { "az": 1.6, "el": 0.8, "yaw": 1.7, "pitch": -0.4, "length": 0.62, "width": 0.32, "taper": 1.4, "curl": 0.3, "stand": 0.4, "mirror": true },
+        { "az": 2.4, "el": 0.8, "yaw": 2.5, "pitch": -0.2, "length": 0.62, "width": 0.32, "taper": 1.4, "curl": 0.3, "stand": 0.4, "flick": 0.5, "mirror": true },
+        { "az": 3.14159, "el": 0.8, "yaw": 3.14159, "pitch": -0.1, "length": 0.65, "width": 0.34, "taper": 1.4, "stand": 0.4, "flick": 0.6 }
+      ]
     }
   ]
 }

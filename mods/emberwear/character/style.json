@@ -1,18 +1,31 @@
 {
   "format": 1,
+  "palettes": [
+    { "id": "ember", "name": "Ember", "role": "outfit", "colors": ["#2b0f0a", "#c8381a", [0.95, 0.62, 0.2]] }
+  ],
   "cel_styles": [
     {
       "id": "ink_wash",
       "name": "Ink Wash",
-      "bands": 4,
-      "band_thresholds": [0.18, 0.46, 0.8],
-      "shadow_tint": "#3a3358",
-      "outline_width": 2.5,
-      "outline_color": [0.03, 0.02, 0.05],
-      "rim_strength": 0.5,
-      "rim_color": "#ffb066",
-      "specular_size": 0.15,
-      "saturation": 1.1
+      "base": "comic_ink",
+      "outline_scale": 1.35,
+      "materials": {
+        "armor": {
+          "ramp": { "threshold": 0.4, "softness": 0.015, "shadow_tint": [0.5, 0.44, 0.66], "deep_threshold": 0.05, "deep_tint": [0.3, 0.26, 0.46] },
+          "rim": { "width": 0.34, "strength": 0.6 },
+          "specular": { "threshold": 0.88, "softness": 0.01, "strength": 0.6, "tint": [1.0, 0.86, 0.62] },
+          "outline": { "width_px": 3.4, "tint": [0.1, 0.07, 0.09] }
+        },
+        "hair": {
+          "ramp": { "threshold": 0.35, "softness": 0.02, "shadow_tint": [0.6, 0.5, 0.62], "deep_threshold": 0.0, "deep_tint": [0.4, 0.3, 0.46] },
+          "rim": { "width": 0.3, "strength": 0.5 },
+          "outline": { "width_px": 1.8, "tint": [0.18, 0.1, 0.1] }
+        },
+        "skin": {
+          "ramp": { "threshold": 0.3, "softness": 0.05, "shadow_tint": [0.78, 0.62, 0.7], "deep_threshold": -0.1, "deep_tint": [0.6, 0.46, 0.58] },
+          "outline": { "width_px": 1.6, "tint": [0.3, 0.16, 0.16] }
+        }
+      }
     }
   ]
 }

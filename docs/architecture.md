@@ -435,7 +435,7 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 - the installed mods by name and version.
 - the best completed lap time on the seeded sprint circuit.
 
-Format 15 adds `mod`, the namespaced ids of any mod character content (hairstyle, face preset, armor set, palette, cel style) chosen in each profile; a missing mod falls back to the built-in choice and keeps the id. Formats 12 to 14 still load. See [Character content](mods.md#character-content).
+Format 15 adds `mod`, the namespaced ids of any mod character content (hairstyle, face preset, armor set, palette, cel style) chosen in each profile; a missing mod falls back to the built-in choice and keeps the id. Formats 12 to 14 still load. Mod content is drawn: `game/CharacterContent.zig` parses mod JSON by reflection over `ArmorSetDef`, `StyleDef`, `FacePreset` and `CelStyle`, runs their real validators, and converts entries back to those structs; `Ranger.initContent` builds a player's face, hair and armor from them, and `render/Characters.zig` uploads that player's cel table (one per character id). See [Character content](mods.md#character-content).
 
 Optional fields in format 15 have defaults for documents that omit them:
 - **progress:** what the team shares: story flags (including destroyed nests and carriers), the hero roster, collected pickup IDs, the cars, and the fighter with its upgrades and paint;

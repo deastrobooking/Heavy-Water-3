@@ -44,7 +44,7 @@ Installation is also all or nothing. A second mod with the same name, or a bluep
 
 ## Character content
 
-A mod adds options to the character creator by listing data files under `"character"` in `mod.json`. Everything is JSON, validated before anything is installed, and there is no code to run. `mods/emberwear/` is a complete example (two hairstyles, a face, three armor pieces, a palette, an armor set and a cel style). Check your mod without starting the game:
+A mod adds options to the character creator by listing data files under `"character"` in `mod.json`. Everything is JSON, validated before anything is installed, and there is no code to run. `mods/emberwear/` is a complete example (two hairstyles, a face, a finned armor set, a palette and an ink cel style). Check your mod without starting the game:
 
 ```sh
 python3 tools/zig.py build validate-mods               # every mod under mods/
@@ -58,12 +58,11 @@ It prints `ok <mod>: ...` or `REJECTED <mod>` followed by one `file: key: reason
 ```json
 {
   "format": 1,
-  "hair_styles":   [ { "id": "flame_crest", "name": "Flame Crest", "base": "crest", "spike": 0.8 } ],
-  "face_presets":  [ ... ],
-  "armor_pieces":  [ ... ],
-  "armor_sets":    [ ... ],
-  "palettes":      [ ... ],
-  "cel_styles":    [ ... ]
+  "hair_styles":  [ { "id": "flame_crest", "name": "Flame Crest", "clumps": [ { "az": 0, "el": 1.3, "pitch": 1.35, "length": 0.95 } ] } ],
+  "face_presets": [ ... ],
+  "armor_sets":   [ ... ],
+  "palettes":     [ ... ],
+  "cel_styles":   [ ... ]
 }
 ```
 
@@ -72,69 +71,39 @@ Every section is optional and a mod may spread sections across files. Each entry
 - `id`: lowercase letters, digits and underscores, up to 23 characters, unique within its kind in your mod.
 - `name`: the label shown in the creator, 1 to 31 printable ASCII characters.
 
-The game addresses an entry as `<mod>.<id>`, for example `emberwear.flame_crest`. That namespaced string is also what a save stores, so two mods can both define `ember` without clobbering each other, and a mod cannot redefine another mod's ids. Limits: 64 entries per mod and 256 in the whole game. Keys the schema does not list are errors, not ignored, so a typo like `"spikes"` is caught instead of silently doing nothing. Numbers are plain JSON numbers; colors are `"#rrggbb"` or `[r, g, b]` with channels from 0 to 1. Listing order is by mod name and then declaration order, so it never depends on directory order.
+The game addresses an entry as `<mod>.<id>`, for example `emberwear.flame_crest`. That namespaced string is also what a save stores, so two mods can both define `ember` without clobbering each other, and a mod cannot redefine another mod's ids. Limits: 64 entries per mod and 256 in the whole game. Keys the schema does not list are errors, not ignored, so a typo like `"lenght"` is caught instead of silently doing nothing. Numbers are plain JSON numbers; armor colors are `"#rrggbb"` or `[r, g, b]`. Listing order is by mod name and then declaration order.
 
 ### Schema reference
 
-Defaults apply when a key is omitted. Keys marked required have none. The tables in `src/game/CharacterContent.zig` (`schema`) are the source of truth; this is the same data.
+The schema is the game's own data structs, so a key is a field name and its value has that field's type. Omitted keys keep the struct's default. The doc comments on the structs are the full reference; this is the map.
 
-| Kind | Key | Type and range | Default |
-| --- | --- | --- | --- |
-| `hair_styles` | `base` | built-in hair tag (`short`, `crest`, `bob`, `swept_back`, ...): the look used wherever the game cannot yet draw the mod style | `short` |
-| | `length` | 0.1 to 2 | 1 |
-| | `volume` | 0.5 to 2.5 | 1 |
-| | `curl`, `spike` | 0 to 1 | 0 |
-| | `parting` | -1 to 1 | 0 |
-| | `cards` | whole number 8 to 64 (strand cards) | 24 |
-| | `tip_color` | color, optional | unset |
-| | `tint_slot` | `hair`, `highlight`, `accent` | `hair` |
-| `face_presets` | `base` | built-in face tag (`classic`, `soft`, `angular`, `heroic`, `alien`) | `classic` |
-| | `jaw_width`, `chin_height`, `nose_length`, `mouth_width` | 0.7 to 1.3 | 1 |
-| | `cheek_fullness`, `lip_fullness` | 0.5 to 1.5 | 1 |
-| | `eye_size` | 0.7 to 1.4 | 1 |
-| | `eye_spacing` | 0.8 to 1.2 | 1 |
-| | `eye_tilt`, `brow_height` | -1 to 1 | 0 |
-| `armor_pieces` | `part` (required) | `helmet`, `pauldron`, `chest`, `bracer`, `gauntlet`, `belt`, `tasset`, `greave`, `boot`, `back` | |
-| | `attach_joint` (required) | `head`, `neck`, `chest`, `spine`, `shoulder`, `upper_arm`, `forearm`, `hand`, `hip`, `thigh`, `shin`, `foot` | |
-| | `silhouette` | `plate`, `wedge`, `dome`, `ring`, `blade`, `fin`, `cylinder`, `cone` | `plate` |
-| | `size` | `[x, y, z]`, each 0.02 to 1.5 (metres) | `[0.2, 0.2, 0.2]` |
-| | `offset` | `[x, y, z]` from the joint, each -0.5 to 0.5 | `[0, 0, 0]` |
-| | `flare` | 0 to 2 | 0 |
-| | `emissive` | 0 to 1 | 0 |
-| | `fins` | whole number 0 to 8 | 0 |
-| | `bevel` | 0 to 1 | 0.2 |
-| | `mirror` | `true` places a matching piece on the other side | `true` |
-| | `tint` | `outfit`, `accent`, `trim`, `metal` | `outfit` |
-| `armor_sets` | `pieces` (required) | 1 to 12 ids of `armor_pieces` in the same mod | |
-| | `base` | built-in armor tag (`none`, `scout`, `sentinel`, `rootweave`, `skyguard`, `gem_aegis`, `starforge`, `deep_prism`) | `none` |
-| | `palette` | id of a `palettes` entry in the same mod, optional | unset |
-| `palettes` | `role` (required) | `hair`, `outfit`, `accent`, `skin`, `coat` | |
-| | `colors` (required) | 1 to 8 colors | |
-| `cel_styles` | `bands` | whole number 2 to 6 | 3 |
-| | `band_thresholds` | exactly `bands - 1` strictly ascending numbers in 0 to 1, optional (evenly spaced if omitted) | unset |
-| | `shadow_tint` | color | a soft blue-violet |
-| | `outline_color` | color | near black |
-| | `rim_color` | color, optional | unset |
-| | `outline_width` | 0 to 4 (pixels) | 1.5 |
-| | `rim_strength` | 0 to 1 | 0.3 |
-| | `specular_size` | 0 to 1 | 0.2 |
-| | `saturation` | 0.5 to 1.5 | 1 |
+| Kind | Maps to | Keys |
+| --- | --- | --- |
+| `hair_styles` | `hair_style.StyleDef` in `src/character/hair_style.zig` | `clumps` (required, list of `ClumpDef`, at most 96 counting `mirror` twins twice), `cap` (`CapDef`: `hairline`, five numbers; `lift`) |
+| | `ClumpDef` | `az`, `el` (required); `yaw`, `pitch`, `length`, `width`, `thickness`, `taper`, `curl`, `flick`, `stand`, `layer` (whole 0 to 3), `spike`, `sway`, `mirror` |
+| `face_presets` | `spec.FacePreset` in `src/character/spec.zig` | `masculine`, `feminine` (`spec.HeadSpec`: `cranium_width`, `cranium_depth`, `cranium_size`, `cheek_width`, `cheek_height`, `jaw_taper`, `chin_width`, `chin_point`, `chin_jut`, `neck_length`, `neck_thickness`, `brow_ridge`, `cheek_fullness`, `nose_bridge`, `nose_tip`), `head_ratio`, `eye_size_scale`, `eye_aspect_scale`, `eye_tilt`, `eye_height_add`, `brow_weight`, `brow_tilt`, `brow_gap`, `nose_mark`, `mouth_width` |
+| `armor_sets` | `armor.ArmorSetDef` in `src/character/armor.zig` | `metal`, `secondary`, `trim` (required colors), `dark`, `shape` (`spec.ShapeSpec`: `silhouette`, `flare`, `crest`, `roundness`, `overlap`), `visor`, `pieces` (list of `armor.Piece`, at most 64) |
+| | `armor.Piece` | `kind`, `anchor` (required); `sides`, `when`, `offset`, `size`, `scale`, `tilt`, `exponent`, `taper`, `color`, `material`, `fit`, `shape` (optional, overrides the set's) |
+| `cel_styles` | `CelStyle.CelStyle` in `src/character/CelStyle.zig` | `base` (`heavy_water`, `watercolor`, `comic_ink`, `flat`: the preset you start from), `face_softness`, `outline_scale`, `outline_min_world`, `outline_max_world`, `materials` (an object keyed by material name, each a partial `MaterialStyle`: `ramp`, `rim`, `specular`, `outline`, `emissive`; unnamed fields keep the base's values) |
+| `palettes` | creator swatches | `role` (`hair`, `outfit`, `accent`, `skin`, `coat`), `colors` (1 to 8). Listed in the creator; **not drawn yet** |
 
-References between entries use local ids (no `mod.` prefix) and must exist in the same mod, so a mod never depends on load order or on another mod being installed.
+Enum-valued fields take the Zig tag as a string (`"kind": "dome_pauldron"`, `"anchor": "upper_arm"`); a wrong one lists the valid choices. The ranges are the real validators': `ArmorSetDef.validate`, `hair_style.validate`, `CelStyle.validate`, and for heads the limits in `CharacterContent.zig` (every built-in face lies inside them). Pieces are placed in meters on a 1.8 m body, relative to their anchor joint (see the header of `armor.zig` for the axes).
 
 ### Authoring guide
 
 1. Copy `mods/emberwear/` to `mods/<yourmod>/`, set `name` in `mod.json` to the same lowercase name as the directory, and list your files under `"character"`.
-2. Start from a built-in: set `base` to the nearest built-in hairstyle, face or armor. Wherever the game cannot yet draw your parameters, players see that built-in, never an empty slot.
-3. Build armor from pieces. Declare each piece once (`part`, `attach_joint`, `silhouette`), tune `flare`, `fins` and `bevel`, nudge it with `offset`, and let `mirror` supply the other side. Then list the pieces in an `armor_sets` entry.
-4. Run `build validate-mods -- mods/<yourmod>` after each edit.
-5. In the game, open the creator (new game, or Customize). Your hairstyles appear after the built-in ones on the HAIR style row, faces on FACE style, armor sets on ARMOR, palettes after the outfit colors, and cel styles on the RENDER STYLE row (which reads "default" until a mod adds one).
+2. Start from something that looks right: copy a piece list or clump list from `armor.zig` or `hair_library.zig` and change numbers. A cel style starts from a preset with `base`.
+3. Run `python3 tools/zig.py build validate-mods -- mods/<yourmod>` after each edit. Every problem is one `file: key: reason (detail)` line, with the key path down to the field (`armor_sets[0].pieces[2].shape.crest`).
+4. In the game, open the creator (new game, or Customize). Hairstyles appear after the built-in ones on HAIR style, faces on FACE style, armor sets on ARMOR (they replace the built-in armor, whatever its tag), palettes after the outfit colors, and cel styles on RENDER STYLE.
+5. To review without the creator, run with `-Dcharacter-showcase=40` (hair, face and cel style of emberwear), `41` (phoenix armor over a hardsuit, visor), `42` (sealed helmet) or `43` (second hairstyle, exo rig). These expect a mod named `emberwear`.
 
 A rejected mod installs nothing: not its blueprints, scripts or character content. The log shows the same `file: key: reason` lines as the validator.
 
+What is drawn: the hair clumps (`HairSpec.custom`, still shaped by the player's spike, volume and length sliders and hair color), both heads and the eye and brow numbers of the face, the whole armor set (pieces, colors, shape, visor; its `shape` also drives hardsuit plates), and the cel style. A cel style applies to that player's characters only (each character id has its own table); the F3 look-dev preset applies to characters whose player picked none.
+
 ### Saves
 
-A player's chosen mod content is stored in their profile as namespaced ids (`"mod": {"hair_style": "emberwear.flame_crest"}`), never as indexes, so installing or removing other mods does not change anyone's look. Save format **15** adds this field; formats 12 to 14 still load and simply have no mod choices. If a mod is missing when a save loads, the profile keeps the id (the look returns when the mod does) and the character uses its built-in hair style, face style, armor or outfit color meanwhile. The render style row then reads "default (mod missing)". A malformed id (anything but lowercase `mod.id`) makes the profile invalid, like any other bad field.
+A player's chosen mod content is stored in their profile as namespaced ids (`"mod": {"hair_style": "emberwear.flame_crest"}`), never as indexes, so installing or removing other mods does not change anyone's look. Save format **15** adds this field; formats 12 to 14 still load and simply have no mod choices. If a mod is missing when a save loads, the profile keeps the id (the look returns when the mod does) and the character uses its built-in hair style, face style, armor or cel style meanwhile; the render style row then reads "default (mod missing)". A malformed id (anything but lowercase `mod.id`) makes the profile invalid, like any other bad field.
 
 ### Validation errors
 
@@ -142,43 +111,31 @@ A player's chosen mod content is stored in their profile as namespaced ids (`"mo
 | --- | --- |
 | `not valid JSON` | Syntax error; the detail is the parser's message. Check commas and quotes. |
 | `wrong JSON type` | The value has the wrong shape: a string where a number belongs, `offset` without 3 numbers. |
-| `required key is missing` | Add the key. For `format`, write `"format": 1`. |
-| `unknown key (typo?)` | The key is not in the schema table; the detail lists the valid ones. |
-| `value out of range` | Outside the range in the table, or `band_thresholds` not strictly ascending. |
-| `not one of the allowed values` | Use one of the listed strings; the detail lists them. |
-| `bad id` | Ids are lowercase letters, digits and underscores, at most 23 characters. References never carry a `mod.` prefix. |
-| `bad display name`, `text too long` | 1 to 31 printable ASCII characters, not starting with a space. |
-| `bad color` | Use `"#rrggbb"` or `[r, g, b]` with channels 0 to 1. |
+| `required key is missing` | Add the key (`format`, `clumps`, `az`/`el`, `kind`/`anchor`, `metal`/`secondary`/`trim`). |
+| `unknown key (typo?)` | Not a field of the struct; the detail lists the valid ones. |
+| `value out of range` | Outside the struct validator's range; the detail gives the range for that field. |
+| `not one of the allowed values` | Use one of the listed strings. |
+| `bad id`, `bad display name`, `text too long` | Ids: lowercase letters, digits, underscores, at most 23. Names: 1 to 31 printable ASCII characters. |
+| `bad color` | Use `"#rrggbb"` or `[r, g, b]`. |
 | `id already declared in this mod` | Two entries of one kind share an id. |
-| `refers to an id this mod does not declare` | A set names a piece or palette that is not in this mod; check spelling and kind. |
-| `too many entries or items` | Over 64 entries in the mod, or a list longer than its limit. |
-| `values contradict each other` | `band_thresholds` must have `bands - 1` items. |
+| `too many entries or items` | Over 64 entries, 96 clumps, 64 pieces or 8 palette colors. |
+| `values contradict each other` | A `center` piece on a limb anchor, or head proportions that give a degenerate outline. |
 | `mod already installed with different content`, `registry is full` | A second package with the same mod name, or more than 256 entries game-wide. |
 
 Manifest-level failures (`UnsafePath`, `MissingFile`, `TooManyCharacterFiles`, `InvalidCharacterContent`) are reported by name with the other package errors.
 
 ### For developers: binding the content
 
-Content flows as data only. `mod/Mod.zig` loads and validates, `Sandbox.installMod` installs into `Sandbox.characters` (a `CharacterContent.Registry`), the Creator lists it, and `Profile.mod` stores the choice. Renderers read an entry through typed getters and never see JSON:
+`mod/Mod.zig` loads and validates, `Sandbox.installMod` installs into `Sandbox.characters` (a `CharacterContent.Registry`), the Creator lists it, `Profile.mod` stores the choice and `App` hands the registry to `Renderer.characters`. Parsing is reflection over the real structs, so a field added to `ClumpDef`, `Piece`, `HeadSpec`, `MaterialStyle` and the rest is a valid key immediately; a new field on `ArmorSetDef` or `StyleDef` fails a comptime check in `CharacterContent.zig` until it is classified. The conversions are the binding:
 
 ```zig
-const handle = profile.mod.resolve(.hair_style, sandbox.characters) orelse return builtin;
-const entry = sandbox.characters.?.get(handle);
-const spike = entry.float("spike").?;  // also int, boolean, choice, vec3, color, colorAt, list, refAt
+const def = try CharacterContent.armorSet(entry);   // armor.ArmorSetDef, validated
+const style = try CharacterContent.hairStyle(entry); // hair_style.StyleDef; HairSpec.custom = &style
+const face = try CharacterContent.facePreset(entry); // spec.FacePreset (also headSpec)
+const cel = try CharacterContent.celStyle(entry);    // CelStyle.CelStyle, ready for CelStyle.pack
 ```
 
-Parameters come from the `schema` tables in `CharacterContent.zig`; adding one is a `Param` line plus the reader. The systems being built alongside this layer bind as follows:
-
-| System | Struct fields it should accept | Read from |
-| --- | --- | --- |
-| Hair (`HairStyleDef`) | base style tag, length, volume, curl, spike, parting, card count, tip color, tint slot | `hair_style` entries |
-| Head and face (`HeadSpec`) | base face tag, jaw width, chin height, cheek fullness, eye size, spacing, tilt, brow height, nose length, mouth width, lip fullness | `face_preset` entries |
-| Armor pieces (`ShapeSpec`) | part, attach joint, silhouette, size, offset, flare, fin count, bevel, mirror, tint, emissive | `armor_piece` entries |
-| Armor sets (`ArmorSetDef`) | base armor tag, piece list (`refAt("pieces", i)`), optional palette (`refAt("palette", 0)`) | `armor_set` entries |
-| Palettes | role and 1 to 8 colors | `palette` entries (`colorAt("colors", i)`) |
-| `CelStyle` | band count, thresholds, shadow tint, outline width and color, rim strength and color, specular size, saturation | `cel_style` entries |
-
-The binding is mechanical: for each kind, write a function that turns an `Entry` into the struct, and call it where the character is built. `Selection.resolve` returns null when the choice is unset or its mod is missing, so the built-in path stays the default. Enum-valued parameters arrive as strings from `choice`; map them with `std.meta.stringToEnum` against the new enums. The test "schema base choices name real Profile enum tags" in `Creator.zig` fails if a listed `base` tag stops matching `Profile`, which is the cue to update the tables.
+`Ranger.initContent(a, profile, registry)` resolves `profile.mod` for each slot and falls back to the built-in choice when the id is unset, the mod is missing, or the entry no longer validates. The results borrow the entry's storage, so the registry must outlive the build. `Ranger.sameAppearance` compares the whole profile including `mod`, and `Characters` also rebuilds a character when mod content installs after it was built. `Renderer` keeps one cel table per character id (dynamic offset in the skinned bind group).
 
 ## Scripts
 

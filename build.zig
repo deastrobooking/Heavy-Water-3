@@ -151,6 +151,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addAnonymousImport("glowworks.lamp", .{ .root_source_file = b.path("mods/glowworks/blueprints/breathing_lamp.json") });
     tests.root_module.addAnonymousImport("emberwear.mod", .{ .root_source_file = b.path("mods/emberwear/mod.json") });
     tests.root_module.addAnonymousImport("emberwear.hair", .{ .root_source_file = b.path("mods/emberwear/character/hair.json") });
+    tests.root_module.addAnonymousImport("emberwear.face", .{ .root_source_file = b.path("mods/emberwear/character/face.json") });
     tests.root_module.addAnonymousImport("emberwear.armor", .{ .root_source_file = b.path("mods/emberwear/character/armor.json") });
     tests.root_module.addAnonymousImport("emberwear.style", .{ .root_source_file = b.path("mods/emberwear/character/style.json") });
     b.step("test", "Run deterministic engine tests (no window)").dependOn(&b.addRunArtifact(tests).step);
