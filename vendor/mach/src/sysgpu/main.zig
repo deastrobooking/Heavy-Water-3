@@ -987,7 +987,7 @@ pub const Impl = sysgpu.Interface(struct {
         const encoder: *impl.RenderPassEncoder = @ptrCast(@alignCast(render_pass_encoder));
         const buffer: *impl.Buffer = @ptrCast(@alignCast(indirect_buffer));
         switch (backend_type) {
-            .metal, .vulkan, .opengl => encoder.drawIndexedIndirect(buffer, indirect_offset) catch @panic("api error"),
+            .metal, .vulkan, .opengl, .d3d12 => encoder.drawIndexedIndirect(buffer, indirect_offset) catch @panic("api error"),
             else => @panic("drawIndexedIndirect is not implemented for this backend"),
         }
     }
@@ -996,7 +996,7 @@ pub const Impl = sysgpu.Interface(struct {
         const encoder: *impl.RenderPassEncoder = @ptrCast(@alignCast(render_pass_encoder));
         const buffer: *impl.Buffer = @ptrCast(@alignCast(indirect_buffer));
         switch (backend_type) {
-            .metal, .vulkan, .opengl => encoder.drawIndirect(buffer, indirect_offset) catch @panic("api error"),
+            .metal, .vulkan, .opengl, .d3d12 => encoder.drawIndirect(buffer, indirect_offset) catch @panic("api error"),
             else => @panic("drawIndirect is not implemented for this backend"),
         }
     }

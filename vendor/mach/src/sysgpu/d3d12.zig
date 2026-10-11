@@ -342,6 +342,8 @@ pub const Device = struct {
     sampler_heap: DescriptorHeap = undefined,
     rtv_heap: DescriptorHeap = undefined,
     dsv_heap: DescriptorHeap = undefined,
+    draw_command_signature: *c.ID3D12CommandSignature = undefined,
+    draw_indexed_command_signature: *c.ID3D12CommandSignature = undefined,
     command_manager: CommandManager = undefined,
     streaming_manager: StreamingManager = undefined,
     reference_trackers: std.ArrayList(*ReferenceTracker) = .empty,
@@ -424,6 +426,19 @@ pub const Device = struct {
             .queue = queue,
         };
 
+        device.draw_command_signature = try createIndirectCommandSignature(
+            d3d_device,
+            c.D3D12_INDIRECT_ARGUMENT_TYPE_DRAW,
+            @sizeOf(sysgpu.DrawIndirectArgs),
+        );
+        errdefer _ = device.draw_command_signature.lpVtbl.*.Release.?(device.draw_command_signature);
+        device.draw_indexed_command_signature = try createIndirectCommandSignature(
+            d3d_device,
+            c.D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED,
+            @sizeOf(sysgpu.DrawIndexedIndirectArgs),
+        );
+        errdefer _ = device.draw_indexed_command_signature.lpVtbl.*.Release.?(device.draw_indexed_command_signature);
+
         // Initialize
         device.queue.* = try Queue.init(device);
         errdefer queue.deinit();
@@ -479,6 +494,9 @@ pub const Device = struct {
     pub fn deinit(device: *Device) void {
         device.queue.waitUntil(device.queue.fence_value);
         device.processQueuedOperations();
+
+        _ = device.draw_indexed_command_signature.lpVtbl.*.Release.?(device.draw_indexed_command_signature);
+        _ = device.draw_command_signature.lpVtbl.*.Release.?(device.draw_command_signature);
 
         device.map_callbacks.deinit(allocator);
         device.reference_trackers.deinit(allocator);
@@ -3762,6 +3780,56 @@ pub const RenderPassEncoder = struct {
         );
     }
 
+    pub fn drawIndexedIndirect(encoder: *RenderPassEncoder, buffer: *Buffer, offset: u64) !void {
+        if (!buffer.usage.indirect) return error.BufferMissingIndirectUsage;
+        if (buffer.usage.map_read) return error.CpuReadIndirectBufferUnsupported;
+        if (offset % 4 != 0) return error.IndirectOffsetMisaligned;
+        if (offset > buffer.size or buffer.size - offset < @sizeOf(sysgpu.DrawIndexedIndirectArgs)) {
+            return error.IndirectArgumentsOutOfBounds;
+        }
+
+        try encoder.reference_tracker.referenceBuffer(buffer);
+        if (!buffer.usage.map_write) {
+            try encoder.state_tracker.transition(&buffer.resource, c.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            encoder.state_tracker.flush(encoder.command_list);
+        }
+        encoder.applyVertexBuffers();
+        encoder.command_list.lpVtbl.*.ExecuteIndirect.?(
+            encoder.command_list,
+            encoder.reference_tracker.device.draw_indexed_command_signature,
+            1,
+            buffer.resource.d3d_resource,
+            offset,
+            null,
+            0,
+        );
+    }
+
+    pub fn drawIndirect(encoder: *RenderPassEncoder, buffer: *Buffer, offset: u64) !void {
+        if (!buffer.usage.indirect) return error.BufferMissingIndirectUsage;
+        if (buffer.usage.map_read) return error.CpuReadIndirectBufferUnsupported;
+        if (offset % 4 != 0) return error.IndirectOffsetMisaligned;
+        if (offset > buffer.size or buffer.size - offset < @sizeOf(sysgpu.DrawIndirectArgs)) {
+            return error.IndirectArgumentsOutOfBounds;
+        }
+
+        try encoder.reference_tracker.referenceBuffer(buffer);
+        if (!buffer.usage.map_write) {
+            try encoder.state_tracker.transition(&buffer.resource, c.D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            encoder.state_tracker.flush(encoder.command_list);
+        }
+        encoder.applyVertexBuffers();
+        encoder.command_list.lpVtbl.*.ExecuteIndirect.?(
+            encoder.command_list,
+            encoder.reference_tracker.device.draw_command_signature,
+            1,
+            buffer.resource.d3d_resource,
+            offset,
+            null,
+            0,
+        );
+    }
+
     pub fn end(encoder: *RenderPassEncoder) !void {
         const command_list = encoder.command_list;
 
@@ -3990,6 +4058,32 @@ pub const RenderPassEncoder = struct {
         }
     }
 };
+
+fn createIndirectCommandSignature(
+    d3d_device: *c.ID3D12Device,
+    argument_type: c.D3D12_INDIRECT_ARGUMENT_TYPE,
+    stride: usize,
+) !*c.ID3D12CommandSignature {
+    const argument = c.D3D12_INDIRECT_ARGUMENT_DESC{
+        .Type = argument_type,
+    };
+    const desc = c.D3D12_COMMAND_SIGNATURE_DESC{
+        .ByteStride = @intCast(stride),
+        .NumArgumentDescs = 1,
+        .pArgumentDescs = &argument,
+        .NodeMask = 0,
+    };
+    var command_signature: ?*anyopaque = null;
+    const hr = d3d_device.lpVtbl.*.CreateCommandSignature.?(
+        d3d_device,
+        &desc,
+        null,
+        &c.IID_ID3D12CommandSignature,
+        @ptrCast(&command_signature),
+    );
+    if (hr != c.S_OK) return error.CreateCommandSignatureFailed;
+    return @ptrCast(@alignCast(command_signature orelse return error.CreateCommandSignatureFailed));
+}
 
 pub const Queue = struct {
     manager: utils.Manager(Queue) = .{},

@@ -41,13 +41,13 @@ The pinned Mach lacks capabilities measured or needed during development:
 
 | Capability gap in `7ed0d504` (Metal) | Found during | Status and need |
 | --- | --- | --- |
-| `drawIndexedIndirect` | Phase 12 | Metal, Vulkan, and OpenGL implementations are now in `vendor/mach`: public 16/20-byte argument layouts, alignment/bounds/usage checks, and a `GpuMesh` helper. D3D12 remains unsupported. GPU-generated command buffers still depend on shader atomics. |
+| `drawIndexedIndirect` | Phase 12 | Metal, Vulkan, OpenGL, and D3D12 implementations are now in `vendor/mach`: public 16/20-byte argument layouts, alignment/bounds/usage checks, and a `GpuMesh` helper. GPU-generated command buffers still depend on shader atomics. |
 | Shader atomics (`atomicAdd` and others unimplemented in the WGSL compiler) | Phase 12 | GPU compaction, GPU particles |
 | Timestamp queries (TODO) | Phase 12 | GPU timing in benchmark reports |
 | `copyTextureToBuffer` (panics) | Sky city | Captures; worked around with a compute copy |
 | Fixed 64 MiB staging pages that never shrink | Phase 12 | Memory budgets |
 
-**Plan:** the project-owned fork is the engine work branch. Indirect draws now work on Metal, Vulkan, and OpenGL. Add the D3D12 path next, then shader atomics, timing, readback, and reclaimable staging pages. Before phase 14's GPU skinning, also compare against current Mach `main` on code.hexops.org with its nominated Zig:
+**Plan:** the project-owned fork is the engine work branch. Indirect draws now work on all four local backends. Implement shader atomics next, then timing, readback, and reclaimable staging pages. Before phase 14's GPU skinning, also compare against current Mach `main` on code.hexops.org with its nominated Zig:
 
 1. Check the gaps in the table above.
 2. Run the full test suite, smoke, and benchmarks.
