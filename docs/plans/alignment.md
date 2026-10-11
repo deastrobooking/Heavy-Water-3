@@ -23,11 +23,19 @@ Two outside summaries proposed "Unreal-like" upgrades for a Mach game. Each poin
 | Zig 0.16 `std.Io` threaded explicitly | Done. File, network, and timing I/O take an `io` parameter. | No work |
 | Unmanaged `ArrayList` (`.empty`, explicit allocator) | Done throughout. | No work |
 | "Juicy Main" (`main(init: std.process.Init)`) | Done where we own `main` (`asset-compiler`). The game's entry point belongs to Mach. | Adopt for every new tool (importer, server) |
-| Track Mach `main` on code.hexops.org | Pinned to `7ed0d504` with its nominated Zig, upgraded only as a tested pair. | See "Mach tracking" below |
+| Track Mach `main` on code.hexops.org | Now held as a project-owned fork in `vendor/mach`, based on `7ed0d504`. | See "Mach tracking" below |
 | Don't build an editor or visual scripting yet | Agreed. JSON scenes, hot reload, and the showcase/capture tools stand in for an editor. | Agreed |
 | Forward renderer with shadow mapping and instancing | Cel-shaded forward renderer with instancing, culling, and LOD exists; there are no shadows yet. | Lighting work continues alongside content |
 
 ## Mach tracking
+
+### Zig 0.17 and 0.18 toolchain gate (2026-10-10)
+
+The Mach package is now checked into `vendor/mach` from upstream base commit `7ed0d504a9569fd4ad840ecb10ead16b90a8926e`, with its upstream licenses retained. The root package resolves it as a local path dependency, and `vendor/mach/FORK.md` records provenance and patch goals. The first fork changes modernize argument forwarding, generated build metadata, and the iOS simulator runner while preserving the default Zig 0.16 build.
+
+Compatibility checks are available through `tools/zig.py` using `HEAVYWATER_ZIG_CHANNEL=0.17` and `HEAVYWATER_ZIG_CHANNEL=0.18-dev`. Both builds configure the fork and compile the asset tools, then reach Mach's module reflection. Array-repeat syntax, enum reflection, static bitsets, and vector layout were migrated. Remaining blockers include old `Type.StructField` usage and Zig's removed `@cImport` builtin across Mach's shader, font, audio, and platform modules. The 0.18 channel is pinned to `0.18.0-dev.146+35accc06e` so the check is reproducible.
+
+Keep the working Mach/compiler pair as the default. When Mach updates its nominated compiler and build scripts, move the dependency and compiler together, rerun both compatibility checks, then handle any game-source diagnostics. Only raise `.minimum_zig_version` after the normal build succeeds; follow with headless tests and a Metal smoke run before adopting the pair.
 
 The pinned Mach lacks capabilities measured or needed during development:
 

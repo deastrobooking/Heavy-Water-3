@@ -1,6 +1,7 @@
 //! Character creator: edits a draft profile field by field; Enter confirms, Escape cancels.
 //! Input arrives as abstract keys so the logic is testable without a window.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Profile = @import("Profile.zig");
 const Creator = @This();
 
@@ -13,7 +14,7 @@ pub const Line = struct {
         return self.text[0..self.len];
     }
 };
-const fields = std.meta.fields(Profile.Field);
+const fields = enum_compat.fields(Profile.Field);
 
 open: bool = false,
 field: Profile.Field = .name,
@@ -70,14 +71,14 @@ pub fn adjust(self: *Creator, delta: i32) void {
         return;
     }
     if (self.field == .armor) {
-        for (0..@typeInfo(Profile.Armor).@"enum".fields.len) |_| {
+        for (0..enum_compat.fields(Profile.Armor).len) |_| {
             if (self.owned_armor & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.armor))) != 0) return;
             self.draft.adjust(.armor, delta);
         }
         return;
     }
     if (self.field != .clothing) return;
-    for (0..@typeInfo(Profile.Clothing).@"enum".fields.len) |_| {
+    for (0..enum_compat.fields(Profile.Clothing).len) |_| {
         if (self.owned & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.clothing))) != 0) return;
         self.draft.adjust(.clothing, delta);
     }

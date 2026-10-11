@@ -3,6 +3,7 @@
 //! the tinker's upgrades and wardrobe, and conversations. Drawing never changes state; each
 //! clickable element records a hit whose id says which control and row it is.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Canvas = @import("Canvas.zig");
 const Menu = @import("Menu.zig");
 const Sandbox = @import("../game/Sandbox.zig");
@@ -730,7 +731,7 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
 
 fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     const cr = &sb.creator;
-    const fields = @typeInfo(Profile.Field).@"enum".fields;
+    const fields = enum_compat.fields(Profile.Field);
     const h = 120 + @as(f32, @floatFromInt(fields.len)) * row_height + sections.len * 22;
     const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(20, (v.h - h) / 2), .w = 460, .h = h };
     panel(c, r, if (cr.confirmed) "CUSTOMIZE RANGER" else "CREATE YOUR RANGER");
@@ -766,7 +767,7 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
         c.text(tx, row.y + 8, value, 1, ink);
         y += row_height;
     }
-    const clothing_count = @typeInfo(Profile.Clothing).@"enum".fields.len;
+    const clothing_count = enum_compat.fields(Profile.Clothing).len;
     const all: u8 = @intCast((@as(u16, 1) << clothing_count) - 1);
     const locked = clothing_count - @popCount(cr.owned & all);
     if (locked > 0) c.print(r.x + 18, y + 8, 0.9, gold, "{d} ARMOR SUITS LOCKED: BUY THEM FROM MARO, SOUTH MARKET", .{locked});
@@ -899,7 +900,7 @@ fn drawWardrobe(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
     const r = shopFrame(c, v, Sandbox.wardrobe_rows, "SUIT WARDROBE  MARO, TINKER", hitId(.shop_close, 0), true);
     walletLine(c, sb, r.x + 18, r.y + 46);
     var y = r.y + 76;
-    inline for (@typeInfo(Profile.Clothing).@"enum".fields, 0..) |f, i| {
+    inline for (enum_compat.fields(Profile.Clothing), 0..) |f, i| {
         const clothing: Profile.Clothing = @enumFromInt(f.value);
         const row: Rect = .{ .x = r.x + 10, .y = y, .w = r.w - 20, .h = 30 };
         rowBack(c, row, selected == i);
@@ -1115,7 +1116,7 @@ test "every screen lays out inside the window and records hits" {
     c.reset(1280, 720);
     draw(&c, &m, &sb, hud);
     try expectInside(&c);
-    try std.testing.expect(c.hit_len >= @typeInfo(Profile.Field).@"enum".fields.len);
+    try std.testing.expect(c.hit_len >= enum_compat.fields(Profile.Field).len);
     sb.creator.open = false;
     for (sb.dialogue.parsed.value.conversations, 0..) |conv, ci| for (0..conv.nodes.len) |ni| {
         sb.talk = .{ .conversation = @intCast(ci), .node = @intCast(ni), .reveal = 999, .partner = .{ .keeper = 0 } };

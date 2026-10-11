@@ -21,6 +21,7 @@
 //! recovers after five quiet seconds; a downed player is restored at the spawn (P1) or beside
 //! P1 (guests).
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
 const CombatSystem = @import("../combat/CombatSystem.zig");
 const Weapon = @import("../combat/Weapon.zig");
@@ -139,7 +140,7 @@ pub const Stance = struct {
 pub const Arsenal = struct {
     system: CombatSystem = .{},
     /// Weapon Mk II/Mk III bonuses, copied from shared party progression.
-    weapon_upgrades: [@typeInfo(WeaponKind).@"enum".fields.len]u8 = @splat(0),
+    weapon_upgrades: [enum_compat.fields(WeaponKind).len]u8 = @splat(0),
     /// Selected weapon (one the party has fabricated), if any.
     active: ?WeaponKind = .machine_gun,
     ranged: WeaponKind = .machine_gun,
@@ -163,7 +164,7 @@ pub const Arsenal = struct {
 
     /// Keeps the selection valid: the next owned weapon after `active` (or the first).
     pub fn select(self: *Arsenal, owned: u16, next: bool) void {
-        const count = @typeInfo(WeaponKind).@"enum".fields.len;
+        const count = enum_compat.fields(WeaponKind).len;
         if (owned == 0) {
             self.active = null;
             return;

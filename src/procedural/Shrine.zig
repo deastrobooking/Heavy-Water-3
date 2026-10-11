@@ -318,8 +318,8 @@ pub fn length(p: Puzzle) f32 {
     return @as(f32, @floatFromInt(p.rooms)) * room_length;
 }
 
-const stone = [4]f32{ 0.36, 0.40, 0.33, 1 };
-const moss = [4]f32{ 0.26, 0.38, 0.27, 1 };
+const sandstone = [4]f32{ 0.66, 0.55, 0.38, 1 };
+const turquoise_stone = [4]f32{ 0.22, 0.43, 0.40, 1 };
 
 /// Compiles a puzzle into a validated blueprint named `name`: floor, roof, walls, and door
 /// frames as parts; a generator powering doors and the seed lamp; buttons → latches; one logic
@@ -334,15 +334,15 @@ pub fn blueprint(p: Puzzle, name: []const u8) !Blueprint {
             n.* += 1;
         }
     };
-    Add.part(&parts, &np, .{ 0, -1, L / 2 }, .{ width + 1, 2, L + 1 }, moss);
-    Add.part(&parts, &np, .{ 0, height + 0.25, L / 2 }, .{ width + 1, 0.5, L + 1 }, moss);
-    for ([_]f32{ -1, 1 }) |side| Add.part(&parts, &np, .{ side * (width / 2 + 0.25), height / 2, L / 2 }, .{ 0.5, height, L + 1 }, stone);
-    Add.part(&parts, &np, .{ 0, height / 2, L + 0.25 }, .{ width + 1, height, 0.5 }, stone);
+    Add.part(&parts, &np, .{ 0, -1, L / 2 }, .{ width + 1, 2, L + 1 }, turquoise_stone);
+    Add.part(&parts, &np, .{ 0, height + 0.25, L / 2 }, .{ width + 1, 0.5, L + 1 }, turquoise_stone);
+    for ([_]f32{ -1, 1 }) |side| Add.part(&parts, &np, .{ side * (width / 2 + 0.25), height / 2, L / 2 }, .{ 0.5, height, L + 1 }, sandstone);
+    Add.part(&parts, &np, .{ 0, height / 2, L + 0.25 }, .{ width + 1, height, 0.5 }, sandstone);
     const piece = (width + 1 - opening) / 2;
     for (0..p.rooms) |i| {
         // The entrance wall (i = 0) and each divider have a doorway in the middle.
         const z = @as(f32, @floatFromInt(i)) * room_length - if (i == 0) @as(f32, 0.25) else 0;
-        for ([_]f32{ -1, 1 }) |side| Add.part(&parts, &np, .{ side * (opening / 2 + piece / 2), height / 2, z }, .{ piece, height, 0.5 }, stone);
+        for ([_]f32{ -1, 1 }) |side| Add.part(&parts, &np, .{ side * (opening / 2 + piece / 2), height / 2, z }, .{ piece, height, 0.5 }, sandstone);
     }
 
     var devices: [Blueprint.max_devices]Blueprint.DocDevice = undefined;
@@ -404,7 +404,7 @@ pub fn blueprint(p: Puzzle, name: []const u8) !Blueprint {
             Build.wire(&wires, &ports, &nw, src_name, if (t.plate) "pressed" else "state", logic, if (j == 0) "a" else "b");
         }
         const door = Build.id(&names, nd, "d{d}", .{i});
-        devices[nd] = .{ .id = door, .kind = .actuator, .offset = .{ 0, height / 2, doorZ(i) }, .size = .{ opening, height, 0.3 }, .color = .{ 0.62, 0.52, 0.34, 1 }, .travel = .{ opening + 0.3, 0, 0 }, .speed = 2.5, .watts = 150 };
+        devices[nd] = .{ .id = door, .kind = .actuator, .offset = .{ 0, height / 2, doorZ(i) }, .size = .{ opening, height, 0.3 }, .color = .{ 0.78, 0.59, 0.28, 1 }, .travel = .{ opening + 0.3, 0, 0 }, .speed = 2.5, .watts = 150 };
         nd += 1;
         Build.wire(&wires, &ports, &nw, "cell", "power", door, "power");
         Build.wire(&wires, &ports, &nw, logic, "out", door, "target");

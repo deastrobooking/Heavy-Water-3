@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -17,7 +18,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(u32, "capture_frame", b.option(u32, "capture-frame", "Write rendered frame N to zig-out/capture.bmp, then exit (0 = off)") orelse 0);
-    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk, 16 armor lineup, 17 hardsuit close-up, 18-35 GUI/frontier/flight, 36 river and falls, 37-45 combat/caves/lock reticle, 46 gamepad controls, 47 Scalari fleet") orelse 0);
+    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a city viewpoint: 1-6 each road, 7 overview, 8 dusk overview, 9 street level, 10-15 roads at dusk, 16 armor lineup, 17 hardsuit close-up, 18-35 GUI/frontier/flight, 36 river and falls, 37-45 combat/caves/lock reticle, 46 gamepad controls, 47 Scalari fleet, 60 Rootdeep temples") orelse 0);
     options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
     options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);
@@ -25,9 +26,11 @@ pub fn build(b: *std.Build) void {
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     options.addOption(bool, "audio", b.option(bool, "audio", "Open the system audio device (default true; false runs silent)") orelse true);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true, .sysaudio = true });
+    const enum_compat = b.createModule(.{ .root_source_file = b.path("src/compat/enum.zig"), .target = target, .optimize = optimize });
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
     // output is embedded, so the app never parses glTF at runtime.
     const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
+    compiler.root_module.addImport("enum_compat", enum_compat);
     // Every source has a `.meta` sidecar (GUID, source hash, importer, settings); compiling checks
     // it, and `zig build import` creates or refreshes sidecars deliberately.
     const import = b.addRunArtifact(compiler);
@@ -36,7 +39,11 @@ pub fn build(b: *std.Build) void {
     b.step("import", "Create missing asset sidecars (new GUIDs) and refresh source hashes").dependOn(&import.step);
     const heightmap_import = b.addRunArtifact(compiler);
     heightmap_import.addArg("heightmap");
-    if (b.args) |args| heightmap_import.addArgs(args);
+    if (builtin.zig_version.minor >= 17) {
+        heightmap_import.addPassthruArgs();
+    } else if (b.args) |args| {
+        heightmap_import.addArgs(args);
+    }
     b.step("heightmap", "Import a PGM heightmap to the versioned HWMH terrain format").dependOn(&heightmap_import.step);
     const sounds = b.addRunArtifact(compiler);
     sounds.addArgs(&.{ "sounds", "zig-out/sounds" });
@@ -81,6 +88,7 @@ pub fn build(b: *std.Build) void {
 
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
+    app.addImport("enum_compat", enum_compat);
     app.addOptions("options", options);
     app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     app.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });
@@ -100,10 +108,15 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     const run = b.addRunArtifact(exe);
     run.step.dependOn(&mods.step);
-    if (b.args) |args| run.addArgs(args);
+    if (builtin.zig_version.minor >= 17) {
+        run.addPassthruArgs();
+    } else if (b.args) |args| {
+        run.addArgs(args);
+    }
     b.step("run", "Explore the engine test world").dependOn(&run.step);
     const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }) });
     tests.root_module.addImport("mach", mach.module("mach"));
+    tests.root_module.addImport("enum_compat", enum_compat);
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
     tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     tests.root_module.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });

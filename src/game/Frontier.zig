@@ -1125,6 +1125,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishWildkin(sb, out, n, t);
     n = publishPets(sb, out, n, t);
     n = publishArena(sb, out, n, t);
+    n = publishShrines(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);
     if (room(out, n, 3)) {
@@ -1351,6 +1352,63 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         };
         n += 1;
     };
+    return n;
+}
+
+/// The Rootdeep seed vaults sit inside bright, stepped science temples. These exterior pieces
+/// are presentation geometry; the verified puzzle rooms and their collision stay in the blueprint.
+fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const c = &sb.catalog.content;
+    var n = start;
+    const Add = struct {
+        fn block(props: []World.Prop, count: *usize, mesh: @TypeOf(c.block), at: V, size: V, tint: [4]f32) bool {
+            if (count.* == props.len) return false;
+            props[count.*] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = tint, .size = size };
+            count.* += 1;
+            return true;
+        }
+    };
+    for (sb.shrines, 0..) |shrine, k| {
+        const o = shrine.origin;
+        const l = @import("../procedural/Shrine.zig").length(shrine.generated.puzzle);
+        const sandstone: [4]f32 = if (k == 0) .{ 0.78, 0.62, 0.38, 1 } else .{ 0.76, 0.72, 0.58, 1 };
+        const trim: [4]f32 = if (k == 0) .{ 0.8, 0.51, 0.19, 1 } else .{ 0.2, 0.52, 0.57, 1 };
+        const glow_color: [4]f32 = if (k == 0) .{ 1, 0.67, 0.2, 1 } else .{ 0.22, 0.94, 0.88, 1 };
+
+        // Broad terraces rise toward the hall, giving the seed vault a ziggurat foundation.
+        for ([_]f32{ -1, 1 }) |side| {
+            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 8.5, -0.8, l / 2 }), .{ 6, 0.9, l + 14 }, sandstone)) return n;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 7.5, -0.05, l / 2 }), .{ 4, 0.65, l + 10 }, trim)) return n;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 6.5, 0.48, l / 2 }), .{ 2, 0.45, l + 6 }, sandstone)) return n;
+        }
+        // Three broad, low steps keep the original doorway clear and make the entrance read at a distance.
+        for (0..3) |step_index| {
+            const s: f32 = @floatFromInt(step_index);
+            const w = 14 - s * 2;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, -0.75 + s * 0.27, -3.3 + s * 0.8 }), .{ w, 0.5, 1.25 }, if (step_index == 2) trim else sandstone)) return n;
+        }
+        // Monumental piers frame the processional hall and carry the lit roofline.
+        for ([_]f32{ -1, 1 }) |side| for ([_]f32{ 4, l / 2, l - 4 }) |z| {
+            const at = R.add(o, .{ side * 6.8, 4, z });
+            if (!Add.block(out, &n, c.block, at, .{ 1.35, 8, 1.35 }, sandstone)) return n;
+            if (!Add.block(out, &n, c.block, R.add(at, .{ 0, 4.15, 0 }), .{ 1.8, 0.42, 1.8 }, trim)) return n;
+        };
+
+        // A luminous stepped pyramid or pagoda crown marks the weapon-vault at the rear.
+        const crown_z = l - 4.5;
+        for (0..3) |tier| {
+            const f: f32 = @floatFromInt(tier);
+            const width: f32 = if (k == 0) 16.4 - f * 2.8 else if (tier == 0) 11.5 else if (tier == 1) 13 else 9.5;
+            const height: f32 = if (k == 0) 1.25 else 0.85;
+            const y = 5.5 + f * (height + 0.2);
+            const tint = if (tier == 0) sandstone else trim;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, y, crown_z }), .{ width, height, width }, tint)) return n;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, y + height / 2, crown_z }), .{ width + 0.45, 0.2, width + 0.45 }, Material.emissive(glow_color, 0.7 + 0.2 * @sin(t * 2 + f)))) return n;
+        }
+        if (n == out.len) return n;
+        out[n] = .{ .mesh = c.gem, .transform = .{ .position = R.add(o, .{ 0, 10.3, crown_z }) }, .tint = Material.emissive(glow_color, 1.4 + 0.3 * @sin(t * 2.4)), .size = @splat(1.5), .rotation = yawQuat(t * 0.35) };
+        n += 1;
+    }
     return n;
 }
 

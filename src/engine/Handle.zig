@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 /// A typed generational reference. The tag type keeps mesh, material, and body handles distinct.
 /// Generation 0 is never issued, so a zero-initialized handle is always invalid.
@@ -22,7 +23,7 @@ pub fn Pool(comptime Tag: type, comptime T: type, comptime capacity: u16) type {
         pub const Id = Handle(Tag);
         items: [capacity]T = undefined,
         generations: [capacity]u16 = @splat(0),
-        live: std.StaticBitSet(capacity) = .initEmpty(),
+        live: std.StaticBitSet(capacity) = if (builtin.zig_version.minor >= 17) .empty else .initEmpty(),
 
         pub fn add(self: *Self, value: T) error{PoolFull}!Id {
             var free = self.live.complement().iterator(.{});

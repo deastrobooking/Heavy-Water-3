@@ -7,6 +7,7 @@
 //! in the parent's frame" — exactly what IK and procedural animation want.
 
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const m = @import("math.zig");
 const mesh_mod = @import("mesh.zig");
 const Vec3 = m.Vec3;
@@ -47,7 +48,7 @@ pub const Joint = enum(u16) {
         return @intFromEnum(j);
     }
 };
-pub const humanoid_joint_count = @typeInfo(Joint).@"enum".fields.len;
+pub const humanoid_joint_count = enum_compat.fields(Joint).len;
 
 pub const Skeleton = struct {
     names: std.ArrayList([]const u8) = .empty,

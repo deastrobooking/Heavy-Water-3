@@ -1,0 +1,1250 @@
+const std = @import("std");
+const mach = @import("../../main.zig");
+const gpu = mach.gpu;
+const Linux = @import("../Linux.zig");
+const Core = @import("../../Core.zig");
+const InitOptions = Core.InitOptions;
+const KeyEvent = Core.Event.Key;
+const DisplayMode = Core.DisplayMode;
+const log = std.log.scoped(.mach);
+
+pub const Wayland = @This();
+
+pub const c = @cImport({
+    @cInclude("wayland-client-protocol.h");
+    @cInclude("wayland-xdg-shell-client-protocol.h");
+    @cInclude("wayland-xdg-decoration-client-protocol.h");
+    @cInclude("wayland-viewporter-client-protocol.h");
+    @cInclude("wayland-relative-pointer-unstable-v1-client-protocol.h");
+    @cInclude("wayland-pointer-constraints-unstable-v1-client-protocol.h");
+    @cInclude("wayland-idle-inhibit-unstable-v1-client-protocol.h");
+    @cInclude("xkbcommon/xkbcommon.h");
+    @cInclude("xkbcommon/xkbcommon-compose.h");
+    @cInclude("linux/input-event-codes.h");
+    @cInclude("libdecor.h");
+});
+
+// This needs to be declared here so it can be used in the exported functions below,
+// but doesn't need to be defined until run time (and can't be defined until run time).
+pub var libwaylandclient: ?LibWaylandClient = null;
+
+// This does not need to be declared here, but we are declaring it here to be consistent
+// with `libwaylandclient`.
+pub var libxkbcommon: ?LibXkbCommon = null;
+
+// LibDecor allows wayland clients to draw window decorations for them, this is dynamically
+// loaded and should not be used if use_client_side_decorations is false
+pub var libdecor: ?LibDecor = null;
+
+var core_ptr: *Core = undefined;
+
+// These exported functions are defined because the wayland headers don't define them,
+// and then the linker gets confused. They reference undefined `libwaylandclient` at
+// compile time, but since they are not run until run time, after `libwaylandclient` is
+// defined, an error never occurs.
+export fn wl_proxy_add_listener(proxy: ?*c.struct_wl_proxy, implementation: [*c]?*const fn () callconv(.c) void, data: ?*anyopaque) c_int {
+    return @call(.auto, libwaylandclient.?.wl_proxy_add_listener, .{ proxy, implementation, data });
+}
+export fn wl_proxy_get_version(proxy: ?*c.struct_wl_proxy) u32 {
+    return @call(.auto, libwaylandclient.?.wl_proxy_get_version, .{proxy});
+}
+// TODO(aarch64-linux): we have to write varargs code in C due to Zig on aarch64-linux not providing a varargs
+// implementation, see https://github.com/ziglang/zig/issues/15389
+//
+// export fn wl_proxy_marshal_flags(proxy: ?*c.struct_wl_proxy, opcode: u32, interface: [*c]const c.struct_wl_interface, version: u32, flags: u32, ...) ?*c.struct_wl_proxy {
+//     var arg_list: std.builtin.VaList = @cVaStart();
+//     defer @cVaEnd(&arg_list);
+//
+//     return @call(.always_tail, libwaylandclient.?.wl_proxy_marshal_flags, .{ proxy, opcode, interface, version, flags, arg_list });
+// }
+//
+export var wl_proxy_marshal_array_flags_ptr: ?*const fn () callconv(.c) void = null;
+// TODO(aarch64-linux): remove the code above, and uncomment the commented out code once aarch64-linux has a varargs implementation.
+
+export fn wl_proxy_destroy(proxy: ?*c.struct_wl_proxy) void {
+    return @call(.auto, libwaylandclient.?.wl_proxy_destroy, .{proxy});
+}
+
+pub const Native = struct {
+    surface_descriptor: gpu.Surface.DescriptorFromWaylandSurface,
+    configured: bool = false,
+
+    display: *c.wl_display,
+    surface: *c.wl_surface,
+    toplevel: *c.xdg_toplevel,
+    interfaces: Interfaces,
+
+    // input stuff
+    keyboard: ?*c.wl_keyboard = null,
+    pointer: ?*c.wl_pointer = null,
+
+    // keyboard stuff
+    xkb_context: *c.xkb_context,
+    xkb_state: ?*c.xkb_state = null,
+    compose_state: ?*c.xkb_compose_state = null,
+    keymap: ?*c.xkb_keymap = null,
+    modifiers: Core.KeyMods,
+    modifier_indices: KeyModInd,
+
+    // whether to use client side decorations or server side
+    use_client_side_decorations: bool,
+    libdecor_context: ?*c.libdecor = null,
+    libdecor_frame: ?*c.libdecor_frame = null,
+
+    // scaling factor, this is updated by the wl_output scale event
+    // TODO(wayland): https://code.hexops.org/hexops/mach/issues/1457
+    scale: u32 = 1,
+};
+
+pub fn initWindow(
+    core: *Core,
+    window_id: mach.ObjectID,
+) !void {
+    core_ptr = core;
+    var core_window = core.windows.getValue(window_id);
+    libwaylandclient = try LibWaylandClient.load();
+    // TODO(aarch64-linux): we have to write varargs code in C due to Zig on aarch64-linux not providing a varargs
+    // implementation, see https://github.com/ziglang/zig/issues/15389
+    wl_proxy_marshal_array_flags_ptr = @ptrCast(libwaylandclient.?.wl_proxy_marshal_array_flags);
+    // TODO(aarch64-linux): remove the code above once aarch64-linux has a varargs implementation.
+    libxkbcommon = try LibXkbCommon.load();
+
+    var use_csd = true;
+    libdecor = LibDecor.load() catch blk: {
+        log.warn("Failed to load libdecor, falling back to server side rendering", .{});
+        use_csd = false;
+        break :blk null;
+    };
+
+    core_window.native = .{
+        .wayland = .{
+            .interfaces = Interfaces{},
+            .display = libwaylandclient.?.wl_display_connect(null) orelse return error.FailedToConnectToDisplay,
+            .modifiers = .{
+                .alt = false,
+                .caps_lock = false,
+                .control = false,
+                .num_lock = false,
+                .shift = false,
+                .super = false,
+                .help = false,
+                .function = false,
+            },
+            .modifier_indices = .{ // TODO: make sure these are always getting initialized, we don't want undefined behavior
+                .control_index = undefined,
+                .alt_index = undefined,
+                .shift_index = undefined,
+                .super_index = undefined,
+                .caps_lock_index = undefined,
+                .num_lock_index = undefined,
+            },
+            // These undefined values require the initialization of `.interfaces` which happens in the registry listener
+            .surface_descriptor = undefined,
+            .surface = undefined,
+            .toplevel = undefined,
+            .xkb_context = libxkbcommon.?.xkb_context_new(0) orelse return error.FailedToGetXkbContext,
+            .use_client_side_decorations = use_csd,
+        },
+    };
+
+    // Save so that the new `.native` value is accessible from the registry listener
+    core.windows.setValue(window_id, core_window);
+    var wl = &core_window.native.?.wayland;
+
+    const registry = c.wl_display_get_registry(wl.display) orelse return error.FailedToGetDisplayRegistry;
+
+    if (c.wl_registry_add_listener(registry, &registry_listener.listener, @ptrFromInt(window_id)) != 0) {
+        return error.ListenerHasAlreadyBeenSet;
+    }
+
+    // TODO: Look at replacing these 2 calls to wl_display_roundtrip with wl_display::sync
+    // Round trip to get all the registry objects
+    _ = libwaylandclient.?.wl_display_roundtrip(wl.display);
+
+    // Round trip to get all initial output events
+    _ = libwaylandclient.?.wl_display_roundtrip(wl.display);
+
+    // Needed otherwise variables set by keyboardHandleKeymap like wl.xkb_state are not set by the
+    // time we do another core.windows.setValue
+    _ = libwaylandclient.?.wl_display_roundtrip(wl.display);
+    // Update `core_window` since registry listener and seat listener changed values in it
+    core_window = core.windows.getValue(window_id);
+    wl = &core_window.native.?.wayland;
+
+    // Setup surface
+    wl.surface = c.wl_compositor_create_surface(wl.interfaces.wl_compositor) orelse return error.UnableToCreateSurface;
+    wl.surface_descriptor = .{ .display = wl.display, .surface = wl.surface };
+    core_window.surface_descriptor = .{ .next_in_chain = .{
+        .from_wayland_surface = &wl.surface_descriptor,
+    } };
+
+    // Setup opaque region
+    {
+        const region = c.wl_compositor_create_region(wl.interfaces.wl_compositor) orelse return error.CouldntCreateWaylandRegtion;
+
+        c.wl_region_add(
+            region,
+            0,
+            0,
+            @intCast(core_window.width),
+            @intCast(core_window.height),
+        );
+        c.wl_surface_set_opaque_region(wl.surface, region);
+        c.wl_region_destroy(region);
+    }
+
+    core_ptr.windows.setValue(window_id, core_window);
+    wl = &core_window.native.?.wayland;
+    if (wl.use_client_side_decorations) {
+        setupLibDecor(window_id) catch {
+            wl.use_client_side_decorations = false;
+        };
+    }
+
+    if (!wl.use_client_side_decorations and wl.interfaces.zxdg_decoration_manager_v1 == null) {
+        //unable to use csd or ssd at this point
+        return error.NoDecorationSupport;
+    }
+
+    if (!wl.use_client_side_decorations) {
+        const xdg_surface = c.xdg_wm_base_get_xdg_surface(wl.interfaces.xdg_wm_base, wl.surface) orelse return error.UnableToCreateXdgSurface;
+        wl.toplevel = c.xdg_surface_get_toplevel(xdg_surface) orelse return error.UnableToGetXdgTopLevel;
+        if (c.xdg_surface_add_listener(xdg_surface, &xdg_surface_listener.listener, @ptrFromInt(window_id)) != 0) {
+            return error.ListenerHasAlreadyBeenSet;
+        }
+
+        if (c.xdg_toplevel_add_listener(wl.toplevel, &xdg_toplevel_listener.listener, @ptrFromInt(window_id)) != 0) {
+            return error.ListenerHasAlreadyBeenSet;
+        }
+
+        c.xdg_toplevel_set_title(wl.toplevel, @ptrCast(core_window.title));
+
+        const decoration = c.zxdg_decoration_manager_v1_get_toplevel_decoration(
+            wl.interfaces.zxdg_decoration_manager_v1,
+            wl.toplevel,
+        ) orelse return error.UnableToGetToplevelDecoration;
+        c.zxdg_toplevel_decoration_v1_set_mode(decoration, c.ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+
+        // Save so that xdg listeners can use the `wl.surface`
+        core_ptr.windows.setValue(window_id, core_window);
+    }
+    // Wait for events to get pushed
+    _ = libwaylandclient.?.wl_display_roundtrip(wl.display);
+
+    core_window = core.windows.getValue(window_id);
+    wl = &core_window.native.?.wayland;
+
+    // Commit changes to surface
+    c.wl_surface_commit(wl.surface);
+
+    const dispatch: *const DispatchFn = if (wl.use_client_side_decorations) @ptrCast(libdecor.?.libdecor_dispatch) else wlDispatchHelper;
+    const ctx: *anyopaque = if (wl.use_client_side_decorations) @ptrCast(wl.libdecor_context) else @ptrCast(wl.display);
+    const NON_BLOCKING = 0;
+
+    while (true) {
+        const result = dispatch(ctx, NON_BLOCKING);
+
+        core_window = core.windows.getValue(window_id);
+        wl = &core_window.native.?.wayland;
+
+        if (result != -1 and wl.configured) break;
+    }
+
+    // Commit changes to surface
+    c.wl_surface_commit(wl.surface);
+
+    _ = libwaylandclient.?.wl_display_roundtrip(wl.display);
+
+    core.windows.setValue(window_id, core_window);
+    try core.initWindow(window_id);
+}
+
+const DispatchFn = fn (*anyopaque, c_int) callconv(.c) c_int;
+
+// thin wrapper to match the function signature of libdecor dispatch
+fn wlDispatchHelper(ctx: *anyopaque, _: c_int) callconv(.c) c_int {
+    return libwaylandclient.?.wl_display_dispatch(@ptrCast(ctx));
+}
+
+pub fn tick(window_id: mach.ObjectID) !void {
+    const wl = &core_ptr.windows.getValue(window_id).native.?.wayland;
+
+    while (libwaylandclient.?.wl_display_flush(wl.display) == -1) {
+        if (std.posix.errno(-1) == std.posix.E.AGAIN) {
+            log.err("flush error", .{});
+            return error.FlushError;
+        }
+        var pollfd = [_]std.posix.pollfd{
+            std.posix.pollfd{
+                .fd = libwaylandclient.?.wl_display_get_fd(wl.display),
+                .events = std.posix.POLL.OUT,
+                .revents = 0,
+            },
+        };
+        while (try std.posix.poll(&pollfd, 1) == -1) {
+            const errno = std.posix.errno(-1);
+            if (errno == std.posix.E.INTR or errno == std.posix.E.AGAIN) {
+                log.err("poll error", .{});
+                return error.PollError;
+            }
+        }
+    }
+
+    if (wl.use_client_side_decorations) {
+        _ = libdecor.?.libdecor_dispatch(wl.libdecor_context, 0);
+    } else {
+        _ = libwaylandclient.?.wl_display_roundtrip(wl.display);
+    }
+
+    const err = libwaylandclient.?.wl_display_get_error(wl.display);
+    if (err != 0) {
+        log.err("wayland display error: {}", .{err});
+        return error.DisplayError;
+    }
+}
+
+pub fn setTitle(wl: *const Native, title: [:0]const u8) void {
+    if (wl.use_client_side_decorations) {
+        libdecor.?.libdecor_frame_set_title(wl.libdecor_frame, title);
+    } else {
+        c.xdg_toplevel_set_title(wl.toplevel, title);
+    }
+}
+
+pub fn setDisplayMode(wl: *const Native, display_mode: DisplayMode) void {
+    _ = wl;
+    _ = display_mode;
+}
+
+pub const LibXkbCommon = struct {
+    handle: std.DynLib,
+
+    xkb_context_new: *const fn (c.enum_xkb_context_flags) callconv(.c) ?*c.struct_xkb_context,
+    xkb_keymap_new_from_string: *const fn (?*c.struct_xkb_context, [*c]const u8, c.enum_xkb_keymap_format, c.enum_xkb_keymap_compile_flags) callconv(.c) ?*c.struct_xkb_keymap,
+    xkb_state_new: *const fn (?*c.struct_xkb_keymap) callconv(.c) ?*c.struct_xkb_state,
+    xkb_keymap_unref: *const fn (?*c.struct_xkb_keymap) callconv(.c) void,
+    xkb_state_unref: *const fn (?*c.struct_xkb_state) callconv(.c) void,
+    xkb_compose_table_new_from_locale: *const fn (?*c.struct_xkb_context, [*c]const u8, c.enum_xkb_compose_compile_flags) callconv(.c) ?*c.struct_xkb_compose_table,
+    xkb_compose_state_new: *const fn (?*c.struct_xkb_compose_table, c.enum_xkb_compose_state_flags) callconv(.c) ?*c.struct_xkb_compose_state,
+    xkb_compose_table_unref: *const fn (?*c.struct_xkb_compose_table) callconv(.c) void,
+    xkb_keymap_mod_get_index: *const fn (?*c.struct_xkb_keymap, [*c]const u8) callconv(.c) c.xkb_mod_index_t,
+    xkb_state_update_mask: *const fn (?*c.struct_xkb_state, c.xkb_mod_mask_t, c.xkb_mod_mask_t, c.xkb_mod_mask_t, c.xkb_layout_index_t, c.xkb_layout_index_t, c.xkb_layout_index_t) callconv(.c) c.enum_xkb_state_component,
+    xkb_state_mod_index_is_active: *const fn (?*c.struct_xkb_state, c.xkb_mod_index_t, c.enum_xkb_state_component) callconv(.c) c_int,
+    xkb_state_key_get_syms: *const fn (?*c.struct_xkb_state, c.xkb_keycode_t, [*c][*c]const c.xkb_keysym_t) callconv(.c) c_int,
+    xkb_compose_state_feed: *const fn (?*c.struct_xkb_compose_state, c.xkb_keysym_t) callconv(.c) c.enum_xkb_compose_feed_result,
+    xkb_compose_state_get_status: *const fn (?*c.struct_xkb_compose_state) callconv(.c) c.enum_xkb_compose_status,
+    xkb_compose_state_get_one_sym: *const fn (?*c.struct_xkb_compose_state) callconv(.c) c.xkb_keysym_t,
+    xkb_keysym_to_utf32: *const fn (c.xkb_keysym_t) callconv(.c) u32,
+
+    pub fn load() !LibXkbCommon {
+        var lib: LibXkbCommon = undefined;
+        lib.handle = mach.dynLibOpen(.{ "libxkbcommon.so.0", "libxkbcommon.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
+        inline for (@typeInfo(LibXkbCommon).@"struct".fields[1..]) |field| {
+            const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
+            const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
+            @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse {
+                log.err("Symbol lookup failed for {s}", .{name});
+                return error.SymbolLookup;
+            };
+        }
+        return lib;
+    }
+};
+
+pub const LibWaylandClient = struct {
+    handle: std.DynLib,
+
+    wl_display_connect: *const fn ([*c]const u8) callconv(.c) ?*c.struct_wl_display,
+    wl_display_roundtrip: *const fn (?*c.struct_wl_display) callconv(.c) c_int,
+    wl_display_dispatch: *const fn (?*c.struct_wl_display) callconv(.c) c_int,
+    wl_display_dispatch_pending: *const fn (?*c.struct_wl_display) callconv(.c) c_int,
+    wl_display_flush: *const fn (?*c.struct_wl_display) callconv(.c) c_int,
+    wl_display_get_fd: *const fn (?*c.struct_wl_display) callconv(.c) c_int,
+    wl_proxy_add_listener: *const fn (?*c.struct_wl_proxy, [*c]?*const fn () callconv(.c) void, ?*anyopaque) callconv(.c) c_int,
+    wl_proxy_get_version: *const fn (?*c.struct_wl_proxy) callconv(.c) u32,
+    // TODO(aarch64-linux): we have to write varargs code in C due to Zig on aarch64-linux not providing a varargs
+    // implementation, see https://github.com/ziglang/zig/issues/15389
+    //
+    // wl_proxy_marshal_flags: *const @TypeOf(c.wl_proxy_marshal_flags),
+    //
+    wl_proxy_marshal_array_flags: *const fn (?*c.struct_wl_proxy, u32, [*c]const c.struct_wl_interface, u32, u32, [*c]c.union_wl_argument) callconv(.c) ?*c.struct_wl_proxy,
+    // TODO(aarch64-linux): remove the code above, and uncomment the commented out code once aarch64-linux has a varargs implementation.
+
+    wl_proxy_set_tag: *const fn (?*c.struct_wl_proxy, [*c]const [*c]const u8) callconv(.c) void,
+    wl_proxy_destroy: *const fn (?*c.struct_wl_proxy) callconv(.c) void,
+    wl_display_get_error: *fn (?*c.struct_wl_display) callconv(.c) c_int,
+
+    //Interfaces
+    wl_compositor_interface: *c.struct_wl_interface,
+    wl_subcompositor_interface: *c.struct_wl_interface,
+    wl_shm_interface: *c.struct_wl_interface,
+    wl_data_device_manager_interface: *c.struct_wl_interface,
+
+    wl_buffer_interface: *c.struct_wl_interface,
+    wl_callback_interface: *c.struct_wl_interface,
+    wl_data_device_interface: *c.struct_wl_interface,
+    wl_data_offer_interface: *c.struct_wl_interface,
+    wl_data_source_interface: *c.struct_wl_interface,
+    wl_keyboard_interface: *c.struct_wl_interface,
+    wl_output_interface: *c.struct_wl_interface,
+    wl_pointer_interface: *c.struct_wl_interface,
+    wl_region_interface: *c.struct_wl_interface,
+    wl_registry_interface: *c.struct_wl_interface,
+    wl_seat_interface: *c.struct_wl_interface,
+    wl_shell_surface_interface: *c.struct_wl_interface,
+    wl_shm_pool_interface: *c.struct_wl_interface,
+    wl_subsurface_interface: *c.struct_wl_interface,
+    wl_surface_interface: *c.struct_wl_interface,
+    wl_touch_interface: *c.struct_wl_interface,
+
+    pub fn load() !LibWaylandClient {
+        var lib: LibWaylandClient = undefined;
+        lib.handle = mach.dynLibOpen(.{ "libwayland-client.so.0", "libwayland-client.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
+        inline for (@typeInfo(LibWaylandClient).@"struct".fields[1..]) |field| {
+            const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
+            const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
+            @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse {
+                log.err("Symbol lookup failed for {s}", .{name});
+                return error.SymbolLookup;
+            };
+        }
+        return lib;
+    }
+};
+
+pub const LibDecor = struct {
+    handle: std.DynLib,
+
+    libdecor_new: *const fn (?*c.struct_wl_display, [*c]const c.struct_libdecor_interface) callconv(.c) ?*c.struct_libdecor,
+    libdecor_decorate: *const fn (?*c.struct_libdecor, ?*c.struct_wl_surface, [*c]const c.struct_libdecor_frame_interface, ?*anyopaque) callconv(.c) ?*c.struct_libdecor_frame,
+    libdecor_frame_set_title: *const fn (?*c.struct_libdecor_frame, [*c]const u8) callconv(.c) void,
+    libdecor_frame_map: *const fn (?*c.struct_libdecor_frame) callconv(.c) void,
+    libdecor_configuration_get_content_size: *const fn (?*c.struct_libdecor_configuration, ?*c.struct_libdecor_frame, [*c]c_int, [*c]c_int) callconv(.c) bool,
+    libdecor_frame_commit: *const fn (?*c.struct_libdecor_frame, ?*c.struct_libdecor_state, ?*c.struct_libdecor_configuration) callconv(.c) void,
+    libdecor_state_new: *const fn (c_int, c_int) callconv(.c) ?*c.struct_libdecor_state,
+    libdecor_state_free: *const fn (?*c.struct_libdecor_state) callconv(.c) void,
+    libdecor_dispatch: *const fn (?*c.struct_libdecor, c_int) callconv(.c) c_int,
+
+    pub fn load() !LibDecor {
+        var lib: LibDecor = undefined;
+        lib.handle = mach.dynLibOpen(.{ "libdecor-0.so.0", "libdecor-0.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
+        inline for (@typeInfo(LibDecor).@"struct".fields[1..]) |field| {
+            const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
+            const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
+            @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse {
+                log.err("Symbol lookup failed for {s}", .{name});
+                return error.SymbolLookup;
+            };
+        }
+        return lib;
+    }
+};
+
+const Interfaces = struct {
+    wl_compositor: ?*c.wl_compositor = null,
+    wl_subcompositor: ?*c.wl_subcompositor = null,
+    wl_shm: ?*c.wl_shm = null,
+    wl_output: ?*c.wl_output = null,
+    wl_seat: ?*c.wl_seat = null,
+    wl_data_device_manager: ?*c.wl_data_device_manager = null,
+    xdg_wm_base: ?*c.xdg_wm_base = null,
+    zxdg_decoration_manager_v1: ?*c.zxdg_decoration_manager_v1 = null,
+};
+
+const KeyModInd = struct {
+    control_index: c.xkb_mod_index_t,
+    alt_index: c.xkb_mod_index_t,
+    shift_index: c.xkb_mod_index_t,
+    super_index: c.xkb_mod_index_t,
+    caps_lock_index: c.xkb_mod_index_t,
+    num_lock_index: c.xkb_mod_index_t,
+};
+
+const registry_listener = struct {
+    fn registryHandleGlobal(window_id: mach.ObjectID, registry: ?*c.struct_wl_registry, name: u32, interface_ptr: [*:0]const u8, version: u32) callconv(.c) void {
+        const interface = std.mem.span(interface_ptr);
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+
+        if (std.mem.eql(u8, "wl_compositor", interface)) {
+            wl.interfaces.wl_compositor = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                libwaylandclient.?.wl_compositor_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+        } else if (std.mem.eql(u8, "wl_subcompositor", interface)) {
+            // TODO: Remove this binding because we aren't using wl_shm
+            wl.interfaces.wl_subcompositor = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                libwaylandclient.?.wl_subcompositor_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+        } else if (std.mem.eql(u8, "wl_shm", interface)) {
+            // TODO: Remove this binding because we aren't using wl_shm
+            wl.interfaces.wl_shm = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                libwaylandclient.?.wl_shm_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+        } else if (std.mem.eql(u8, "wl_output", interface)) {
+            wl.interfaces.wl_output = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                libwaylandclient.?.wl_output_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+            _ = c.wl_output_add_listener(wl.interfaces.wl_output, &wl_output_listener.listener, @ptrFromInt(window_id));
+            // } else if (std.mem.eql(u8, "wl_data_device_manager", interface)) {
+            //     wl.interfaces.wl_data_device_manager = @ptrCast(c.wl_registry_bind(
+            //         registry,
+            //         name,
+            //         libwaylandclient.?.wl_data_device_manager_interface,
+            //         @min(3, version),
+            //     ) orelse @panic("uh idk how to proceed"));
+        } else if (std.mem.eql(u8, "xdg_wm_base", interface)) {
+            wl.interfaces.xdg_wm_base = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                &c.xdg_wm_base_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+
+            // TODO: handle return value
+            _ = c.xdg_wm_base_add_listener(wl.interfaces.xdg_wm_base, &xdg_wm_base_listener.listener, @ptrFromInt(window_id));
+        } else if (std.mem.eql(u8, "zxdg_decoration_manager_v1", interface)) {
+            wl.interfaces.zxdg_decoration_manager_v1 = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                &c.zxdg_decoration_manager_v1_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+        } else if (std.mem.eql(u8, "wl_seat", interface)) {
+            wl.interfaces.wl_seat = @ptrCast(c.wl_registry_bind(
+                registry,
+                name,
+                libwaylandclient.?.wl_seat_interface,
+                @min(3, version),
+            ) orelse @panic("uh idk how to proceed"));
+
+            // TODO: handle return value
+            _ = c.wl_seat_add_listener(wl.interfaces.wl_seat, &seat_listener.listener, @ptrFromInt(window_id));
+        } else {
+            // No changes made to `wl`, so exit function
+            return;
+        }
+        core_ptr.windows.setValue(window_id, core_window);
+    }
+
+    fn registryHandleGlobalRemove(window_id: mach.ObjectID, registry: ?*c.struct_wl_registry, name: u32) callconv(.c) void {
+        _ = window_id;
+        _ = registry;
+        _ = name;
+    }
+
+    const listener = c.wl_registry_listener{
+        // ptrcast is for the [*:0] -> [*c] conversion, silly yes
+        .global = @ptrCast(&registryHandleGlobal),
+        // ptrcast is for the wl param, which is guarenteed to be our type (and if its not, it should be caught by safety checks)
+        .global_remove = @ptrCast(&registryHandleGlobalRemove),
+    };
+};
+
+const wl_output_listener = struct {
+    fn output_scale(user_data: ?*anyopaque, wl_output: ?*c.struct_wl_output, scale: i32) callconv(.c) void {
+        const window_id = @intFromPtr(user_data);
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+
+        wl.scale = @intCast(scale);
+
+        _ = wl_output;
+    }
+
+    fn output_geometry(
+        user_data: ?*anyopaque,
+        wl_output: ?*c.struct_wl_output,
+        x: i32,
+        y: i32,
+        physical_width: i32,
+        physical_height: i32,
+        subpixel: i32,
+        make: [*c]const u8,
+        model: [*c]const u8,
+        transform: i32,
+    ) callconv(.c) void {
+        _ = user_data;
+        _ = wl_output;
+        _ = x;
+        _ = y;
+        _ = physical_width;
+        _ = physical_height;
+        _ = subpixel;
+        _ = make;
+        _ = model;
+        _ = transform;
+    }
+
+    fn output_mode(user_data: ?*anyopaque, wl_output: ?*c.struct_wl_output, flags: u32, width: i32, height: i32, refresh: i32) callconv(.c) void {
+        _ = user_data;
+        _ = wl_output;
+        _ = flags;
+        _ = width;
+        _ = height;
+        _ = refresh;
+    }
+
+    fn output_done(user_data: ?*anyopaque, wl_output: ?*c.struct_wl_output) callconv(.c) void {
+        _ = user_data;
+        _ = wl_output;
+    }
+
+    const listener = c.wl_output_listener{
+        .scale = output_scale,
+        //below are not implemented but must be set since listener attempts to call them
+        .geometry = output_geometry,
+        .mode = output_mode,
+        .done = output_done,
+    };
+};
+
+const keyboard_listener = struct {
+    fn keyboardHandleKeymap(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, format: u32, fd: i32, keymap_size: u32) callconv(.c) void {
+        _ = keyboard;
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+
+        if (format != c.WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
+            @panic("TODO");
+        }
+
+        const map_str = std.posix.mmap(null, keymap_size, .{ .READ = true }, .{ .TYPE = .SHARED }, fd, 0) catch unreachable;
+
+        const keymap = libxkbcommon.?.xkb_keymap_new_from_string(
+            wl.xkb_context,
+            @alignCast(map_str), //align cast happening here, im sure its fine? TODO: figure out if this okay
+            c.XKB_KEYMAP_FORMAT_TEXT_V1,
+            0,
+        ).?;
+
+        //Unmap the keymap
+        std.posix.munmap(map_str);
+        //Close the fd
+        std.Io.Threaded.closeFd(fd);
+
+        //Release reference to old state and create new state
+        libxkbcommon.?.xkb_state_unref(wl.xkb_state);
+        const state = libxkbcommon.?.xkb_state_new(keymap).?;
+
+        //this chain hurts me. why must C be this way.
+        const locale = std.c.getenv("LC_ALL") orelse std.c.getenv("LC_CTYPE") orelse std.c.getenv("LANG") orelse "C";
+
+        var compose_table = libxkbcommon.?.xkb_compose_table_new_from_locale(
+            wl.xkb_context,
+            locale,
+            c.XKB_COMPOSE_COMPILE_NO_FLAGS,
+        );
+
+        //If creation failed, lets try the C locale
+        if (compose_table == null)
+            compose_table = libxkbcommon.?.xkb_compose_table_new_from_locale(
+                wl.xkb_context,
+                "C",
+                c.XKB_COMPOSE_COMPILE_NO_FLAGS,
+            ).?;
+
+        defer libxkbcommon.?.xkb_compose_table_unref(compose_table);
+
+        wl.keymap = keymap;
+        wl.xkb_state = state;
+        wl.compose_state = libxkbcommon.?.xkb_compose_state_new(compose_table, c.XKB_COMPOSE_STATE_NO_FLAGS).?;
+
+        wl.modifier_indices.control_index = libxkbcommon.?.xkb_keymap_mod_get_index(keymap, "Control");
+        wl.modifier_indices.alt_index = libxkbcommon.?.xkb_keymap_mod_get_index(keymap, "Mod1");
+        wl.modifier_indices.shift_index = libxkbcommon.?.xkb_keymap_mod_get_index(keymap, "Shift");
+        wl.modifier_indices.super_index = libxkbcommon.?.xkb_keymap_mod_get_index(keymap, "Mod4");
+        wl.modifier_indices.caps_lock_index = libxkbcommon.?.xkb_keymap_mod_get_index(keymap, "Lock");
+        wl.modifier_indices.num_lock_index = libxkbcommon.?.xkb_keymap_mod_get_index(keymap, "Mod2");
+
+        core_ptr.windows.setValue(window_id, core_window);
+    }
+
+    fn keyboardHandleEnter(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, surface: ?*c.struct_wl_surface, keys: [*c]c.struct_wl_array) callconv(.c) void {
+        _ = keyboard;
+        _ = serial;
+        _ = surface;
+        _ = keys;
+
+        core_ptr.pushEvent(.{ .focus_gained = .{ .window_id = window_id } });
+    }
+
+    fn keyboardHandleLeave(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, surface: ?*c.struct_wl_surface) callconv(.c) void {
+        _ = keyboard;
+        _ = serial;
+        _ = surface;
+
+        core_ptr.pushEvent(.{ .focus_lost = .{ .window_id = window_id } });
+    }
+
+    fn keyboardHandleKey(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, time: u32, scancode: u32, state: u32) callconv(.c) void {
+        _ = keyboard;
+        _ = serial;
+        _ = time;
+        const wl = &core_ptr.windows.getValue(window_id).native.?.wayland;
+
+        const pressed = state == 1;
+
+        const key_event = KeyEvent{ .key = toMachKey(scancode), .mods = wl.modifiers, .window_id = window_id };
+
+        if (pressed) {
+            core_ptr.pushEvent(.{ .key_press = key_event });
+
+            var keysyms: ?[*]const c.xkb_keysym_t = undefined;
+            //Get the keysym from the keycode (scancode + 8)
+            if (libxkbcommon.?.xkb_state_key_get_syms(wl.xkb_state, scancode + 8, &keysyms) == 1) {
+                //Compose the keysym
+                const keysym: c.xkb_keysym_t = composeSymbol(wl, keysyms.?[0]);
+
+                //Try to convert that keysym to a unicode codepoint
+                const codepoint = libxkbcommon.?.xkb_keysym_to_utf32(keysym);
+                if (codepoint != 0) {
+                    core_ptr.pushEvent(.{ .char_input = .{ .codepoint = @truncate(codepoint), .window_id = window_id } });
+                }
+            }
+        } else {
+            core_ptr.pushEvent(.{ .key_release = key_event });
+        }
+    }
+
+    fn keyboardHandleModifiers(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, mods_depressed: u32, mods_latched: u32, mods_locked: u32, group: u32) callconv(.c) void {
+        _ = keyboard;
+        _ = serial;
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+
+        if (wl.keymap == null)
+            return;
+
+        // TODO: handle this return value
+        _ = libxkbcommon.?.xkb_state_update_mask(
+            wl.xkb_state.?,
+            mods_depressed,
+            mods_latched,
+            mods_locked,
+            0,
+            0,
+            group,
+        );
+
+        //Iterate over all the modifiers
+        inline for (.{
+            .{ wl.modifier_indices.alt_index, "alt" },
+            .{ wl.modifier_indices.shift_index, "shift" },
+            .{ wl.modifier_indices.super_index, "super" },
+            .{ wl.modifier_indices.control_index, "control" },
+            .{ wl.modifier_indices.num_lock_index, "num_lock" },
+            .{ wl.modifier_indices.caps_lock_index, "caps_lock" },
+        }) |key| {
+            @field(wl.modifiers, key[1]) = libxkbcommon.?.xkb_state_mod_index_is_active(
+                wl.xkb_state,
+                key[0],
+                c.XKB_STATE_MODS_EFFECTIVE,
+            ) == 1;
+        }
+
+        core_ptr.windows.setValue(window_id, core_window);
+    }
+
+    fn keyboardHandleRepeatInfo(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, rate: i32, delay: i32) callconv(.c) void {
+        _ = window_id;
+        _ = keyboard;
+        _ = rate;
+        _ = delay;
+    }
+
+    const listener = c.wl_keyboard_listener{
+        .keymap = @ptrCast(&keyboardHandleKeymap),
+        .enter = @ptrCast(&keyboardHandleEnter),
+        .leave = @ptrCast(&keyboardHandleLeave),
+        .key = @ptrCast(&keyboardHandleKey),
+        .modifiers = @ptrCast(&keyboardHandleModifiers),
+        .repeat_info = @ptrCast(&keyboardHandleRepeatInfo),
+    };
+};
+
+const pointer_listener = struct {
+    fn handlePointerAxis(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, time: u32, axis: u32, value: c.wl_fixed_t) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = time;
+        _ = axis;
+        _ = value;
+    }
+
+    fn handlePointerFrame(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+    }
+
+    fn handlePointerAxisSource(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis_source: u32) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = axis_source;
+    }
+
+    fn handlePointerAxisStop(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, time: u32, axis: u32) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = time;
+        _ = axis;
+    }
+
+    fn handlePointerAxisDiscrete(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, discrete: i32) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = axis;
+        _ = discrete;
+    }
+
+    fn handlePointerAxisValue120(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, value_120: i32) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = axis;
+        _ = value_120;
+    }
+
+    fn handlePointerAxisRelativeDirection(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, direction: u32) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = axis;
+        _ = direction;
+    }
+
+    fn handlePointerEnter(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, surface: ?*c.struct_wl_surface, fixed_x: c.wl_fixed_t, fixed_y: c.wl_fixed_t) callconv(.c) void {
+        _ = fixed_x;
+        _ = fixed_y;
+        _ = window_id;
+        _ = pointer;
+        _ = serial;
+        _ = surface;
+    }
+
+    fn handlePointerLeave(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, surface: ?*c.struct_wl_surface) callconv(.c) void {
+        _ = window_id;
+        _ = pointer;
+        _ = serial;
+        _ = surface;
+    }
+
+    fn handlePointerMotion(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, fixed_x: c.wl_fixed_t, fixed_y: c.wl_fixed_t) callconv(.c) void {
+        _ = pointer;
+        _ = serial;
+
+        const x = c.wl_fixed_to_double(fixed_x);
+        const y = c.wl_fixed_to_double(fixed_y);
+
+        core_ptr.pushEvent(.{ .mouse_motion = .{ .pos = .{ .x = x, .y = y }, .window_id = window_id } });
+    }
+
+    fn handlePointerButton(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, time: u32, button: u32, state: u32) callconv(.c) void {
+        _ = pointer;
+        _ = serial;
+        _ = time;
+        const wl = &core_ptr.windows.getValue(window_id).native.?.wayland;
+
+        const mouse_button: Core.MouseButtonID = @enumFromInt(button - c.BTN_LEFT);
+        const pressed = state == c.WL_POINTER_BUTTON_STATE_PRESSED;
+        const x = core_ptr.input_state.mouse_position.x;
+        const y = core_ptr.input_state.mouse_position.y;
+
+        if (pressed) {
+            core_ptr.pushEvent(Core.Event{ .mouse_press = .{
+                .button = mouse_button,
+                .mods = wl.modifiers,
+                .pos = .{ .x = x, .y = y },
+                .window_id = window_id,
+            } });
+        } else {
+            core_ptr.pushEvent(Core.Event{ .mouse_release = .{
+                .button = mouse_button,
+                .mods = wl.modifiers,
+                .pos = .{ .x = x, .y = y },
+                .window_id = window_id,
+            } });
+        }
+    }
+
+    const listener = c.wl_pointer_listener{
+        .axis = @ptrCast(&handlePointerAxis),
+        .axis_discrete = @ptrCast(&handlePointerAxisDiscrete),
+        .axis_relative_direction = @ptrCast(&handlePointerAxisRelativeDirection),
+        .axis_source = @ptrCast(&handlePointerAxisSource),
+        .axis_stop = @ptrCast(&handlePointerAxisStop),
+        .axis_value120 = @ptrCast(&handlePointerAxisValue120),
+        .button = @ptrCast(&handlePointerButton),
+        .enter = @ptrCast(&handlePointerEnter),
+        .frame = @ptrCast(&handlePointerFrame),
+        .leave = @ptrCast(&handlePointerLeave),
+        .motion = @ptrCast(&handlePointerMotion),
+    };
+};
+
+const seat_listener = struct {
+    fn seatHandleName(window_id: mach.ObjectID, seat: ?*c.struct_wl_seat, name_ptr: [*:0]const u8) callconv(.c) void {
+        _ = window_id;
+        _ = seat;
+        _ = name_ptr;
+    }
+
+    fn seatHandleCapabilities(window_id: mach.ObjectID, seat: ?*c.struct_wl_seat, caps: c.wl_seat_capability) callconv(.c) void {
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+        var changed = false;
+
+        if ((caps & c.WL_SEAT_CAPABILITY_KEYBOARD) != 0) {
+            changed = true;
+            wl.keyboard = c.wl_seat_get_keyboard(seat);
+
+            // TODO: handle return value
+            _ = c.wl_keyboard_add_listener(wl.keyboard, &keyboard_listener.listener, @ptrFromInt(window_id));
+        }
+
+        if ((caps & c.WL_SEAT_CAPABILITY_TOUCH) != 0) {
+            // TODO
+        }
+
+        if ((caps & c.WL_SEAT_CAPABILITY_POINTER) != 0) {
+            changed = true;
+            wl.pointer = c.wl_seat_get_pointer(seat);
+
+            // TODO: handle return value
+            _ = c.wl_pointer_add_listener(wl.pointer, &pointer_listener.listener, @ptrFromInt(window_id));
+        }
+
+        // Delete keyboard if its no longer in the seat
+        if (wl.keyboard) |keyboard| {
+            if ((caps & c.WL_SEAT_CAPABILITY_KEYBOARD) == 0) {
+                changed = true;
+                c.wl_keyboard_destroy(keyboard);
+                wl.keyboard = null;
+            }
+        }
+
+        if (wl.pointer) |pointer| {
+            if ((caps & c.WL_SEAT_CAPABILITY_POINTER) == 0) {
+                changed = true;
+                c.wl_pointer_destroy(pointer);
+                wl.pointer = null;
+            }
+        }
+
+        if (changed) {
+            core_ptr.windows.setValue(window_id, core_window);
+        }
+    }
+
+    const listener = c.wl_seat_listener{
+        .capabilities = @ptrCast(&seatHandleCapabilities),
+        .name = @ptrCast(&seatHandleName), //ptrCast for the `[*:0]const u8`
+    };
+};
+
+const xdg_wm_base_listener = struct {
+    fn wmBaseHandlePing(window_id: mach.ObjectID, wm_base: ?*c.struct_xdg_wm_base, serial: u32) callconv(.c) void {
+        _ = window_id;
+        c.xdg_wm_base_pong(wm_base, serial);
+    }
+
+    const listener = c.xdg_wm_base_listener{ .ping = @ptrCast(&wmBaseHandlePing) };
+};
+
+const xdg_surface_listener = struct {
+    fn xdgSurfaceHandleConfigure(window_id: mach.ObjectID, xdg_surface: ?*c.struct_xdg_surface, serial: u32) callconv(.c) void {
+        c.xdg_surface_ack_configure(xdg_surface, serial);
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+
+        if (wl.configured) {
+            c.wl_surface_commit(wl.surface);
+        } else {
+            wl.configured = true;
+            core_ptr.windows.setValue(window_id, core_window);
+            core_window = core_ptr.windows.getValue(window_id);
+        }
+
+        setContentAreaOpaque(wl, Core.Size{ .width = core_window.width, .height = core_window.height });
+    }
+
+    const listener = c.xdg_surface_listener{ .configure = @ptrCast(&xdgSurfaceHandleConfigure) };
+};
+
+const xdg_toplevel_listener = struct {
+    fn xdgToplevelHandleClose(window_id: mach.ObjectID, toplevel: ?*c.struct_xdg_toplevel) callconv(.c) void {
+        // TODO: implement this
+        _ = window_id;
+        _ = toplevel;
+    }
+
+    fn xdgToplevelHandleConfigure(window_id: mach.ObjectID, toplevel: ?*c.struct_xdg_toplevel, width: i32, height: i32, states: [*c]c.struct_wl_array) callconv(.c) void {
+        var core_window = core_ptr.windows.getValue(window_id);
+        _ = toplevel;
+        _ = states;
+
+        if (width > 0 and height > 0) {
+            core_window.width = @intCast(width);
+            core_window.height = @intCast(height);
+            core_ptr.windows.setValue(window_id, core_window);
+        }
+    }
+
+    const listener = c.xdg_toplevel_listener{
+        .configure = @ptrCast(&xdgToplevelHandleConfigure),
+        .close = @ptrCast(&xdgToplevelHandleClose),
+    };
+};
+
+const libdecor_listener = struct {
+    fn handle_error(context: ?*c.struct_libdecor, err: c_uint, message: [*c]const u8) callconv(.c) void {
+        _ = context;
+        _ = err;
+
+        log.err("{s}", .{message});
+    }
+
+    fn libdecor_configure(frame: ?*c.struct_libdecor_frame, configuration: ?*c.struct_libdecor_configuration, user_data: ?*anyopaque) callconv(.c) void {
+        const window_id = @intFromPtr(user_data);
+        var core_window = core_ptr.windows.getValue(window_id);
+        var wl = &core_window.native.?.wayland;
+
+        var width: c_int = 0;
+        var height: c_int = 0;
+        if (!libdecor.?.libdecor_configuration_get_content_size(configuration, frame, &width, &height)) {
+            //Set initial window size configuration
+            width = @intCast(core_window.width);
+            height = @intCast(core_window.height);
+        } else {
+            const new_width: u32 = if (width > 0) @intCast(width) else core_window.width;
+            const new_height: u32 = if (height > 0) @intCast(height) else core_window.height;
+            if (core_window.width != new_width or core_window.height != new_height) {
+                // Update logical size only. renewSwapChain in Linux.zig detects the mismatch
+                // and recreates the swapchain
+                core_window.height = new_height;
+                core_window.width = new_width;
+
+                setContentAreaOpaque(wl, Core.Size{ .width = core_window.width, .height = core_window.height });
+                // Wayland does not currently track pixel density separately.
+                const new_size = Core.Size{ .width = core_window.width, .height = core_window.height };
+                core_ptr.pushEvent(.{ .resize = .{
+                    .window_id = window_id,
+                    .window_size = new_size,
+                    .framebuffer_size = new_size,
+                    .pixel_density = 1.0,
+                } });
+            }
+        }
+
+        wl.configured = true;
+        const state = libdecor.?.libdecor_state_new(width, height);
+        defer libdecor.?.libdecor_state_free(state);
+
+        libdecor.?.libdecor_frame_commit(wl.libdecor_frame, state, configuration);
+        c.wl_surface_commit(wl.surface);
+
+        core_ptr.windows.setValue(window_id, core_window);
+    }
+
+    fn libdecor_commit(frame: ?*c.struct_libdecor_frame, user_data: ?*anyopaque) callconv(.c) void {
+        const window_id = @intFromPtr(user_data);
+        var core_window = core_ptr.windows.getValue(window_id);
+        const wl = &core_window.native.?.wayland;
+
+        //wl should be have configured = true
+        c.wl_surface_commit(wl.surface);
+
+        _ = frame;
+    }
+
+    fn libdecor_close(frame: ?*c.struct_libdecor_frame, user_data: ?*anyopaque) callconv(.c) void {
+        const window_id = @intFromPtr(user_data);
+        core_ptr.pushEvent(.{ .close = .{ .window_id = window_id } });
+        _ = frame;
+    }
+
+    var interface = c.libdecor_interface{ .@"error" = handle_error };
+    var frame_interface = c.libdecor_frame_interface{
+        .configure = libdecor_configure,
+        .commit = libdecor_commit,
+        .close = libdecor_close,
+    };
+};
+
+fn composeSymbol(wl: *const Native, sym: c.xkb_keysym_t) c.xkb_keysym_t {
+    if (sym == c.XKB_KEY_NoSymbol or wl.compose_state == null)
+        return sym;
+
+    if (libxkbcommon.?.xkb_compose_state_feed(wl.compose_state, sym) != c.XKB_COMPOSE_FEED_ACCEPTED)
+        return sym;
+
+    return switch (libxkbcommon.?.xkb_compose_state_get_status(wl.compose_state)) {
+        c.XKB_COMPOSE_COMPOSED => libxkbcommon.?.xkb_compose_state_get_one_sym(wl.compose_state),
+        c.XKB_COMPOSE_COMPOSING, c.XKB_COMPOSE_CANCELLED => c.XKB_KEY_NoSymbol,
+        else => sym,
+    };
+}
+
+fn toMachKey(key: u32) Core.KeyButtonID {
+    return switch (key) {
+        c.KEY_GRAVE => .grave,
+        c.KEY_1 => .one,
+        c.KEY_2 => .two,
+        c.KEY_3 => .three,
+        c.KEY_4 => .four,
+        c.KEY_5 => .five,
+        c.KEY_6 => .six,
+        c.KEY_7 => .seven,
+        c.KEY_8 => .eight,
+        c.KEY_9 => .nine,
+        c.KEY_0 => .zero,
+        c.KEY_SPACE => .space,
+        c.KEY_MINUS => .minus,
+        c.KEY_EQUAL => .equal,
+        c.KEY_Q => .q,
+        c.KEY_W => .w,
+        c.KEY_E => .e,
+        c.KEY_R => .r,
+        c.KEY_T => .t,
+        c.KEY_Y => .y,
+        c.KEY_U => .u,
+        c.KEY_I => .i,
+        c.KEY_O => .o,
+        c.KEY_P => .p,
+        c.KEY_LEFTBRACE => .left_bracket,
+        c.KEY_RIGHTBRACE => .right_bracket,
+        c.KEY_A => .a,
+        c.KEY_S => .s,
+        c.KEY_D => .d,
+        c.KEY_F => .f,
+        c.KEY_G => .g,
+        c.KEY_H => .h,
+        c.KEY_J => .j,
+        c.KEY_K => .k,
+        c.KEY_L => .l,
+        c.KEY_SEMICOLON => .semicolon,
+        c.KEY_APOSTROPHE => .apostrophe,
+        c.KEY_Z => .z,
+        c.KEY_X => .x,
+        c.KEY_C => .c,
+        c.KEY_V => .v,
+        c.KEY_B => .b,
+        c.KEY_N => .n,
+        c.KEY_M => .m,
+        c.KEY_COMMA => .comma,
+        c.KEY_DOT => .period,
+        c.KEY_SLASH => .slash,
+        c.KEY_BACKSLASH => .backslash,
+        c.KEY_ESC => .escape,
+        c.KEY_TAB => .tab,
+        c.KEY_LEFTSHIFT => .left_shift,
+        c.KEY_RIGHTSHIFT => .right_shift,
+        c.KEY_LEFTCTRL => .left_control,
+        c.KEY_RIGHTCTRL => .right_control,
+        c.KEY_LEFTALT => .left_alt,
+        c.KEY_RIGHTALT => .right_alt,
+        c.KEY_LEFTMETA => .left_super,
+        c.KEY_RIGHTMETA => .right_super,
+        c.KEY_NUMLOCK => .num_lock,
+        c.KEY_CAPSLOCK => .caps_lock,
+        c.KEY_PRINT => .print,
+        c.KEY_SCROLLLOCK => .scroll_lock,
+        c.KEY_PAUSE => .pause,
+        c.KEY_DELETE => .delete,
+        c.KEY_BACKSPACE => .backspace,
+        c.KEY_ENTER => .enter,
+        c.KEY_HOME => .home,
+        c.KEY_END => .end,
+        c.KEY_PAGEUP => .page_up,
+        c.KEY_PAGEDOWN => .page_down,
+        c.KEY_INSERT => .insert,
+        c.KEY_LEFT => .left,
+        c.KEY_RIGHT => .right,
+        c.KEY_DOWN => .down,
+        c.KEY_UP => .up,
+        c.KEY_F1 => .f1,
+        c.KEY_F2 => .f2,
+        c.KEY_F3 => .f3,
+        c.KEY_F4 => .f4,
+        c.KEY_F5 => .f5,
+        c.KEY_F6 => .f6,
+        c.KEY_F7 => .f7,
+        c.KEY_F8 => .f8,
+        c.KEY_F9 => .f9,
+        c.KEY_F10 => .f10,
+        c.KEY_F11 => .f11,
+        c.KEY_F12 => .f12,
+        c.KEY_F13 => .f13,
+        c.KEY_F14 => .f14,
+        c.KEY_F15 => .f15,
+        c.KEY_F16 => .f16,
+        c.KEY_F17 => .f17,
+        c.KEY_F18 => .f18,
+        c.KEY_F19 => .f19,
+        c.KEY_F20 => .f20,
+        c.KEY_F21 => .f21,
+        c.KEY_F22 => .f22,
+        c.KEY_F23 => .f23,
+        c.KEY_F24 => .f24,
+        c.KEY_KPSLASH => .kp_divide,
+        c.KEY_KPASTERISK => .kp_multiply,
+        c.KEY_KPMINUS => .kp_subtract,
+        c.KEY_KPPLUS => .kp_add,
+        c.KEY_KP0 => .kp_0,
+        c.KEY_KP1 => .kp_1,
+        c.KEY_KP2 => .kp_2,
+        c.KEY_KP3 => .kp_3,
+        c.KEY_KP4 => .kp_4,
+        c.KEY_KP5 => .kp_5,
+        c.KEY_KP6 => .kp_6,
+        c.KEY_KP7 => .kp_7,
+        c.KEY_KP8 => .kp_8,
+        c.KEY_KP9 => .kp_9,
+        c.KEY_KPDOT => .kp_decimal,
+        c.KEY_KPEQUAL => .kp_equal,
+        c.KEY_KPENTER => .kp_enter,
+        else => .unknown,
+    };
+}
+
+fn setContentAreaOpaque(wl: *const Native, new_size: Core.Size) void {
+    const region = c.wl_compositor_create_region(wl.interfaces.wl_compositor) orelse return;
+
+    c.wl_region_add(region, 0, 0, @intCast(new_size.width), @intCast(new_size.height));
+    c.wl_surface_set_opaque_region(wl.surface, region);
+    c.wl_region_destroy(region);
+
+    // FIX: What is the Mach Object System way of doing this?
+    // core_ptr.swap_chain_update.set();
+}
+
+fn setupLibDecor(window_id: mach.ObjectID) !void {
+    var core_window = core_ptr.windows.getValue(window_id);
+    var wl = &core_window.native.?.wayland;
+
+    wl.libdecor_context = libdecor.?.libdecor_new(wl.display, &libdecor_listener.interface);
+    if (wl.libdecor_context == null) {
+        return error.FailedLibDecorInitialization;
+    }
+
+    wl.libdecor_frame = libdecor.?.libdecor_decorate(wl.libdecor_context, wl.surface, &libdecor_listener.frame_interface, @ptrFromInt(window_id));
+    if (wl.libdecor_frame == null) {
+        return error.FailedLibDecorFrameDecoration;
+    }
+
+    libdecor.?.libdecor_frame_set_title(wl.libdecor_frame, core_window.title);
+    libdecor.?.libdecor_frame_map(wl.libdecor_frame);
+    core_ptr.windows.setValue(window_id, core_window);
+}

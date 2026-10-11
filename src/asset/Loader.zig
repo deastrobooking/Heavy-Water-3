@@ -297,7 +297,7 @@ test "a pack of 64 models loads in the background with progress; damage fails on
     try std.testing.expectEqual(@as(u32, 64), loader.stats.loaded);
     try std.testing.expectEqual(@as(u32, 2), loader.stats.failed);
     // A damaged table is refused when the pack is opened.
-    try tmp.dir.writeFile(io, .{ .sub_path = "bad.hwpk", .data = "HWPK\x07\x00\x00\x00" ++ [_]u8{0} ** 8 });
+    try tmp.dir.writeFile(io, .{ .sub_path = "bad.hwpk", .data = "HWPK\x07\x00\x00\x00" ++ @as([8]u8, @splat(0)) });
     try std.testing.expectError(error.UnsupportedPackVersion, loader.openPack(tmp.dir, "bad.hwpk"));
 }
 

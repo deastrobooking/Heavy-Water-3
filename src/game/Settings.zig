@@ -1,13 +1,14 @@
 //! Player settings, kept in `saves/settings.json` apart from world saves. Every field has a
 //! range; a missing or damaged file falls back to the defaults.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Settings = @This();
 const Bindings = @import("Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 
 pub const path = "saves/settings.json";
 pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, metrics };
-pub const field_count = @typeInfo(Field).@"enum".fields.len;
+pub const field_count = enum_compat.fields(Field).len;
 
 /// Volumes in percent: everything, then the effects, ambience and interface buses.
 master_volume: u8 = 80,

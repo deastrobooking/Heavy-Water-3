@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const enum_compat = @import("enum_compat");
 const mach = @import("mach");
 const math = @import("mach").math;
 const Physics = @import("../physics/Physics.zig");
@@ -64,7 +66,7 @@ pub const BenchmarkMetric = struct {
     }
 };
 pub const BenchmarkMetrics = struct {
-    stages: [@typeInfo(BenchmarkStage).@"enum".fields.len]BenchmarkMetric = @splat(.{}),
+    stages: [enum_compat.fields(BenchmarkStage).len]BenchmarkMetric = @splat(.{}),
     pub fn record(self: *BenchmarkMetrics, stage: BenchmarkStage, ms: f32) void {
         self.stages[@intFromEnum(stage)].record(ms);
     }
@@ -138,7 +140,7 @@ pub fn cuePitch(self: *Sandbox, sound: @import("../audio/Synth.zig").Sound, posi
 
 pub const Shop = struct { kind: enum { upgrades, wardrobe, fabricate }, row: u8 = 0, tab: u8 = 0 };
 pub const ShopKey = enum { up, down, left, right, confirm, close };
-pub const wardrobe_rows = @typeInfo(Profile.Clothing).@"enum".fields.len;
+pub const wardrobe_rows = enum_compat.fields(Profile.Clothing).len;
 /// Keys the trade panel understands while a stall is open.
 pub const TradeKey = enum { up, down, confirm, close };
 /// Trade panel rows: sell parts, then one row per ware.
@@ -2423,7 +2425,7 @@ test "powered door blocks, opens from its button, lets the player through, and r
     const bytes = try sandbox.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
     // Close it by hand, then reload: the door and its latch come back open.
-    try sandbox.machines[0].machine.restore(&[_]f32{0} ** 6);
+    try sandbox.machines[0].machine.restore(&@as([6]f32, @splat(0)));
     try sandbox.restore(std.testing.allocator, bytes, &camera);
     try std.testing.expectEqual(@as(f32, 1), sandbox.machines[0].machine.state[door.device]);
     try std.testing.expectApproxEqAbs(origin[0] + 2.9, sandbox.devicePosition(door)[0], 0.001);
@@ -3634,7 +3636,7 @@ test "hover cars stay where they were left across a save, and pickups stay colle
     const bytes = try sb.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
     sb.garage = .{};
-    sb.progress.picked = .initEmpty();
+    sb.progress.picked = if (builtin.zig_version.minor >= 17) .empty else .initEmpty();
     try sb.restore(std.testing.allocator, bytes, &camera);
     const car = sb.garage.cars[0].?.flyer;
     try std.testing.expectApproxEqAbs(moved[0], car.body.pos.x, 1e-3);

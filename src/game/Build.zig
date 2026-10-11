@@ -2,6 +2,7 @@
 //! workshop devices with grid and surface snapping and quarter-turn rotation) and the wire
 //! tool (connect and disconnect device ports with the same validation blueprint files get).
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
 const R = Physics.Rotation;
 const Blueprint = @import("../machine/Blueprint.zig");
@@ -19,7 +20,7 @@ pub const build_reach: f32 = 14;
 pub const grid: f32 = 0.5;
 pub const max_candidates = 16;
 
-pub const builtin_count = std.meta.fields(Item).len;
+pub const builtin_count = enum_compat.fields(Item).len;
 const Market = @import("../city/Market.zig");
 /// A palette entry: a built-in item, a market kit, or a captured prefab (index into
 /// `Sandbox.prefabs`).

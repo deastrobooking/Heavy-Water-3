@@ -1,10 +1,10 @@
 # Rootdeep shrines
 
-The Rootdeep is the forest floor under the canopy city. Two shrines stand there: seed vaults built entirely from the machine kit. Every shrine is generated from the world seed, and a solver proves it can be solved before it is placed.
+The Rootdeep is the forest floor under the canopy city. Two ancient science temples stand there, built around seed vaults in the remains of the first engineers' weapons labs. Their stepped sandstone bases, monumental corner piers, luminous crowns, and turquoise or gold inlays draw from South American rock temples, pagodas, and Indian palace silhouettes. Each world seeds their locations and puzzle layouts; a solver proves each vault can be reached before it is placed.
 
 ## Play a shrine
 
-1. Look for two long, moss-roofed stone halls on the forest floor, 110–260 m from spawn. The smoke log and `Sandbox.shrines` give their exact positions for a seed. Walk in through the open doorway.
+1. Look for two bright, stepped temples on the forest floor, 110–260 m from spawn. One carries a sunstone pyramid crown; the other uses pale stone and turquoise tiers. The smoke log and `Sandbox.shrines` give their exact positions for a seed. Walk in through the open doorway.
 2. Each hall is a chain of rooms, three or four of them. A sliding door between rooms opens when its logic is satisfied. Each door reads one or two conditions:
    - **Latches**, toggled by red buttons on the left walls. Pressing again toggles back.
    - **Weight plates** on the right side, pressed only by a **crate** resting on them. Standing on a plate does nothing.
@@ -17,7 +17,9 @@ Shrines belong to the world. The build tool cannot remove or capture them or pla
 
 ## Generation and verification
 
-`procedural/Shrine.zig`, shrine generator v1:
+`procedural/Shrine.zig` generates the verified puzzle and hall interior. `game/Frontier.zig` adds the exterior temple architecture as presentation geometry, leaving the puzzle collision and solver unchanged.
+
+Shrine generator v1:
 
 - **Candidates:** a seeded candidate picks 3–4 rooms, 1–3 latches with their buttons, 0–2 plates each with a crate, and one or two terms per door. A term is a latch or plate, possibly inverted.
 - **Solver:** a breadth-first search over room, latch bits and each crate's place. A crate is on a room floor, on a plate, or carried; the whole state fits in 2,048 codes. The actions are press, pick up, drop on the floor, drop on a plate, move through an open door, and open the vault. A carried crate does not press a plate.
@@ -28,7 +30,7 @@ Measured over 300 seeds, every shrine is solvable and its plan replays legally. 
 
 Compilation turns the puzzle into an ordinary blueprint, validated by `Blueprint.fromDoc`:
 
-- **Structure:** floor, roof, side and back walls, and doorway walls as structure parts.
+- **Structure:** floor, roof, side and back walls, and doorway walls as structure parts. The live world adds stepped stone terraces, entry stairs, monumental piers, inlaid light bands, and a bright stepped crown around the hall.
 - **Doors:** a generator powers the doors and the seed lamp. Each door is an actuator driven by one logic device: a term is `input > 0.5`, an inverted term `0.5 > input`, and two terms multiply.
 - **Latches and plates:** buttons drive latches, and plates are the new `plate` device kind. A plate reports pressed while a crate centre is over its footprint and up to 1.2 m above it; people do not count.
 - **Vault:** the vault button toggles a `sealed` latch that lights the seed lamp. The world marks the shrine complete when `sealed` is set.

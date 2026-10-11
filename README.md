@@ -2,6 +2,26 @@
 
 **A native Zig exploration, engineering, and world-building game for a wild, technological future Earth.** Built on Mach, Heavy Water brings together procedural Arbors, a living canopy city, hands-on machine building, and traversal across a vast vertical landscape.
 
+## Build and run
+
+From the repository root, build the installed executable and launch it:
+
+```sh
+python3 tools/zig.py build
+./zig-out/bin/heavy-water
+```
+
+For Windows, use `py tools/zig.py build`. The launcher downloads the checksum-verified Zig compiler into `.tools/` when needed and does not change the system Zig or `PATH`. The first build fetches pinned Mach dependencies and requires an internet connection. For a development build that runs directly from the build cache, use `python3 tools/zig.py build run`.
+
+The default compiler is the Zig revision required by the pinned Mach engine. To check newer compilers while preparing the engine update, run:
+
+```sh
+HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check
+HEAVYWATER_ZIG_CHANNEL=0.18-dev python3 tools/zig.py build check
+```
+
+On Windows, set the environment variable before `py tools/zig.py build check`. Both preview channels currently expose Mach compatibility gaps; the 0.18 channel is a pinned development snapshot for reproducible checks. The project-owned engine source lives in `vendor/mach`.
+
 > **Project status:** playable systems prototype in active development. The current build focuses on exploration, construction, machines, vehicles, local co-op, and a bounded procedural district. The Hive war and full combat campaign are still in development; see [the gameplay overview](docs/project-overview.md#what-you-can-do) for status.
 
 ## In the Current Build
@@ -69,8 +89,8 @@ Additional system plans live in [`docs/plans/`](docs/plans/), including scenes, 
 
 ## Technology
 
-- **Language:** Zig `0.16.0-dev.3142+5ccfeb926`, pinned for the selected Mach revision.
-- **Platform and graphics:** [Mach](https://github.com/hexops/mach) with `sysgpu`.
+- **Language:** Zig `0.16.0-dev.3142+5ccfeb926`, pinned for the selected Mach revision. Opt-in checks are available for Zig 0.17.0 and a pinned Zig 0.18.0-dev snapshot.
+- **Platform and graphics:** a project-owned [Mach fork](vendor/mach/FORK.md), based on upstream `7ed0d504`, with `sysgpu`.
 - **Runtime systems:** native Zig procedural generation, physics, asset catalog, machine simulation, streaming, and mod interpreter.
 - **Validation target:** Apple Silicon with Metal. Linux/Vulkan and Windows/D3D12 runtime testing remains future work.
 

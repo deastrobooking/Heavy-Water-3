@@ -1,0 +1,14 @@
+.{
+    .name = .vulkan,
+    .fingerprint = 0xbe155a03c72db6af,
+    .version = "0.0.0",
+    .minimum_zig_version = "0.16.0-dev.1859+212968c57",
+    .paths = .{
+        "build.zig.zon",
+        "build.zig",
+        "LICENSE",
+        "README.md",
+        "FORK.md",
+        "src",
+    },
+}

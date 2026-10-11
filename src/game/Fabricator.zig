@@ -4,6 +4,7 @@
 //! when a recipe cannot be paid. Cars and the Kestrel join the team's garage (`Progress`);
 //! suits, armor and weapons are the maker's own, paid from their kit's pickups and wallet.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Progress = @import("Progress.zig");
 const Kit = @import("Kit.zig");
 const Profile = @import("Profile.zig");
@@ -13,7 +14,7 @@ const Designs = @import("../vehicle/Designs.zig");
 const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 
 pub const Tab = enum { vehicles, suits, armor, weapons, aircraft };
-pub const tab_count = @typeInfo(Tab).@"enum".fields.len;
+pub const tab_count = enum_compat.fields(Tab).len;
 pub const WeaponUpgrade = struct { weapon: WeaponKind, tier: u8 };
 pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.

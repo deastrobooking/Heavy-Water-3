@@ -1,4 +1,5 @@
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const mach = @import("mach");
 const options = @import("options");
 const Engine = @import("engine/Engine.zig");
@@ -334,7 +335,7 @@ fn reportFrontierBenchmark(self: *App) void {
         self.benchmark_air_targets,
         if (self.audio != null) "true" else "false",
     });
-    inline for (@typeInfo(Sandbox.BenchmarkStage).@"enum".fields) |field| {
+    inline for (enum_compat.fields(Sandbox.BenchmarkStage)) |field| {
         const stage: Sandbox.BenchmarkStage = @enumFromInt(field.value);
         const sample = self.benchmark_substeps.stages[field.value];
         const mean = if (sample.total == 0) 0 else sample.sum_ms / @as(f64, @floatFromInt(sample.total));
@@ -1168,7 +1169,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57)) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1269,7 +1270,8 @@ fn showcase(self: *App) void {
 /// 27 four-player split screen with a guest trading, 28 controls while rebinding,
 /// 29 the garage with all three hover cars, 30 a Hive nest under attack, 31 the fabricator,
 /// 32 the Skimmer in flight, 33 the Kestrel on its pad, 34 a dogfight by a Brood carrier,
-/// 35 the carrier from above, 45 a live missile lock for HUD capture, 47 the Scalari fleet lineup.
+/// 35 the carrier from above, 45 a live missile lock for HUD capture, 47 the Scalari fleet lineup,
+/// and 60 the Rootdeep weapon temples.
 fn guiShowcase(self: *App, v: u32) void {
     const sb = &self.sandbox;
     self.engine.input = .{};
@@ -1277,6 +1279,21 @@ fn guiShowcase(self: *App, v: u32) void {
     if (v == 18) {
         if (self.menu.screen == .none) self.menu.open(.title);
         self.titleCamera();
+        return;
+    }
+    if (v == 60) {
+        const shrine = sb.shrines[0];
+        const origin = shrine.origin;
+        const length = @import("procedural/Shrine.zig").length(shrine.generated.puzzle);
+        const eye: [3]f32 = .{ origin[0] + 24, origin[1] + 12, origin[2] - 30 };
+        const target: [3]f32 = .{ origin[0], origin[1] + 5, origin[2] + length * 0.5 };
+        const dx = target[0] - eye[0];
+        const dy = target[1] - eye[1];
+        const dz = target[2] - eye[2];
+        self.engine.camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
+        self.engine.camera.yaw = std.math.atan2(dx, dz);
+        self.engine.camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        sb.player.mode = .fly;
         return;
     }
     if (sb.talk) |*talk| talk.reveal = 999;

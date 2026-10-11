@@ -9,6 +9,7 @@
 //! anything is read; each blob's hash is checked when it is loaded, so a damaged pack fails one
 //! asset with a clear error instead of corrupting memory.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Guid = @import("Guid.zig");
 const Meta = @import("Meta.zig");
 const Pack = @This();
@@ -39,7 +40,7 @@ pub fn open(allocator: std.mem.Allocator, bytes: []const u8, pack_size: u64) (Er
     for (entries, 0..) |*e, i| {
         const raw = bytes[header_size + i * entry_size ..][0..entry_size];
         const kind_byte = raw[16];
-        if (kind_byte >= @typeInfo(Meta.Kind).@"enum".fields.len) return error.InvalidEntry;
+        if (kind_byte >= enum_compat.fields(Meta.Kind).len) return error.InvalidEntry;
         e.* = .{
             .guid = .{ .value = std.mem.readInt(u128, raw[0..16], .little) },
             .kind = @enumFromInt(kind_byte),

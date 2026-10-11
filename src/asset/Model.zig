@@ -83,7 +83,7 @@ pub fn encode(self: Model, allocator: std.mem.Allocator) ![]u8 {
     }
     for (self.submeshes) |s| for ([_]u32{ s.first_index, s.index_count, s.material }) |v| try w.writeInt(u32, v, .little);
     for (self.mesh.vertices) |vertex| {
-        const floats: [vertex_floats]f32 = @bitCast(vertex);
+        const floats = vertex.position ++ vertex.normal ++ vertex.uv ++ vertex.color;
         for (floats) |v| try w.writeInt(u32, @bitCast(v), .little);
     }
     for (self.mesh.indices) |v| try w.writeInt(u32, v, .little);

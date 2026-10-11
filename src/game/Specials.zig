@@ -24,6 +24,7 @@
 //! - **chain:** zaps up to `count` units in sight within `radius` (`damage` each).
 //! - **vanish:** unseen by the Hive for `time` s, healing `damage`.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
 const Profile = @import("Profile.zig");
 const Enemies = @import("Enemies.zig");
@@ -127,7 +128,7 @@ pub const Kind = enum {
     sandstorm,
     pincer_slam,
 };
-pub const kind_count = @typeInfo(Kind).@"enum".fields.len;
+pub const kind_count = enum_compat.fields(Kind).len;
 
 pub const Mechanic = enum { grenade, sentry, shield, blink, slam, lance, launch, aura, field, cone, heal, chain, vanish };
 

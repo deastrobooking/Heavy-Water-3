@@ -1,6 +1,7 @@
 //! Skinned triangle mesh container plus topology helpers used by every generator.
 
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const m = @import("math.zig");
 const Vec2 = m.Vec2;
 const Vec3 = m.Vec3;
@@ -201,7 +202,7 @@ pub const Mesh = struct {
         for (self.vertices.items) |v| try out.print(gpa, "v {d:.5} {d:.5} {d:.5}\n", .{ v.pos.x, v.pos.y, v.pos.z });
         for (self.vertices.items) |v| try out.print(gpa, "vn {d:.4} {d:.4} {d:.4}\n", .{ v.normal.x, v.normal.y, v.normal.z });
         for (self.vertices.items) |v| try out.print(gpa, "vt {d:.4} {d:.4}\n", .{ v.uv.x, v.uv.y });
-        inline for (std.meta.fields(Material)) |f| {
+        inline for (enum_compat.fields(Material)) |f| {
             const mat: Material = @enumFromInt(f.value);
             var wrote_header = false;
             var i: usize = 0;

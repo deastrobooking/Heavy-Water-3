@@ -3,13 +3,14 @@
 //! per day; a stall sells out and restocks at the next dawn. Stock, the day it was stocked,
 //! and the player's wallet are saved.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Seed = @import("../procedural/Seed.zig");
 const Sky = @import("../engine/Sky.zig");
 const District = @import("../procedural/District.zig");
 const Market = @This();
 
 pub const Ware = enum { proximity_gate, street_lamp, signal_relay };
-pub const ware_count = @typeInfo(Ware).@"enum".fields.len;
+pub const ware_count = enum_compat.fields(Ware).len;
 pub const stall_count = 3;
 /// Tower plazas host the stalls.
 pub const stall_plazas = [stall_count]u8{ 1, 3, 5 };

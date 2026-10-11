@@ -189,7 +189,8 @@ test "hits resolve topmost first and text is measured in units" {
     try std.testing.expectEqual(@as(?u16, 1), c.hitAt(10, 10));
     try std.testing.expectEqual(@as(?u16, null), c.hitAt(300, 300));
     try std.testing.expectApproxEqAbs(@as(f32, 22), textWidth("ABC", 1), 1e-6);
-    c.text(0, 0, "x" ** 200, 1, .{ 1, 1, 1, 1 });
+    const long_text: [200]u8 = @splat('x');
+    c.text(0, 0, &long_text, 1, .{ 1, 1, 1, 1 });
     try std.testing.expectEqual(@as(u8, text_capacity), c.commands[0].len);
 }
 

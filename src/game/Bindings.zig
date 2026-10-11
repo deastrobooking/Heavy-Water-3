@@ -2,12 +2,13 @@
 //! saved with the settings. Escape and Enter are reserved for menus. Binding a key that another
 //! action uses swaps the two, so every action always keeps exactly one key.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const mach = @import("mach");
 const Bindings = @This();
 
 pub const Key = mach.Core.KeyButtonID;
 pub const Action = enum { forward, back, left, right, jump, sprint, roll, stomp, grapple, traversal, mantle, ascend, descend, walk_fly, reset, camera_view, customize, inspect, capture_prefab, rotate, next_item, tool_hands, tool_build, tool_wire, tool_bridge, channel_down, channel_up, quicksave, quickload, add_guest, metrics, culling, tool_weapon, special_1, special_2, special_3 };
-pub const count = @typeInfo(Action).@"enum".fields.len;
+pub const count = enum_compat.fields(Action).len;
 pub const defaults = [count]Key{ .w, .s, .a, .d, .space, .left_shift, .left_control, .x, .g, .b, .f, .e, .q, .v, .r, .f2, .f4, .i, .p, .t, .tab, .one, .two, .three, .four, .left_bracket, .right_bracket, .f5, .f9, .f6, .f1, .f7, .five, .z, .c, .h };
 pub const reserved = [_]Key{ .escape, .enter, .kp_enter };
 

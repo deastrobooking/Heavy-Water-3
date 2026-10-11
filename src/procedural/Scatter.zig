@@ -131,7 +131,7 @@ test "seeded scatter distributes all plant forms and three tree species reproduc
 test "boulders gather on high, steep and dry ground, after every older candidate" {
     var objects: [capacity]Object = undefined;
     var boulders: usize = 0;
-    var kinds = [_]bool{false} ** Vegetation.boulder_count;
+    var kinds: [Vegetation.boulder_count]bool = @splat(false);
     for (0..12) |z| for (0..12) |x| {
         const key: Key = .{ .x = @as(i32, @intCast(x)) * 3 - 18, .z = @as(i32, @intCast(z)) * 3 - 18 };
         const n = generate(42, key, &objects);

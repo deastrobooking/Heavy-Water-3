@@ -1,4 +1,5 @@
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Handle = @import("../engine/Handle.zig");
 const Mesh = @import("../render/Mesh.zig");
 const Model = @import("Model.zig");
@@ -489,7 +490,7 @@ pub fn replaceModel(self: *Catalog, allocator: std.mem.Allocator, guid: Guid, mo
     for (self.registry.entries[0..self.registry.count]) |*e| if (e.target == .mesh and e.target.mesh.eql(old)) {
         e.target = .{ .mesh = next };
     };
-    inline for (std.meta.fields(Content)) |field| {
+    inline for (enum_compat.structFields(Content)) |field| {
         if (field.type == MeshHandle) {
             const handle = &@field(self.content, field.name);
             if (handle.eql(old)) handle.* = next;

@@ -4,6 +4,7 @@
 //! body, the rotor and the light strips as separate meshes so the game can spin the rotors and
 //! light the strips.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const car = @import("car.zig");
 const dyn = @import("dynamics.zig");
 const cm = @import("../character/mesh.zig");
@@ -11,7 +12,7 @@ const m = @import("../character/math.zig");
 const RenderMesh = @import("../render/Mesh.zig");
 
 pub const Design = enum { skimmer, dart, courier };
-pub const count = @typeInfo(Design).@"enum".fields.len;
+pub const count = enum_compat.fields(Design).len;
 
 pub const Palette = struct { paint: [3]f32, accent: [3]f32, lights: [3]f32 };
 

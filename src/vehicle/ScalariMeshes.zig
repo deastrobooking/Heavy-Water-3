@@ -2,6 +2,7 @@
 //! plates, overlapping dorsal scales and segmented tails. Two large ark classes carry brood
 //! bays and capital defenses. +Z is forward and +Y is up, matching ShipMeshes.zig.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const m = @import("../character/math.zig");
 const cm = @import("../character/mesh.zig");
 const prims = @import("prims.zig");
@@ -15,7 +16,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Pair = struct { shell: RenderMesh, glow: RenderMesh };
 pub const FighterClass = enum { ember_wyrm, void_lance, dreadclaw };
-pub const fighter_count = @typeInfo(FighterClass).@"enum".fields.len;
+pub const fighter_count = enum_compat.fields(FighterClass).len;
 pub const mothership_count = 2;
 
 const Palette = struct { paint: [3]f32, accent: [3]f32, lights: [3]f32 };

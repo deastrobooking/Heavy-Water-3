@@ -1,6 +1,7 @@
 //! The player's name and appearance. Choices index fixed palettes drawn from the painterly
 //! direction in docs/world.md, so every combination reads well and saves stay small.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Profile = @This();
 
 pub const name_capacity = 20;
@@ -59,7 +60,7 @@ pub const Species = enum {
     butterfly,
     scorpion,
 };
-pub const species_count = @typeInfo(Species).@"enum".fields.len;
+pub const species_count = enum_compat.fields(Species).len;
 pub const HairStyle = enum { short, ponytail, long, crest, hood };
 pub const Presentation = enum { masculine, feminine };
 /// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
@@ -128,19 +129,19 @@ pub fn backspace(self: *Profile) void {
 pub fn adjust(self: *Profile, field: Field, delta: i32) void {
     switch (field) {
         .name => {},
-        .class => self.class = @enumFromInt(cycle(@intFromEnum(self.class), delta, @typeInfo(Class).@"enum".fields.len)),
+        .class => self.class = @enumFromInt(cycle(@intFromEnum(self.class), delta, enum_compat.fields(Class).len)),
         .species => self.species = @enumFromInt(cycle(@intFromEnum(self.species), delta, species_count)),
         .coat => self.coat = cycle(self.coat, delta, coat_colors.len),
         .marking => self.marking = cycle(self.marking, delta, coat_colors.len),
-        .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, @typeInfo(Presentation).@"enum".fields.len)),
+        .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, enum_compat.fields(Presentation).len)),
         .height => self.height = std.math.clamp(self.height + @as(f32, @floatFromInt(delta)) * 0.02, 0.9, 1.1),
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
         .skin => self.skin = cycle(self.skin, delta, skin_tones.len),
-        .hair_style => self.hair_style = @enumFromInt(cycle(@intFromEnum(self.hair_style), delta, std.meta.fields(HairStyle).len)),
+        .hair_style => self.hair_style = @enumFromInt(cycle(@intFromEnum(self.hair_style), delta, enum_compat.fields(HairStyle).len)),
         .hair_color => self.hair_color = cycle(self.hair_color, delta, hair_colors.len),
         .outfit => self.outfit = cycle(self.outfit, delta, outfit_colors.len),
-        .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, @typeInfo(Clothing).@"enum".fields.len)),
-        .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, @typeInfo(Armor).@"enum".fields.len)),
+        .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, enum_compat.fields(Clothing).len)),
+        .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, enum_compat.fields(Armor).len)),
         .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, 3)),
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
     }
@@ -207,7 +208,8 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     try std.testing.expectError(error.InvalidName, p.setName(""));
     try std.testing.expectError(error.InvalidName, p.setName(" lead"));
     try std.testing.expectError(error.InvalidName, p.setName("no_underscores"));
-    try std.testing.expectError(error.InvalidName, p.setName("x" ** 21));
+    const too_long_name: [21]u8 = @splat('x');
+    try std.testing.expectError(error.InvalidName, p.setName(&too_long_name));
     while (p.name_len > 0) p.backspace();
     p.typeChar(' ');
     p.typeChar('z');

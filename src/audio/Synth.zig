@@ -3,6 +3,7 @@
 //! f32 at `rate`, peak-normalized; loops crossfade their tail into their head so they repeat
 //! without a click.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Synth = @This();
 
 pub const rate: u32 = 48_000;
@@ -45,7 +46,7 @@ pub const Sound = enum {
         };
     }
 };
-pub const sound_count = @typeInfo(Sound).@"enum".fields.len;
+pub const sound_count = enum_compat.fields(Sound).len;
 
 /// Deterministic white noise (xorshift), in [-1, 1].
 const Noise = struct {

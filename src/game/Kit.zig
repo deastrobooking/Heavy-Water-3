@@ -4,6 +4,7 @@
 //! pets they freed with each pet's experience. In co-op every player has a kit of their own; the
 //! team shares only the world and its story (`Progress`). Nothing changes when a purchase fails.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Pets = @import("Pets.zig");
 const Market = @import("../city/Market.zig");
 const Profile = @import("Profile.zig");
@@ -13,7 +14,7 @@ const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 const Kit = @This();
 
 pub const Upgrade = enum { fuel_tank, jet_efficiency, sprint_servos, stamina_weave, grapple_reel, salvage_kit };
-pub const upgrade_count = @typeInfo(Upgrade).@"enum".fields.len;
+pub const upgrade_count = enum_compat.fields(Upgrade).len;
 pub const max_level = 3;
 pub const Cost = struct { scrap: u32, parts: u32 };
 pub const Error = error{ MaxLevel, NotEnoughScrap, NotEnoughParts, AlreadyOwned, NotOwned };
@@ -44,7 +45,7 @@ inventory: [Collectibles.kind_count]u32 = @splat(0),
 armors: u8 = free_armors,
 weapons: u16 = starter_weapons,
 /// Installed weapon tiers beyond Mk I, indexed by `WeaponKind`.
-weapon_upgrades: [@typeInfo(WeaponKind).@"enum".fields.len]u8 = @splat(0),
+weapon_upgrades: [enum_compat.fields(WeaponKind).len]u8 = @splat(0),
 /// Bio-synth pets freed (bit per `Pets.Species`), each one's experience, and the one out.
 pets: u8 = 0,
 pet_xp: [Pets.count]u32 = @splat(0),
@@ -189,11 +190,11 @@ pub const PetDoc = struct { name: []const u8, xp: u32 = 0 };
 
 pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
     var suits: std.ArrayList(Profile.Clothing) = .empty;
-    inline for (@typeInfo(Profile.Clothing).@"enum".fields) |f| if (self.owns(@enumFromInt(f.value))) try suits.append(arena, @enumFromInt(f.value));
+    inline for (enum_compat.fields(Profile.Clothing)) |f| if (self.owns(@enumFromInt(f.value))) try suits.append(arena, @enumFromInt(f.value));
     var armors: std.ArrayList(Profile.Armor) = .empty;
-    inline for (@typeInfo(Profile.Armor).@"enum".fields) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
+    inline for (enum_compat.fields(Profile.Armor)) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
     var weapons: std.ArrayList(WeaponKind) = .empty;
-    inline for (@typeInfo(WeaponKind).@"enum".fields) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
+    inline for (enum_compat.fields(WeaponKind)) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
     var pets: std.ArrayList(PetDoc) = .empty;
     for (std.enums.values(Pets.Species)) |sp| if (self.hasPet(sp)) try pets.append(arena, .{ .name = Pets.info(sp).name, .xp = self.pet_xp[@intFromEnum(sp)] });
     return .{
@@ -292,7 +293,7 @@ test "suits are bought once, and a kit round-trips through its save shape" {
     try std.testing.expectEqual(@as(u8, 3), back.petLevel(.falcon));
     try std.testing.expectEqual(Pets.Species.falcon, back.pet_active.?);
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
-    try std.testing.expectError(error.InvalidKit, fromDoc(.{ .levels = &(.{0} ** (upgrade_count + 1)) }));
+    try std.testing.expectError(error.InvalidKit, fromDoc(.{ .levels = &@as([upgrade_count + 1]u8, @splat(0)) }));
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .weapon_upgrades = &.{3} }));
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .weapon_upgrades = &.{1} })).weaponLevel(.beam_saber));
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));

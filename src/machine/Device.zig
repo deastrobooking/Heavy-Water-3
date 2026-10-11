@@ -1,4 +1,5 @@
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 
 /// Device kinds shared by every machine. Sensors produce signals, controllers transform them,
 /// actuators consume power and signals, and generators feed power networks.
@@ -90,7 +91,7 @@ pub fn powerPort(kind: Kind) ?u8 {
 }
 
 test "port tables fit the fixed capacity and have at most one power port" {
-    inline for (std.meta.fields(Kind)) |field| {
+    inline for (enum_compat.fields(Kind)) |field| {
         const kind: Kind = @enumFromInt(field.value);
         try std.testing.expect(ports(kind).len <= max_ports);
         var power: usize = 0;
@@ -100,7 +101,7 @@ test "port tables fit the fixed capacity and have at most one power port" {
     try std.testing.expectEqual(@as(?u8, 1), portIndex(.actuator, "target"));
     try std.testing.expectEqual(@as(?u8, null), portIndex(.button, "power"));
     // Port names are unique within a kind, so "device.port" is unambiguous.
-    inline for (std.meta.fields(Kind)) |field| {
+    inline for (enum_compat.fields(Kind)) |field| {
         const list = ports(@enumFromInt(field.value));
         for (list, 0..) |a, i| for (list[0..i]) |b| try std.testing.expect(!std.mem.eql(u8, a.name, b.name));
     }

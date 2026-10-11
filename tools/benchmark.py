@@ -124,9 +124,11 @@ def main():
         checks["field_drawn"] = result["field_submitted_p50"] > 0 and result["field_runs_p99"] > 0
         checks["field_cpu_copy_freed"] = result["field_cpu_bytes_now"] == 0
         checks["render_cpu_budget"] = result["cpu_p99_ms"] < 16.667
+    zig_versions = {"mach": "0.16.0-dev.3142+5ccfeb926", "0.17": "0.17.0", "0.18-dev": "0.18.0-dev.146+35accc06e"}
+    zig_channel = os.environ.get("HEAVYWATER_ZIG_CHANNEL", "mach")
     report = {"arbor": args.arbor, "scale_objects": args.scale, "route": "frontier" if args.frontier else "canopy" if args.canopy else "streaming", "audio": not args.silent, "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
               "host": platform.platform(), "machine": platform.machine(), "optimize": "ReleaseFast",
-              "zig": "0.16.0-dev.3142+5ccfeb926", "mach": "7ed0d504a9569fd4ad840ecb10ead16b90a8926e",
+              "zig": zig_versions.get(zig_channel, "unknown"), "mach": "7ed0d504a9569fd4ad840ecb10ead16b90a8926e",
               "warmup_frames": 180 if args.frontier else 60, "checks": checks, "metrics": result, "log": output}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")

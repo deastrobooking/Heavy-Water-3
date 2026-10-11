@@ -5,8 +5,8 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 ## Requirements
 
 - **Python 3.10+:** the only bootstrap prerequisite.
-- **Zig toolchain:** `tools/zig.py` downloads the pinned Zig compiler (`0.16.0-dev.3142+5ccfeb926`), checksum-verified, into `.tools/`. It never touches the system Zig or `PATH`. Run every build through it: `python3 tools/zig.py <args>` (on Windows, `py tools/zig.py`).
-- **Mach:** the engine library is pinned in `build.zig.zon` (Mach `7ed0d504`, with `core` and `sysaudio` enabled). Its packages live in `zig-pkg/`; the first build needs an internet connection to fetch them.
+- **Zig toolchain:** `tools/zig.py` downloads the Mach-pinned Zig compiler (`0.16.0-dev.3142+5ccfeb926`), checksum-verified, into `.tools/`. It never touches the system Zig or `PATH`. Run every build through it: `python3 tools/zig.py <args>` (on Windows, `py tools/zig.py`). Set `HEAVYWATER_ZIG_CHANNEL=0.17` or `HEAVYWATER_ZIG_CHANNEL=0.18-dev` to run compiler compatibility checks; both previews use separately cached, checksum-verified compilers.
+- **Mach:** the engine library is the project-owned fork at `vendor/mach`, based on upstream `7ed0d504` (see [fork provenance and patch notes](../vendor/mach/FORK.md)). Third-party packages live in `zig-pkg/`; the first build needs an internet connection to fetch them.
 - **A GPU desktop to run the game:** the game is developed and validated on macOS with Metal on Apple silicon (M3 Pro). Tests are headless and need no window.
 
 ## Build steps
@@ -22,6 +22,8 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `python3 tools/zig.py build mods` | Builds the example WebAssembly mod's scripts into `mods/`. |
 | `python3 tools/zig.py build sounds` | Writes every synthesized sound to `zig-out/sounds/*.wav` for listening. |
 | `python3 tools/zig.py build heightmap -- <in.pgm> <out.hwmh> [width depth elevation base]` | Imports a PGM heightmap to the runtime terrain format. |
+
+The fork's build scripts, game enum reflection, static bitsets, and Mach vector types have compatibility paths for newer compilers. The Zig 0.17 and 0.18 game builds reach Mach's module reflection and currently stop at old `Type.StructField` usage plus Zig's removed `@cImport` builtin in Mach's shader, font, audio, and platform modules. Keep the proven Mach compiler as the default until the full compile passes. Run `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` or `HEAVYWATER_ZIG_CHANNEL=0.18-dev python3 tools/zig.py build check` to inspect compatibility progress.
 
 ### Optimization modes
 
@@ -190,6 +192,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 56 | The Heroes screen at 150% interface size, scrolled to BACK |
 | 57 | The pause menu at 150% interface size, scrolled to its last item |
 | 58, 59 | The four pets on the meadow: in their Hive collars; freed, in the ranger's colours |
+| 60 | The bright, stepped Rootdeep temples and their luminous crowns |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.
 

@@ -14,6 +14,7 @@
 //! a trotting gait, wing beats, a wagging tail, and attack and trick flourishes. Pets cannot be
 //! hurt; the game is for all ages, and a pet never needs rescuing.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
 const Enemies = @import("Enemies.zig");
 const Terrain = @import("../procedural/Terrain.zig");
@@ -27,7 +28,7 @@ const Q = [4]f32;
 const Pets = @This();
 
 pub const Species = enum(u8) { hound, falcon, golem, moth };
-pub const count = @typeInfo(Species).@"enum".fields.len;
+pub const count = enum_compat.fields(Species).len;
 pub const max_level = 20;
 
 pub const Info = struct {

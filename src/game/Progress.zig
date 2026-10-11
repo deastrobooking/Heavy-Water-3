@@ -3,6 +3,8 @@
 //! taken, the hover cars and the Kestrel in the garage with its upgrades and paint, and the
 //! arena record. Each player's own upgrades, gear, pickups, pets and wallet are their `Kit`.
 const std = @import("std");
+const builtin = @import("builtin");
+const enum_compat = @import("enum_compat");
 const Kit = @import("Kit.zig");
 const Market = @import("../city/Market.zig");
 const Profile = @import("Profile.zig");
@@ -25,12 +27,12 @@ pub const suitPrice = Kit.suitPrice;
 pub const max_flags = 96;
 pub const flag_capacity = 24;
 pub const KestrelUpgrade = enum { armor, missile_rack, engine, gun_cooling };
-pub const kestrel_upgrade_count = @typeInfo(KestrelUpgrade).@"enum".fields.len;
+pub const kestrel_upgrade_count = enum_compat.fields(KestrelUpgrade).len;
 pub const Paint = enum { ivory, azure, ember, moss };
-pub const paint_count = @typeInfo(Paint).@"enum".fields.len;
+pub const paint_count = enum_compat.fields(Paint).len;
 
 /// World pickups already collected, by ID.
-picked: Collectibles.Picked = .initEmpty(),
+picked: Collectibles.Picked = if (builtin.zig_version.minor >= 17) .empty else .initEmpty(),
 /// Fabricated hover car designs (bit per design).
 vehicles: u8 = 0,
 /// The Kestrel fighter has been fabricated.
@@ -162,7 +164,7 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     var it = self.picked.iterator(.{});
     while (it.next()) |i| try picked.append(arena, @intCast(i));
     var vehicles: std.ArrayList(Designs.Design) = .empty;
-    inline for (@typeInfo(Designs.Design).@"enum".fields) |f| if (self.ownsVehicle(@enumFromInt(f.value))) try vehicles.append(arena, @enumFromInt(f.value));
+    inline for (enum_compat.fields(Designs.Design)) |f| if (self.ownsVehicle(@enumFromInt(f.value))) try vehicles.append(arena, @enumFromInt(f.value));
     const Heroes = @import("Heroes.zig");
     var heroes: std.ArrayList([]const u8) = .empty;
     for (Heroes.roster, 0..) |h, i| if (self.hasHero(@intCast(i))) try heroes.append(arena, h.name);
@@ -205,7 +207,8 @@ test "team progress round-trips flags, pickups, the garage and heroes; old perso
     var p: Progress = .{};
     p.setFlag("met_maro");
     p.setFlag("met_maro");
-    p.setFlag("x" ** 30);
+    const too_long_flag: [30]u8 = @splat('x');
+    p.setFlag(&too_long_flag);
     try std.testing.expectEqual(@as(usize, 1), p.flag_count);
     p.picked.set(3);
     p.picked.set(90);

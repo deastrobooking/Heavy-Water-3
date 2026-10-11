@@ -456,7 +456,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     var character_timer: mach.time.Timer = undefined;
     if (measure_character_prepare) character_timer = mach.time.Timer.start(self.timer.io);
     const character_views = @max(1, @min(self.view_count, max_views));
-    var character_visible = [_]bool{false} ** Ranger.capacity;
+    var character_visible: [Ranger.capacity]bool = @splat(false);
     for (self.props[0..self.prop_count]) |prop| {
         const descriptor = prop.character orelse continue;
         if (descriptor.id >= Ranger.capacity) continue;

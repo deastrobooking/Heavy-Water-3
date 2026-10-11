@@ -3,9 +3,10 @@
 //! changing gameplay code; the platform bridge translates each discovered device into this raw
 //! axis/button vocabulary.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 
 pub const Action = enum { jump, dodge, interact, grapple, traversal, view, sprint, fire, alt, stomp, join, respawn, up, down, left, right };
-pub const action_count = @typeInfo(Action).@"enum".fields.len;
+pub const action_count = enum_compat.fields(Action).len;
 pub const axis_count = 4;
 pub const physical_button_count = 16;
 pub const trigger_threshold_default: f32 = 0.15;

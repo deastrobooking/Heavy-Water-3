@@ -5,12 +5,13 @@
 //! loops fade instead of clicking. Buses scale effects, ambience and interface separately under a
 //! master volume, and a soft limiter keeps the sum below full scale.
 const std = @import("std");
+const enum_compat = @import("enum_compat");
 const Synth = @import("Synth.zig");
 const Mixer = @This();
 
 pub const Sound = Synth.Sound;
 pub const Bus = enum { effects, ambience, interface };
-pub const bus_count = @typeInfo(Bus).@"enum".fields.len;
+pub const bus_count = enum_compat.fields(Bus).len;
 pub const voice_count = 32;
 pub const queue_capacity = 256;
 

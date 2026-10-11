@@ -11,6 +11,8 @@
 //! World pickups have stable IDs, so collecting one is remembered in the save; drops are not
 //! saved. Walking within `radius` of a pickup collects it (any local player).
 const std = @import("std");
+const builtin = @import("builtin");
+const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
 const Seed = @import("../procedural/Seed.zig");
 const R = Physics.Rotation;
@@ -18,7 +20,7 @@ const V = Physics.Vec3;
 const Collectibles = @This();
 
 pub const Kind = enum { lumen_shard, rotor_core, hive_alloy, vital_cell };
-pub const kind_count = @typeInfo(Kind).@"enum".fields.len;
+pub const kind_count = enum_compat.fields(Kind).len;
 /// Placement counts, collection distance and temporary drop lifetime.
 pub const tuning = .{
     .max_items = 128,
@@ -207,7 +209,7 @@ test "placement is deterministic and covers every kind" {
     const b = generate(sites);
     try std.testing.expectEqual(a.count, b.count);
     for (a.items[0..a.count], b.items[0..b.count]) |x, y| try std.testing.expectEqual(x, y);
-    var picked: Picked = .initEmpty();
+    var picked: Picked = if (builtin.zig_version.minor >= 17) .empty else .initEmpty();
     for (0..kind_count) |k| try std.testing.expect(a.remaining(&picked, @enumFromInt(k)) > 0);
     // The vital cell on the tallest roof sits on the 120 m roof.
     var roof_cell = false;
@@ -219,7 +221,7 @@ test "walking over pickups collects each once; drops expire" {
     var c: Collectibles = .{};
     c.add(.lumen_shard, .{ 0, 1, 0 });
     c.add(.rotor_core, .{ 10, 1, 0 });
-    var picked: Picked = .initEmpty();
+    var picked: Picked = if (builtin.zig_version.minor >= 17) .empty else .initEmpty();
     var events: [8]Event = undefined;
     try std.testing.expectEqual(@as(usize, 1), c.collect(&picked, &.{.{ 0.5, 0, 0 }}, 0.1, &events));
     try std.testing.expectEqual(Kind.lumen_shard, events[0].kind);
@@ -238,7 +240,7 @@ test "pickup overflow waits for capacity without losing world items or drops" {
     c.add(.lumen_shard, .{ 0, 1, 0 });
     c.add(.rotor_core, .{ 0, 1, 0 });
     c.drop(.hive_alloy, .{ 0, 1, 0 });
-    var picked: Picked = .initEmpty();
+    var picked: Picked = if (builtin.zig_version.minor >= 17) .empty else .initEmpty();
     var events: [1]Event = undefined;
     const players = [_]V{.{ 0, 0, 0 }};
     try std.testing.expectEqual(@as(usize, 0), c.collect(&picked, &players, 0.1, &.{}));
@@ -253,7 +255,7 @@ test "pickup overflow waits for capacity without losing world items or drops" {
 test "drop age accumulates over successive frames" {
     var c: Collectibles = .{};
     c.drop(.hive_alloy, .{ 0, 1, 0 });
-    var picked: Picked = .initEmpty();
+    var picked: Picked = if (builtin.zig_version.minor >= 17) .empty else .initEmpty();
     for (0..4) |_| _ = c.collect(&picked, &.{}, drop_lifetime / 3, &.{});
     try std.testing.expect(c.drops[0] == null);
 }
