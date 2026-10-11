@@ -6,7 +6,7 @@ const std = @import("std");
 const Canvas = @This();
 
 pub const capacity = 640;
-pub const hit_capacity = 64;
+pub const hit_capacity = 96;
 pub const text_capacity = 120;
 /// A character advances four glyph cells; at scale 1 a cell is 2 units.
 pub const char_width: f32 = 8;

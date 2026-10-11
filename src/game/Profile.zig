@@ -64,7 +64,14 @@ pub const Species = enum {
 };
 pub const species_count = enum_compat.fields(Species).len;
 // Keep the original tags so existing JSON save profiles continue to decode unchanged.
-pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part };
+pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part, spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail };
+/// Steps of the per-style hair adjustments; the middle one leaves the style as designed.
+pub const hair_levels: u8 = 5;
+pub const hair_neutral: u8 = 2;
+/// Multiplier for an adjustment level: 0.7, 0.85, 1.0, 1.15, 1.3.
+pub fn hairFactor(level: u8) f32 {
+    return 0.7 + 0.15 * @as(f32, @floatFromInt(@min(level, hair_levels - 1)));
+}
 pub const FaceStyle = enum { classic, soft, angular, heroic, alien };
 pub const BootStyle = enum { trail_runner, field_boot, armored_sabatons, magstep, thruster };
 pub const Presentation = enum { masculine, feminine };
@@ -79,7 +86,7 @@ pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, 
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut };
+pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -95,6 +102,10 @@ height: f32 = 1,
 build: f32 = 1,
 skin: u8 = 2,
 hair_style: HairStyle = .short,
+/// Spikiness, volume and length of the style, 0..hair_levels-1 (`hair_neutral` = as authored).
+hair_spike: u8 = hair_neutral,
+hair_volume: u8 = hair_neutral,
+hair_length: u8 = hair_neutral,
 hair_color: u8 = 1,
 /// Zero disables streaks; 1..hair_colors.len selects a contrasting streak color.
 hair_highlight: u8 = 0,
@@ -152,6 +163,9 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
         .skin => self.skin = cycle(self.skin, delta, skin_tones.len),
         .hair_style => self.hair_style = @enumFromInt(cycle(@intFromEnum(self.hair_style), delta, enum_compat.fields(HairStyle).len)),
+        .hair_spike => self.hair_spike = stepLevel(self.hair_spike, delta),
+        .hair_volume => self.hair_volume = stepLevel(self.hair_volume, delta),
+        .hair_length => self.hair_length = stepLevel(self.hair_length, delta),
         .hair_color => self.hair_color = cycle(self.hair_color, delta, hair_colors.len),
         .hair_highlight => self.hair_highlight = cycle(self.hair_highlight, delta, hair_colors.len + 1),
         .outfit => self.outfit = cycle(self.outfit, delta, outfit_colors.len),
@@ -163,6 +177,10 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .gemstone => self.gemstone = @enumFromInt(cycle(@intFromEnum(self.gemstone), delta, enum_compat.fields(Gemstone).len)),
         .gem_cut => self.gem_cut = @enumFromInt(cycle(@intFromEnum(self.gem_cut), delta, enum_compat.fields(GemCut).len)),
     }
+}
+
+fn stepLevel(level: u8, delta: i32) u8 {
+    return @intCast(std.math.clamp(@as(i32, level) + delta, 0, hair_levels - 1));
 }
 
 fn cycle(value: anytype, delta: i32, count: usize) @TypeOf(value) {
@@ -182,6 +200,9 @@ pub const Doc = struct {
     build: f32,
     skin: u8,
     hair_style: HairStyle,
+    hair_spike: u8 = hair_neutral,
+    hair_volume: u8 = hair_neutral,
+    hair_length: u8 = hair_neutral,
     hair_color: u8,
     hair_highlight: u8 = 0,
     face_style: FaceStyle = .classic,
@@ -196,7 +217,7 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut };
+    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -204,7 +225,7 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     try result.setName(doc.name);
     if (!(doc.height >= 0.9 and doc.height <= 1.1) or !(doc.build >= 0.85 and doc.build <= 1.15)) return error.InvalidProfile;
     if (doc.coat >= coat_colors.len or doc.marking >= coat_colors.len) return error.InvalidProfile;
-    if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.hair_highlight > hair_colors.len or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
+    if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.hair_highlight > hair_colors.len or doc.hair_spike >= hair_levels or doc.hair_volume >= hair_levels or doc.hair_length >= hair_levels or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
     result.height = doc.height;
     result.build = doc.build;
     result.class = doc.class;
@@ -214,6 +235,9 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.presentation = doc.presentation;
     result.skin = doc.skin;
     result.hair_style = doc.hair_style;
+    result.hair_spike = doc.hair_spike;
+    result.hair_volume = doc.hair_volume;
+    result.hair_length = doc.hair_length;
     result.hair_color = doc.hair_color;
     result.hair_highlight = doc.hair_highlight;
     result.face_style = doc.face_style;
@@ -250,7 +274,7 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     p.adjust(.skin, -3);
     try std.testing.expectEqual(@as(u8, 7), p.skin);
     p.adjust(.hair_style, -1);
-    try std.testing.expectEqual(HairStyle.hood, p.hair_style);
+    try std.testing.expectEqual(HairStyle.spike_tail, p.hair_style);
     p.adjust(.presentation, 1);
     try std.testing.expectEqual(Presentation.feminine, p.presentation);
     for (0..20) |_| p.adjust(.height, 1);
@@ -262,6 +286,19 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     defer arena.deinit();
     const legacy = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0}", .{});
     try std.testing.expectEqual(Presentation.masculine, legacy.value.presentation);
+    // saves from before the hair adjustments decode to the neutral levels
+    try std.testing.expectEqual(hair_neutral, legacy.value.hair_spike);
+    try std.testing.expectEqual(hair_neutral, (try fromDoc(legacy.value)).hair_length);
+    // new styles and adjustments round-trip through the JSON document
+    var styled: Profile = .{ .hair_style = .widow_flame, .hair_spike = 4, .hair_volume = 0, .hair_length = 3 };
+    const json = try std.json.Stringify.valueAlloc(arena.allocator(), styled.toDoc(), .{});
+    const parsed = try std.json.parseFromSlice(Doc, arena.allocator(), json, .{});
+    try std.testing.expectEqualDeep(styled, try fromDoc(parsed.value));
+    styled.adjust(.hair_spike, 9);
+    try std.testing.expectEqual(hair_levels - 1, styled.hair_spike);
+    var out_of_range = styled.toDoc();
+    out_of_range.hair_volume = hair_levels;
+    try std.testing.expectError(error.InvalidProfile, fromDoc(out_of_range));
     try std.testing.expectEqual(Class.ranger, legacy.value.class);
     p.adjust(.class, 1);
     try std.testing.expectEqual(Class.synthetic, (try fromDoc(p.toDoc())).class);

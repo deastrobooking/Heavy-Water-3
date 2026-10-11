@@ -62,6 +62,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dscale-objects=N` | 0 | Scale workload of N field objects. |
 | `-Dpack-stress=N` | 0 | Write and stream a pack of N meshes during the benchmark. |
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
+| `-Dcharacter-showcase=6..38` | 0 | Hairstyle review in the creator, in `Profile.HairStyle` order (6 = short, 30..38 = the anime cuts). |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |
 | `-Dcpu-skinning=true` | false | Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback). |

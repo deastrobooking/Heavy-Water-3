@@ -115,13 +115,22 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
         .alien_crown => .alien_crown,
         .crew_cut => .crew_cut,
         .side_part => .side_part,
+        .spiky_hero => .spiky_hero,
+        .widow_flame => .widow_flame,
+        .fringe_spikes => .fringe_spikes,
+        .super_flare => .super_flare,
+        .flip_bob => .flip_bob,
+        .pilot_sweep => .pilot_sweep,
+        .big_fringe => .big_fringe,
+        .topknot => .topknot,
+        .spike_tail => .spike_tail,
     };
     var ch = try gen.Character.build(a, .{
         .body = bodySpec(profile),
         // Wildkin wear their coat where a human shows skin.
         .skin = if (wildkin) rgb(Profile.coat_colors[profile.coat], 1) else if (synthetic) mix(Profile.skin_tones[profile.skin], spec.Rgb.hex(0xe4eaef), 0.6) else rgb(Profile.skin_tones[profile.skin], 1),
         .eyes = eyes,
-        .hair = .{ .style = hair_style, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = if (hair_style == .afro or hair_style == .alien_crown) 1.25 else 0.8, .spikiness = if (hair_style == .nova_spike or hair_style == .alien_crown) 0.95 else 0.35, .bang_count = if (hair_style == .nova_spike) 9 else 5 },
+        .hair = .{ .style = hair_style, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = if (hair_style == .afro or hair_style == .alien_crown) 1.25 else 0.8, .spikiness = if (hair_style == .nova_spike or hair_style == .alien_crown) 0.95 else 0.35, .bang_count = if (hair_style == .nova_spike) 9 else 5, .spike_scale = Profile.hairFactor(profile.hair_spike), .volume_scale = Profile.hairFactor(profile.hair_volume), .length_scale = Profile.hairFactor(profile.hair_length) },
         .outfit = garments[0..outfit_len],
         .detail = 0.7,
     });

@@ -64,6 +64,11 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - Expanded the character creator from five hair entries to eleven: short, ponytail, long, crest, hood, bob, twin tails, bun, braids, curls and undercut. Ponytail, paired braid, bun, curly, cropped and mohawk silhouettes now have separate procedural generation paths. New enum tags are appended so existing profile JSON names remain valid.
 - The pinned Debug check and ReleaseFast build passed; `zig-out/bin/heavy-water` was reinstalled. A Metal API Validation ReleaseSafe character preview for braids completed on Apple M3 Pro and was visually inspected. Headless tests were not run.
 
+## Anime action hair — 2026-10-11
+
+- Added data-driven hair (`hair_style.zig`, `hair_library.zig`): fat tapered clumps rooted on the scalp ellipsoid, a per-style hairline, `validate`, and `HairSpec.custom` for modded styles. Short and crest are now data; nine new styles (spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail). Profile gained `hair_spike`, `hair_volume`, `hair_length` (creator rows). New fields default on old saves and round-trip in a Profile test; `Save.format_version` was not bumped because nothing existing changes meaning (same policy as the face and boot additions).
+- Tests: every definition validates, builds finite vertices with in-range joints, roots sit on the scalp, extents are bounded, the styles produce different meshes, adjustments change height, and a wider head still fits. Pinned `build check` passed; ReleaseSafe Metal captures of short and the nine new styles were inspected (all read as distinct, spiky or swept, not a cap). Not reviewed: side and back views, non-brown colours, spring chains moving (`sway` clumps only move when `chain_joints` > 0, which the game sets to 0), the remaining procedural styles' cap look, 0.17 channel and cross-compiles.
+
 ## Anime hair shading — 2026-10-11
 
 - Ranger hair now bakes a broad broken highlight band plus narrow comb-strand glints into its vertex colors. This runs on GPU-skinned game characters; the CPU preview's existing cel light, face-shadow map, SDF facial decals and silhouette ink remain unchanged.

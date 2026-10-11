@@ -60,7 +60,10 @@ pub const EyeSpec = struct {
     highlight_count: u8 = 2,
 };
 
-pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part };
+pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part, spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail };
+
+/// Data-driven styles are described by `hair_style.StyleDef`; see `hair_library.zig`.
+const hair_style = @import("hair_style.zig");
 
 pub const HairSpec = struct {
     /// The single antenna strand on top.
@@ -81,6 +84,13 @@ pub const HairSpec = struct {
     seed: u64 = 0x5eed,
     /// Spring-bone joints per dynamic clump chain (0 = static hair).
     chain_joints: u8 = 4,
+    /// Replaces the built-in definition of `style` (a mod's hairstyle). Must outlive the build.
+    custom: ?*const hair_style.StyleDef = null,
+    /// Adjustments for data-driven styles, 1 = as authored: spike tips and standing height,
+    /// root lift and clump width, and overall length.
+    spike_scale: f32 = 1,
+    volume_scale: f32 = 1,
+    length_scale: f32 = 1,
 };
 
 pub const GarmentKind = enum {
