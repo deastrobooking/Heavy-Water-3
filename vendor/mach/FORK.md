@@ -25,6 +25,7 @@ The source is checked into this repository so engine changes are reviewable, rep
 - Forward `zig build run -- ...` arguments through the public passthrough API on Zig 0.17 while retaining the existing route for the pinned compiler.
 - Use a checked-in iOS simulator helper instead of a custom build step removed in Zig 0.17.
 - Keep the 0.17 and recorded 0.18 compiler pins available for build compatibility work.
+- Add Metal render-pass indirect draw calls, argument records, bounds/usage validation, and a Heavy Water `GpuMesh.drawIndexedIndirect` helper. This is the first GPU capability slice; Vulkan, OpenGL, and D3D12 dispatch still report it as unsupported.
 
 The Zig 0.16 build currently passes. The Zig 0.17/0.18 port is in progress: the build graph configures, asset tools compile, and the engine/game compile reaches Mach's module metadata. The remaining blockers are Mach's `@cImport` usage across platform, shader, audio and font modules, and old `Type.StructField` reflection in Mach's module system. Zig 0.17/0.18 also required updates for array repeats, static bitsets, and 3D vector layout. Do not describe the fork as compatible with either preview until `build check` passes.
 

@@ -37,6 +37,13 @@ pub fn drawRange(self: GpuMesh, pass: *gpu.RenderPassEncoder, first_index: u32, 
     pass.setIndexBuffer(self.indices, .uint32, 0, self.index_count * 4);
     pass.drawIndexed(index_count, instances, first_index, 0, first);
 }
+/// Uses a 20-byte gpu.DrawIndexedIndirectArgs record from `arguments` at `offset`.
+/// The buffer needs `.indirect` usage, and its contents must be written before the draw.
+pub fn drawIndexedIndirect(self: GpuMesh, pass: *gpu.RenderPassEncoder, arguments: *gpu.Buffer, offset: u64) void {
+    pass.setVertexBuffer(0, self.vertices, 0, self.vertex_bytes);
+    pass.setIndexBuffer(self.indices, .uint32, 0, self.index_count * 4);
+    pass.drawIndexedIndirect(arguments, offset);
+}
 pub fn deinit(self: GpuMesh) void {
     self.indices.release();
     self.vertices.release();

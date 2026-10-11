@@ -39,21 +39,21 @@ Keep the working Mach/compiler pair as the default. When Mach updates its nomina
 
 The pinned Mach lacks capabilities measured or needed during development:
 
-| Missing in `7ed0d504` (Metal) | Found during | Needed for |
+| Capability gap in `7ed0d504` (Metal) | Found during | Status and need |
 | --- | --- | --- |
-| `drawIndexedIndirect` (panics "unimplemented") | Phase 12 | GPU-driven culling and submission |
+| `drawIndexedIndirect` | Phase 12 | Metal implementation is now in `vendor/mach`: public 16/20-byte argument layouts, alignment/bounds/usage checks, and a `GpuMesh` helper. Other backends remain unsupported. GPU-generated command buffers still depend on shader atomics. |
 | Shader atomics (`atomicAdd` and others unimplemented in the WGSL compiler) | Phase 12 | GPU compaction, GPU particles |
 | Timestamp queries (TODO) | Phase 12 | GPU timing in benchmark reports |
 | `copyTextureToBuffer` (panics) | Sky city | Captures; worked around with a compute copy |
 | Fixed 64 MiB staging pages that never shrink | Phase 12 | Memory budgets |
 
-**Plan:** before phase 14's GPU skinning, evaluate the current Mach `main` on code.hexops.org with its nominated Zig, on a branch:
+**Plan:** the project-owned fork is the engine work branch. Implement and validate one backend slice at a time, starting with Metal indirect draws; then add the remaining backend support, shader atomics, timing, readback, and reclaimable staging pages. Before phase 14's GPU skinning, also compare against current Mach `main` on code.hexops.org with its nominated Zig:
 
 1. Check the gaps in the table above.
 2. Run the full test suite, smoke, and benchmarks.
 3. Record any API breakage.
 
-Adopt the upgrade only if everything passes. Otherwise stay pinned and keep the workarounds. Patching the dependency cache in place remains off-limits; a fork would be a deliberate decision. Phases 13–16 are designed to work on the current pin.
+Adopt upstream changes only if everything passes and preserve Heavy Water's engine patches. The ignored dependency cache remains off-limits; engine work belongs in `vendor/mach`. Phases 13–16 are designed to work on the current pin.
 
 ## Principles kept
 
