@@ -602,7 +602,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
         .unit_down => |u| {
             const random = sb.enemies.rng.random();
             sb.collectibles.drop(.hive_alloy, u.position);
-            if (u.kind == .sentinel) {
+            if (u.kind == .sentinel or u.kind == .bulwark) {
                 sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ 1.2, 0, 0 }));
                 sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ -1.2, 0, 0.6 }));
             } else if (random.float(f32) < 0.35) sb.collectibles.drop(.lumen_shard, R.add(u.position, .{ 0.8, 0, 0 }));
@@ -1189,9 +1189,9 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             n += 1;
         }
     }
-    // Troopers are skinned characters (ids 16–23), drawn only near P1 to bound skinning cost.
+    // Ground Hive units are skinned characters (ids 16–23), drawn only near P1 to bound cost.
     var trooper_id: u8 = 16;
-    for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .trooper) {
+    for (sb.enemies.units) |slot| if (slot) |u| if (Enemies.isGround(u.kind)) {
         if (trooper_id >= hero_first_id or !room(out, n, 1)) break;
         const d = R.sub(u.position, sb.player.feet);
         if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
@@ -1202,8 +1202,15 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .strike => 1 - u.melee_anim / 0.62,
             else => 0,
         };
-        out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = .{ 1, 1, 1, 1 }, .character = .{
-            .profile = trooper_profile,
+        const profile = switch (u.kind) {
+            .trooper => trooper_profile,
+            .skirmisher => skirmisher_profile,
+            .bulwark => bulwark_profile,
+            else => trooper_profile,
+        };
+        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else .{ 1, 1, 1, 1 };
+        out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = tint, .character = .{
+            .profile = profile,
             .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t, .action = action, .action_t = action_t },
             .id = trooper_id,
         } };
@@ -1211,7 +1218,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         n += 1;
     };
     for (sb.enemies.units) |slot| if (slot) |u| {
-        if (u.kind == .trooper) continue;
+        if (Enemies.isGround(u.kind)) continue;
         if (!room(out, n, 2)) break;
         const shell = if (u.kind == .drone) c.drone else c.sentinel;
         const glow = if (u.kind == .drone) c.drone_glow else c.sentinel_glow;
@@ -1631,6 +1638,8 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
 
 /// Hive troopers: dark red heavy plate, sealed helmets, magenta lumen.
 const trooper_profile: @import("Profile.zig") = .{ .outfit = 3, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 2, .skin = 7, .build = 1.1, .height = 1.05 };
+const skirmisher_profile: @import("Profile.zig") = .{ .outfit = 7, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 3, .skin = 7, .build = 0.92, .height = 0.96 };
+const bulwark_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 1, .skin = 7, .build = 1.18, .height = 1.15 };
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {
     const color = Collectibles.tint(kind);

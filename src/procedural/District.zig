@@ -7,6 +7,7 @@ const Mesh = @import("../render/Mesh.zig");
 const Seed = @import("Seed.zig");
 const Terrain = @import("Terrain.zig");
 const TestArbor = @import("TestArbor.zig");
+const CanopyCourse = @import("CanopyCourse.zig");
 const V = R.Vec3;
 /// v3: glass-bay facades and open observatory crowns on the seeded skyline.
 pub const generator_version: u32 = 3;
@@ -314,6 +315,22 @@ pub fn geometry(layout: *const Layout) !CityParts {
             try Skyline.plazaBraces(layout, node.position, &out);
         }
     }
+    // Each market tower has a climbable route: ladder start, rising ramp, narrow bridge,
+    // upper patio and a short jump gap. Static pieces are both grappling anchors and walkable
+    // collision, using the same geometry list for render and physics.
+    var sites: [3]CanopyCourse.Site = undefined;
+    var site_count: usize = 0;
+    for ([_]usize{ 1, 3, 5 }) |i| {
+        const node = layout.nodes[i];
+        const outward = R.normalize(.{ node.position[0] + 20, 0, node.position[2] - 110 });
+        const market = marketPosition(layout, i);
+        const course_start = R.add(market, R.scale(outward, 31));
+        sites[site_count] = .{ .plaza = market, .ground = Terrain.surface(layout.seed, course_start[0], course_start[2]).height, .outward = outward };
+        site_count += 1;
+    }
+    var course: [CanopyCourse.max_pieces]CanopyCourse.Piece = undefined;
+    const course_count = CanopyCourse.generate(sites[0..site_count], &course);
+    for (course[0..course_count]) |piece| try out.add(.{ .center = piece.center, .size = piece.size, .rotation = piece.rotation, .color = piece.color, .solid = piece.solid });
     return out;
 }
 

@@ -2,6 +2,15 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## City modules and enemy damage audit — 2026-10-11
+
+- Interior room roles now map to reusable fixture modules and local interaction anchors (exit, trade, evidence, power, alarm, loot, unlock, and Hive heart). This is a data contract for the runtime; rendering, entry transitions, doors, population, and actual interactions remain open.
+- The district now composes a canopy parkour route at each market tower from reusable ladder, patio, ramp, mini-bridge, jump-gap, and grapple-anchor pieces. These are included in the same district render/collision mesh. Their placement and traversability have not been visually reviewed or hand-played.
+- Hive damage is now fully held in each archetype's `Stats`: projectile burst values plus melee damage, guarded melee damage, grenade damage/radius/fuse/cooldown. Existing values are unchanged. Static rates at uninterrupted firing are drone 3.85 damage/s (5 every 1.3 s), sentinel 8.57 (three 8-damage bolts every 2.8 s), trooper 6.67 (two 6-damage bolts every 1.8 s), skirmisher 2.0 (3 every 1.5 s) plus 14.63 point-blank melee (12 every 0.82 s), and bulwark 2.5 (6 every 2.4 s) plus 15.76 point-blank melee (26 every 1.65 s). Trooper's 24-damage grenade adds up to 3.43 averaged over its 7 s cooldown at the blast center. These sources stack when multiple attacks connect.
+- A correctly facing guard reduces bolts and grenade damage to 25%; it halves melee damage (trooper 18→9, skirmisher 12→6, bulwark 26→13). Player health regenerates after 5 quiet seconds at 10/s. These are code-derived rates, not measured encounter DPS or a manual balance verdict.
+- Generated Arbor foliage now uses larger irregular eight-facet clusters, and the canopy course palette shifts toward warm grown decking, green structural rails, and lumen grappling markers. This changes render geometry and color only; the Metal art-review capture and hands-on route check have not been run.
+- Build, tests, and smoke were not run for this pass, as requested; compile and runtime integration remain unverified.
+
 ## Scalari campaign foundation — 2026-10-05
 
 - The campaign catalog now has three destinations, five stable city-region IDs and one capital per destination. Validation enforces the city count, unique IDs/capitals and the single final-boss site at the Scalari Obsidian Coil; the Hive Homeworld records the Scalarians as its ancient founders.

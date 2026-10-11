@@ -201,15 +201,27 @@ const Writer = struct {
             self.tri(base + sides * 2 + 1, base + sides + next, base + sides + j);
         }
     }
-    fn foliage(self: *Writer, center: V, half: V, color: V) void {
-        const ring = [_]V{ .{ half[0], 0, 0 }, .{ 0, 0, half[2] }, .{ -half[0], 0, 0 }, .{ 0, 0, -half[2] } };
-        for (0..2) |side| for (0..4) |j| {
-            const a = R.add(center, .{ 0, if (side == 0) half[1] else -half[1], 0 });
-            const b = R.add(center, ring[if (side == 0) (j + 1) % 4 else j]);
-            const c = R.add(center, ring[if (side == 0) j else (j + 1) % 4]);
-            const normal = R.normalize(R.cross(R.sub(b, a), R.sub(c, a)));
+    fn foliage(self: *Writer, center: V, half: V, color: V, phase: f32) void {
+        // Eight broad, uneven facets read as a connected crown cluster at distance. The slight
+        // radial changes break the old four-sided crystal silhouette without leaf-level detail.
+        const sides = 8;
+        const denominator: f32 = @floatFromInt(sides);
+        for (0..2) |side| for (0..sides) |j| {
+            const a0 = @as(f32, @floatFromInt(j)) * 2 * std.math.pi / denominator;
+            const a1 = @as(f32, @floatFromInt(j + 1)) * 2 * std.math.pi / denominator;
+            const r0 = 0.88 + 0.12 * @sin(a0 * 3 + phase);
+            const r1 = 0.88 + 0.12 * @sin(a1 * 3 + phase);
+            const lower: V = .{ 0, if (side == 0) half[1] else -half[1], 0 };
+            const a = R.add(center, lower);
+            const b: V = .{ @cos(a1) * half[0] * r1, 0, @sin(a1) * half[2] * r1 };
+            const c: V = .{ @cos(a0) * half[0] * r0, 0, @sin(a0) * half[2] * r0 };
+            const first = R.add(center, if (side == 0) b else c);
+            const second = R.add(center, if (side == 0) c else b);
+            const normal = R.normalize(R.cross(R.sub(first, a), R.sub(second, a)));
+            const shade = if (side == 0) 1.0 else 0.72;
+            const facet = R.scale(color, shade * (0.92 + 0.08 * @sin(a0 * 2 + phase)));
             const base = self.v;
-            for ([_]V{ a, b, c }) |point| self.vertex(point, normal, color);
+            for ([_]V{ a, first, second }) |point| self.vertex(point, normal, facet);
             self.tri(base, base + 1, base + 2);
         };
     }
@@ -238,15 +250,15 @@ pub fn mesh(allocator: std.mem.Allocator, tree: *const Tree, detail: Detail) !Me
     const platforms = if (detail == .proxy) 0 else tree.platform_count;
     const unit = try Mesh.block(allocator);
     defer unit.deinit(allocator);
-    const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + leaves * 24);
+    const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + leaves * 48);
     errdefer allocator.free(vertices);
-    const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + leaves * 24);
+    const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + leaves * 48);
     var writer: Writer = .{ .vertices = vertices, .indices = indices };
     for (tree.nodes[1..tree.count], 1..) |node, i| {
         if (detail != .proxy or node.depth < 3) writer.tube(tree.nodes[node.parent].position, node.position, tree.edgeStartRadius(i), node.radius, sides, tree.genome);
         if (detail != .collision and node.depth > 0 and children[i] == 0) {
-            const r = 8 + 7 * (1 - tree.genome.apical_dominance);
-            writer.foliage(node.position, .{ r, r * 0.35, r }, .{ 0.16, 0.36 + random(tree.seed, i) * 0.12, 0.22 });
+            const r = (13 + 10 * (1 - tree.genome.apical_dominance)) * (0.9 + random(tree.seed, i + 700) * 0.2);
+            writer.foliage(node.position, .{ r, r * 0.48, r }, .{ 0.16, 0.34 + random(tree.seed, i) * 0.12, 0.20 }, random(tree.seed, i + 900) * 2 * std.math.pi);
         }
     }
     for (tree.platforms[0..platforms]) |p| writer.box(unit, p.center, p.half, .{ 0.38, 0.48, 0.26 });

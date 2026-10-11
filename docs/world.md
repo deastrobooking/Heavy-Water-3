@@ -46,7 +46,7 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Conversations: keepers and locals talk in branching dialogue, remember what you have done (salvage, shrines, bridges, nests), and hint at the Rootdeep's waking machines.
 - Pickups to find: lumen shards on the plazas and roads, rotor cores on high roofs and by the shrines, Hive alloy from the Hive, and vital cells that raise maximum health.
 - The fabricator at the garage builds hover cars (Skimmer, Dart, Courier), armor suits and accents, and weapons from those pickups.
-- The Hive is an engineered insect civilization: ancient Scalarians altered Earth's insects, left the planet, and founded the first Hive lineages on their homeworld. Three black spires send drones, sentinels and troopers after anyone who comes near. Breaking a spire stops its swarm.
+- The Hive is an engineered insect civilization: ancient Scalarians altered Earth's insects, left the planet, and founded the first Hive lineages on their homeworld. Three black spires field flying drones and burst-firing sentinels alongside three ground roles: troopers pressure players with bolts and grenades, skirmishers close quickly for light melee strikes, and bulwarks advance slowly with heavier armor and punishing close-range attacks. Breaking a spire stops its swarm.
 - In the skies beyond the nests, two Brood carriers (giant beetle ships) launch swarms of wasp fighters. The fabricated Kestrel, a VTOL fighter, takes the war to them. Scalari dragon-armor fighters and motherships are a separate, more advanced fleet.
 
 Clothing, gear, and accent unlocks found while exploring are future growth for this system.
@@ -75,6 +75,8 @@ Each Arbor grows from a **genome**: a small, versioned set of parameters that is
 - **Bark and lumen:** bark color and ridging, and the hue of the tree's bioluminescence.
 
 Branching uses space colonization: the crown volume is seeded with attraction points and branches grow toward them, which gives natural gaps and light wells. Grafting lets the player add a growth target so the tree extends a branch toward a tower or a planned bridge anchor over in-game days.
+
+The canopy should feel like a whole inhabited ecosystem at impossible scale: broad, layered crowns gathered around the branch skeleton, buttress roots and major limbs visible as structural supports, and bridges that appear woven, grafted, or grown between living anchors. Small ladders, ramps, patios, rope walks, and jump gaps turn the crown into a parkour route; luminous guide nodes and unobtrusive grapple rings make the route legible. Mix warm wood and leaf color with quiet ceramic, oxidized metal, glass, and restrained lumen accents. Keep the shapes painterly and original, with hand-shaped silhouettes and readable scale cues rather than copying any one film or artist.
 
 ### The heavy-water cycle
 
@@ -135,6 +137,7 @@ The target is grounded, hopeful science fantasy: painterly cel shading and panor
 - Keep human Rangers adult and practical; preserve the intentionally more expressive animal silhouettes of the Wildkin.
 - Give Frontier, Hive, and Scalari distinct material families and restrained accent colors.
 - Let bark, steel, ceramic, fabric, chitin, water, and glass read differently through shape, color, and subtle surface variation.
+- Make canopy routes look grown into the Arbors: layered connected foliage, branch-supported landings, vine and cable bridges, tiny terraces and ladders, with selective bioluminescent wayfinding and grappling points.
 - Compose around a small number of landmarks and provide visible support, contact, and scale cues for buildings, trees, roads, and bridges.
 
 ## Scale, as engineering constraints

@@ -20,8 +20,27 @@ const R = Physics.Rotation;
 const V = Physics.Vec3;
 const Enemies = @This();
 
-pub const Kind = enum { drone, sentinel, trooper };
-pub const Stats = struct { health: f32, speed: f32, accel: f32, radius: f32, standoff: f32, sight: f32, cooldown: f32, burst: u8, damage: f32, bolt_speed: f32 };
+pub const Kind = enum { drone, sentinel, trooper, skirmisher, bulwark };
+pub const Stats = struct {
+    health: f32,
+    speed: f32,
+    accel: f32,
+    radius: f32,
+    standoff: f32,
+    sight: f32,
+    cooldown: f32,
+    burst: u8,
+    damage: f32,
+    bolt_speed: f32,
+    melee_damage: f32 = 0,
+    guarded_melee_damage: f32 = 0,
+    melee_cooldown: f32 = 1.15,
+    grenade_damage: f32 = 24,
+    grenade_radius: f32 = 4.2,
+    grenade_fuse: f32 = 1.25,
+    grenade_cooldown: f32 = 7,
+    grenade_enabled: bool = false,
+};
 
 /// Combat and pacing values for the Hive. Keep encounter balance edits here.
 pub const tuning = .{
@@ -38,7 +57,9 @@ pub const tuning = .{
     .units = [_]Stats{
         .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 5, .bolt_speed = 34 },
         .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 8, .bolt_speed = 28 },
-        .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32 },
+        .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32, .melee_damage = 18, .guarded_melee_damage = 9, .grenade_enabled = true },
+        .{ .health = 72, .speed = 8.2, .accel = 19, .radius = 0.62, .standoff = 10, .sight = 42, .cooldown = 1.5, .burst = 1, .damage = 3, .bolt_speed = 37, .melee_damage = 12, .guarded_melee_damage = 6, .melee_cooldown = 0.82 },
+        .{ .health = 250, .speed = 3.2, .accel = 7, .radius = 1.0, .standoff = 15, .sight = 42, .cooldown = 2.4, .burst = 1, .damage = 6, .bolt_speed = 28, .melee_damage = 26, .guarded_melee_damage = 13, .melee_cooldown = 1.65 },
     },
 };
 
@@ -64,6 +85,20 @@ pub const wake_distance: f32 = tuning.wake_distance;
 
 pub fn stats(k: Kind) Stats {
     return tuning.units[@intFromEnum(k)];
+}
+
+pub fn isGround(k: Kind) bool {
+    return k == .trooper or k == .skirmisher or k == .bulwark;
+}
+
+pub fn mass(k: Kind) f32 {
+    return switch (k) {
+        .drone => 1,
+        .sentinel => 4,
+        .trooper => 1.6,
+        .skirmisher => 0.9,
+        .bulwark => 3,
+    };
 }
 
 pub const State = enum { patrol, hunt, retreat };
@@ -100,9 +135,9 @@ pub const Unit = struct {
     walk_phase: f32 = 0,
     walk_amount: f32 = 0,
 
-    /// Where the unit is hit and shoots from: troopers' chests, other units' centres.
+    /// Where the unit is hit and shoots from: ground units' chests, fliers' centres.
     pub fn center(u: Unit) V {
-        return if (u.kind == .trooper) R.add(u.position, .{ 0, 1.2, 0 }) else u.position;
+        return if (isGround(u.kind)) R.add(u.position, .{ 0, 1.2, 0 }) else u.position;
     }
 };
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
@@ -215,13 +250,17 @@ fn spawnUnit(self: *Enemies, nest: u8) void {
     const random = self.rng.random();
     var sentinels: usize = 0;
     var troopers: usize = 0;
+    var skirmishers: usize = 0;
+    var bulwarks: usize = 0;
     for (self.units) |slot| if (slot) |u| if (u.nest == nest) {
         sentinels += @intFromBool(u.kind == .sentinel);
         troopers += @intFromBool(u.kind == .trooper);
+        skirmishers += @intFromBool(u.kind == .skirmisher);
+        bulwarks += @intFromBool(u.kind == .bulwark);
     };
     const n = self.nests[nest];
     if (n.cave and troopers >= cave_troopers) return;
-    const kind: Kind = if (n.cave) .trooper else if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else .drone;
+    const kind: Kind = if (n.cave) .trooper else if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else if (skirmishers == 0) .skirmisher else if (bulwarks == 0) .bulwark else .drone;
     const spread: f32 = if (n.cave) 3.5 else 7;
     for (&self.units, 0..) |*slot, i| if (slot.* == null) {
         self.unit_generations[i] +%= 1;
@@ -233,7 +272,7 @@ fn spawnUnit(self: *Enemies, nest: u8) void {
             .generation = self.unit_generations[i],
             .kind = kind,
             .nest = nest,
-            .position = if (kind == .trooper) R.add(n.position, .{ @sin(angle) * spread, 0.5, @cos(angle) * spread }) else R.add(n.position, .{ 0, 24, 0 }),
+            .position = if (isGround(kind)) R.add(n.position, .{ @sin(angle) * spread, 0.5, @cos(angle) * spread }) else R.add(n.position, .{ 0, 24, 0 }),
             .health = stats(kind).health,
             .orbit = random.float(f32) * 2 * std.math.pi,
         };
@@ -290,7 +329,7 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
             u.burst_left = 0;
             u.position = R.add(u.position, R.scale(u.velocity, dt));
             u.velocity = R.scale(u.velocity, 1 / (1 + 3 * dt));
-            if (u.kind == .trooper) {
+            if (isGround(u.kind)) {
                 if (physics.castRay(R.add(u.position, .{ 0, 1.2, 0 }), .{ 0, -1, 0 }, 30, .none)) |floor| u.position[1] = floor.point[1];
                 u.walk_amount = 0;
             }
@@ -349,7 +388,7 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
                 goal = R.add(p, .{ @sin(u.orbit) * s.standoff, 5 + @sin(u.orbit * 1.7) * 2, @cos(u.orbit) * s.standoff });
             },
         }
-        if (u.kind == .trooper) {
+        if (isGround(u.kind)) {
             if (u.state == .hunt) {
                 const target = players[u.target];
                 const distance = horizontal(R.sub(target.chest, u.position));
@@ -360,9 +399,9 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
                     if (u.melee_cooldown == 0) {
                         const toward = R.normalize(R.sub(target.chest, u.center()));
                         const faces_attacker = R.dot(target.facing, R.scale(toward, -1)) > 0.2;
-                        const damage: f32 = if (target.guard != .none and faces_attacker) 9 else 18;
+                        const damage = if (target.guard != .none and faces_attacker) s.guarded_melee_damage else s.melee_damage;
                         push(out, &n, .{ .player_hit = .{ .player = u.target, .damage = damage, .from = u.center() } });
-                        u.melee_cooldown = 1.15;
+                        u.melee_cooldown = s.melee_cooldown;
                         u.melee_anim = 0.62;
                     }
                 } else {
@@ -383,8 +422,8 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
                     }
                     // Grenades are lobbed at the player's current position, so movement after
                     // the throw can beat the fixed 1.25 second fuse and 4.2 m blast radius.
-                    if (distance > 7 and distance < 24 and u.grenade_cooldown == 0) {
-                        var grenade = Grenade{ .position = R.add(u.center(), .{ 0, 0.4, 0 }) };
+                    if (s.grenade_enabled and distance > 7 and distance < 24 and u.grenade_cooldown == 0) {
+                        var grenade = Grenade{ .position = R.add(u.center(), .{ 0, 0.4, 0 }), .fuse = s.grenade_fuse, .damage = s.grenade_damage, .radius = s.grenade_radius };
                         const predicted = R.add(target.chest, R.scale(target.velocity, 0.45));
                         var direction = R.normalize(R.sub(predicted, grenade.position));
                         direction[1] = @max(direction[1], 0.16);
@@ -396,7 +435,7 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
                             u.throw_anim = 0.72;
                             break;
                         };
-                        u.grenade_cooldown = 7;
+                        u.grenade_cooldown = s.grenade_cooldown;
                     }
                 }
             } else {
@@ -574,7 +613,7 @@ fn shoot(self: *Enemies, u: *Unit, s: Stats, players: []const Target, seen: ?u8,
     u.burst_left -= 1;
     u.burst_timer = 0.18;
     const p = players[u.target];
-    const muzzle = if (u.kind == .trooper) R.add(u.center(), .{ 0, 0.2, 0 }) else R.add(u.position, .{ 0, -0.2, 0 });
+    const muzzle = if (isGround(u.kind)) R.add(u.center(), .{ 0, 0.2, 0 }) else R.add(u.position, .{ 0, -0.2, 0 });
     const t = R.length(R.sub(p.chest, muzzle)) / s.bolt_speed;
     const aim = R.add(p.chest, R.scale(p.velocity, t * 0.8));
     var dir = R.normalize(R.sub(aim, muzzle));
@@ -685,13 +724,8 @@ pub fn strikeBlade(self: *Enemies, origin: V, dir: V, length: f32, radius: f32, 
         self.damageUnit(i, damage, out, n);
         if (slot.*) |*alive| {
             // Heavier units are pushed less.
-            const mass: f32 = switch (alive.kind) {
-                .drone => 1,
-                .trooper => 1.6,
-                .sentinel => 4,
-            };
-            alive.velocity = R.add(alive.velocity, R.scale(knock, 1 / mass));
-            alive.stun = @max(alive.stun, stun / mass);
+            alive.velocity = R.add(alive.velocity, R.scale(knock, 1 / mass(alive.kind)));
+            alive.stun = @max(alive.stun, stun / mass(alive.kind));
         }
     };
     for (self.nests[0..self.nest_count], 0..) |nst, i| {
@@ -820,12 +854,7 @@ pub fn cone(self: *Enemies, origin: V, dir: V, range: f32, cos_half: f32, damage
         hits += 1;
         if (damage > 0) self.damageUnit(i, damage, out, n);
         if (slot.*) |*alive| {
-            const mass: f32 = switch (alive.kind) {
-                .drone => 1,
-                .trooper => 1.6,
-                .sentinel => 4,
-            };
-            alive.velocity = R.add(alive.velocity, R.scale(R.add(away, .{ 0, 0.3, 0 }), push / mass));
+            alive.velocity = R.add(alive.velocity, R.scale(R.add(away, .{ 0, 0.3, 0 }), push / mass(alive.kind)));
             alive.stun = @max(alive.stun, stun);
         }
     };

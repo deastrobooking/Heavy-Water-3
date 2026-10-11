@@ -7,6 +7,10 @@ const Seed = @import("Seed.zig");
 
 pub const Archetype = enum { residence, commerce, industry, enemy_base, dungeon };
 pub const Role = enum { entry, corridor, common, living, sleeping, utility, atrium, shop, storage, office, security, command, barracks, armory, reactor, hangar, assembly, control, trial, cache, heart };
+/// Reusable room content modules. The room graph stays procedural data; gameplay systems attach
+/// the matching fixture and interaction behavior without branching on every building archetype.
+pub const Module = enum { plain, entry, home, market, evidence, power, security, command, armory, hangar, trial, cache, heart };
+pub const Interaction = enum { exit, trade, evidence, power, alarm, loot, unlock, nest_heart };
 pub const Side = enum { north, east, south, west };
 pub const max_rooms = 8;
 pub const max_doors = max_rooms - 1;
@@ -19,7 +23,10 @@ pub const Room = struct {
     half_extent: [2]f32,
     floor_y: f32 = 0,
     ceiling: f32 = wall_height,
+    module: Module = .plain,
 };
+/// A local fixture anchor for the room's module. Coordinates are centered on the room, in meters.
+pub const Fixture = struct { interaction: Interaction, position: [3]f32 };
 pub const Door = struct { a: u8, b: u8, side_a: Side, side_b: Side, width: f32 = 2.4, height: f32 = 2.8 };
 pub const Layout = struct {
     seed: u64,
@@ -89,7 +96,7 @@ pub fn generate(seed: u64, archetype: Archetype) Layout {
     const rotation: u2 = @truncate(Seed.mix(seed ^ (@as(u64, @intFromEnum(archetype)) *% 0x9e3779b97f4a7c15)));
     var result: Layout = .{ .seed = seed, .archetype = archetype, .rotation = rotation, .room_count = @intCast(template.roles.len), .objective = @intCast(template.roles.len - 1) };
     for (template.roles, template.grid, 0..) |role, cell, index| {
-        result.rooms[index] = .{ .role = role, .grid = cell, .half_extent = extents(role), .ceiling = if (role == .reactor or role == .atrium or role == .hangar) 7 else wall_height };
+        result.rooms[index] = .{ .role = role, .grid = cell, .half_extent = extents(role), .ceiling = if (role == .reactor or role == .atrium or role == .hangar) 7 else wall_height, .module = moduleFor(role) };
     }
     for (1..template.roles.len) |index| {
         const parent: usize = template.parents[index];
@@ -102,6 +109,46 @@ pub fn generate(seed: u64, archetype: Archetype) Layout {
         result.door_count += 1;
     }
     return result;
+}
+
+/// The common interaction anchor for each room module. Renderers place the matching prop here,
+/// and the interior runtime binds it to the same interaction kind.
+pub fn fixture(room: Room) ?Fixture {
+    const x = room.half_extent[0] * 0.58;
+    const z = room.half_extent[1] * 0.58;
+    return switch (room.module) {
+        .plain => null,
+        .entry => .{ .interaction = .exit, .position = .{ 0, 0, -z } },
+        .home => .{ .interaction = .loot, .position = .{ x, 0, 0 } },
+        .market => .{ .interaction = .trade, .position = .{ 0, 0, z } },
+        .evidence => .{ .interaction = .evidence, .position = .{ 0, 0, z } },
+        .power => .{ .interaction = .power, .position = .{ x, 0, 0 } },
+        .security => .{ .interaction = .alarm, .position = .{ x, 0, 0 } },
+        .command => .{ .interaction = .evidence, .position = .{ 0, 0, z } },
+        .armory => .{ .interaction = .loot, .position = .{ -x, 0, 0 } },
+        .hangar => .{ .interaction = .unlock, .position = .{ 0, 0, z } },
+        .trial => .{ .interaction = .unlock, .position = .{ 0, 0, z } },
+        .cache => .{ .interaction = .loot, .position = .{ x, 0, 0 } },
+        .heart => .{ .interaction = .nest_heart, .position = .{ 0, 0, z } },
+    };
+}
+
+fn moduleFor(role: Role) Module {
+    return switch (role) {
+        .entry => .entry,
+        .living, .sleeping => .home,
+        .shop => .market,
+        .office, .control => .evidence,
+        .utility, .reactor => .power,
+        .security => .security,
+        .command => .command,
+        .armory => .armory,
+        .hangar => .hangar,
+        .trial => .trial,
+        .cache, .storage => .cache,
+        .heart => .heart,
+        .corridor, .common, .atrium, .barracks, .assembly => .plain,
+    };
 }
 
 fn extents(role: Role) [2]f32 {
