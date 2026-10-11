@@ -12,6 +12,7 @@ const m = @import("math.zig");
 const toon = @import("toon.zig");
 const Beasts = @import("Beasts.zig");
 const armor_kit = @import("armor.zig");
+const enum_compat = @import("enum_compat");
 const hair_def = @import("hair_style.zig");
 const cel_style = @import("CelStyle.zig");
 const CharacterContent = @import("../game/CharacterContent.zig");
@@ -1459,7 +1460,7 @@ test "appearance changes with mod ids, so characters rebuild when a mod choice c
 }
 
 test "every Profile.Armor tag has a valid armor set definition" {
-    inline for (std.meta.fields(Profile.Armor)) |f| {
+    inline for (enum_compat.fields(Profile.Armor)) |f| {
         const def = armor_kit.find(&armor_kit.builtin_sets, f.name) orelse return error.MissingArmorSet;
         try def.validate();
     }
