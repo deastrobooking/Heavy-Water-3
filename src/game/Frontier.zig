@@ -631,7 +631,13 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             if (winner) |player_index| {
                 const kit = &sb.kits[player_index];
                 const leveled = kit.awardCombatXP(xp);
-                if (scalari) kit.wallet.scrap +|= switch (u.kind) { .scalari_scout => 3, .scalari_stinger => 6, .scalari_titan => 40, .scalari_miner => 2, else => 0 };
+                if (scalari) kit.wallet.scrap +|= switch (u.kind) {
+                    .scalari_scout => 3,
+                    .scalari_stinger => 6,
+                    .scalari_titan => 40,
+                    .scalari_miner => 2,
+                    else => 0,
+                };
                 if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
             }
             if (!scalari) {
@@ -794,6 +800,9 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .airborne = !sb.player.grounded,
         .fire = armed and sb.trigger.fire,
         .alt = armed and sb.trigger.alt,
+        .martial_fire = !armed and sb.tools.tool == .hands and sb.trigger.fire and sb.target == .none,
+        .martial_guard = !armed and sb.tools.tool == .hands and (sb.trigger.alt or sb.trigger.saber),
+        .energy_kick = sb.player.energy_kick_timer > 0,
         .saber = armed and sb.trigger.saber,
         .weapon_accent = rgb3(Profile.accent_colors[sb.profile.accent]),
         .direct = sb.trigger.direct,
@@ -817,6 +826,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .airborne = !g.player.grounded,
             .fire = !frozen and g.fire and g.trading == null,
             .saber = !frozen and g.alt and g.trading == null,
+            .energy_kick = g.player.energy_kick_timer > 0,
             .weapon_accent = rgb3(Profile.accent_colors[g.profile.accent]),
             .direct = true,
             .cycle = !frozen and g.next_weapon and g.trading == null,
@@ -1505,7 +1515,9 @@ const gunmetal: [3]f32 = .{ 0.16, 0.17, 0.2 };
 const plate: [3]f32 = .{ 0.62, 0.64, 0.68 };
 
 /// A held weapon built from blocks: hilt and blade, or a gun's body, barrel and lumen strips.
-fn rgb3(c: [4]f32) [3]f32 { return .{ c[0], c[1], c[2] }; }
+fn rgb3(c: [4]f32) [3]f32 {
+    return .{ c[0], c[1], c[2] };
+}
 
 fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
     const hum = 0.85 + 0.15 * @sin(t * 30);

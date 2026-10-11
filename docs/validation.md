@@ -30,6 +30,12 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - Added cyan low-profile scout drone rendering, amber stinger and oversized titan character profiles, separate Scalari reward handling, and updated combat/world docs.
 - No build, tests, smoke, benchmark, save round-trip, dash handling check or visual review was run. These changes are implementation-only and remain unverified on macOS.
 
+## Long jumps and energy martial combat — 2026-10-11
+
+- Sprint-jump now launches a long-jump motion with forward carry. An airborne stomp sets a short landing pulse; combat turns it into a 92-damage radial energy kick with push/stun and colored impact effects.
+- Hands-tool attacks with no world target chain two energy punches into a roundhouse. The alternate input guards and briefly parries. The Ranger gets strike/kick poses; punch, kick and landing effects use the profile accent. Existing four-step chained dash remains available to set up an airborne finisher.
+- This was a code and documentation pass only. No build, tests, Metal capture, or hands-on combat run was made, so compilation, enemy hit feel, control conflicts and animation quality remain unverified.
+
 ## City modules and enemy damage audit — 2026-10-11
 
 - Interior room roles now map to reusable fixture modules and local interaction anchors (exit, trade, evidence, power, alarm, loot, unlock, and Hive heart). This is a data contract for the runtime; rendering, entry transitions, doors, population, and actual interactions remain open.

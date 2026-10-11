@@ -78,6 +78,11 @@ pub const Aim = struct {
     alt: bool = false,
     cycle: bool = false,
     saber: bool = false,
+    /// Bare-hand attack and alternate guard while the player has the hands tool selected.
+    martial_fire: bool = false,
+    martial_guard: bool = false,
+    /// One-shot landing pulse from a powered downward kick.
+    energy_kick: bool = false,
     /// Profile accent used by the saber blade and its released wave.
     weapon_accent: [3]f32 = .{ 0.3, 0.95, 1 },
     direct: bool = false,
@@ -119,6 +124,16 @@ pub const Melee = struct {
     guard: ?f32 = null,
 };
 
+pub const Martial = struct {
+    timer: f32 = 0,
+    duration: f32 = 0.3,
+    cooldown: f32 = 0,
+    guard: f32 = 0,
+    combo: u8 = 0,
+    was_fire: bool = false,
+    kick_seen: bool = false,
+};
+
 /// What the body is doing with the weapon, for the drawn pose and the rig.
 pub const Stance = struct {
     action: Ranger.Action = .none,
@@ -150,6 +165,7 @@ pub const Arsenal = struct {
     was_alt: bool = false,
     beam: ?struct { left: f32, dps: f32, width: f32, length: f32 } = null,
     melee: Melee = .{},
+    martial: Martial = .{},
     firearm: Firearms.State = .{},
     /// The last bazooka orb, for the alternate to detonate.
     orb: ?usize = null,
@@ -196,8 +212,12 @@ pub const Arsenal = struct {
 
     /// The pose the weapon puts the body in.
     pub fn stance(self: *const Arsenal) Stance {
+        if (!self.armed) {
+            if (self.martial.timer > 0) return .{ .action = if (self.martial.combo == 3) .kick else .strike, .t = 1 - self.martial.timer / self.martial.duration };
+            if (self.martial.guard > 0) return .{ .action = .guard };
+            return .{};
+        }
         const k = self.active orelse return .{};
-        if (!self.armed) return .{};
         if (self.melee.swing) |sw| return .{ .action = .swing, .t = sw.t, .arc = sw.arc };
         return .{ .pitch = self.pitch, .action = switch (k) {
             .beam_saber => if (self.melee.guard != null) .guard else .none,
@@ -209,6 +229,7 @@ pub const Arsenal = struct {
 
     /// The guard the Hive's bolts meet: a saber guard raised (parrying at first).
     pub fn guard(self: *const Arsenal) Enemies.Guard {
+        if (!self.armed and self.martial.guard > 0) return if (self.martial.guard < parry_window) .parry else .guard;
         if (self.active != .beam_saber or !self.armed) return .none;
         const g = self.melee.guard orelse return .none;
         return if (g < parry_window) .parry else .guard;
@@ -312,6 +333,7 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
     arsenal.select(owned, aim.cycle);
     if (aim.direct and aim.cycle and arsenal.active == .beam_saber) arsenal.select(owned, true);
     arsenal.armed = aim.armed;
+    self.stepMartial(arsenal, enemies, aim, dt, out, &n, &hive, &hn);
     arsenal.pitch = std.math.asin(std.math.clamp(aim.forward[1], -1, 1));
     const s = &arsenal.system;
     const kind = arsenal.active;
@@ -429,6 +451,42 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
 
     relay(out, &n, hive[0..@min(hn, hive.len)]);
     return n;
+}
+
+/// Body-powered combat uses the same per-player enemy damage path as fabricated weapons. The
+/// three-hit chain alternates hand techniques and finishes with a luminous roundhouse; impact on
+/// landing releases the separate powered dive-kick pulse supplied by Player.
+fn stepMartial(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, dt: f32, out: []Event, n: *usize, hive: []Enemies.Event, hn: *usize) void {
+    const m = &arsenal.martial;
+    m.timer = @max(0, m.timer - dt);
+    m.cooldown = @max(0, m.cooldown - dt);
+    m.guard = if (!aim.armed and aim.martial_guard) m.guard + dt else 0;
+    const pressed = !aim.armed and aim.martial_fire and !m.was_fire;
+    m.was_fire = !aim.armed and aim.martial_fire;
+    if (pressed and m.cooldown == 0 and m.timer == 0) {
+        m.combo = if (m.combo >= 3) 1 else m.combo + 1;
+        m.timer = 0.3;
+        m.cooldown = 0.16;
+        const fwd = flat(aim);
+        const kick = m.combo == 3;
+        const center = R.add(aim.feet, R.add(R.scale(fwd, 1.45), .{ 0, if (kick) @as(f32, 0.85) else 1.15, 0 }));
+        const color = aim.weapon_accent;
+        _ = enemies.strikeArea(center, if (kick) 2.7 else 2.15, if (kick) 48 else if (m.combo == 2) 34 else 27, fwd, hive, hn);
+        if (kick) _ = enemies.shock(center, 2.8, 0.45, 7);
+        self.effect(.{ .kind = .trail, .position = center, .dir = fwd, .life = 0.16, .size = if (kick) 0.25 else 0.17, .length = if (kick) 2.4 else 1.5, .color = color });
+        self.effect(.{ .kind = .spark, .position = center, .life = 0.13, .size = if (kick) 0.48 else 0.34, .color = color });
+        push(out, n, .slash);
+    }
+    if (aim.energy_kick and !m.kick_seen) {
+        const fwd = flat(aim);
+        const center = R.add(aim.feet, .{ 0, 0.55, 0 });
+        _ = enemies.strikeArea(center, 3.8, 92, null, hive, hn);
+        _ = enemies.shock(center, 4.2, 1.4, 15);
+        self.effect(.{ .kind = .burst, .position = center, .dir = fwd, .life = 0.32, .size = 3.8, .color = aim.weapon_accent });
+        self.effect(.{ .kind = .trail, .position = R.add(center, R.scale(fwd, 0.6)), .dir = fwd, .life = 0.22, .size = 0.34, .length = 2.2, .color = aim.weapon_accent });
+        push(out, n, .{ .impact = center });
+    }
+    m.kick_seen = aim.energy_kick;
 }
 
 /// The saber: guard, cuts, the queued next cut, the charged wave, and the blade's sweep.

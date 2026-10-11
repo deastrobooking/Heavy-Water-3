@@ -852,13 +852,13 @@ pub fn halve(size: [3]f32) Physics.Vec3 {
     return .{ size[0] / 2, size[1] / 2, size[2] / 2 };
 }
 
-/// P1's controller weapons for the coming step: the right trigger fires the energy gun, the
-/// right bumper quick-draws the beam saber. Either draws the weapon tool.
+/// P1's controller combat for the coming step: in Hands, trigger/bumper drive energy martial
+/// attacks and guard; in Weapon, they fire the gun and quick-draw the saber.
 pub fn padWeapons(self: *Sandbox, fire: bool, saber: bool) void {
     self.trigger.fire = self.trigger.fire or fire;
     self.trigger.saber = self.trigger.saber or saber;
     self.trigger.direct = true;
-    if (fire or saber) self.tools.tool = .weapon;
+    if ((fire or saber) and self.tools.tool != .hands) self.tools.tool = .weapon;
 }
 
 /// A body's passives on top of the party's suit: a Wildkin hero's run speed, and wings that

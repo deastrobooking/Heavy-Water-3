@@ -11,7 +11,7 @@ const Biome = @import("../procedural/Biome.zig");
 const Player = @This();
 pub const Mode = enum { walk, fly };
 pub const Traversal = enum { grapple, hover_jet, flight, hoverboard, energy_skate };
-pub const Motion = enum { idle, run, sprint, jump, fall, roll, stomp, wall_slide, climb, hang, mantle, jet, hover, glide, dash, board, skate, grapple_zip, grapple_swing, swim };
+pub const Motion = enum { idle, run, sprint, jump, long_jump, fall, roll, stomp, wall_slide, climb, hang, mantle, jet, hover, glide, dash, board, skate, grapple_zip, grapple_swing, swim };
 pub const eye_height: f32 = 1.62;
 pub const walk_speed: f32 = 5.8;
 pub const sprint_speed: f32 = 10.8;
@@ -93,6 +93,9 @@ dash_direction: V = .{ 0, 0, 1 },
 boost_timer: f32 = 0,
 boost_cooldown: f32 = 0,
 landing: f32 = 0,
+long_jump_timer: f32 = 0,
+/// Brief landing pulse consumed by combat for a powered dive-kick impact.
+energy_kick_timer: f32 = 0,
 grapple: Grapple = .{},
 suit: Suit = .{},
 /// The ground underfoot and the depth of river water around the feet (0 when dry), as of the
@@ -190,7 +193,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const pressed = input.jump_pressed or (input.jump and !self.previous_jump);
     const released = !input.jump and self.previous_jump;
     self.previous_jump = input.jump;
-    for ([_]*f32{ &self.jump_buffer, &self.coyote, &self.wall_lock, &self.grab_cooldown, &self.roll_timer, &self.dash_timer, &self.dash_cooldown, &self.dodge_tap_window, &self.dash_chain_timer, &self.boost_timer, &self.boost_cooldown, &self.tap_timer, &self.landing, &self.grapple.timer }) |timer| decay(timer, dt);
+    for ([_]*f32{ &self.jump_buffer, &self.coyote, &self.wall_lock, &self.grab_cooldown, &self.roll_timer, &self.dash_timer, &self.dash_cooldown, &self.dodge_tap_window, &self.dash_chain_timer, &self.boost_timer, &self.boost_cooldown, &self.tap_timer, &self.landing, &self.long_jump_timer, &self.energy_kick_timer, &self.grapple.timer }) |timer| decay(timer, dt);
     if (self.dash_chain_timer == 0) self.dash_chain_count = 0;
     self.grapple.heat = @max(0, self.grapple.heat - 24 * dt);
     if (self.grapple.mode == .cooldown and self.grapple.timer == 0) self.grapple.mode = .ready;
@@ -347,7 +350,17 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         }
     }
     if (!controlled and self.motion != .hang and self.motion != .climb) {
-        if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) self.wallJump() else if (self.jump_buffer > 0 and self.coyote > 0) self.jump(jump_speed * (if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
+        if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) self.wallJump() else if (self.jump_buffer > 0 and self.coyote > 0) {
+            const long_jump = self.grounded and input.fast and strength > 0.7 and !board;
+            self.jump(jump_speed * (if (long_jump) @as(f32, 1.12) else if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
+            if (long_jump) {
+                const launch = if (strength > 0.1) wish else forward;
+                self.velocity[0] = launch[0] * 17;
+                self.velocity[2] = launch[2] * 17;
+                self.motion = .long_jump;
+                self.long_jump_timer = 0.42;
+            }
+        }
         h = horizontal(self.velocity);
         if (input.dodge and !dash_started and self.grounded and self.boost_cooldown == 0) {
             if (board) {
@@ -398,7 +411,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             const gravity: f32 = -15 * (if (self.velocity[1] < 0) @as(f32, 1.35) else 1) * (if (@abs(self.velocity[1]) < 1) @as(f32, 0.55) else 1) * (if (board) @as(f32, 0.42) else 1);
             self.velocity[1] = @max(-35, self.velocity[1] + gravity * dt);
         } else self.velocity[1] = Physics.gravity * dt;
-        if (self.motion != .stomp and self.roll_timer == 0) self.motion = if (self.grounded) (if (skating) .skate else if (board) .board else if (strength < 0.05) .idle else if (sprinting) .sprint else .run) else if (self.velocity[1] > 0) .jump else .fall;
+        if (self.motion != .stomp and self.roll_timer == 0) self.motion = if (self.grounded) (if (skating) .skate else if (board) .board else if (strength < 0.05) .idle else if (sprinting) .sprint else .run) else if (self.long_jump_timer > 0) .long_jump else if (self.velocity[1] > 0) .jump else .fall;
         if (contact != null and pushing and !self.grounded and self.velocity[1] < 0 and self.motion != .stomp and self.grab_cooldown == 0) {
             self.velocity[1] = @max(self.velocity[1], if (self.stamina > 0) @as(f32, -3.5) else -5);
             self.stamina = @max(0, self.stamina - 28 * dt);
@@ -488,6 +501,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     if (self.grounded and !was_grounded) {
         self.landing = 0.25;
         if (self.motion == .stomp) {
+            self.energy_kick_timer = 0.3;
             self.jump(8.5);
             self.motion = .jump;
         }

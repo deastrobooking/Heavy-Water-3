@@ -20,7 +20,7 @@ const Ranger = @This();
 pub const capacity = 32;
 /// What the upper body is doing on top of the gait: weapon use, throwing, a trooper's strike, or
 /// a low cover posture. `action_t` advances timed actions from 0 to 1.
-pub const Action = enum { none, aim, swing, guard, cast, throw, strike, cover };
+pub const Action = enum { none, aim, swing, guard, cast, throw, strike, kick, cover };
 /// Saber arcs: forehand, backhand, overhead finisher, dash cut, aerial, charged wave.
 pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged };
 pub const Pose = struct {
@@ -234,7 +234,7 @@ fn clipFor(motion: Player.Motion, amount: f32) Animation.ClipId {
         .run => if (amount < 0.08) .idle else if (amount >= 0.78) .run else .walk,
         .sprint => if (amount < 0.08) .idle else .run,
         .climb, .hang, .mantle => .climb,
-        .jump, .fall, .roll, .stomp, .wall_slide, .jet, .hover, .glide, .dash, .board, .grapple_zip, .grapple_swing, .swim => .air,
+        .jump, .long_jump, .fall, .roll, .stomp, .wall_slide, .jet, .hover, .glide, .dash, .board, .grapple_zip, .grapple_swing, .swim => .air,
         .skate => if (amount < 0.08) .idle else .run,
     };
 }
@@ -258,7 +258,7 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
     p.reset(skel);
     const amount = std.math.clamp(state.walk_amount, 0, 1);
     const airborne = switch (state.motion) {
-        .jump, .fall, .jet, .hover, .glide, .grapple_zip, .grapple_swing => true,
+        .jump, .long_jump, .fall, .jet, .hover, .glide, .grapple_zip, .grapple_swing => true,
         else => false,
     };
     const climbing = state.motion == .climb or state.motion == .hang or state.motion == .wall_slide or state.motion == .mantle;
@@ -317,6 +317,15 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
             // The off hand guards the chest through the entire attack.
             pointBone(p, skel, .upper_arm_l, .lower_arm_l, V.init(0.35, -0.18, 0.76));
             pointBone(p, skel, .lower_arm_l, .hand_l, V.init(0.12, 0.12, 0.86));
+        },
+        .kick => {
+            // A chambered guard hand balances the hip turn as the right boot snaps forward.
+            p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_y, -0.32 * (1 - t)));
+            p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, -0.25 - 1.05 * smoothstep(0.12, 0.48, t)));
+            p.rotateLocal(sk.Joint.shin_r.idx(), Q.fromAxisAngle(V.unit_x, 0.18 + 0.72 * smoothstep(0.2, 0.55, t)));
+            p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, 0.18));
+            pointBone(p, skel, .upper_arm_l, .lower_arm_l, V.init(0.3, 0.25, 0.75));
+            pointBone(p, skel, .lower_arm_l, .hand_l, V.init(-0.1, 0.08, 0.9));
         },
         .cover => {
             // Low profile behind waist-high cover, with the helmet tucked and arms protecting
