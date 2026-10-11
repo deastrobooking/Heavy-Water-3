@@ -171,6 +171,11 @@ pub fn freePet(self: *Kit, s: Pets.Species) bool {
     return fresh;
 }
 
+/// Provides the campaign's starter companion to a newly active ranger or an older empty save.
+pub fn ensureStarterPet(self: *Kit) void {
+    if (self.pet_active == null) _ = self.freePet(.hound);
+}
+
 /// The next freed pet after the active one (wrapping), or null with none freed.
 pub fn nextPet(self: *const Kit) ?Pets.Species {
     const from: usize = if (self.pet_active) |a| @intFromEnum(a) + 1 else 0;

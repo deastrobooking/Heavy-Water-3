@@ -947,6 +947,7 @@ pub fn joinGuest(self: *Sandbox, index: usize) void {
         self.known[index + 1] = true;
     }
     self.guests[index] = .{ .active = true, .profile = profile };
+    self.kits[index + 1].ensureStarterPet();
     self.respawnGuest(index);
 }
 
@@ -990,6 +991,7 @@ pub fn rangerInPlay(self: *const Sandbox, name: []const u8, except: usize) bool 
 pub fn takeRanger(self: *Sandbox, p: usize, ranger: Save.Ranger) void {
     if (p == 0) self.profile = ranger.profile else self.guests[p - 1].profile = ranger.profile;
     self.kits[p] = ranger.kit;
+    self.kits[p].ensureStarterPet();
     self.own_profiles[p] = null;
     self.known[p] = true;
     self.pets.out[p] = null;
@@ -2251,6 +2253,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.market = market;
     self.progress = progress;
     self.kits = kits;
+    for (&self.kits) |*kit| kit.ensureStarterPet();
     self.known = known;
     self.own_profiles = owns;
     for (&self.guests, 1..) |*g, slot| if (characters[slot]) |c| {

@@ -106,6 +106,8 @@ pub const wasps_per_carrier = tuning.wasps_per_carrier;
 pub const carrier_health: f32 = tuning.carrier_health;
 pub const wasp_health: f32 = tuning.wasp_health;
 pub const wasp_radius: f32 = tuning.wasp_radius;
+/// Energy nets are intentionally generous so their lattice reads as a broad capture shot.
+pub const energy_net_radius: f32 = 7.5 * 1.15;
 /// A carrier wakes (launches, shoots) only with a player this close.
 pub const wake_distance: f32 = tuning.carrier_wake_distance;
 
@@ -140,6 +142,8 @@ pub const Wasp = struct {
     raid_target: V = @splat(0),
     bomb_timer: f32 = 2.5,
 };
+pub const WaspTarget = struct { index: u8, position: V, distance: f32 };
+pub const PetWaspHit = struct { position: V, downed: bool, raid_repelled: bool = false };
 pub const Carrier = struct {
     alive: bool = true,
     health: f32 = carrier_health,
@@ -864,11 +868,36 @@ pub fn fireRangerNet(self: *Skies, origin: V, dir: V, damage: f32) void {
     self.addShot(.{ .kind = .energy_net, .position = origin, .velocity = R.scale(R.normalize(dir), 120), .damage = damage, .life = 1.8 });
 }
 
+pub fn nearestWasp(self: *const Skies, position: V, reach: f32) ?WaspTarget {
+    var best: ?WaspTarget = null;
+    for (self.wasps, 0..) |slot, i| if (slot) |w| {
+        const distance = R.length(R.sub(w.position, position));
+        if (distance < reach and (best == null or distance < best.?.distance)) best = .{ .index = @intCast(i), .position = w.position, .distance = distance };
+    };
+    return best;
+}
+
+/// A companion's focused strike can stagger and destroy a nearby wasp.
+pub fn petStrikeWasp(self: *Skies, index: u8, damage: f32) ?PetWaspHit {
+    if (index >= self.wasps.len) return null;
+    const slot = &self.wasps[index];
+    const w = &(slot.* orelse return null);
+    const position = w.position;
+    w.health -= damage;
+    w.flash = 0.22;
+    w.netted = @max(w.netted, 0.45);
+    if (w.health > 0) return .{ .position = position, .downed = false };
+    const repelled = w.kind == .beetle_bomber and self.raid_active;
+    if (repelled) self.raid_active = false;
+    slot.* = null;
+    return .{ .position = position, .downed = true, .raid_repelled = repelled };
+}
+
 fn strikeNet(self: *Skies, origin: V, dir: V, length: f32, damage: f32, out: []Event, n: *usize) bool {
     var hit_any = false;
     for (&self.wasps) |*slot| {
         const w = &(slot.* orelse continue);
-        if (Enemies.segmentSphere(origin, dir, length, w.position, wasp_radius + 7.5) == null) continue;
+        if (Enemies.segmentSphere(origin, dir, length, w.position, wasp_radius + energy_net_radius) == null) continue;
         hit_any = true;
         w.health -= damage;
         w.flash = 0.18;

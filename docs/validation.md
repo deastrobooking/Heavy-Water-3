@@ -26,6 +26,13 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 ## Energy net and greatblade — 2026-10-11
 
 - Added a fabricable energy net. Its fast lattice shot reaches 120 m/s, damages every Hive flyer intersecting a broad capture corridor, and briefly freezes survivors for 1.45 seconds so they are easier to hit again. It has a 1.1-second firing cooldown and a distinct cyan lattice visual. The existing firearm shots still damage flyers through the shared Skies shot path.
+
+## Starter companion, pet growth and air support — 2026-10-11
+
+- Enlarged the energy-net lattice and its flyer hit corridor by 15%.
+- New games, new local players, empty ranger files, and older empty saves receive the level-one plasma hound. Pet experience remains individually saved and now increases both damage and maximum health; each pet shows its current level and health in the HUD.
+- Companion targeting now includes Hive flyers within 28 m as well as ground enemies. Pet strikes damage and stagger flyers, bring them down for alloy, and award nearby companions XP. Hostile melee units can damage pets; companions recover health outside combat.
+- Default Zig/Mach build verification is in progress. Headless tests, smoke, visual capture, and other compiler/platform checks have not been run.
 - Expanded the held saber into an oversized, curved, segmented plasma blade with a white-hot center and accent-colored outer facets. The animated swing trail is wider, longer, and uses the player's weapon accent; the damage sweep reach now matches the larger silhouette.
 - `python3 tools/zig.py build check` passed on the default Zig 0.16/Mach pair.
 - `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=37 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. Capture `zig-out/energy-blade-review.png` was inspected. The blade reads at a dramatically larger scale; the showcase image shows the held silhouette more clearly than its active swing, so the swing's pose and feel still need hands-on review.

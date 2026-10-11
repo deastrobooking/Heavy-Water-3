@@ -17,6 +17,7 @@ const std = @import("std");
 const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
 const Enemies = @import("Enemies.zig");
+const Skies = @import("Skies.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const Seed = @import("../procedural/Seed.zig");
 const World = @import("../world/World.zig");
@@ -78,6 +79,12 @@ pub fn damage(s: Species, level: u8) f32 {
     return i.damage + i.per_level * @as(f32, @floatFromInt(level -| 1));
 }
 
+/// Pet experience levels improve survivability alongside attack damage.
+pub fn maxHealth(s: Species, level: u8) f32 {
+    const base: f32 = switch (s) { .hound => 150, .falcon => 105, .golem => 240, .moth => 115 };
+    return base + 12 * @as(f32, @floatFromInt(level -| 1));
+}
+
 /// Hover height of fliers over their ground.
 pub const hover: f32 = 2.3;
 /// Experience the pet earns for each Hive unit downed near it.
@@ -99,12 +106,18 @@ pub const Pet = struct {
     trick: bool = false,
     cooldown: f32 = 0.5,
     heal_timer: f32 = 4,
+    health: f32 = 150,
+    max_health: f32 = 150,
+    hurt_cooldown: f32 = 0,
     engaged: bool = false,
 };
 
 pub const Event = union(enum) {
     /// An attack landed or swung, at a point (for a sound and a flash).
     attack: struct { species: Species, at: V },
+    /// A nearby Hive flyer was hit, and may have been brought down.
+    air_attack: struct { species: Species, at: V, downed: bool = false, raid_repelled: bool = false },
+    hurt: struct { species: Species, at: V },
     /// The moth mended rangers within `radius` of `at` by `amount`.
     mend: struct { at: V, radius: f32, amount: f32 },
 };
@@ -116,6 +129,7 @@ pub const Context = struct {
     level: u8,
     seed: u64,
     physics: *const Physics,
+    skies: *Skies,
 };
 
 pub const max_owners = 4;
@@ -141,10 +155,11 @@ pub fn place(self: *Pets, seed: u64, spawn: V) void {
 }
 
 /// Brings `species` out for player `owner` beside `at` (replacing any pet already out).
-pub fn summon(self: *Pets, owner: usize, species: Species, at: V) void {
+pub fn summon(self: *Pets, owner: usize, species: Species, at: V, level: u8) void {
     var p: V = R.add(at, .{ 1.2, 0, -1.2 });
     if (info(species).flies) p[1] += hover;
-    self.out[owner] = .{ .species = species, .position = p };
+    const hp = maxHealth(species, level);
+    self.out[owner] = .{ .species = species, .position = p, .health = hp, .max_health = hp };
 }
 
 /// A happy trick: a hop and a spin (or a loop, for fliers).
@@ -163,28 +178,40 @@ fn ground(ctx: Context, at: V) f32 {
     return terrain;
 }
 
-/// One fixed step of player `owner`'s pet: follow, pick a fight with the nearest Hive unit near
-/// its ranger, attack in reach, and (the moth) mend. Hive outcomes of its attacks land in `hive`.
+/// One fixed step of player `owner`'s pet: follow, attack nearby Hive units or flyers, take
+/// occasional close-range damage, recover after combat, and (the moth) mend.
 pub fn step(self: *Pets, owner: usize, ctx: Context, enemies: *Enemies, dt: f32, hive: []Enemies.Event, hn: *usize, out: []Event) usize {
     var n: usize = 0;
     if (self.out[owner] == null) return 0;
     // Too far behind (a fast travel, a flight): catch up at once.
-    if (R.length(R.sub(self.out[owner].?.position, ctx.owner)) > 60) self.summon(owner, self.out[owner].?.species, ctx.owner);
+    if (R.length(R.sub(self.out[owner].?.position, ctx.owner)) > 60) self.summon(owner, self.out[owner].?.species, ctx.owner, ctx.level);
     const q = &self.out[owner].?;
     const i = info(q.species);
+    const upgraded_max = maxHealth(q.species, ctx.level);
+    if (upgraded_max > q.max_health) q.health = @min(upgraded_max, q.health + upgraded_max - q.max_health);
+    q.max_health = upgraded_max;
     q.cooldown = @max(0, q.cooldown - dt);
+    q.hurt_cooldown = @max(0, q.hurt_cooldown - dt);
     q.action = @max(0, q.action - dt);
     if (q.action == 0) q.trick = false;
 
     const owner_chest = R.add(ctx.owner, .{ 0, 1.2, 0 });
-    const target = enemies.nearestUnit(owner_chest, 22);
-    q.engaged = target != null;
+    var target = enemies.nearestUnit(owner_chest, 22);
+    var target_wasp: ?u8 = null;
+    if (ctx.skies.nearestWasp(owner_chest, 28)) |air| {
+        const ground_distance = if (target) |g| R.length(R.sub(g, owner_chest)) else std.math.inf(f32);
+        if (air.distance < ground_distance) {
+            target = air.position;
+            target_wasp = air.index;
+        }
+    }
+    q.engaged = target != null and q.health > 0;
     const side: V = if (i.flies) .{ 0.9, 0, -0.9 } else .{ -1.1, 0, -1.4 };
     var goal = R.add(ctx.owner, R.rotate(R.axisAngle(.{ 0, 1, 0 }, ctx.owner_yaw), side));
     if (target) |t| {
         const away = R.sub(q.position, t);
         const flat = R.normalize(.{ away[0], 0, away[2] });
-        goal = R.add(t, R.scale(flat, i.reach * 0.7));
+        goal = R.add(t, R.scale(flat, if (target_wasp != null) @as(f32, 6) else i.reach * 0.7));
     }
     const ground_at = ground(ctx, goal);
     goal[1] = if (i.flies) ground_at + hover + (if (target) |t| @max(0, t[1] - ground_at - 1) else 0) else ground_at;
@@ -208,7 +235,18 @@ pub fn step(self: *Pets, owner: usize, ctx: Context, enemies: *Enemies, dt: f32,
         q.yaw += turn * @min(1, 10 * dt);
     }
 
-    if (target) |t| if (q.cooldown == 0 and R.length(R.sub(t, q.position)) < i.reach + 1.2) {
+    if (q.health > 0 and target_wasp != null and q.cooldown == 0) {
+        const wasp_index = target_wasp.?;
+        const wasp = ctx.skies.wasps[wasp_index] orelse return n;
+        if (R.length(R.sub(wasp.position, q.position)) < 28) {
+            const hit = ctx.skies.petStrikeWasp(wasp_index, damage(q.species, ctx.level) * 0.7) orelse return n;
+            q.cooldown = i.cooldown;
+            q.action = 0.45;
+            q.trick = false;
+            if (n < out.len) out[n] = .{ .air_attack = .{ .species = q.species, .at = hit.position, .downed = hit.downed, .raid_repelled = hit.raid_repelled } };
+            n += 1;
+        }
+    } else if (q.health > 0) if (target) |t| if (q.cooldown == 0 and R.length(R.sub(t, q.position)) < i.reach + 1.2) {
         q.cooldown = i.cooldown;
         q.action = if (q.species == .golem) 0.7 else 0.45;
         q.trick = false;
@@ -222,7 +260,21 @@ pub fn step(self: *Pets, owner: usize, ctx: Context, enemies: *Enemies, dt: f32,
         if (n < out.len) out[n] = .{ .attack = .{ .species = q.species, .at = t } };
         n += 1;
     };
-    if (q.species == .moth) {
+    var threatened = target != null;
+    for (enemies.units) |slot| if (slot) |u| {
+        const distance_to_enemy = R.length(R.sub(u.center(), q.position));
+        if (distance_to_enemy < 12) threatened = true;
+        const melee = Enemies.stats(u.kind).melee_damage;
+        if (q.health > 0 and q.hurt_cooldown == 0 and melee > 0 and u.state == .hunt and distance_to_enemy < 2.4) {
+            q.health = @max(0, q.health - melee * 0.55);
+            q.hurt_cooldown = 1.1;
+            if (n < out.len) out[n] = .{ .hurt = .{ .species = q.species, .at = q.position } };
+            n += 1;
+            break;
+        }
+    };
+    if (!threatened and q.hurt_cooldown == 0) q.health = @min(q.max_health, q.health + 10 * dt);
+    if (q.species == .moth and q.health > 0) {
         q.heal_timer -= dt;
         if (q.heal_timer <= 0) {
             q.heal_timer = 5;
@@ -529,7 +581,10 @@ test "levels grow with experience and raise damage, capped" {
     try std.testing.expectEqual(@as(u8, 2), levelFor(60));
     try std.testing.expectEqual(@as(u8, 3), levelFor(180));
     try std.testing.expectEqual(@as(u8, max_level), levelFor(1_000_000));
-    for (std.enums.values(Species)) |s| try std.testing.expect(damage(s, 5) > damage(s, 1));
+    for (std.enums.values(Species)) |s| {
+        try std.testing.expect(damage(s, 5) > damage(s, 1));
+        try std.testing.expect(maxHealth(s, 5) > maxHealth(s, 1));
+    }
 }
 
 test "wild pets wait on the meadow ring, apart from each other" {
@@ -547,9 +602,10 @@ test "a pet follows its ranger, fights the Hive near them, and the moth mends" {
     defer physics.deinit();
     for (std.enums.values(Species)) |species| {
         var pets: Pets = .{};
-        pets.summon(0, species, .{ 0, 0, 0 });
+        pets.summon(0, species, .{ 0, 0, 0 }, 1);
         var enemies: Enemies = .{};
-        const ctx: Context = .{ .owner = .{ 20, 0, 0 }, .owner_yaw = 0, .level = 1, .seed = 1, .physics = &physics };
+        var skies: Skies = .{};
+        const ctx: Context = .{ .owner = .{ 20, 0, 0 }, .owner_yaw = 0, .level = 1, .seed = 1, .physics = &physics, .skies = &skies };
         var hive: [16]Enemies.Event = undefined;
         var hn: usize = 0;
         var events: [8]Event = undefined;
@@ -569,6 +625,7 @@ test "a pet follows its ranger, fights the Hive near them, and the moth mends" {
             const n = pets.step(0, ctx, &enemies, 1.0 / 60.0, &hive, &hn, &events);
             for (events[0..@min(n, events.len)]) |e| switch (e) {
                 .attack => attacks += 1,
+                .air_attack, .hurt => {},
                 .mend => mends += 1,
             };
             for (hive[0..@min(hn, hive.len)]) |e| downed = downed or e == .unit_down;

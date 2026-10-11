@@ -219,7 +219,7 @@ pub fn recruit(sb: *Sandbox, hero: u8) void {
 pub fn freePet(sb: *Sandbox, p: usize, species: Pets.Species) void {
     if (!sb.kits[p].freePet(species)) return;
     const spot = sb.pets.spots[@intFromEnum(species)];
-    sb.pets.summon(p, species, spot.position);
+    sb.pets.summon(p, species, spot.position, sb.kits[p].petLevel(species));
     sb.pets.cheer(p);
     const i = Pets.info(species);
     burst(sb, R.add(spot.position, .{ 0, 1, 0 }), 2.5, i.glow);
@@ -235,7 +235,7 @@ pub fn petPet(sb: *Sandbox, p: usize, owner: usize) void {
     const kit = &sb.kits[owner];
     if (p == owner) if (kit.nextPet()) |next| if (next != pet.species) {
         kit.pet_active = next;
-        sb.pets.summon(owner, next, sb.feetOf(owner));
+        sb.pets.summon(owner, next, sb.feetOf(owner), kit.petLevel(next));
         sb.pets.cheer(owner);
         sb.cuePitch(.pickup, pet.position, 0.8);
         sb.say("{s} heads home; {s} the {s} comes out (level {d})", .{ Pets.info(pet.species).name, Pets.info(next).name, Pets.info(next).kind, kit.petLevel(next) });
@@ -255,16 +255,30 @@ fn stepPet(sb: *Sandbox, camera: *Camera, dt: f32) void {
             sb.pets.out[owner] = null;
             continue;
         };
-        if (sb.pets.out[owner] == null or sb.pets.out[owner].?.species != species) sb.pets.summon(owner, species, sb.feetOf(owner));
+        if (sb.pets.out[owner] == null or sb.pets.out[owner].?.species != species) sb.pets.summon(owner, species, sb.feetOf(owner), sb.kits[owner].petLevel(species));
         var hive_events: [16]Enemies.Event = undefined;
         var hn: usize = 0;
         var events: [4]Pets.Event = undefined;
-        const n = sb.pets.step(owner, .{ .owner = sb.feetOf(owner), .owner_yaw = sb.yawOf(owner), .level = sb.kits[owner].petLevel(species), .seed = sb.seed, .physics = &sb.physics }, &sb.enemies, dt, &hive_events, &hn, &events);
+        const n = sb.pets.step(owner, .{ .owner = sb.feetOf(owner), .owner_yaw = sb.yawOf(owner), .level = sb.kits[owner].petLevel(species), .seed = sb.seed, .physics = &sb.physics, .skies = &sb.skies }, &sb.enemies, dt, &hive_events, &hn, &events);
         for (events[0..@min(n, events.len)]) |e| switch (e) {
             .attack => |a| sb.cuePitch(switch (a.species) {
                 .hound, .golem => .impact,
                 .falcon, .moth => .zap,
             }, a.at, if (a.species == .golem) 0.7 else 1.2),
+            .air_attack => |a| {
+                sb.cuePitch(.zap, a.at, 1.3);
+                if (a.downed) {
+                    burst(sb, a.at, 3.5, Pets.info(a.species).glow);
+                    dropBelow(sb, .hive_alloy, a.at);
+                    sb.progress.setFlag("wasp_down");
+                    petLearns(sb, a.at);
+                    if (a.raid_repelled) {
+                        sb.progress.setFlag("bomber_raid_defended");
+                        sb.say("{s} drove off the market bomber!", .{Pets.info(a.species).name});
+                    }
+                }
+            },
+            .hurt => |h| sb.cuePitch(.hurt, h.at, 0.8),
             .mend => |m_| {
                 var mended = false;
                 for (0..Sandbox.max_players) |p| {
@@ -1653,7 +1667,7 @@ fn energyNet(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandl
     const forward = R.normalize(velocity);
     const side = if (@abs(forward[1]) > 0.95) R.normalize(R.cross(forward, .{ 0, 0, 1 })) else R.normalize(R.cross(forward, .{ 0, 1, 0 }));
     const up = R.normalize(R.cross(side, forward));
-    const radius: f32 = 4.5;
+    const radius: f32 = 4.5 * 1.15;
     const glow = Material.emissive(.{ 0.12, 0.95, 0.84, 1 }, 1.45);
     var count: usize = 0;
     for (0..5) |i| {

@@ -650,6 +650,9 @@ fn startArena(self: *App) void {
 
 fn newGame(self: *App) void {
     self.menu.open(.none);
+    for (&self.sandbox.kits, 0..) |*kit, slot| {
+        if (slot == 0 or self.sandbox.guests[slot - 1].active) kit.ensureStarterPet();
+    }
     self.sandbox.tools.tool = .weapon;
     self.sandbox.player.mode = .walk;
     self.sandbox.resetPlayer(&self.engine.camera);

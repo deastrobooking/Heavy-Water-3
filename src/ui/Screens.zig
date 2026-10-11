@@ -19,6 +19,7 @@ const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
 const Heroes = @import("../game/Heroes.zig");
 const Specials = @import("../game/Specials.zig");
+const Pets = @import("../game/Pets.zig");
 const Encounters = @import("../game/Encounters.zig");
 const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
@@ -551,6 +552,7 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     // Vitals, bottom left (hidden under conversation and shop panels).
     if (sb.seated == null and !panels) {
         vitals(c, v, sb.player, sb.profile, sb.combat.vitals[0]);
+        petStatus(c, v, sb, 0);
         specials(c, v, sb, 0, sb.profile, hud.special_keys);
         if (sb.tools.tool == .weapon) weaponLine(c, v, sb, 0);
     }
@@ -584,6 +586,17 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     // Interaction prompt and toast, bottom centre.
     prompt(c, v, hud.prompt, accent);
     if (hud.toast.len > 0) c.centered(v.x + v.w / 2, v.y + v.h - 150, hud.toast, 1.2, accent);
+}
+
+fn petStatus(c: *Canvas, v: Rect, sb: *const Sandbox, owner: usize) void {
+    const pet = sb.pets.out[owner] orelse return;
+    const kit = &sb.kits[owner];
+    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 170, .w = 250, .h = 22 };
+    const lumen = Pets.info(pet.species).glow;
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+    c.text(r.x + 9, r.y + 4, Pets.info(pet.species).name, 0.9, .{ lumen[0], lumen[1], lumen[2], 1 });
+    c.print(r.x + 72, r.y + 4, 0.85, ink, "LV {d}  HP {d:.0}/{d:.0}", .{ kit.petLevel(pet.species), pet.health, pet.max_health });
+    bar(c, .{ .x = r.x + 9, .y = r.y + 17, .w = r.w - 18, .h = 2 }, pet.health / pet.max_health, .{ lumen[0], lumen[1], lumen[2], 1 });
 }
 
 /// Name, motion, fuel and stamina in the bottom-left corner of a view.
@@ -668,6 +681,7 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const v = guest.view;
     const tint = Profile.accent_colors[g.profile.accent];
     vitals(c, v, g.player, g.profile, sb.combat.vitals[guest.index + 1]);
+    petStatus(c, v, sb, guest.index + 1);
     specials(c, v, sb, guest.index + 1, g.profile, .{ "UP", "DN", "R3+UP" });
     if (sb.kits[guest.index + 1].weapons != 0) weaponLine(c, v, sb, guest.index + 1);
     const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
