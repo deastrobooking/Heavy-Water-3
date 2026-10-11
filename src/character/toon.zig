@@ -126,7 +126,7 @@ pub fn faceShadowMap(u: f32, v: f32) f32 {
     t += 0.06 * (1 - m.saturate(cy * cy));
     // Nose wedge: just right of the nose (u < 0.5) stays in shadow longer.
     const nx = (u - 0.44) / 0.07;
-    const ny = (v - 0.33) / 0.09;
+    const ny = (v - 0.29) / 0.08;
     const r2 = nx * nx + ny * ny;
     if (r2 < 1) t -= 0.10 * (1 - r2) * (1 - r2);
     // Eye sockets stay lit slightly longer (keeps eyes readable).
@@ -270,19 +270,37 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
         out = over(out, lash, a);
     }
 
-    // brows: thin arcs
-    const bc = Vec2.init(ec.x - w * 0.05, ec.y + w * eyes.aspect * 1.55 + expr.brow_raise * 0.03);
-    const d_brow = ellipse(p, Vec2.init(bc.x, bc.y - w * 0.6), w * 1.05, w * 0.6);
-    if (p.y > bc.y - w * 0.2 and @abs(p.x - bc.x) < w * 1.0) {
-        out = over(out, lash, (1 - m.smoothstep(aa * 0.6, aa * 1.8, @abs(d_brow))) * 0.68);
+    // brows: a tapered stroke, heavy at the inner end, tilted by `brow_tilt`. Distance to a
+    // segment minus a radius that thins toward the temple keeps it crisp at any size.
+    {
+        const half_len = w * eyes.brow_length;
+        const by = ec.y + w * eyes.aspect + eyes.brow_gap + expr.brow_raise * 0.03;
+        const inner = Vec2.init(ec.x - half_len * 0.85, by - eyes.brow_tilt * half_len);
+        const outer = Vec2.init(ec.x + half_len * 0.85, by + eyes.brow_tilt * half_len * 0.6);
+        const seg = outer.sub(inner);
+        const k = m.saturate(p.sub(inner).dot(seg) / seg.dot(seg));
+        const on = inner.add(seg.scale(k));
+        const radius = eyes.brow_weight * m.lerp(1.0, 0.4, k);
+        const d_brow = p.sub(on).length() - radius;
+        if (d_brow < aa * 2) out = over(out, scalec(lash, 0.9), (1 - m.smoothstep(-aa * 0.5, aa * 1.2, d_brow)) * 0.8);
+    }
+
+    // nose: only a short shadow under the tip plus a faint bridge line; the mesh carries the rest
+    if (eyes.nose_mark > 0.001) {
+        const nd = ellipse(uv, Vec2.init(0.5, eyes.nose_height - 0.012), 0.026, 0.014);
+        const arc = (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(nd))) * @as(f32, if (uv.y < eyes.nose_height - 0.012) 1 else 0);
+        out = over(out, Rgb.hex(0x7a4a40), arc * eyes.nose_mark);
+        const lx = (uv.x - 0.47) / 0.006;
+        const ly = (uv.y - (eyes.nose_height + 0.03)) / 0.035;
+        out = over(out, Rgb.hex(0x9a6a5e), m.saturate(1 - (lx * lx + ly * ly)) * eyes.nose_mark * 0.35);
     }
 
     // mouth (centered, not mirrored)
-    const mx = (uv.x - 0.5) / 0.07;
-    const my = uv.y - (0.205 + expr.smile * 0.012 * (mx * mx - 0.5));
+    const mx = (uv.x - 0.5) / eyes.mouth_width;
+    const my = uv.y - (eyes.mouth_height + expr.smile * 0.012 * (mx * mx - 0.5));
     if (@abs(mx) < 1.0) {
         if (expr.mouth_open > 0.05) {
-            const d_m = ellipse(uv, Vec2.init(0.5, 0.20), 0.045, 0.03 * expr.mouth_open);
+            const d_m = ellipse(uv, Vec2.init(0.5, eyes.mouth_height - 0.005), eyes.mouth_width * 0.65, 0.03 * expr.mouth_open);
             out = over(out, Rgb.hex(0x8a2f3c), 1 - m.smoothstep(-aa, aa, d_m));
         } else {
             out = over(out, Rgb.hex(0x8b5650), (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(my))) * 0.68 * (1 - @abs(mx)));
@@ -331,6 +349,29 @@ test "face lighting: front fully lit, back fully dark, side half" {
     try std.testing.expect(faceLit(.{ .x = 0.15, .y = 0.6 }, fwd, left, Vec3.unit_x, 0.01) < 0.01);
     // and mirrored from the right
     try std.testing.expect(faceLit(.{ .x = 0.15, .y = 0.6 }, fwd, left, Vec3.unit_x.neg(), 0.01) > 0.99);
+}
+
+test "face marks follow the spec: brow above the eye, nose and mouth at their heights" {
+    const e: EyeSpec = .{};
+    // Brow: dark stroke sits above the eye top and is absent far above it.
+    const brow_y = e.height + 0.5 * e.size * e.aspect + e.brow_gap;
+    var found = false;
+    var x: f32 = 0.5 + e.spacing - 0.1;
+    while (x < 0.5 + e.spacing + 0.1) : (x += 0.005) {
+        if (faceDecal(.{ .x = x, .y = brow_y }, e, .{}, 0.002).alpha > 0.5) found = true;
+    }
+    try std.testing.expect(found);
+    try std.testing.expect(faceDecal(.{ .x = 0.5 + e.spacing, .y = brow_y + 0.12 }, e, .{}, 0.002).alpha < 0.01);
+    // Mouth line moves with its height; the nose mark vanishes when switched off.
+    var low = e;
+    low.mouth_height = 0.12;
+    try std.testing.expect(faceDecal(.{ .x = 0.5, .y = e.mouth_height }, e, .{ .smile = 0 }, 0.002).alpha > 0.5);
+    try std.testing.expect(faceDecal(.{ .x = 0.5, .y = e.mouth_height }, low, .{ .smile = 0 }, 0.002).alpha < 0.05);
+    var no_nose = e;
+    no_nose.nose_mark = 0;
+    const under_tip = Vec2.init(0.5, e.nose_height - 0.026);
+    try std.testing.expect(faceDecal(under_tip, e, .{}, 0.002).alpha > 0.1);
+    try std.testing.expect(faceDecal(under_tip, no_nose, .{}, 0.002).alpha < 0.01);
 }
 
 test "eye decal is symmetric and opaque in the iris" {

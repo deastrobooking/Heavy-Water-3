@@ -65,7 +65,8 @@ pub const Species = enum {
 pub const species_count = enum_compat.fields(Species).len;
 // Keep the original tags so existing JSON save profiles continue to decode unchanged.
 pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part };
-pub const FaceStyle = enum { classic, soft, angular, heroic, alien };
+/// Order matches `character/spec.zig` `face_presets`; new tags go at the end so saved names keep their meaning.
+pub const FaceStyle = enum { classic, soft, angular, heroic, alien, hero };
 pub const BootStyle = enum { trail_runner, field_boot, armored_sabatons, magstep, thruster };
 pub const Presentation = enum { masculine, feminine };
 /// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
@@ -271,4 +272,21 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     bad = p.toDoc();
     bad.height = 2;
     try std.testing.expectError(error.InvalidProfile, fromDoc(bad));
+}
+
+test "every face style, including the newest, survives the JSON round trip by name" {
+    for (std.enums.values(FaceStyle)) |style| {
+        var q: Profile = .{};
+        q.face_style = style;
+        const json = try std.json.Stringify.valueAlloc(std.testing.allocator, q.toDoc(), .{});
+        defer std.testing.allocator.free(json);
+        var parsed = try std.json.parseFromSlice(Doc, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expectEqual(style, (try fromDoc(parsed.value)).face_style);
+    }
+    // Saves from before the face table have no face_style field and keep the classic face.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const legacy = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0}", .{});
+    try std.testing.expectEqual(FaceStyle.classic, (try fromDoc(legacy.value)).face_style);
 }

@@ -142,7 +142,7 @@ Each system pairs a natural analogue with gameplay and with the engine piece it 
 
 ## Visual direction
 
-The target is grounded, hopeful science fantasy: painterly cel shading and panoramic natural forms with deliberate contours, broad readable color shapes, and engineered details that make physical sense. “Serious” means authored and credible, not grimdark. Keep the warmth and all-ages heroism while giving people and places adult proportions, useful construction, and stronger visual hierarchy. Human Rangers already use a 7.5-head proportion; the art pass should refine face construction, equipment fit, and presentation rather than inflate their heads. See the [character and environment visual pass](plans/visual-direction.md) for the current review and work order.
+The target is grounded, hopeful science fantasy: painterly cel shading and panoramic natural forms with deliberate contours, broad readable color shapes, and engineered details that make physical sense. “Serious” means authored and credible, not grimdark. Keep the warmth and all-ages heroism while giving people and places adult proportions, useful construction, and stronger visual hierarchy. Human Rangers use stylized anime action proportions (about 6 heads, large eyes, short neck, big hands and feet; see the character stylization pass); the art pass refines face construction, equipment fit, and presentation. See the [character and environment visual pass](plans/visual-direction.md) for the current review and work order.
 
 - Two- or three-step toon ramps with soft transitions, warm key light, and cool fill.
 - Selective outlines at important silhouettes; avoid outlining every internal edge.

@@ -2,6 +2,12 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Anime face and head proportions — 2026-10-11
+
+- **Changed:** `HeadSpec` and the comptime `face_presets` table (six faces, with the new `hero`), keyframed head profile, short neck, 5.9 to 6.5 head ratio for humans, larger eyes, tapered brow strokes, flat nose with a shadow mark, adjustable mouth, `hand_scale` and `foot_scale`. `Profile.FaceStyle` gained `hero` at the end; no save format change (the tag is stored by name, old saves default to `classic`).
+- **Checked:** `python3 tools/zig.py build check` (default pair) and `HEAVYWATER_ZIG_CHANNEL=0.17 build check` pass. `build test`: 369 of 377 pass; the 8 failures (armor suits count, asset Meta sidecar, Save format rejection, Sandbox controller, Profile hair-style wrap, Creator height, Screens layout, Enemies nest) fail identically on the unmodified base commit and are not from this change. New tests that pass: head profile ordering and head-ratio range for every preset, preset and `FaceStyle` order, hero versus classic proportions, face decal brow, nose and mouth placement, and the `FaceStyle` JSON round trip with a legacy document. ReleaseSafe Metal smoke (300 frames, validation layer) passed. ReleaseFast captures with `-Dcharacter-showcase=3` and `4` for classic, hero, soft, angular, alien and heroic were inspected.
+- **Not checked:** the other platforms, benchmarks, helmet and hair fit across all styles (the visor and hair generators scale with head height and were only seen on the short hairstyle), profile and three-quarter views, and Wildkin visuals (they keep their own head ratio, neck and hand scale, only the tests exercise them). Captures are at creator distance, where the mouth and brows are only a few pixels.
+
 ## GLB source trace and modular export — 2026-10-11
 
 - The repository already had a static glTF/GLB-to-HWMS converter. Added `asset-compiler trace` to validate sidecars and report GUID/hash provenance, stable node/mesh/primitive addresses, material slots, buffer/image dependencies and features outside the static importer.

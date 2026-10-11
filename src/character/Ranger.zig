@@ -55,41 +55,27 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     const synthetic = profile.class == .synthetic and profile.species == .human;
     const wildkin = profile.species != .human;
     const lumen = Profile.accent_colors[profile.accent];
+    const preset = facePreset(profile.face_style);
     var eyes = Beasts.eyes(profile.species, .{
-        .size = if (feminine) 0.15 else 0.13,
-        .aspect = if (feminine) 0.78 else 0.70,
-        .spacing = if (feminine) 0.19 else 0.18,
-        .height = if (feminine) 0.46 else 0.45,
+        .size = (if (feminine) @as(f32, 0.22) else 0.20) * preset.eye_size_scale,
+        .aspect = (if (feminine) @as(f32, 0.92) else 0.84) * preset.eye_aspect_scale,
+        .spacing = if (feminine) 0.20 else 0.19,
+        .height = (if (feminine) @as(f32, 0.46) else 0.455) + preset.eye_height_add,
+        .tilt = preset.eye_tilt,
         .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82),
         .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946),
         .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31,
-        .highlight_count = 1,
+        .highlight_count = if (profile.face_style == .heroic or profile.face_style == .hero or profile.face_style == .alien) 2 else 1,
+        .brow_weight = preset.brow_weight,
+        .brow_tilt = preset.brow_tilt,
+        .brow_gap = preset.brow_gap,
+        .nose_mark = preset.nose_mark,
+        .mouth_width = preset.mouth_width,
     }, rgb(lumen, 1.2));
-    switch (profile.face_style) {
-        .classic => {},
-        .soft => {
-            eyes.size *= 1.08;
-            eyes.aspect *= 1.08;
-            eyes.tilt *= 0.55;
-        },
-        .angular => {
-            eyes.size *= 0.92;
-            eyes.aspect *= 0.88;
-            eyes.tilt = -0.10;
-        },
-        .heroic => {
-            eyes.size *= 0.9;
-            eyes.height += 0.015;
-            eyes.highlight_count = 2;
-        },
-        .alien => {
-            eyes.size *= 1.12;
-            eyes.aspect *= 1.32;
-            eyes.pupil_size = 0.18;
-            eyes.iris_color = rgb(lumen, 1.4);
-            eyes.iris_dark = rgb(lumen, 0.66);
-            eyes.highlight_count = 2;
-        },
+    if (profile.face_style == .alien) {
+        eyes.pupil_size = 0.18;
+        eyes.iris_color = rgb(lumen, 1.4);
+        eyes.iris_dark = rgb(lumen, 0.66);
     }
     const hair_style: spec.HairStyle = switch (profile.hair_style) {
         .short => .short_spiky,
@@ -432,6 +418,11 @@ fn smoothstep(edge0: f32, edge1: f32, value: f32) f32 {
     return x * x * (3 - 2 * x);
 }
 
+/// The comptime face table row for a profile's face style (`spec.face_presets`, same order).
+pub fn facePreset(style: Profile.FaceStyle) spec.FacePreset {
+    return spec.face_presets[@intFromEnum(style)];
+}
+
 /// The body part of a profile's character spec (everything the skeleton depends on).
 pub fn bodySpec(profile: Profile) spec.BodySpec {
     const feminine = profile.presentation == .feminine;
@@ -439,14 +430,9 @@ pub fn bodySpec(profile: Profile) spec.BodySpec {
     const form = Beasts.scale(profile.species);
     const build = profile.build * form.build;
     const wildkin = profile.species != .human;
-    const face: struct { head: f32, jaw: f32 } = if (wildkin) .{ .head = 0.9, .jaw = 0.2 } else switch (profile.face_style) {
-        .classic => .{ .head = if (feminine) @as(f32, 0.80) else 0.83, .jaw = if (feminine) @as(f32, 0.65) else 0.28 },
-        .soft => .{ .head = if (feminine) @as(f32, 0.86) else 0.88, .jaw = 0.14 },
-        .angular => .{ .head = if (feminine) @as(f32, 0.79) else 0.82, .jaw = 0.88 },
-        .heroic => .{ .head = if (feminine) @as(f32, 0.85) else 0.89, .jaw = 0.56 },
-        .alien => .{ .head = if (feminine) @as(f32, 0.76) else 0.78, .jaw = 0.44 },
-    };
-    return .{ .height = 1.8 * profile.height * form.height, .head_ratio = Beasts.headRatio(profile.species), .femininity = if (feminine) 0.84 else 0.18, .bust = if (wildkin) 0.02 else if (feminine) 0.10 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * build, .head_width = face.head, .jaw_sharpness = face.jaw };
+    const preset = facePreset(profile.face_style);
+    const head: spec.HeadSpec = if (wildkin) .{ .cranium_width = 0.9, .jaw_taper = 0.2, .neck_length = 0.36, .neck_thickness = 1.0 } else if (feminine) preset.feminine else preset.masculine;
+    return .{ .height = 1.8 * profile.height * form.height, .head_ratio = if (wildkin) Beasts.headRatio(profile.species) else preset.head_ratio, .femininity = if (feminine) 0.84 else 0.18, .bust = if (wildkin) 0.02 else if (feminine) 0.10 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * build, .head = head, .hand_scale = if (wildkin) 1.0 else 1.15, .foot_scale = if (wildkin) 1.0 else 1.1 };
 }
 
 fn mix(a: [4]f32, b: spec.Rgb, t: f32) spec.Rgb {
@@ -1076,8 +1062,8 @@ test "masculine and feminine ranger faces have fitted feature meshes and distinc
     try std.testing.expectEqual(@as(f32, 0.18), masc.character.spec.body.femininity);
     try std.testing.expectEqual(@as(f32, 0.84), fem.character.spec.body.femininity);
     try std.testing.expect(!Ranger.sameAppearance(masc.profile, fem.profile));
-    try std.testing.expect(masc.character.spec.body.jaw_sharpness != fem.character.spec.body.jaw_sharpness);
-    try std.testing.expect(masc.character.spec.body.head_width != fem.character.spec.body.head_width);
+    try std.testing.expect(masc.character.spec.body.head.jaw_taper != fem.character.spec.body.head.jaw_taper);
+    try std.testing.expect(masc.character.spec.body.head.cranium_width != fem.character.spec.body.head.cranium_width);
     try std.testing.expectApproxEqAbs(@as(f32, 0.10), fem.character.spec.body.bust, 1e-6);
     try std.testing.expect(masc.character.spec.eyes.size != fem.character.spec.eyes.size);
     const male_eye = toon.faceDecal(.{ .x = 0.5 + masc.character.spec.eyes.spacing, .y = masc.character.spec.eyes.height }, masc.character.spec.eyes, .{}, 0.01);
@@ -1332,4 +1318,25 @@ test "suits carry lit strips, cops and a buckle; full suits add a core and a bac
     }
     // The power pack stands off the back; the vanguard's farthest.
     try std.testing.expect(backs[1] > backs[0] + 0.02 and backs[2] > backs[1]);
+}
+
+test "face presets match the face styles and give each one a distinct head" {
+    const styles = std.enums.values(Profile.FaceStyle);
+    try std.testing.expectEqual(spec.face_presets.len, styles.len);
+    for (styles) |style| try std.testing.expectEqualStrings(@tagName(style), facePreset(style).name);
+    const a = std.testing.allocator;
+    var hero = try init(a, .{ .face_style = .hero });
+    defer hero.deinit(a);
+    var classic = try init(a, .{ .face_style = .classic });
+    defer classic.deinit(a);
+    // Human heads are 5.5-6.5 per head height; the hero has the shorter, thicker neck and bigger hands.
+    const hb = hero.character.spec.body;
+    try std.testing.expect(hb.head_ratio >= 5.5 and hb.head_ratio <= 6.5);
+    try std.testing.expect(hb.head.neck_length < classic.character.spec.body.head.neck_length);
+    try std.testing.expect(hero.character.spec.eyes.brow_tilt > classic.character.spec.eyes.brow_tilt);
+    try std.testing.expect(hero.character.landmarks.hand_len > 0.092 * hb.height);
+    // The face is a front-facing band: eyes sit about 0.55 of the head down from the crown.
+    const lm = hero.character.landmarks;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.45), hero.character.spec.eyes.height, 0.03);
+    try std.testing.expect(lm.shoulder_y < lm.chin_y and lm.chin_y - lm.shoulder_y < 0.3 * lm.B);
 }

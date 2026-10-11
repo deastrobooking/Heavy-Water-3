@@ -22,9 +22,84 @@ pub const Rgb = struct {
     }
 };
 
+/// Head and face shape as plain data. Lengths are fractions of the head height (`H`) unless noted;
+/// the face landmarks (eyes, nose, mouth) live in `EyeSpec` as heights in face UV (0 chin, 1 crown).
+/// A face is just a value of this struct, so mods can define one in data. See `face_presets`.
+pub const HeadSpec = struct {
+    /// Skull width at its widest point, as a fraction of `H`.
+    cranium_width: f32 = 0.88,
+    /// Skull front-to-back depth, as a fraction of `H`.
+    cranium_depth: f32 = 0.96,
+    /// Uniform multiplier on the whole skull (1 = default). Above 1 gives a fuller forehead and dome.
+    cranium_size: f32 = 1.0,
+    /// Width at the cheekbones relative to the skull (1 = as wide as the skull).
+    cheek_width: f32 = 1.0,
+    /// Cheekbone height in face UV (0 chin, 1 crown); places the cheek relief.
+    cheek_height: f32 = 0.30,
+    /// 0 = round or boxy jaw, 1 = sharp V jaw.
+    jaw_taper: f32 = 0.35,
+    /// Width of the chin base relative to the skull before taper and point are applied.
+    chin_width: f32 = 0.40,
+    /// 0 = broad rounded chin, 1 = narrow point.
+    chin_point: f32 = 0.25,
+    /// How far the chin sits forward of the default slope, as a fraction of `H` (negative recedes).
+    chin_jut: f32 = 0.0,
+    /// Neck height from shoulder line to chin, in body units (`height / 6.3`). Anime necks are short.
+    neck_length: f32 = 0.22,
+    /// Neck girth multiplier (1 = default).
+    neck_thickness: f32 = 1.0,
+    /// Brow ridge relief, fraction of `H`. Small: the brow mostly reads from the decal.
+    brow_ridge: f32 = 0.010,
+    /// Cheek pad relief, fraction of `H`.
+    cheek_fullness: f32 = 0.014,
+    /// Nose bridge relief, fraction of `H`. The nose is a tiny bridge plus a shadow mark, not a bump.
+    nose_bridge: f32 = 0.006,
+    /// Nose tip relief, fraction of `H`.
+    nose_tip: f32 = 0.014,
+
+    /// Number of keyframes in `profile`.
+    pub const key_count = 7;
+
+    /// Keyframed outline of the head, chin to temple. `us` are heights in face UV; `half_w` is the
+    /// half width and `front`/`back` the face and skull surface z (forward positive), in units of
+    /// `H`. This is the single place a face shape becomes geometry.
+    pub const Profile = struct {
+        us: [key_count]f32,
+        half_w: [key_count]f32,
+        front: [key_count]f32,
+        back: [key_count]f32,
+    };
+
+    pub fn profile(h: HeadSpec) Profile {
+        const half = 0.5 * h.cranium_width * h.cranium_size;
+        const d = 0.5 * h.cranium_depth * h.cranium_size;
+        const t = std.math.clamp(h.jaw_taper, 0, 1);
+        const pt = std.math.clamp(h.chin_point, 0, 1);
+        const jut = h.chin_jut;
+        const jaw = m.lerp(0.78, 0.56, t);
+        // Anime chins are short and soft: the base stays wide and deep until the point is raised.
+        const chin = h.chin_width * m.lerp(1.0, 0.55, pt) * m.lerp(1.0, 0.8, t);
+        const cheek = h.cheek_width;
+        return .{
+            .us = .{ 0.11, 0.17, 0.26, 0.37, 0.50, 0.62, 0.72 },
+            .half_w = .{
+                half * chin,
+                half * jaw * cheek,
+                half * cheek * m.lerp(0.94, 0.84, t),
+                half * cheek * m.lerp(0.99, 0.95, t),
+                half,
+                half * 1.02,
+                half * 0.96,
+            },
+            .front = .{ d * 0.52 + jut, d * 0.78 + jut * 0.8, d * 0.92 + jut * 0.3, d * 0.99, d, d * 0.99, d * 0.94 },
+            .back = .{ -d * 0.55, -d * 0.72, -d * 0.87, -d * 0.96, -d, -d, -d * 0.97 },
+        };
+    }
+};
+
 pub const BodySpec = struct {
     height: f32 = 1.58,
-    /// Heads tall. Chibi ~2.5-3.5, shoujo/idol ~6-6.5, action/realistic ~7-8.
+    /// Heads tall. Chibi ~2.5-3.5, anime action heroes ~5.5-6.5, realistic ~7-8.
     head_ratio: f32 = 6.3,
     /// 0 = masculine (broad shoulders, narrow hips), 1 = feminine.
     femininity: f32 = 1.0,
@@ -37,20 +112,23 @@ pub const BodySpec = struct {
     limb_thickness: f32 = 1.0,
     /// 0 = flat, 1 = pronounced.
     bust: f32 = 0.45,
-    /// Head shape: width relative to head height, jaw taper (0 round, 1 sharp V).
-    head_width: f32 = 0.80,
-    jaw_sharpness: f32 = 0.70,
+    /// Head and face shape (skull, cheek, jaw, chin, neck).
+    head: HeadSpec = .{},
+    /// Hand and foot size multipliers; large hands and feet read well at gameplay distance.
+    hand_scale: f32 = 1.15,
+    foot_scale: f32 = 1.1,
     /// Arm angle below horizontal in the rest pose (A-pose), radians.
     arm_rest_angle: f32 = m.radians(40),
 };
 
+/// Eyes plus the other flat face marks (brows, nose shadow, mouth), all drawn as decals.
 pub const EyeSpec = struct {
     /// Eye size as a fraction of face width. Anime: big.
     size: f32 = 0.24,
     /// Height / width of the eye opening.
     aspect: f32 = 1.15,
-    /// Vertical position in the face UV (0 chin, 1 crown).
-    height: f32 = 0.44,
+    /// Vertical position in the face UV (0 chin, 1 crown). About 0.55 down from the crown.
+    height: f32 = 0.45,
     /// Horizontal distance from face center (face UV units).
     spacing: f32 = 0.20,
     tilt: f32 = 0.08,
@@ -58,6 +136,115 @@ pub const EyeSpec = struct {
     iris_dark: Rgb = Rgb.hex(0x1d2b6b),
     pupil_size: f32 = 0.38,
     highlight_count: u8 = 2,
+    /// Brow height above the top of the eye, in face UV.
+    brow_gap: f32 = 0.045,
+    /// Brow stroke length as a multiple of the eye width.
+    brow_length: f32 = 1.05,
+    /// Brow stroke thickness at the inner end, in face UV.
+    brow_weight: f32 = 0.011,
+    /// Brow slope: positive lowers the inner end (determined, fierce), negative raises it (gentle).
+    brow_tilt: f32 = 0.12,
+    /// Nose tip height in face UV (0 chin, 1 crown); also places the relief on the mesh.
+    nose_height: f32 = 0.29,
+    /// Opacity of the nose shadow mark (0 hides it).
+    nose_mark: f32 = 0.45,
+    /// Mouth line height in face UV.
+    mouth_height: f32 = 0.19,
+    /// Mouth half width in face UV.
+    mouth_width: f32 = 0.06,
+};
+
+/// A named face: head shape for each presentation, eye shape and the head ratio that goes with
+/// it. The table is comptime data; add a row (and a `Profile.FaceStyle` tag) to add a face.
+pub const FacePreset = struct {
+    name: []const u8,
+    masculine: HeadSpec = .{},
+    feminine: HeadSpec = .{},
+    /// Heads tall for a human with this face.
+    head_ratio: f32 = 6.3,
+    eye_size_scale: f32 = 1.0,
+    eye_aspect_scale: f32 = 1.0,
+    /// Outer-corner lift of the eyes (negative droops toward the temple).
+    eye_tilt: f32 = 0.06,
+    eye_height_add: f32 = 0.0,
+    /// Brow and mouth overrides; see `EyeSpec`.
+    brow_weight: f32 = 0.011,
+    brow_tilt: f32 = 0.12,
+    brow_gap: f32 = 0.045,
+    nose_mark: f32 = 0.45,
+    mouth_width: f32 = 0.06,
+};
+
+/// In the order of `game/Profile.zig` `FaceStyle`; a test keeps the two in step.
+pub const face_presets = [_]FacePreset{
+    .{
+        .name = "classic",
+        .masculine = .{ .jaw_taper = 0.35, .chin_point = 0.25, .neck_thickness = 1.05 },
+        .feminine = .{ .cranium_width = 0.85, .jaw_taper = 0.62, .chin_point = 0.42, .neck_length = 0.24, .neck_thickness = 0.88 },
+        .head_ratio = 6.3,
+    },
+    .{
+        .name = "soft",
+        .masculine = .{ .cranium_width = 0.92, .cranium_size = 1.03, .cheek_width = 1.02, .jaw_taper = 0.12, .chin_point = 0.05, .cheek_fullness = 0.018 },
+        .feminine = .{ .cranium_width = 0.90, .cranium_size = 1.03, .cheek_width = 1.02, .jaw_taper = 0.2, .chin_point = 0.1, .cheek_fullness = 0.018, .neck_length = 0.24, .neck_thickness = 0.88 },
+        .head_ratio = 5.9,
+        .eye_size_scale = 1.08,
+        .eye_aspect_scale = 1.1,
+        .eye_tilt = 0.03,
+        .brow_weight = 0.009,
+        .brow_tilt = 0.0,
+        .brow_gap = 0.055,
+    },
+    .{
+        .name = "angular",
+        .masculine = .{ .cranium_width = 0.84, .jaw_taper = 0.85, .chin_point = 0.7, .chin_jut = 0.02, .cheek_width = 0.98, .brow_ridge = 0.013 },
+        .feminine = .{ .cranium_width = 0.82, .jaw_taper = 0.88, .chin_point = 0.75, .chin_jut = 0.02, .cheek_width = 0.98, .neck_length = 0.24, .neck_thickness = 0.86 },
+        .head_ratio = 6.5,
+        .eye_size_scale = 0.94,
+        .eye_aspect_scale = 0.86,
+        .eye_tilt = 0.12,
+        .brow_weight = 0.012,
+        .brow_tilt = 0.28,
+        .nose_mark = 0.55,
+    },
+    .{
+        .name = "heroic",
+        .masculine = .{ .cranium_width = 0.90, .jaw_taper = 0.45, .chin_width = 0.46, .chin_point = 0.3, .chin_jut = 0.02, .brow_ridge = 0.013, .neck_thickness = 1.1 },
+        .feminine = .{ .cranium_width = 0.86, .jaw_taper = 0.55, .chin_point = 0.35, .chin_jut = 0.015, .neck_length = 0.24, .neck_thickness = 0.9 },
+        .head_ratio = 6.4,
+        .eye_size_scale = 0.96,
+        .eye_height_add = 0.01,
+        .eye_tilt = 0.09,
+        .brow_weight = 0.013,
+        .brow_tilt = 0.2,
+    },
+    .{
+        .name = "alien",
+        .masculine = .{ .cranium_width = 0.82, .cranium_depth = 0.92, .cranium_size = 1.06, .jaw_taper = 0.7, .chin_point = 0.6, .nose_bridge = 0.0, .nose_tip = 0.004, .neck_length = 0.26 },
+        .feminine = .{ .cranium_width = 0.80, .cranium_depth = 0.92, .cranium_size = 1.06, .jaw_taper = 0.75, .chin_point = 0.65, .nose_bridge = 0.0, .nose_tip = 0.004, .neck_length = 0.28, .neck_thickness = 0.85 },
+        .head_ratio = 6.0,
+        .eye_size_scale = 1.12,
+        .eye_aspect_scale = 1.3,
+        .eye_tilt = 0.14,
+        .brow_weight = 0.006,
+        .brow_tilt = -0.1,
+        .nose_mark = 0.0,
+        .mouth_width = 0.04,
+    },
+    // Dragon Ball Z hero: square strong jaw, short thick neck, heavy angled brows, sharp upswept eyes.
+    .{
+        .name = "hero",
+        .masculine = .{ .cranium_depth = 0.98, .jaw_taper = 0.28, .chin_width = 0.50, .chin_point = 0.1, .chin_jut = 0.03, .brow_ridge = 0.015, .neck_length = 0.18, .neck_thickness = 1.18 },
+        .feminine = .{ .cranium_width = 0.86, .jaw_taper = 0.45, .chin_width = 0.44, .chin_point = 0.2, .chin_jut = 0.02, .brow_ridge = 0.012, .neck_length = 0.2, .neck_thickness = 0.95 },
+        .head_ratio = 6.1,
+        .eye_aspect_scale = 0.84,
+        .eye_tilt = 0.16,
+        .brow_weight = 0.016,
+        .brow_tilt = 0.36,
+        .brow_gap = 0.035,
+        .nose_mark = 0.6,
+        .mouth_width = 0.055,
+    },
 };
 
 pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part };
@@ -181,4 +368,25 @@ pub const school_uniform = [_]GarmentSpec{
 test "head units" {
     const s: CharacterSpec = .{};
     try std.testing.expectApproxEqAbs(s.body.height / 6.3, s.headHeight(), 1e-6);
+}
+
+test "every face preset yields an ordered, finite head profile with human head ratios" {
+    for (face_presets) |fp| {
+        try std.testing.expect(fp.head_ratio >= 5.5 and fp.head_ratio <= 6.5);
+        for ([_]HeadSpec{ fp.masculine, fp.feminine }) |h| {
+            const pr = h.profile();
+            for (0..HeadSpec.key_count) |i| {
+                if (i > 0) try std.testing.expect(pr.us[i] > pr.us[i - 1]);
+                try std.testing.expect(pr.half_w[i] > 0.05 and pr.half_w[i] < 0.6);
+                try std.testing.expect(pr.front[i] > pr.back[i] + 0.1);
+            }
+            // The chin is narrower than the cheek, and the skull is at least as wide as the chin.
+            try std.testing.expect(pr.half_w[0] < pr.half_w[3]);
+        }
+    }
+    // Jaw taper and chin point narrow the chin; a forward jut moves its front out.
+    const round: HeadSpec = .{ .jaw_taper = 0, .chin_point = 0 };
+    const sharp: HeadSpec = .{ .jaw_taper = 1, .chin_point = 1, .chin_jut = 0.05 };
+    try std.testing.expect(sharp.profile().half_w[0] < round.profile().half_w[0]);
+    try std.testing.expect(sharp.profile().front[0] > round.profile().front[0]);
 }
