@@ -1,9 +1,5 @@
 const std = @import("std");
 const Air = @import("Air.zig");
-const c = @cImport({
-    @cInclude("spirv-cross/spirv_cross_c.h");
-    @cInclude("spirv-tools/libspirv.h");
-});
 const genGlsl = @import("codegen/glsl.zig").gen;
 const genHlsl = @import("codegen/hlsl.zig").gen;
 const genMsl = @import("codegen/msl.zig").gen;
@@ -158,79 +154,6 @@ pub fn generate(
     };
 }
 
-fn spvMessageConsumer(
-    level: c.spv_message_level_t,
-    src: [*c]const u8,
-    pos: [*c]const c.spv_position_t,
-    msg: [*c]const u8,
-) callconv(.c) void {
-    switch (level) {
-        c.SPV_MSG_FATAL,
-        c.SPV_MSG_INTERNAL_ERROR,
-        c.SPV_MSG_ERROR,
-        => {
-            // TODO - don't panic
-            std.debug.panic("{s} at :{d}:{d}\n{s}", .{
-                std.mem.span(msg),
-                pos.*.line,
-                pos.*.column,
-                std.mem.span(src),
-            });
-        },
-        else => {},
-    }
-}
-
-fn spvTargetEnv(language: Language) c.spv_target_env {
-    return switch (language) {
-        .glsl => c.SPV_ENV_OPENGL_4_5,
-        .spirv => c.SPV_ENV_VULKAN_1_0,
-        else => unreachable,
-    };
-}
-
-fn spvExecutionModel(stage: Stage) c.SpvExecutionModel {
-    return switch (stage) {
-        .vertex => c.SpvExecutionModelVertex,
-        .fragment => c.SpvExecutionModelFragment,
-        .compute => c.SpvExecutionModelGLCompute,
-    };
-}
-
-fn spvcErrorCallback(userdata: ?*anyopaque, err: [*c]const u8) callconv(.c) void {
-    _ = userdata;
-    // TODO - don't panic
-    @panic(std.mem.span(err));
-}
-
-fn spvcBackend(language: Language) c_uint {
-    return switch (language) {
-        .glsl => c.SPVC_BACKEND_GLSL,
-        .hlsl => c.SPVC_BACKEND_HLSL,
-        .msl => c.SPVC_BACKEND_MSL,
-        .spirv => unreachable,
-    };
-}
-
-fn glslRemapResources(
-    compiler: c.spvc_compiler,
-    resources: c.spvc_resources,
-    resource_type: c.spvc_resource_type,
-    bindings: *const BindingTable,
-) void {
-    var resource_list: [*c]c.spvc_reflected_resource = undefined;
-    var resource_size: usize = undefined;
-    _ = c.spvc_resources_get_resource_list_for_type(resources, resource_type, &resource_list, &resource_size);
-
-    for (resource_list[0..resource_size]) |resource| {
-        const key = BindingPoint{
-            .group = c.spvc_compiler_get_decoration(compiler, resource.id, c.SpvDecorationDescriptorSet),
-            .binding = c.spvc_compiler_get_decoration(compiler, resource.id, c.SpvDecorationBinding),
-        };
-
-        if (bindings.get(key)) |slot| {
-            _ = c.spvc_compiler_unset_decoration(compiler, resource.id, c.SpvDecorationDescriptorSet);
-            _ = c.spvc_compiler_set_decoration(compiler, resource.id, c.SpvDecorationBinding, slot);
-        }
-    }
-}
+// The spirv-cross and spirv-tools helpers that lived here (`spvMessageConsumer`, `spvTargetEnv`,
+// `spvExecutionModel`, `spvcBackend`, `glslRemapResources`) were unreferenced and imported headers no
+// build dependency provides; Zig 0.17 removed the `@cImport` they needed. See git history to restore.

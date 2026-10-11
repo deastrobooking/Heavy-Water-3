@@ -5,11 +5,12 @@
 //! to separate sections, which can then later be merged into the final binary.
 
 const std = @import("std");
+const meta_compat = @import("../../../../meta_compat.zig");
 const spec = @import("spec.zig");
 const Opcode = spec.Opcode;
 const Word = spec.Word;
 
-const DoubleWord = std.meta.Int(.unsigned, @bitSizeOf(Word) * 2);
+const DoubleWord = meta_compat.Int(.unsigned, @bitSizeOf(Word) * 2);
 const Log2Word = std.math.Log2Int(Word);
 
 const Section = @This();
@@ -68,7 +69,7 @@ pub fn emitSpecConstantOp(
     section.writeOperand(spec.IdRef, operands.id_result);
     section.writeOperand(Opcode, opcode);
 
-    const fields = @typeInfo(opcode.Operands()).@"struct".fields;
+    const fields = comptime meta_compat.fields(opcode.Operands());
     // First 2 fields are always id_result_type and id_result.
     inline for (fields[2..]) |field| {
         section.writeOperand(field.type, @field(operands, field.name));
@@ -91,11 +92,8 @@ pub fn writeDoubleWord(section: *Section, dword: DoubleWord) void {
 }
 
 fn writeOperands(section: *Section, comptime Operands: type, operands: Operands) void {
-    const fields = switch (@typeInfo(Operands)) {
-        .@"struct" => |info| info.fields,
-        .void => return,
-        else => unreachable,
-    };
+    if (@typeInfo(Operands) == .void) return;
+    const fields = comptime meta_compat.fields(Operands);
 
     inline for (fields) |field| {
         section.writeOperand(field.type, @field(operands, field.name));
@@ -172,7 +170,8 @@ fn writeContextDependentNumber(section: *Section, operand: spec.LiteralContextDe
 
 fn writeExtendedMask(section: *Section, comptime Operand: type, operand: Operand) void {
     var mask: Word = 0;
-    inline for (@typeInfo(Operand).@"struct".fields, 0..) |field, bit| {
+    const fields = comptime meta_compat.fields(Operand);
+    inline for (fields, 0..) |field, bit| {
         switch (@typeInfo(field.type)) {
             .optional => if (@field(operand, field.name) != null) {
                 mask |= 1 << @intCast(bit);
@@ -186,7 +185,7 @@ fn writeExtendedMask(section: *Section, comptime Operand: type, operand: Operand
 
     section.writeWord(mask);
 
-    inline for (@typeInfo(Operand).@"struct".fields) |field| {
+    inline for (fields) |field| {
         switch (@typeInfo(field.type)) {
             .optional => |info| if (@field(operand, field.name)) |child| {
                 section.writeOperands(info.child, child);
@@ -201,7 +200,8 @@ fn writeExtendedUnion(section: *Section, comptime Operand: type, operand: Operan
     const tag = std.meta.activeTag(operand);
     section.writeWord(@intFromEnum(tag));
 
-    inline for (@typeInfo(Operand).@"union".fields) |field| {
+    const fields = comptime meta_compat.fields(Operand);
+    inline for (fields) |field| {
         if (@field(Operand, field.name) == tag) {
             section.writeOperands(field.type, @field(operand, field.name));
             return;
@@ -215,11 +215,8 @@ fn instructionSize(comptime opcode: spec.Opcode, operands: opcode.Operands()) us
 }
 
 fn operandsSize(comptime Operands: type, operands: Operands) usize {
-    const fields = switch (@typeInfo(Operands)) {
-        .@"struct" => |info| info.fields,
-        .void => return 0,
-        else => unreachable,
-    };
+    if (@typeInfo(Operands) == .void) return 0;
+    const fields = comptime meta_compat.fields(Operands);
 
     var total: usize = 0;
     inline for (fields) |field| {
@@ -272,7 +269,8 @@ fn operandSize(comptime Operand: type, operand: Operand) usize {
 fn extendedMaskSize(comptime Operand: type, operand: Operand) usize {
     var total: usize = 0;
     var any_set = false;
-    inline for (@typeInfo(Operand).@"struct".fields) |field| {
+    const fields = comptime meta_compat.fields(Operand);
+    inline for (fields) |field| {
         switch (@typeInfo(field.type)) {
             .optional => |info| if (@field(operand, field.name)) |child| {
                 total += operandsSize(info.child, child);
@@ -292,7 +290,8 @@ fn extendedMaskSize(comptime Operand: type, operand: Operand) usize {
 
 fn extendedUnionSize(comptime Operand: type, operand: Operand) usize {
     const tag = std.meta.activeTag(operand);
-    inline for (@typeInfo(Operand).@"union".fields) |field| {
+    const fields = comptime meta_compat.fields(Operand);
+    inline for (fields) |field| {
         if (@field(Operand, field.name) == tag) {
             // Add one for the tag itself.
             return 1 + operandsSize(field.type, @field(operand, field.name));

@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta_compat = @import("meta_compat.zig");
 const builtin = @import("builtin");
 const mach = @import("main.zig");
 const sysaudio = mach.sysaudio;
@@ -163,7 +164,7 @@ fn initAudioContext(allocator: std.mem.Allocator) sysaudio.Context.InitError!sys
         return sysaudio.Context.init(null, allocator, .{});
     const forced = std.mem.sliceTo(forced_ptr, 0);
 
-    inline for (std.meta.fields(sysaudio.Backend)) |field| {
+    inline for (meta_compat.fields(sysaudio.Backend)) |field| {
         if (std.ascii.eqlIgnoreCase(forced, field.name)) {
             return sysaudio.Context.init(@enumFromInt(field.value), allocator, .{});
         }

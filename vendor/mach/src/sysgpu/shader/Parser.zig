@@ -1,5 +1,6 @@
 //! Based on cb76461a088a2b554f0248e7cf94d5a12b77e28e
 const std = @import("std");
+const meta_compat = @import("../../meta_compat.zig");
 const Ast = @import("Ast.zig");
 const Token = @import("Token.zig");
 const Extensions = @import("wgsl.zig").Extensions;
@@ -2005,7 +2006,7 @@ fn addNode(p: *Parser, node: Node) error{OutOfMemory}!NodeIndex {
 }
 
 fn addExtra(p: *Parser, extra: anytype) error{OutOfMemory}!NodeIndex {
-    const fields = std.meta.fields(@TypeOf(extra));
+    const fields = comptime meta_compat.fields(@TypeOf(extra));
     try p.extra.ensureUnusedCapacity(p.allocator, fields.len);
     const result: NodeIndex = @enumFromInt(p.extra.items.len);
     inline for (fields) |field| {

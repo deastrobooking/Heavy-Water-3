@@ -10,6 +10,21 @@ const StructFieldAttributes = if (builtin.zig_version.minor >= 17)
 else
     std.builtin.Type.StructField.Attributes;
 
+fn structFieldCount(comptime T: type) usize {
+    const info = @typeInfo(T).@"struct";
+    return if (builtin.zig_version.minor >= 17) info.field_names.len else info.fields.len;
+}
+
+fn structFieldName(comptime T: type, comptime index: usize) []const u8 {
+    const info = @typeInfo(T).@"struct";
+    return if (builtin.zig_version.minor >= 17) info.field_names[index] else info.fields[index].name;
+}
+
+fn structFieldType(comptime T: type, comptime index: usize) type {
+    const info = @typeInfo(T).@"struct";
+    return if (builtin.zig_version.minor >= 17) info.field_types[index] else info.fields[index].type;
+}
+
 /// A handle to a spawned thread.
 pub const Thread = struct {
     thread: std.Thread,
@@ -341,7 +356,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             // If we are tracking fields, we need to resize the bitset to hold another object's fields
             if (objs.internal.updated) |*updated_fields| {
-                try updated_fields.resize(allocator, data.capacity * @typeInfo(T).@"struct".fields.len, true);
+                try updated_fields.resize(allocator, data.capacity * structFieldCount(T), true);
             }
 
             const index = data.len;
@@ -378,8 +393,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             data.set(unpacked.index, toStorage(value));
 
             if (objs.internal.updated) |*updated_fields| {
-                const updated_start = unpacked.index * @typeInfo(T).@"struct".fields.len;
-                const updated_end = updated_start + @typeInfo(T).@"struct".fields.len;
+                const updated_start = unpacked.index * structFieldCount(T);
+                const updated_end = updated_start + structFieldCount(T);
                 updated_fields.setRangeValue(.{ .start = @intCast(updated_start), .end = @intCast(updated_end) }, true);
             }
         }
@@ -408,7 +423,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             if (options.track_fields)
                 if (std.meta.fieldIndex(T, @tagName(field_name))) |field_index|
                     if (objs.internal.updated) |*updated_fields|
-                        updated_fields.set(unpacked.index * @typeInfo(T).@"struct".fields.len + field_index);
+                        updated_fields.set(unpacked.index * structFieldCount(T) + field_index);
         }
 
         /// Get a single field.
@@ -641,7 +656,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const unpacked = objs.validateAndUnpack(id, "updated");
             const field_index = std.meta.fieldIndex(T, @tagName(field_name)).?;
             const updated_fields = &(objs.internal.updated orelse return false);
-            const updated_index = unpacked.index * @typeInfo(T).@"struct".fields.len + field_index;
+            const updated_index = unpacked.index * structFieldCount(T) + field_index;
             const updated_value = updated_fields.isSet(updated_index);
             if (!peek) updated_fields.unset(updated_index);
             return updated_value;
@@ -665,8 +680,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const unpacked = objs.validateAndUnpack(id, "updated");
             const updated_fields = &(objs.internal.updated orelse return false);
             var any_updated = false;
-            inline for (0..@typeInfo(T).@"struct".fields.len) |field_index| {
-                const updated_index = unpacked.index * @typeInfo(T).@"struct".fields.len + field_index;
+            inline for (0..structFieldCount(T)) |field_index| {
+                const updated_index = unpacked.index * structFieldCount(T) + field_index;
                 const updated_value = updated_fields.isSet(updated_index);
                 if (!peek) updated_fields.unset(updated_index);
                 if (updated_value) any_updated = true;
@@ -759,7 +774,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             if (has_fields) {
                 const src_slice = src.internal.data.slice();
                 const dst_slice = dst.internal.data.slice();
-                inline for (0..@typeInfo(StorageT).@"struct".fields.len) |i| {
+                inline for (0..structFieldCount(StorageT)) |i| {
                     const field_tag: std.meta.FieldEnum(StorageT) = @enumFromInt(i);
                     @memcpy(dst_slice.items(field_tag)[0..src_len], src_slice.items(field_tag)[0..src_len]);
                 }
@@ -1068,6 +1083,7 @@ pub fn Modules(module_lists: anytype) type {
         ) (std.mem.Allocator.Error || std.Thread.SpawnError || error{
             AlreadyInitialized,
         })!void {
+            @setEvalBranchQuota(10000);
             if (m.initialized) return error.AlreadyInitialized;
             m.io = io;
             m.allocator = allocator;
@@ -1082,16 +1098,22 @@ pub fn Modules(module_lists: anytype) type {
                 m.module_names.deinit(allocator);
             }
 
-            inline for (@typeInfo(@TypeOf(m.mods)).@"struct".fields) |field| {
+            const ModsType = @TypeOf(m.mods);
+            const mods_field_count = comptime structFieldCount(ModsType);
+            inline for (0..mods_field_count) |field_index| {
                 // TODO(objects): module-state-init
-                const Mod2 = @TypeOf(@field(m.mods, field.name));
+                const field_name = comptime structFieldName(ModsType, field_index);
+                const Mod2 = @TypeOf(@field(m.mods, field_name));
                 var mod: Mod2 = undefined;
                 const module_name_id = try m.module_names.indexOrPut(allocator, @tagName(Mod2.mach_module));
-                const mod_fields = @typeInfo(@TypeOf(mod)).@"struct".fields;
-                try m.name_ids.ensureUnusedCapacity(allocator, mod_fields.len);
-                inline for (mod_fields) |mod_field| {
-                    if (@typeInfo(mod_field.type) == .@"struct" and @hasDecl(mod_field.type, "IsMachObjects")) {
-                        const object_name_id = try m.object_names.indexOrPut(allocator, mod_field.name);
+                const ModType = @TypeOf(mod);
+                const mod_field_count = comptime structFieldCount(ModType);
+                try m.name_ids.ensureUnusedCapacity(allocator, mod_field_count);
+                inline for (0..mod_field_count) |mod_field_index| {
+                    const mod_field_name = comptime structFieldName(ModType, mod_field_index);
+                    const mod_field_type = structFieldType(ModType, mod_field_index);
+                    if (@typeInfo(mod_field_type) == .@"struct" and @hasDecl(mod_field_type, "IsMachObjects")) {
+                        const object_name_id = try m.object_names.indexOrPut(allocator, mod_field_name);
 
                         const object_type_id = m.name_ids.addOneAssumeCapacity();
                         m.name_ids.set(object_type_id, .{
@@ -1099,7 +1121,7 @@ pub fn Modules(module_lists: anytype) type {
                             .object_name_id = object_name_id,
                         });
 
-                        @field(mod, mod_field.name).internal = .{
+                        @field(mod, mod_field_name).internal = .{
                             .allocator = allocator,
                             .io = io,
                             .type_id = @intCast(object_type_id),
@@ -1107,13 +1129,15 @@ pub fn Modules(module_lists: anytype) type {
                         };
                     }
                 }
-                @field(m.mods, field.name) = mod;
+                @field(m.mods, field_name) = mod;
 
                 // Register each Objects pool's pending_delete bitset and mutex with the graph
                 // so that delete() can cascade across pools via cascadeDelete().
-                inline for (mod_fields) |mod_field| {
-                    if (@typeInfo(mod_field.type) == .@"struct" and @hasDecl(mod_field.type, "IsMachObjects")) {
-                        const objs = &@field(@field(m.mods, field.name), mod_field.name);
+                inline for (0..mod_field_count) |mod_field_index| {
+                    const mod_field_name = comptime structFieldName(ModType, mod_field_index);
+                    const mod_field_type = structFieldType(ModType, mod_field_index);
+                    if (@typeInfo(mod_field_type) == .@"struct" and @hasDecl(mod_field_type, "IsMachObjects")) {
+                        const objs = &@field(@field(m.mods, field_name), mod_field_name);
                         try m.graph.registerDeletePool(allocator, objs.internal.type_id, &objs.internal.pending_delete, &objs.internal.mu);
                     }
                 }
@@ -1123,13 +1147,19 @@ pub fn Modules(module_lists: anytype) type {
         }
 
         fn deinitObjectPools(m: *@This(), allocator: std.mem.Allocator) void {
-            inline for (@typeInfo(@TypeOf(m.mods)).@"struct".fields) |field| {
-                const M = @TypeOf(@field(m.mods, field.name));
-                inline for (@typeInfo(M).@"struct".fields) |mod_field| {
-                    if (@typeInfo(mod_field.type) == .@"struct" and
-                        @hasDecl(mod_field.type, "IsMachObjects"))
+            const ModsType = @TypeOf(m.mods);
+            const mods_field_count = comptime structFieldCount(ModsType);
+            inline for (0..mods_field_count) |field_index| {
+                const field_name = comptime structFieldName(ModsType, field_index);
+                const M = @TypeOf(@field(m.mods, field_name));
+                const mod_field_count = comptime structFieldCount(M);
+                inline for (0..mod_field_count) |mod_field_index| {
+                    const mod_field_name = comptime structFieldName(M, mod_field_index);
+                    const mod_field_type = structFieldType(M, mod_field_index);
+                    if (@typeInfo(mod_field_type) == .@"struct" and
+                        @hasDecl(mod_field_type, "IsMachObjects"))
                     {
-                        @field(@field(m.mods, field.name), mod_field.name).deinit(allocator);
+                        @field(@field(m.mods, field_name), mod_field_name).deinit(allocator);
                     }
                 }
             }
@@ -1206,26 +1236,30 @@ pub fn Modules(module_lists: anytype) type {
 
                     // Inject arguments
                     var args: std.meta.ArgsTuple(F) = undefined;
-                    outer: inline for (@typeInfo(std.meta.ArgsTuple(F)).@"struct".fields) |arg| {
-                        if (@typeInfo(arg.type) == .pointer and
-                            @typeInfo(std.meta.Child(arg.type)) == .@"struct" and
-                            comptime isValid(std.meta.Child(arg.type)))
+                    const Args = std.meta.ArgsTuple(F);
+                    const args_field_count = comptime structFieldCount(Args);
+                    outer: inline for (0..args_field_count) |arg_index| {
+                        const arg_name = comptime structFieldName(Args, arg_index);
+                        const ArgType = structFieldType(Args, arg_index);
+                        if (@typeInfo(ArgType) == .pointer and
+                            @typeInfo(std.meta.Child(ArgType)) == .@"struct" and
+                            comptime isValid(std.meta.Child(ArgType)))
                         {
                             // *Module argument
                             // TODO: better error if @field(m.mods, ...) fails ("module not registered")
-                            @field(args, arg.name) = &@field(m.mods, @tagName(std.meta.Child(arg.type).mach_module));
+                            @field(args, arg_name) = &@field(m.mods, @tagName(std.meta.Child(ArgType).mach_module));
                             continue :outer;
                         }
-                        if (arg.type == std.Io) {
-                            @field(args, arg.name) = m.modules.io;
+                        if (ArgType == std.Io) {
+                            @field(args, arg_name) = m.modules.io;
                             continue :outer;
                         }
-                        if (arg.type == std.mem.Allocator) {
-                            @field(args, arg.name) = m.modules.allocator;
+                        if (ArgType == std.mem.Allocator) {
+                            @field(args, arg_name) = m.modules.allocator;
                             continue :outer;
                         }
-                        if (@typeInfo(arg.type) == .@"struct" and @hasDecl(arg.type, "IsMachMod")) {
-                            const M = arg.type.Module;
+                        if (@typeInfo(ArgType) == .@"struct" and @hasDecl(ArgType, "IsMachMod")) {
+                            const M = ArgType.Module;
                             var mv: Mod(M) = .{
                                 .id = undefined,
                                 ._ctx = m.modules,
@@ -1240,10 +1274,10 @@ pub fn Modules(module_lists: anytype) type {
                             inline for (M.mach_systems) |m_fn_name| {
                                 @field(mv.id, @tagName(m_fn_name)) = Module(M).getFunction(m_fn_name);
                             }
-                            @field(args, arg.name) = mv;
+                            @field(args, arg_name) = mv;
                             continue :outer;
                         }
-                        @compileError("mach: function " ++ debug_name ++ " has an invalid argument(" ++ arg.name ++ ") type: " ++ @typeName(arg.type));
+                        @compileError("mach: function " ++ debug_name ++ " has an invalid argument(" ++ arg_name ++ ") type: " ++ @typeName(ArgType));
                     }
 
                     const Ret = @typeInfo(F).@"fn".return_type orelse void;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta_compat = @import("../../meta_compat.zig");
 const Parser = @import("Parser.zig");
 const Token = @import("Token.zig");
 const Tokenizer = @import("Tokenizer.zig");
@@ -74,7 +75,7 @@ pub fn spanToList(tree: Ast, span: NodeIndex) []const NodeIndex {
 }
 
 pub fn extraData(tree: Ast, comptime T: type, index: NodeIndex) T {
-    const fields = std.meta.fields(T);
+    const fields = comptime meta_compat.fields(T);
     var result: T = undefined;
     inline for (fields, 0..) |field, i| {
         @field(result, field.name) = @enumFromInt(tree.extra[@intFromEnum(index) + i]);

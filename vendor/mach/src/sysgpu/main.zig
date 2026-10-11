@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta_compat = @import("../meta_compat.zig");
 const builtin = @import("builtin");
 const build_options = @import("build-options");
 pub const sysgpu = @import("sysgpu/main.zig");
@@ -38,7 +39,7 @@ pub const Impl = sysgpu.Interface(struct {
     }
 
     pub inline fn createInstance(descriptor: ?*const sysgpu.Instance.Descriptor) ?*sysgpu.Instance {
-        if (builtin.mode == .Debug and !inited) {
+        if (meta_compat.is_debug and !inited) {
             std.log.err("sysgpu not initialized; did you forget to call sysgpu.Impl.init()?", .{});
         }
 

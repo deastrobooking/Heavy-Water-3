@@ -33,9 +33,23 @@ Two outside summaries proposed "Unreal-like" upgrades for a Mach game. Each poin
 
 The Mach package is now checked into `vendor/mach` from upstream base commit `7ed0d504a9569fd4ad840ecb10ead16b90a8926e`, with its upstream licenses retained. The root package resolves it as a local path dependency, and `vendor/mach/FORK.md` records provenance and patch goals. The first fork changes modernize argument forwarding, generated build metadata, and the iOS simulator runner while preserving the default Zig 0.16 build.
 
-Compatibility checks are available through `tools/zig.py` using `HEAVYWATER_ZIG_CHANNEL=0.17` and `HEAVYWATER_ZIG_CHANNEL=0.18-dev`. Both builds configure the fork and compile the asset tools, then reach Mach's module reflection. Array-repeat syntax, enum reflection, static bitsets, and vector layout were migrated. Remaining blockers include old `Type.StructField` usage and Zig's removed `@cImport` builtin across Mach's shader, font, audio, and platform modules. The 0.18 channel is pinned to `0.18.0-dev.146+35accc06e` so the check is reproducible.
+Compatibility checks are available through `tools/zig.py` using `HEAVYWATER_ZIG_CHANNEL=0.17` and `HEAVYWATER_ZIG_CHANNEL=0.18-dev`. The 0.18 channel is pinned to `0.18.0-dev.146+35accc06e` so the check is reproducible. The results table below is the current state.
 
-Keep the working Mach/compiler pair as the default. When Mach updates its nominated compiler and build scripts, move the dependency and compiler together, rerun both compatibility checks, then handle any game-source diagnostics. Only raise `.minimum_zig_version` after the normal build succeeds; follow with headless tests and a Metal smoke run before adopting the pair.
+**Zig 0.17 candidate matrix (2026-10-10, macOS aarch64, fork at base `7ed0d504` plus local patches).** The `@cImport` removal was the last blocker: each C header set is now a wrapper header in `vendor/mach/src/c/` translated by the build system (`addCImports` in `vendor/mach/build.zig`) into a `c_<name>` module, the same way on every channel. `mach_objc` is vendored at `vendor/mach-objc`, and the OpenGL backend's `c` namespace and the generated Vulkan loader were fixed along the way. Results:
+
+| Gate | Default (0.16-dev) | 0.17.0 | 0.18.0-dev.146 |
+| --- | --- | --- | --- |
+| `build check`, macOS (Metal) | pass | pass | pass |
+| Asset compilation | pass | pass | not run |
+| Headless tests | 373/373 | 373/373 | not run |
+| Metal-validated smoke (300 frames) | clean | clean | not run |
+| Cross compile, Linux Vulkan | pass | pass | pass |
+| Cross compile, Linux OpenGL | pass | pass | not run |
+| Cross compile, Windows D3D12 | pass | pass | **fail**: Zig 0.18-dev's translate-C rejects its own bundled AVX512 headers while translating the Windows headers |
+| Cross compile, Windows OpenGL | fail (apparently pre-existing; not rebuilt on the old tree to confirm) | fail (apparently pre-existing; not rebuilt on the old tree to confirm) | not run |
+| Benchmarks | not run | not run | not run |
+
+Cross compiles only prove that the code compiles; none of the Linux or Windows paths has run, and no Linux or Windows host was available. Windows OpenGL fails on `std.DynLib` being unsupported there and a mis-spelled WGL entry point, neither apparently caused by the migration (the old tree was not rebuilt to confirm). **Decision pending:** Zig 0.17 passes every gate that can run here, but the adoption change (root and Mach `build.zig.zon` metadata, the `tools/zig.py` default pin, docs) has not been made, and benchmarks and a Linux or Windows runtime check are outstanding. Earlier in the day the 0.17 check stopped at 134 errors (121 in `mach_objc`, 12 `@cImport` sites, 1 more reflection use).
 
 The pinned Mach lacks capabilities measured or needed during development:
 
@@ -47,13 +61,13 @@ The pinned Mach lacks capabilities measured or needed during development:
 | `copyTextureToBuffer` (panics) | Sky city | Captures; worked around with a compute copy |
 | Fixed 64 MiB staging pages that never shrink | Phase 12 | Memory budgets |
 
-**Plan:** the project-owned fork is the engine work branch. Indirect draws now work on all four local backends. Implement shader atomics next, then timing, readback, and reclaimable staging pages. Before phase 14's GPU skinning, also compare against current Mach `main` on code.hexops.org with its nominated Zig:
+**Plan:** the project-owned fork is the engine work branch. Indirect draws now work on all four local backends. Implement shader atomics next, then timing, readback, and reclaimable staging pages. Before phase 14's GPU skinning, also compare against current Mach `main` on code.hexops.org with its nominated Zig, following the [update process](engine-update-process.md):
 
 1. Check the gaps in the table above.
 2. Run the full test suite, smoke, and benchmarks.
 3. Record any API breakage.
 
-Adopt upstream changes only if everything passes and preserve Heavy Water's engine patches. The ignored dependency cache remains off-limits; engine work belongs in `vendor/mach`. Phases 13–16 are designed to work on the current pin.
+Adopt upstream changes only if everything passes and preserve Heavy Water's engine patches. Draft focused maintainer proposals for features or compatibility fixes that belong in Mach or Zig; record links and remove corresponding local patches when upstream includes them. The ignored dependency cache remains off-limits; engine work belongs in `vendor/mach`. Phases 13–16 are designed to work on the current pin.
 
 ## Principles kept
 

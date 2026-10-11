@@ -25,7 +25,7 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 
 For backend-specific development builds, pass `-Dmach_gpu_backend=metal`, `vulkan`, `opengl`, or `d3d12`. The default selects the platform backend. Each backend requires a supported target and its native platform libraries.
 
-The fork's build scripts, game enum reflection, static bitsets, and Mach vector types have compatibility paths for newer compilers. The Zig 0.17 and 0.18 game builds reach Mach's module reflection and currently stop at old `Type.StructField` usage plus Zig's removed `@cImport` builtin in Mach's shader, font, audio, and platform modules. Keep the proven Mach compiler as the default until the full compile passes. Run `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` or `HEAVYWATER_ZIG_CHANNEL=0.18-dev python3 tools/zig.py build check` to inspect compatibility progress.
+The fork carries compatibility paths for newer compilers. `HEAVYWATER_ZIG_CHANNEL=0.17` passes `build check`, `build assets`, `build test` and the Metal smoke run, and the Linux (Vulkan, OpenGL) and Windows (D3D12) targets cross-compile (`-Dtarget=x86_64-linux-gnu -Dmach_gpu_backend=vulkan`, `-Dtarget=x86_64-windows -Dmach_gpu_backend=d3d12`); the 0.18 snapshot passes on macOS and Linux Vulkan. The default stays on the proven Mach compiler until the adoption change lands; see the [Mach and Zig update process](plans/engine-update-process.md) and the candidate matrix in [engine alignment](plans/alignment.md#mach-tracking).
 
 ### Optimization modes
 

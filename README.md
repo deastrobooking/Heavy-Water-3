@@ -20,7 +20,7 @@ HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check
 HEAVYWATER_ZIG_CHANNEL=0.18-dev python3 tools/zig.py build check
 ```
 
-On Windows, set the environment variable before `py tools/zig.py build check`. Both preview channels currently expose Mach compatibility gaps; the 0.18 channel is a pinned development snapshot for reproducible checks. The project-owned engine source lives in `vendor/mach`.
+On Windows, set the environment variable before `py tools/zig.py build check`. Zig 0.17.0 is a separately pinned stable compiler and currently passes the build, tests and Metal smoke run (the default has not moved yet); the 0.18 channel is a pinned development snapshot that passes on macOS but not yet for Windows targets. The project-owned engine source lives in `vendor/mach`.
 
 > **Project status:** playable systems prototype in active development. The current build focuses on exploration, construction, machines, vehicles, local co-op, and a bounded procedural district. The Hive war and full combat campaign are still in development; see [the gameplay overview](docs/project-overview.md#what-you-can-do) for status.
 
@@ -84,12 +84,13 @@ python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 m
 | [Validation](docs/validation.md) | Test results, platform coverage, and known limitations |
 | [Next Steps](docs/plans/next-steps.md) | Ordered plan after the frontier and flight work: play and tune, air war depth, Hive campaign, co-op, engine phases |
 | [Heightmapped Landscapes](docs/plans/landscapes.md) | Heightmap import, biome shaping, and temple/cave generation plan |
+| [Mach and Zig Update Process](docs/plans/engine-update-process.md) | Importing newer engine/compiler versions, compatibility gates, and preparing upstream proposals |
 
 Additional system plans live in [`docs/plans/`](docs/plans/), including scenes, the asset pipeline, animation, and engine alignment.
 
 ## Technology
 
-- **Language:** Zig `0.16.0-dev.3142+5ccfeb926`, pinned for the selected Mach revision. Opt-in checks are available for Zig 0.17.0 and a pinned Zig 0.18.0-dev snapshot.
+- **Language:** Zig `0.16.0-dev.3142+5ccfeb926`, pinned for the selected Mach revision. Zig 0.17.0 and a pinned Zig 0.18.0-dev snapshot are available as opt-in channels; 0.17 passes the project's checks and adoption is pending.
 - **Platform and graphics:** a project-owned [Mach fork](vendor/mach/FORK.md), based on upstream `7ed0d504`, with `sysgpu`.
 - **Runtime systems:** native Zig procedural generation, physics, asset catalog, machine simulation, streaming, and mod interpreter.
 - **Validation target:** Apple Silicon with Metal. Linux/Vulkan and Windows/D3D12 runtime testing remains future work.

@@ -9,6 +9,17 @@ const log = std.log.scoped(.sysaudio);
 pub const Backend = backends.Backend;
 pub const Range = util.Range;
 
+fn backendCount() usize {
+    const info = @typeInfo(Backend).@"enum";
+    return if (builtin.zig_version.minor >= 17) info.field_names.len else info.fields.len;
+}
+
+fn backendAt(comptime index: usize) Backend {
+    const info = @typeInfo(Backend).@"enum";
+    const value = if (builtin.zig_version.minor >= 17) info.field_values[index] else info.fields[index].value;
+    return @enumFromInt(value);
+}
+
 pub const default_latency = 30 * std.time.us_per_ms; // ms
 pub const min_sample_rate = 8_000; // Hz
 pub const max_sample_rate = 5_644_800; // Hz
@@ -41,15 +52,17 @@ pub const Context = struct {
                 log.info("Backend selected: {s}", .{@tagName(b)});
                 break :blk d;
             } else {
-                inline for (std.meta.fields(Backend), 0..) |b, i| {
+                const backend_count = comptime backendCount();
+                inline for (0..backend_count) |i| {
+                    const b = comptime backendAt(i);
                     if (@typeInfo(
-                        std.meta.fieldInfo(backends.Context, @as(Backend, @enumFromInt(b.value))).type,
+                        std.meta.fieldInfo(backends.Context, b).type,
                     ).pointer.child.init(allocator, options)) |d| {
-                        log.info("Backend selected: {s}", .{b.name});
+                        log.info("Backend selected: {s}", .{@tagName(b)});
                         break :blk d;
                     } else |err| {
-                        if (i == std.meta.fields(Backend).len - 1) {
-                            log.info("Init failed of Backend: {s}", .{b.name});
+                        if (i == backend_count - 1) {
+                            log.info("Init failed of Backend: {s}", .{@tagName(b)});
                             return err;
                         }
                     }

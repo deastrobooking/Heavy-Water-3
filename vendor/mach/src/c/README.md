@@ -1,0 +1,1 @@
+C headers translated by `build.zig` (`addCImport`) into modules named `c_<name>`. Zig 0.17 removed `@cImport`, so each former `@cImport` block is a wrapper header here plus a translate-C step there. Target-specific workarounds (`_FORTIFY_SOURCE`, `__WCHAR_TYPE__`, `register` on Windows GNU targets) are applied in `build.zig`.

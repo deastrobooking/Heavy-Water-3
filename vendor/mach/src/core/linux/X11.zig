@@ -4,14 +4,8 @@ const InitOptions = Core.InitOptions;
 
 const builtin = @import("builtin");
 const std = @import("std");
-const c = @cImport({
-    @cInclude("X11/Xlib.h");
-    @cInclude("X11/Xatom.h");
-    @cInclude("X11/cursorfont.h");
-    @cInclude("X11/Xcursor/Xcursor.h");
-    @cInclude("X11/extensions/Xrandr.h");
-    @cInclude("xkbcommon/xkbcommon.h");
-});
+const meta_compat = @import("../../meta_compat.zig");
+const c = @import("c_x11");
 const mach = @import("../../main.zig");
 const gpu = mach.gpu;
 const Event = Core.Event;
@@ -38,7 +32,7 @@ pub var libgl: ?LibGL = null;
 
 pub const Native = struct {
     backend_type: gpu.BackendType,
-    cursors: [@typeInfo(CursorShape).@"enum".fields.len]?c.Cursor,
+    cursors: [meta_compat.fieldCount(CursorShape)]?c.Cursor,
     display: *c.Display,
     empty_event_pipe: [2]std.c.fd_t,
     gl_ctx: ?*LibGL.Context,
@@ -152,7 +146,7 @@ pub fn initWindow(
 
     core_window.native = .{ .x11 = .{
         .backend_type = try Core.detectBackendType(core.allocator),
-        .cursors = std.mem.zeroes([@typeInfo(CursorShape).@"enum".fields.len]?c.Cursor),
+        .cursors = std.mem.zeroes([meta_compat.fieldCount(CursorShape)]?c.Cursor),
         .display = display,
         .empty_event_pipe = try std.Io.Threaded.pipe2(.{ .NONBLOCK = true, .CLOEXEC = true }),
         .gl_ctx = null,
@@ -403,7 +397,7 @@ pub const LibX11 = struct {
         var lib: LibX11 = undefined;
         lib.handle = mach.dynLibOpen(.{ "libX11.so.6", "libX11.so" }) catch return error.LibraryNotFound;
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(LibX11).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(LibX11)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -424,7 +418,7 @@ const LibXCursor = struct {
         var lib: LibXCursor = undefined;
         lib.handle = mach.dynLibOpen(.{ "libXcursor.so.1", "libXcursor.so" }) catch return error.LibraryNotFound;
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(LibXCursor).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(LibXCursor)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -442,7 +436,7 @@ const LibXRR = struct {
         var lib: LibXRR = undefined;
         lib.handle = mach.dynLibOpen(.{ "libXrandr.so.1", "libXrandr.so" }) catch return error.LibraryNotFound;
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(LibXRR).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(LibXRR)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -475,7 +469,7 @@ pub const LibGL = struct {
         var lib: LibGL = undefined;
         lib.handle = mach.dynLibOpen(.{ "libGL.so.1", "libGL.so" }) catch return error.LibraryNotFound;
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(LibGL).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(LibGL)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -508,7 +502,7 @@ pub const LibXkbCommon = struct {
         var lib: LibXkbCommon = undefined;
         lib.handle = mach.dynLibOpen(.{ "libxkbcommon.so.0", "libxkbcommon.so" }) catch return error.LibraryNotFound;
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(LibXkbCommon).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(LibXkbCommon)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse {

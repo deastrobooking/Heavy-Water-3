@@ -112,6 +112,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
     });
     module.addImport("build-options", build_options.createModule());
+    addCImports(b, module, .{ .mach = want_mach, .core = want_core, .sysaudio = want_sysaudio, .sysgpu = want_sysgpu });
 
     buildExamples(
         b,
@@ -335,6 +336,105 @@ fn addXCodeFrameworks(b: *std.Build, module: *std.Build.Module) void {
         module.addSystemIncludePath(dep.path("include"));
         module.addLibraryPath(dep.path("lib"));
     }
+}
+
+const CImportWants = struct { mach: bool, core: bool, sysaudio: bool, sysgpu: bool };
+
+/// Zig 0.17 removed `@cImport`: each C header set the engine used is now translated by the build
+/// system into a module named `c_<name>` (wrapper headers live in `src/c/`). Include paths mirror
+/// what `linkCore`, `linkSysaudio`, `linkSysgpu` and the library dependencies give the module.
+/// Imports are added only for the targets that use them; the sources select them at comptime.
+fn addCImports(b: *std.Build, module: *std.Build.Module, wants: CImportWants) void {
+    const target = module.resolved_target orelse @panic("module must have .target specified");
+    const optimize = module.optimize orelse @panic("module must have .optimize specified");
+    const os = target.result.os.tag;
+
+    if (wants.mach and target.result.cpu.arch != .wasm32) {
+        if (b.lazyDependency("freetype", .{ .target = target, .optimize = optimize })) |dep| {
+            const tc = cImport(b, target, optimize, "c_freetype.h");
+            tc.addIncludePath(dep.artifact("freetype").getEmittedIncludeTree());
+            module.addImport("c_freetype", tc.createModule());
+        }
+        if (b.lazyDependency("kb-text-shape", .{ .target = target, .optimize = optimize })) |dep| {
+            const tc = cImport(b, target, optimize, "c_kb_text_shape.h");
+            tc.addIncludePath(dep.artifact("kb-text-shape").getEmittedIncludeTree());
+            module.addImport("c_kb_text_shape", tc.createModule());
+        }
+        if (b.lazyDependency("opusfile", .{ .target = target, .optimize = .ReleaseFast })) |opusfile| {
+            if (b.lazyDependency("opusenc", .{ .target = target, .optimize = .ReleaseFast })) |opusenc| {
+                const tc = cImport(b, target, optimize, "c_opus.h");
+                tc.addIncludePath(opusfile.artifact("opusfile").getEmittedIncludeTree());
+                tc.addIncludePath(opusenc.artifact("opusenc").getEmittedIncludeTree());
+                module.addImport("c_opus", tc.createModule());
+            }
+        }
+    }
+
+    if (wants.core and os == .linux) {
+        if (b.lazyDependency("x11_headers", .{})) |dep| {
+            const tc = cImport(b, target, optimize, "c_x11.h");
+            tc.addSystemIncludePath(dep.path("."));
+            module.addImport("c_x11", tc.createModule());
+        }
+        if (b.lazyDependency("wayland_headers", .{ .target = target, .optimize = optimize })) |dep| {
+            const tc = cImport(b, target, optimize, "c_wayland.h");
+            tc.addIncludePath(dep.path("libdecor"));
+            tc.addIncludePath(dep.path("wayland"));
+            tc.addIncludePath(dep.path("wayland-protocols"));
+            // xkbcommon's headers come with the X11 header package, as they did for the old @cImport.
+            if (b.lazyDependency("x11_headers", .{})) |x11| tc.addSystemIncludePath(x11.path("."));
+            module.addImport("c_wayland", tc.createModule());
+        }
+    }
+
+    if (wants.sysaudio and os == .linux) {
+        if (b.lazyDependency("linux_audio_headers", .{})) |dep| {
+            for ([_][]const u8{ "alsa", "jack", "pulseaudio", "pipewire" }) |name| {
+                const tc = cImport(b, target, optimize, b.fmt("c_{s}.h", .{name}));
+                tc.addIncludePath(dep.path("."));
+                tc.addIncludePath(dep.path("alsa-lib"));
+                module.addImport(b.fmt("c_{s}", .{name}), tc.createModule());
+            }
+        }
+    }
+
+    if (wants.sysgpu and (os == .linux or os == .windows)) {
+        if (b.lazyDependency("opengl_headers", .{})) |dep| {
+            const name = if (os == .windows) "c_opengl_windows" else "c_opengl_linux";
+            const tc = cImport(b, target, optimize, b.fmt("{s}.h", .{name}));
+            tc.addSystemIncludePath(dep.path("."));
+            module.addImport(name, tc.createModule());
+        }
+    }
+    if (wants.sysgpu and os == .windows) {
+        if (b.lazyDependency("directx_headers", .{})) |dep| {
+            const tc = cImport(b, target, optimize, "c_d3d12.h");
+            tc.addSystemIncludePath(dep.path("include"));
+            module.addImport("c_d3d12", tc.createModule());
+        }
+    }
+}
+
+/// A translate-C step for the wrapper header `src/c/<header>`, with the workarounds the old
+/// `@cImport` blocks applied for Windows GNU targets.
+fn cImport(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, header: []const u8) *std.Build.Step.TranslateC {
+    const tc = b.addTranslateC(.{
+        .root_source_file = b.path(b.fmt("src/c/{s}", .{header})),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    // TODO(translate-c): translate-C fails on aarch64-windows-gnu and x86_64-windows-gnu release builds
+    // without this.
+    if (target.result.abi == .gnu) tc.defineCMacro("_FORTIFY_SOURCE", "0");
+    // TODO(translate-c): on aarch64-windows-gnu aro's stddef.h defines wchar_t via __WCHAR_TYPE__ (unsigned
+    // int), conflicting with mingw's corecrt.h (unsigned short), and mingw's winnt.h uses `register` storage
+    // on a global variable.
+    if (target.result.cpu.arch == .aarch64 and target.result.os.tag == .windows and target.result.abi == .gnu) {
+        tc.defineCMacro("__WCHAR_TYPE__", "unsigned short");
+        tc.defineCMacro("register", "");
+    }
+    return tc;
 }
 
 /// Links the system libraries, macOS frameworks, etc. that are needed to build sysgpu.

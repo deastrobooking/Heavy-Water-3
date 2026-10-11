@@ -194,7 +194,7 @@ pub fn Vec3(comptime Scalar: type) type {
 }
 
 pub fn Vec4(comptime Scalar: type) type {
-    return extern struct {
+    return struct {
         v: Vector,
 
         /// The vector dimension size, e.g. Vec3.n == 3

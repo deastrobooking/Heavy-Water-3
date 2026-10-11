@@ -1,11 +1,12 @@
 const std = @import("std");
+const meta_compat = @import("../meta_compat.zig");
 
 const builtin = @import("builtin");
 const sysgpu = @import("sysgpu/main.zig");
 const limits = @import("limits.zig");
 const utils = @import("utils.zig");
 const shader = @import("shader.zig");
-const c = @import("opengl/c.zig");
+const c = @import("opengl/c.zig").c;
 const conv = @import("opengl/conv.zig");
 const proc = @import("opengl/proc.zig");
 
@@ -22,7 +23,7 @@ var allocator: std.mem.Allocator = undefined;
 var debug_enabled: bool = undefined;
 
 pub const InitOptions = struct {
-    debug_enabled: bool = builtin.mode == .Debug,
+    debug_enabled: bool = meta_compat.is_debug,
 };
 
 pub fn init(alloc: std.mem.Allocator, options: InitOptions) !void {
@@ -1287,7 +1288,7 @@ pub const ShaderModule = struct {
             null,
         );
         defer allocator.free(code);
-        const code_z = try allocator.dupeZ(u8, code);
+        const code_z = try allocator.dupeSentinel(u8, code, 0);
         defer allocator.free(code_z);
 
         std.debug.print("{s}\n", .{code});

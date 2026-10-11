@@ -1,10 +1,6 @@
 const std = @import("std");
-const c = @cImport({
-    // TODO: Zig translate-c / Aro chokes on these so we must define them away
-    @cDefine("_Static_assert(expr, msg)", "((void)0)");
-    @cInclude("pipewire/pipewire.h");
-    @cInclude("spa/param/audio/format-utils.h");
-});
+const meta_compat = @import("../meta_compat.zig");
+const c = @import("c_pipewire");
 const main = @import("main.zig");
 const backends = @import("backends.zig");
 const util = @import("util.zig");
@@ -38,7 +34,7 @@ const Lib = struct {
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libpipewire-0.3.so.0", "libpipewire-0.3.so" });
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(Lib).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(Lib)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -166,7 +162,7 @@ pub const Context = struct {
         };
 
         var buf: [8]u8 = undefined;
-        const audio_rate = std.fmt.bufPrintZ(&buf, "{d}", .{options.sample_rate orelse default_sample_rate}) catch unreachable;
+        const audio_rate = std.fmt.bufPrintSentinel(&buf, "{d}", .{options.sample_rate orelse default_sample_rate}, 0) catch unreachable;
 
         const props = lib.pw_properties_new(
             c.PW_KEY_MEDIA_TYPE,
@@ -231,7 +227,7 @@ pub const Context = struct {
         };
 
         var buf: [8]u8 = undefined;
-        const audio_rate = std.fmt.bufPrintZ(&buf, "{d}", .{options.sample_rate orelse default_sample_rate}) catch unreachable;
+        const audio_rate = std.fmt.bufPrintSentinel(&buf, "{d}", .{options.sample_rate orelse default_sample_rate}, 0) catch unreachable;
 
         const props = lib.pw_properties_new(
             c.PW_KEY_MEDIA_TYPE,

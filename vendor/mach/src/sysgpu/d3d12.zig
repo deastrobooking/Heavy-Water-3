@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta_compat = @import("../meta_compat.zig");
 
 const builtin = @import("builtin");
 const sysgpu = @import("sysgpu/main.zig");
@@ -31,8 +32,8 @@ var gpu_validation_enabled: bool = undefined;
 const DXGI_PRESENT_ALLOW_TEARING: c.UINT = 0x00000200;
 
 pub const InitOptions = struct {
-    debug_enabled: bool = builtin.mode == .Debug,
-    gpu_validation_enabled: bool = builtin.mode == .Debug,
+    debug_enabled: bool = meta_compat.is_debug,
+    gpu_validation_enabled: bool = meta_compat.is_debug,
 };
 
 pub fn init(alloc: std.mem.Allocator, options: InitOptions) !void {

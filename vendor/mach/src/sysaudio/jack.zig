@@ -1,5 +1,6 @@
 const std = @import("std");
-const c = @cImport(@cInclude("jack/jack.h"));
+const meta_compat = @import("../meta_compat.zig");
+const c = @import("c_jack");
 const main = @import("main.zig");
 const backends = @import("backends.zig");
 const util = @import("util.zig");
@@ -37,7 +38,7 @@ const Lib = struct {
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libjack.so.0", "libjack.so" });
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(Lib).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(Lib)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -134,7 +135,7 @@ pub const Context = struct {
             }
 
             const device = main.Device{
-                .id = try ctx.allocator.dupeZ(u8, id),
+                .id = try ctx.allocator.dupeSentinel(u8, id, 0),
                 .name = name,
                 .mode = mode,
                 .channels = blk: {
@@ -190,10 +191,10 @@ pub const Context = struct {
         var dest_ports = try ctx.allocator.alloc([:0]const u8, ports.len);
         var buf: [64]u8 = undefined;
         for (device.channels, 0..) |_, i| {
-            const port_name = std.fmt.bufPrintZ(&buf, "playback_{d}", .{i + 1}) catch unreachable;
+            const port_name = std.fmt.bufPrintSentinel(&buf, "playback_{d}", .{i + 1}, 0) catch unreachable;
             ports[i] = lib.jack_port_register(ctx.client, port_name.ptr, c.JACK_DEFAULT_AUDIO_TYPE, c.JackPortIsOutput, 0) orelse
                 return error.OpeningDevice;
-            dest_ports[i] = try ctx.allocator.dupeZ(u8, std.mem.span(dest_port_names[i]));
+            dest_ports[i] = try ctx.allocator.dupeSentinel(u8, std.mem.span(dest_port_names[i]), 0);
         }
 
         const max_frames = lib.jack_get_buffer_size(ctx.client);
@@ -227,10 +228,10 @@ pub const Context = struct {
         var dest_ports = try ctx.allocator.alloc([:0]const u8, ports.len);
         var buf: [64]u8 = undefined;
         for (device.channels, 0..) |_, i| {
-            const port_name = std.fmt.bufPrintZ(&buf, "capture_{d}", .{i + 1}) catch unreachable;
+            const port_name = std.fmt.bufPrintSentinel(&buf, "capture_{d}", .{i + 1}, 0) catch unreachable;
             ports[i] = lib.jack_port_register(ctx.client, port_name.ptr, c.JACK_DEFAULT_AUDIO_TYPE, c.JackPortIsInput, 0) orelse
                 return error.OpeningDevice;
-            dest_ports[i] = try ctx.allocator.dupeZ(u8, std.mem.span(src_port_names[i]));
+            dest_ports[i] = try ctx.allocator.dupeSentinel(u8, std.mem.span(src_port_names[i]), 0);
         }
 
         const max_frames = lib.jack_get_buffer_size(ctx.client);

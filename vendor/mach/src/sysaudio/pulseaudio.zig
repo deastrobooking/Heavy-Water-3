@@ -1,5 +1,6 @@
 const std = @import("std");
-const c = @cImport(@cInclude("pulse/pulseaudio.h"));
+const meta_compat = @import("../meta_compat.zig");
+const c = @import("c_pulseaudio");
 const main = @import("main.zig");
 const backends = @import("backends.zig");
 const util = @import("util.zig");
@@ -65,7 +66,7 @@ const Lib = struct {
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libpulse.so.0", "libpulse.so" });
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(Lib).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(Lib)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -234,8 +235,8 @@ pub const Context = struct {
         var ctx = @as(*Context, @ptrCast(@alignCast(user_data.?)));
 
         defer lib.pa_threaded_mainloop_signal(ctx.main_loop, 0);
-        ctx.default_sink = ctx.allocator.dupeZ(u8, std.mem.span(info.*.default_sink_name)) catch return;
-        ctx.default_source = ctx.allocator.dupeZ(u8, std.mem.span(info.*.default_source_name)) catch {
+        ctx.default_sink = ctx.allocator.dupeSentinel(u8, std.mem.span(info.*.default_sink_name), 0) catch return;
+        ctx.default_source = ctx.allocator.dupeSentinel(u8, std.mem.span(info.*.default_source_name), 0) catch {
             ctx.allocator.free(ctx.default_sink.?);
             return;
         };
@@ -262,9 +263,9 @@ pub const Context = struct {
     }
 
     fn deviceInfoOp(ctx: *Context, info: anytype, mode: main.Device.Mode) !void {
-        const id = try ctx.allocator.dupeZ(u8, std.mem.span(info[0].name));
+        const id = try ctx.allocator.dupeSentinel(u8, std.mem.span(info[0].name), 0);
         errdefer ctx.allocator.free(id);
-        const name = try ctx.allocator.dupeZ(u8, std.mem.span(info[0].description));
+        const name = try ctx.allocator.dupeSentinel(u8, std.mem.span(info[0].description), 0);
         errdefer ctx.allocator.free(name);
 
         const device = main.Device{

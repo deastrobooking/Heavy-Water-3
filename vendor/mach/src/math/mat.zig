@@ -289,7 +289,7 @@ pub fn Mat3x3(
 pub fn Mat4x4(
     comptime Scalar: type,
 ) type {
-    return extern struct {
+    return struct {
         /// The column vectors of the matrix.
         ///
         /// Mach matrices use [column-major storage and column-vectors](https://machengine.org/engine/math/matrix-storage/).

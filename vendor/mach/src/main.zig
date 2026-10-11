@@ -6,7 +6,7 @@ const std = @import("std");
 
 const log = std.log.scoped(.mach);
 
-pub const is_debug = builtin.mode == .Debug;
+pub const is_debug = @import("meta_compat.zig").is_debug;
 
 // Core
 pub const Core = if (build_options.want_core) @import("Core.zig") else struct {};

@@ -1550,9 +1550,17 @@ const Renderer = struct {
         try self.writer.print(
             \\pub fn load({[params]s}) Self {{
             \\    var self: Self = .{{ .dispatch = .{{}} }};
-            \\    inline for (std.meta.fields(Dispatch)) |field| {{
-            \\        if (loader({[first_arg]s}, field.name.ptr)) |cmd_ptr| {{
-            \\            @field(self.dispatch, field.name) = @ptrCast(cmd_ptr);
+            \\    @setEvalBranchQuota(100_000);
+            \\    const info = @typeInfo(Dispatch).@"struct";
+            \\    // Zig 0.17 replaced `fields` with parallel `field_names`; the generated code builds on both.
+            \\    const names = comptime if (@import("builtin").zig_version.minor >= 17) info.field_names else names: {{
+            \\        var list: [info.fields.len][:0]const u8 = undefined;
+            \\        for (info.fields, 0..) |field, i| list[i] = field.name;
+            \\        break :names list;
+            \\    }};
+            \\    inline for (names) |name| {{
+            \\        if (loader({[first_arg]s}, name.ptr)) |cmd_ptr| {{
+            \\            @field(self.dispatch, name) = @ptrCast(cmd_ptr);
             \\        }}
             \\    }}
             \\    return self;

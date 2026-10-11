@@ -144,7 +144,12 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Model
     for (vertices) |*vertex| {
         var floats: [vertex_floats]f32 = undefined;
         for (&floats) |*v| v.* = try r.float();
-        vertex.* = @bitCast(floats);
+        vertex.* = .{
+            .position = floats[0..3].*,
+            .normal = floats[3..6].*,
+            .uv = floats[6..8].*,
+            .color = floats[8..11].*,
+        };
     }
     const indices = try allocator.alloc(u32, index_count);
     errdefer allocator.free(indices);

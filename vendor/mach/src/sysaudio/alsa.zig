@@ -1,5 +1,6 @@
 const std = @import("std");
-const c = @cImport(@cInclude("alsa/asoundlib.h"));
+const meta_compat = @import("../meta_compat.zig");
+const c = @import("c_alsa");
 const main = @import("main.zig");
 const backends = @import("backends.zig");
 const util = @import("util.zig");
@@ -81,7 +82,7 @@ const Lib = struct {
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libasound.so.2", "libasound.so" });
         @setEvalBranchQuota(10000);
-        inline for (@typeInfo(Lib).@"struct".fields[1..]) |field| {
+        inline for (meta_compat.fields(Lib)[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
             @field(lib, field.name) = lib.handle.lookup(field.type, name_z) orelse return error.SymbolLookup;
@@ -340,8 +341,8 @@ pub const Context = struct {
                         .max = @as(u24, @intCast(rate_max)),
                     };
                 },
-                .id = try ctx.allocator.dupeZ(u8, "default"),
-                .name = try ctx.allocator.dupeZ(u8, "Default"),
+                .id = try ctx.allocator.dupeSentinel(u8, "default", 0),
+                .name = try ctx.allocator.dupeSentinel(u8, "Default", 0),
             };
 
             try ctx.devices_info.list.append(ctx.allocator, device);
@@ -358,7 +359,7 @@ pub const Context = struct {
 
         while (card_idx >= 0) {
             var card_id_buf: [8]u8 = undefined;
-            const card_id = std.fmt.bufPrintZ(&card_id_buf, "hw:{d}", .{card_idx}) catch break;
+            const card_id = std.fmt.bufPrintSentinel(&card_id_buf, "hw:{d}", .{card_idx}, 0) catch break;
 
             var ctl: ?*c.snd_ctl_t = undefined;
             _ = switch (-lib.snd_ctl_open(&ctl, card_id.ptr, 0)) {
@@ -390,7 +391,7 @@ pub const Context = struct {
                 }
 
                 var buf: [9]u8 = undefined; // 'hw' + max(card|device) * 2 + ':' + \0
-                const id = std.fmt.bufPrintZ(&buf, "hw:{d},{d}", .{ card_idx, dev_idx }) catch continue;
+                const id = std.fmt.bufPrintSentinel(&buf, "hw:{d},{d}", .{ card_idx, dev_idx }, 0) catch continue;
 
                 var pcm: ?*c.snd_pcm_t = null;
                 if (lib.snd_pcm_open(&pcm, id.ptr, snd_stream, 0) < 0)
@@ -473,8 +474,8 @@ pub const Context = struct {
                             .max = @as(u24, @intCast(rate_max)),
                         };
                     },
-                    .id = try ctx.allocator.dupeZ(u8, id),
-                    .name = try ctx.allocator.dupeZ(u8, name),
+                    .id = try ctx.allocator.dupeSentinel(u8, id, 0),
+                    .name = try ctx.allocator.dupeSentinel(u8, name, 0),
                 };
 
                 try ctx.devices_info.list.append(ctx.allocator, device);
@@ -541,7 +542,7 @@ pub const Context = struct {
             if (lib.snd_mixer_open(mixer, 0) < 0)
                 return;
 
-            const card_id = try ctx.allocator.dupeZ(u8, std.mem.sliceTo(device.id, ','));
+            const card_id = try ctx.allocator.dupeSentinel(u8, std.mem.sliceTo(device.id, ','), 0);
             defer ctx.allocator.free(card_id);
 
             if (lib.snd_mixer_attach(mixer.*, card_id.ptr) < 0) {

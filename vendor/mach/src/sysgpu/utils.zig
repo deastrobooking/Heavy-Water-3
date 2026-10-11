@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const limits = @import("limits.zig");
 const shader = @import("shader.zig");
@@ -22,7 +23,12 @@ pub fn Manager(comptime T: type) type {
 }
 
 pub fn findChained(comptime T: type, next_in_chain: ?*const sysgpu.ChainedStruct) ?*const T {
-    const search = @as(*align(1) const sysgpu.ChainedStruct, @ptrCast(std.meta.fieldInfo(T, .chain).default_value_ptr.?));
+    const field = std.meta.fieldInfo(T, .chain);
+    const default_value_ptr = if (builtin.zig_version.minor >= 17)
+        @typeInfo(T).@"struct".field_attrs[std.meta.fieldIndex(T, "chain").?].default_value_ptr
+    else
+        field.default_value_ptr;
+    const search = @as(*align(1) const sysgpu.ChainedStruct, @ptrCast(default_value_ptr.?));
     var chain = next_in_chain;
     while (chain) |c| {
         if (c.s_type == search.s_type) {

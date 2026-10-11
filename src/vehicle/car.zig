@@ -65,7 +65,9 @@ pub const Parts = struct {
 
 fn partMass(mesh: *const Mesh, first_index: usize, budget: f32) dyn.MassProps {
     // Mass properties of the triangles added since `first_index`.
-    const view: Mesh = .{ .vertices = mesh.vertices, .indices = .{ .items = mesh.indices.items[first_index..], .capacity = 0 } };
+    var indices = std.ArrayList(u32).empty;
+    indices.items = mesh.indices.items[first_index..];
+    const view: Mesh = .{ .vertices = mesh.vertices, .indices = indices };
     const p = dyn.massProperties(&view, 1);
     return p.scaleMass(budget);
 }

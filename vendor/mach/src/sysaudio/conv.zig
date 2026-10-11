@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta_compat = @import("../meta_compat.zig");
 const asBytes = std.mem.asBytes;
 const bytesAsValue = std.mem.bytesAsValue;
 const shl = std.math.shl;
@@ -282,7 +283,7 @@ pub fn floatToSigned(
 ) void {
     const max = maxInt(DstType) + 1;
     // The largest float that fits in DstType: nextDown(2^(bits-1)) to avoid overflow in @intFromFloat.
-    const FloatBits = std.meta.Int(.unsigned, @typeInfo(SrcType).float.bits);
+    const FloatBits = meta_compat.Int(.unsigned, @typeInfo(SrcType).float.bits);
     const max_clamp_val: SrcType = @bitCast(@as(FloatBits, @bitCast(@as(SrcType, max))) - 1);
     const min_clamp_val: SrcType = @floatFromInt(std.math.minInt(DstType));
     var i: usize = 0;

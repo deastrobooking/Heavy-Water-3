@@ -25,7 +25,13 @@ comptime {
 }
 const Sky = @import("../engine/Sky.zig");
 /// Matches `Frame` in scene.wgsl.
-const Frame = extern struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32 };
+const Frame = struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32 };
+
+comptime {
+    if (@sizeOf(Frame) != 272 or @offsetOf(Frame, "planes") != 160 or @offsetOf(Frame, "params") != 256) {
+        @compileError("Frame uniform layout changed; update the GPU layout before continuing");
+    }
+}
 const Field = @import("Field.zig");
 const Memory = @import("../engine/Memory.zig");
 const Visibility = @import("Visibility.zig");

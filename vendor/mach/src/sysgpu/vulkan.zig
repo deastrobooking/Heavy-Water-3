@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta_compat = @import("../meta_compat.zig");
 
 const builtin = @import("builtin");
 const vk = @import("vulkan");
@@ -130,7 +131,7 @@ pub const Instance = struct {
         return instance;
     }
 
-    const instance_layers = if (builtin.mode == .Debug)
+    const instance_layers = if (meta_compat.is_debug)
         &[_][*:0]const u8{"VK_LAYER_KHRONOS_validation"}
     else
         &.{};
@@ -1639,8 +1640,8 @@ pub const BindGroupLayout = struct {
         var bindings = try std.ArrayList(vk.DescriptorSetLayoutBinding).initCapacity(allocator, desc.entry_count);
         defer bindings.deinit(allocator);
 
-        var desc_types = std.AutoArrayHashMap(vk.DescriptorType, u32).init(allocator);
-        errdefer desc_types.deinit();
+        var desc_types: std.AutoArrayHashMapUnmanaged(vk.DescriptorType, u32) = .empty;
+        errdefer desc_types.deinit(allocator);
 
         var entries = try std.ArrayList(Entry).initCapacity(allocator, desc.entry_count);
         errdefer entries.deinit(allocator);
@@ -1651,7 +1652,7 @@ pub const BindGroupLayout = struct {
             if (desc_types.getPtr(descriptor_type)) |count| {
                 count.* += 1;
             } else {
-                try desc_types.put(descriptor_type, 1);
+                try desc_types.put(allocator, descriptor_type, 1);
             }
 
             bindings.appendAssumeCapacity(.{
@@ -1678,7 +1679,7 @@ pub const BindGroupLayout = struct {
         layout.* = .{
             .device = device,
             .vk_layout = vk_layout,
-            .desc_types = desc_types.unmanaged,
+            .desc_types = desc_types,
             .entries = entries,
         };
         return layout;

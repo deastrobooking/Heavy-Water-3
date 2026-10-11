@@ -10,6 +10,7 @@
 //! access is checked at run time, so a malformed module can compute nonsense or trap but
 //! cannot reach outside its instance.
 const std = @import("std");
+const meta_compat = @import("../compat/meta.zig");
 const Wasm = @This();
 
 pub const ValType = enum(u8) { i32 = 0x7f, i64 = 0x7e, f32 = 0x7d, f64 = 0x7c };
@@ -101,7 +102,7 @@ const Reader = struct {
         return @intCast(result);
     }
     fn sleb(r: *Reader, comptime T: type) LoadError!T {
-        const U = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const U = meta_compat.Int(.unsigned, @bitSizeOf(T));
         var result: u64 = 0;
         var shift: u7 = 0;
         var b: u8 = 0;
@@ -958,7 +959,7 @@ fn compareFloat(k: u8, a: anytype, b: @TypeOf(a)) bool {
 }
 
 fn intBinary(comptime U: type, k: u8, a: U, b: U) Trap!U {
-    const S = std.meta.Int(.signed, @bitSizeOf(U));
+    const S = meta_compat.Int(.signed, @bitSizeOf(U));
     const Shift = std.math.Log2Int(U);
     const sa: S = @bitCast(a);
     const sb: S = @bitCast(b);
@@ -1027,7 +1028,7 @@ fn truncate(comptime I: type, x: anytype) Trap!I {
     const t = @trunc(x);
     const lo: @TypeOf(x) = @floatFromInt(std.math.minInt(I));
     // The upper bound is exclusive: 2^N (or 2^(N-1) when signed) is exactly representable.
-    const hi: @TypeOf(x) = -2 * @as(@TypeOf(x), @floatFromInt(std.math.minInt(std.meta.Int(.signed, @bitSizeOf(I))))) / @as(@TypeOf(x), if (@typeInfo(I).int.signedness == .signed) 2 else 1);
+    const hi: @TypeOf(x) = -2 * @as(@TypeOf(x), @floatFromInt(std.math.minInt(meta_compat.Int(.signed, @bitSizeOf(I))))) / @as(@TypeOf(x), if (@typeInfo(I).int.signedness == .signed) 2 else 1);
     if (t < lo or t >= hi) return error.IntegerOverflow;
     return @intFromFloat(t);
 }
