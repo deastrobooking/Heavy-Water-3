@@ -2,6 +2,13 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Planet feature packs and maximum-progression test setting — 2026-10-11
+
+- `Worlds.zig` now catalogs per-destination traversal, hazards, interactive city systems, enemy roles and mission objectives for Arbor Frontier, Hive Homeworld and Gaia. This remains typed design data; it does not add planetary travel or playable regions.
+- Settings has a persistent `MAX PROGRESSION TEST MODE` toggle. Runtime test unlocks max out each player's gear, upgrades, pets and materials, plus team vehicles, aircraft, hero roster and Kestrel progression. Objective-completion flags remain untouched so the story can still be played in sequence.
+- The application holds a full serialized pre-test world snapshot in memory, restores it when the toggle is turned off, and refuses world/ranger quicksaves while the toggle is on. Existing save data is not modified by enabling or exercising the mode.
+- Build, tests and smoke were not run for this pass. Zig syntax, UI fit, unlock coverage, restore behavior and save blocking remain unverified.
+
 ## City modules and enemy damage audit — 2026-10-11
 
 - Interior room roles now map to reusable fixture modules and local interaction anchors (exit, trade, evidence, power, alarm, loot, unlock, and Hive heart). This is a data contract for the runtime; rendering, entry transitions, doors, population, and actual interactions remain open.

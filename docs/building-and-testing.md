@@ -98,6 +98,7 @@ MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-
 Over the frame budget it steps through ten stages, logging `Smoke …` lines:
 
 - **Menus and panels:** pause, settings and a conversation, through the real input paths (`Smoke GUI`).
+- **Maximum-progression test mode:** in Settings, turn on `MAX PROGRESSION TEST MODE` to unlock late-game kit/team progression for a session. It disables world and ranger saves; turn it off to restore the in-memory baseline before saving. The setting itself persists so the mode can also be enabled at startup.
 - **Frontier:** fabricating a car and a blaster, flying the car, downing a drone (`Smoke frontier`).
 - **Flight:** fabricating the Kestrel, lifting off, downing a wasp (`Smoke flight`).
 - **Combat:** fabricating the saber and sniper rifle, a three-cut saber combo with P1's rig, a piercing sniper beam, an arc grenade and a kinetic slam (`Smoke combat`).

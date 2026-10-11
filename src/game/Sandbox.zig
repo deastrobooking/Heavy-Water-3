@@ -314,6 +314,8 @@ market: Market = .{},
 progress: Progress = .{},
 /// Each player's own progression and wallet, by player slot (P1 first); saved per player.
 kits: [max_players]Kit = @splat(.{}),
+/// A temporary rollback point for the settings-driven unlock test. Never serialized.
+test_unlock_backup: ?struct { progress: Progress, kits: [max_players]Kit } = null,
 /// Slots with a character of their own (P1 always; a guest once they have joined or a save named
 /// them). A known guest rejoins as themselves, with their kit.
 known: [max_players]bool = .{ true, false, false, false },
@@ -611,6 +613,58 @@ pub fn deinit(self: *Sandbox) void {
     self.scripts.deinit();
     for (&self.rigs) |*slot| if (slot.*) |*r| r.deinit(self.allocator);
     self.physics.deinit();
+}
+
+/// Applies the maximum feature loadout for an isolated test session. The baseline is held only
+/// in memory, saves are disabled by the application while active, and switching it off restores
+/// the exact team and player progression that was present when it was enabled.
+pub fn setMaxProgressionTest(self: *Sandbox, enabled: bool) void {
+    if (enabled == (self.test_unlock_backup != null)) return;
+    if (!enabled) {
+        const baseline = self.test_unlock_backup.?;
+        self.progress = baseline.progress;
+        self.kits = baseline.kits;
+        self.test_unlock_backup = null;
+        @import("Frontier.zig").refresh(self);
+        return;
+    }
+
+    self.test_unlock_backup = .{ .progress = self.progress, .kits = self.kits };
+    inline for (enum_compat.fields(@import("../vehicle/Designs.zig").Design)) |field| {
+        self.progress.vehicles |= @as(u8, 1) << @intCast(field.value);
+    }
+    self.progress.fighter = true;
+    self.progress.kestrel_levels = @splat(Kit.max_level);
+    self.progress.kestrel_paints = (@as(u8, 1) << @intCast(Progress.paint_count)) - 1;
+    self.progress.kestrel_paint = .ember;
+    self.progress.heroes = (@as(u32, 1) << @intCast(Heroes.count)) - 1;
+    self.progress.arena_best = 999;
+    self.progress.setFlag("kestrel_blueprint");
+    self.progress.setFlag("carrier_seen");
+
+    const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
+    const weapon_count = enum_compat.fields(WeaponKind).len;
+    const all_weapons = (@as(u16, 1) << @intCast(weapon_count)) - 1;
+    const clothing_count = enum_compat.fields(Profile.Clothing).len;
+    const armor_count = enum_compat.fields(Profile.Armor).len;
+    for (&self.kits, 0..) |*kit, player_index| {
+        kit.levels = @splat(Kit.max_level);
+        kit.suits = (@as(u8, 1) << @intCast(clothing_count)) - 1;
+        kit.armors = (@as(u8, 1) << @intCast(armor_count)) - 1;
+        kit.weapons = all_weapons;
+        kit.weapon_upgrades = @splat(Kit.max_level - 1);
+        kit.wallet = .{ .scrap = 999_999, .parts = 999_999 };
+        kit.inventory = @splat(999);
+        kit.inventory[@intFromEnum(@import("Collectibles.zig").Kind.vital_cell)] = 10;
+        kit.pets = (@as(u8, 1) << @intCast(Pets.count)) - 1;
+        kit.pet_xp = @splat(20_000);
+        kit.pet_active = .hound;
+        self.combat.arsenals[player_index].weapon_upgrades = kit.weapon_upgrades;
+        self.combat.arsenals[player_index].active = WeaponKind.machine_gun;
+        self.combat.arsenals[player_index].ranged = WeaponKind.machine_gun;
+    }
+    @import("Frontier.zig").refresh(self);
+    for (&self.combat.arsenals) |*arsenal| arsenal.weapon_upgrades = self.kits[0].weapon_upgrades;
 }
 
 /// Places the test Arbor with its ramp starting on the terrain at the given trunk center.

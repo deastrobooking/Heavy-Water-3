@@ -7,7 +7,7 @@ const Bindings = @import("Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 
 pub const path = "saves/settings.json";
-pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, metrics };
+pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, metrics, max_progression_test };
 pub const field_count = enum_compat.fields(Field).len;
 
 /// Volumes in percent: everything, then the effects, ambience and interface buses.
@@ -26,6 +26,8 @@ ui_scale: f32 = 1,
 third_person: bool = false,
 /// Performance overlay (F1).
 metrics: bool = false,
+/// Temporary maximum-progression test session. Changes are never written to campaign or ranger saves.
+max_progression_test: bool = false,
 /// Keyboard bindings (rebound on the controls screen).
 bindings: Bindings = .{},
 /// The active gamepad mapping; imported presets are kept as portable JSON files.
@@ -44,6 +46,7 @@ pub fn adjust(self: *Settings, field: Field, delta: i32) void {
         .ui_scale => self.ui_scale = std.math.clamp(self.ui_scale + 0.125 * d, 0.75, 1.5),
         .third_person => self.third_person = !self.third_person,
         .metrics => self.metrics = !self.metrics,
+        .max_progression_test => self.max_progression_test = !self.max_progression_test,
     }
 }
 
@@ -63,6 +66,7 @@ pub fn label(field: Field) []const u8 {
         .ui_scale => "INTERFACE SIZE",
         .third_person => "START IN THIRD PERSON",
         .metrics => "PERFORMANCE OVERLAY",
+        .max_progression_test => "MAX PROGRESSION TEST MODE",
     };
 }
 
@@ -78,6 +82,7 @@ pub fn value(self: Settings, field: Field, buffer: []u8) []const u8 {
         .ui_scale => std.fmt.bufPrint(buffer, "{d:.0}%", .{self.ui_scale * 100}) catch buffer,
         .third_person => if (self.third_person) "ON" else "OFF",
         .metrics => if (self.metrics) "ON" else "OFF",
+        .max_progression_test => if (self.max_progression_test) "ON / NO SAVE" else "OFF",
     };
 }
 
@@ -98,6 +103,7 @@ const Raw = struct {
     ui_scale: f64 = 1,
     third_person: bool = false,
     metrics: bool = false,
+    max_progression_test: bool = false,
     bindings: []const Bindings.Entry = &.{},
     pad_mapping: PadBindings.Mapping = .{},
 };
@@ -119,6 +125,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
         .ui_scale = if (std.math.isFinite(r.ui_scale)) @floatCast(std.math.clamp(r.ui_scale, 0.75, 1.5)) else defaults.ui_scale,
         .third_person = r.third_person,
         .metrics = r.metrics,
+        .max_progression_test = r.max_progression_test,
         .bindings = Bindings.fromEntries(r.bindings),
         .pad_mapping = migratePadMapping(if (r.pad_mapping.validate()) r.pad_mapping else defaults.pad_mapping),
     };
@@ -127,7 +134,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
 /// The settings file's JSON (bindings by action and key name).
 pub fn toJson(self: Settings, allocator: std.mem.Allocator) ![]u8 {
     var entries: [Bindings.count]Bindings.Entry = undefined;
-    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .metrics = self.metrics, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
+    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .metrics = self.metrics, .max_progression_test = self.max_progression_test, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
     return std.json.Stringify.valueAlloc(allocator, doc, .{ .whitespace = .indent_2 });
 }
 

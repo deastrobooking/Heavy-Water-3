@@ -56,6 +56,20 @@ These five complete 3D shell-and-glow meshes are currently generated and registe
 
 The Hive remains a distinct modified-insect civilization and combat force. Existing wasps and Brood carriers express its insect-derived forms; Scalari craft use plated dragon silhouettes. Some Hive forms can share Scalari fabrication technology, but their bodies, behavior and story identity stay visibly different.
 
+## Planet feature packs
+
+Each destination assembles the same bounded-region runtime from typed feature modules in `src/procedural/Worlds.zig`: traversal, hazards, city systems, enemy roles, and objective verbs. A feature pack is authored data only until a mission instantiates it; the current catalog does not make these planetary regions playable.
+
+| Destination | Movement and environmental pressure | Interactive city modules | Combat and mission identity |
+| --- | --- | --- | --- |
+| Arbor Frontier | Canopy parkour, bridge-to-bridge grapples, pressure-lock transitions, river surges and leaking domes | Walk-in interiors, root lifts and bridges, pressure locks, current lanes, civilian rescue | Hive skirmishers, burrowers, brutes, screamers and carriers; expose collaborators, restore utilities, destroy nests and stabilize domes |
+| Hive Homeworld | Chitin wall climbs, narrow brood tunnels, resin floods, spore bursts and sulfur vents | Living doors with power or pressure controls, resin pipes that can be rerouted, vats that can be sabotaged, captive-lineage rescue | Hive role combinations mixed with Scalari duelists, lancers and interceptors; cut production and rescue captives before the capital siege |
+| Gaia | Colony rooftops and shell walkways, climate fronts, shell breaches and local micro-meteor events | Walk-in habitats, tram lines, climate controls, repairable geodesic cells and evacuation systems | Mixed Hive infiltrators, Scalari units and rogue colony drones; expose infiltration, evacuate civilians, restore climate and shell integrity |
+
+The modules should create short, readable interactions with world-state consequences: rerouting a resin pipe changes a hazard lane; repairing a shell cell closes a breach and opens a walkway; restoring an ocean pressure lock makes a building and its swim route safe. Keep these interactions authored as small subsystem interfaces that plug into the shared objective and save contracts, rather than planet-specific copies of the city or mission loop. City interiors should support entry, traversal, combat or conversation, and a persistent result before returning to the exterior route.
+
+The settings row **MAX PROGRESSION TEST MODE** unlocks the current game's highest player and team progression for late-game system checks. It holds a full pre-test world snapshot in memory, never writes a world or ranger save while enabled, and restores that baseline when turned off. It leaves objective-completion flags alone so it does not skip existing campaign beats. Planet travel and planetary mission logic remain unavailable until those slices are implemented.
+
 Gaia's 24-hour rotation is the initial Earthlike design target, subject to tuning. The shell is an interior landmark and traversal boundary, not a single monolithic mesh: represent it as stable geodesic cells and stream visible cells near the active region. A failed cell can become a repair or combat objective. Keep Earth-scale radius and travel metadata out of f32 gameplay positions.
 
 ## Four-player arena contract

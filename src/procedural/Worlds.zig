@@ -59,6 +59,21 @@ pub const ArenaId = enum(u16) {
     geodesic_spine = 0x0303,
 };
 pub const Encounter = enum { shrine_recovery, spire_assault, ocean_carrier_siege, salvage_run, nest_break, brood_siege, colony_defense, terraforming, shell_repair };
+/// Reusable gameplay modules assembled into each destination. These records are content
+/// contracts for the future planetary runtime; they do not imply the worlds are playable yet.
+pub const Traversal = enum { canopy_parkour, pressure_swim, chitin_climb, tunnel_crawl, colony_rooftops, shell_walkways };
+pub const Hazard = enum { river_surge, falling_canopy_debris, pressure_leak, dark_water, resin_flood, spore_burst, sulfur_vent, shell_breach, micro_meteor_shower, climate_front };
+pub const CitySystem = enum { interiors, lifts, root_bridges, pressure_locks, current_lanes, brood_doors, resin_pipes, bio_vats, repairable_shell_cells, climate_controls, tram_lines, civilian_rescue };
+pub const EnemyRole = enum { hive_skirmisher, hive_burrower, hive_brute, hive_screamer, hive_carrier, scalari_duelist, scalari_lancer, scalari_interceptor, scalari_boss, rogue_drone };
+pub const Objective = enum { expose_conspiracy, restore_lifeline, disable_nest, escort_survivors, sabotage_broodworks, rescue_captive_lineage, stabilize_pressure, repair_shell, stop_infiltration, siege_capital };
+pub const FeaturePack = struct {
+    world: Id,
+    traversal: []const Traversal,
+    hazards: []const Hazard,
+    city_systems: []const CitySystem,
+    enemy_roles: []const EnemyRole,
+    objectives: []const Objective,
+};
 pub const Reward = struct {
     lumen: u16 = 0,
     rotor_cores: u8 = 0,
@@ -101,6 +116,40 @@ pub const worlds = [_]World{
     .{ .id = .hive_homeworld, .name = "Hive Homeworld", .form = .planetary_surface, .home_biome = .hive_chitin, .arena_diameter_m = 2000, .resident_faction = .hive_brood, .ancient_founder = .scalari },
     .{ .id = .gaia, .name = "Gaia", .form = .artificial_globe, .home_biome = .gaia_habitat, .arena_diameter_m = 1800, .planet_radius_m = earth_radius_m, .sky_clearance_m = mile_m, .rotation_hours = 24, .geodesic_shell = true, .resident_faction = .gaia_colony },
 };
+
+/// Per-world modules keep the shared mission/city runtime composable while preserving a distinct
+/// traversal rhythm, environmental pressure, city machinery, and enemy roster on each planet.
+pub const feature_packs = [_]FeaturePack{
+    .{
+        .world = .arbor_frontier,
+        .traversal = &.{ .canopy_parkour, .pressure_swim },
+        .hazards = &.{ .river_surge, .falling_canopy_debris, .pressure_leak, .dark_water },
+        .city_systems = &.{ .interiors, .lifts, .root_bridges, .pressure_locks, .current_lanes, .civilian_rescue },
+        .enemy_roles = &.{ .hive_skirmisher, .hive_burrower, .hive_brute, .hive_screamer, .hive_carrier },
+        .objectives = &.{ .expose_conspiracy, .restore_lifeline, .disable_nest, .escort_survivors, .stabilize_pressure },
+    },
+    .{
+        .world = .hive_homeworld,
+        .traversal = &.{ .chitin_climb, .tunnel_crawl },
+        .hazards = &.{ .resin_flood, .spore_burst, .sulfur_vent },
+        .city_systems = &.{ .interiors, .lifts, .brood_doors, .resin_pipes, .bio_vats, .civilian_rescue },
+        .enemy_roles = &.{ .hive_skirmisher, .hive_burrower, .hive_brute, .hive_screamer, .hive_carrier, .scalari_duelist, .scalari_lancer, .scalari_interceptor, .scalari_boss },
+        .objectives = &.{ .disable_nest, .sabotage_broodworks, .rescue_captive_lineage, .escort_survivors, .siege_capital },
+    },
+    .{
+        .world = .gaia,
+        .traversal = &.{ .colony_rooftops, .shell_walkways },
+        .hazards = &.{ .shell_breach, .micro_meteor_shower, .climate_front },
+        .city_systems = &.{ .interiors, .lifts, .repairable_shell_cells, .climate_controls, .tram_lines, .civilian_rescue },
+        .enemy_roles = &.{ .hive_skirmisher, .hive_burrower, .scalari_duelist, .scalari_lancer, .scalari_interceptor, .rogue_drone },
+        .objectives = &.{ .expose_conspiracy, .restore_lifeline, .escort_survivors, .repair_shell, .stop_infiltration },
+    },
+};
+
+pub fn featurePack(world: Id) *const FeaturePack {
+    for (&feature_packs) |*pack| if (pack.world == world) return pack;
+    unreachable;
+}
 
 /// Stable city-region content descriptors; they do not claim that city geometry or world travel
 /// is already playable. The Arbor Frontier has two ocean-region concepts in addition to its five

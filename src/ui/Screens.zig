@@ -445,7 +445,7 @@ fn drawSettings(c: *Canvas, menu: *const Menu) void {
     rowBack(c, back, menu.row == Settings.field_count);
     c.text(back.x + 16, back.y + 9, "BACK", 1.1, if (menu.row == Settings.field_count) accent else ink);
     c.hit(back, hitId(.menu, Settings.field_count));
-    c.text(r.x + 18, r.y + r.h - 22, "LEFT RIGHT CHANGE  SAVED AUTOMATICALLY", 1, dim);
+    c.text(r.x + 18, r.y + r.h - 22, if (menu.settings.max_progression_test) "TEST MODE: WORLD AND RANGER SAVES DISABLED" else "LEFT RIGHT CHANGE  SAVED AUTOMATICALLY", 1, dim);
 }
 
 fn drawControls(c: *Canvas, menu: *const Menu) void {

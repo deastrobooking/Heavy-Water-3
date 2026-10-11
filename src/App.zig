@@ -105,6 +105,8 @@ core: *mach.Core = undefined,
 menu: Menu = .{},
 /// A person is playing (no smoke, benchmark or showcase): the title opens and settings save.
 interactive: bool = false,
+/// Serialized pre-test world, held in memory so disabling the test mode discards all session edits.
+test_mode_save: ?[]u8 = null,
 /// Mouse position in canvas units, and the clickable areas of the last published GUI.
 pointer: [2]f32 = .{ -1, -1 },
 hits: [Canvas.hit_capacity]Canvas.Hit = undefined,
@@ -195,6 +197,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     }
     if (self.interactive) {
         self.menu.settings = Settings.load(io, allocator);
+        if (self.menu.settings.max_progression_test) self.setMaxProgressionTest(true);
         self.pads.mapping = self.menu.settings.pad_mapping;
         self.show_metrics = self.menu.settings.metrics;
         self.menu.has_save = self.saveExists();
@@ -528,6 +531,7 @@ fn runCommand(self: *App, command: Menu.Command) void {
         .settings_changed => {
             self.show_metrics = self.menu.settings.metrics;
             self.pads.mapping = self.menu.settings.pad_mapping;
+            self.setMaxProgressionTest(self.menu.settings.max_progression_test);
             self.settings_dirty = true;
             if (self.audio) |a| a.setVolumes(self.menu.settings);
         },
@@ -1636,8 +1640,34 @@ fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
     std.log.info("{s}", .{self.status.slice()});
 }
 
+/// A max-progression test is a disposable session. Keep a complete serialized baseline so
+/// turning the setting off discards world edits, story flags and player progression together.
+fn setMaxProgressionTest(self: *App, enabled: bool) void {
+    if (enabled) {
+        if (self.test_mode_save != null) return;
+        const baseline = self.sandbox.save(self.allocator, self.engine.camera) catch |err| {
+            self.menu.settings.max_progression_test = false;
+            return self.report("TEST MODE COULD NOT SNAPSHOT WORLD: {s}", .{@errorName(err)});
+        };
+        self.test_mode_save = baseline;
+        self.sandbox.setMaxProgressionTest(true);
+        return;
+    }
+    const baseline = self.test_mode_save orelse return;
+    self.sandbox.setMaxProgressionTest(false);
+    self.sandbox.restore(self.allocator, baseline, &self.engine.camera) catch |err| {
+        self.menu.settings.max_progression_test = true;
+        self.sandbox.setMaxProgressionTest(true);
+        self.report("TEST BASELINE RESTORE FAILED: {s}", .{@errorName(err)});
+        return;
+    };
+    self.allocator.free(baseline);
+    self.test_mode_save = null;
+}
+
 /// File I/O runs on the application thread between fixed steps; rendering is unaffected.
 fn quicksave(self: *App) void {
+    if (self.test_mode_save != null) return self.report("TEST MODE: SAVING IS DISABLED; TURN IT OFF TO RESTORE YOUR CAMPAIGN", .{});
     const bytes = self.sandbox.save(self.allocator, self.engine.camera) catch |err| return self.report("SAVE FAILED {s}", .{@errorName(err)});
     defer self.allocator.free(bytes);
     Save.writeFile(self.io, Save.default_path, bytes) catch |err| return self.report("SAVE FAILED {s}", .{@errorName(err)});
@@ -1723,10 +1753,23 @@ fn quickload(self: *App) bool {
         return false;
     };
     defer self.allocator.free(bytes);
+    const test_mode = self.test_mode_save != null;
+    const loaded_baseline = if (test_mode) self.allocator.dupe(u8, bytes) catch {
+        self.report("LOAD FAILED: COULD NOT KEEP TEST BASELINE", .{});
+        return false;
+    } else null;
+    if (test_mode) self.sandbox.setMaxProgressionTest(false);
     self.sandbox.restore(self.allocator, bytes, &self.engine.camera) catch |err| {
+        if (loaded_baseline) |baseline| self.allocator.free(baseline);
+        if (test_mode) self.sandbox.setMaxProgressionTest(true);
         self.report("LOAD FAILED {s}", .{@errorName(err)});
         return false;
     };
+    if (loaded_baseline) |baseline| {
+        self.allocator.free(self.test_mode_save.?);
+        self.test_mode_save = baseline;
+        self.sandbox.setMaxProgressionTest(true);
+    }
     // Prefabs saved with the world come first; the shared library fills in the rest.
     self.importPrefabs();
     self.report("LOADED {s}", .{Save.default_path});
@@ -2592,6 +2635,7 @@ pub fn stop(self: *App) void {
     if (self.audio) |a| a.destroy();
     if (self.loader) |l| l.destroy();
     if (self.reload) |r| r.destroy();
+    if (self.test_mode_save) |baseline| self.allocator.free(baseline);
     if (options.reload_smoke and !self.reload_smoke_passed) @panic("Reload smoke did not reach GPU acceptance");
     defer self.sandbox.deinit();
     // The app thread has exited, so the sandbox can be read safely.
