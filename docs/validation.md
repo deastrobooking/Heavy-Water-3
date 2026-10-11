@@ -2,6 +2,14 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Controller interaction and D-pad routing — 2026-10-11
+
+- Reviewed the controller factory mapping and preset example. The factory layout already assigns all 16 standardized physical inputs; A is jump and X is contextual interact. The actual gameplay gap was P1 routing: D-pad edges were only used in UI, while guests already used left/right for weapon cycling and up/down for specials.
+- P1 now gets the same gameplay D-pad functions: left/right cycle owned weapons; up/down trigger specials 1/2, with up+RB for special 3. Menus and trade panels keep their existing D-pad navigation.
+- X remains separate from jump and now handles relic salvage as well as existing contextual use: talk/trade, hero recruitment, vehicle boarding/exit, device buttons, and machine inspection when aimed at a structure. Mouse salvage is preserved. HUD prompts identify X for these targets, and the mapping screen calls out interaction/discovery/mantling.
+- Updated the portable preset example to match the real factory mapping and documented the button roles.
+- `python3 tools/zig.py build check` passed on the default Zig/Mach channel. Headless tests, smoke, other compiler channels and cross-compiles were not run.
+
 ## Ranger hairstyles — 2026-10-11
 
 - Expanded the character creator from five hair entries to eleven: short, ponytail, long, crest, hood, bob, twin tails, bun, braids, curls and undercut. Ponytail, paired braid, bun, curly, cropped and mohawk silhouettes now have separate procedural generation paths. New enum tags are appended so existing profile JSON names remain valid.

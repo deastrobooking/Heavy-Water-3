@@ -77,8 +77,8 @@ Up to four players share one window in split screen. On macOS, controllers expos
 | Left / right stick | Move / look |
 | A | Jump |
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
-| X | Press the aimed button or open a stall; hold to hang and mantle |
-| D-pad | Choose a market stall row (P1: navigate any menu or panel); left / right switch weapons; away from a stall, up and down use specials 1 and 2 (up with RB held: special 3) |
+| X | One contextual interact button: meet/recruit a nearby hero, talk or trade, board/exit vehicles, operate machine buttons, salvage relics, or inspect an aimed machine structure; hold to hang and mantle. A remains jump. |
+| D-pad | In gameplay, left / right switch owned weapons for P1 and guests; up / down trigger specials 1 and 2 (up with RB held: special 3). P1's menus and panels use the D-pad for navigation; a market stall uses up/down for rows. |
 | In any menu or panel (P1's controller) | D-pad or left stick moves (hold to repeat), A or X chooses, B goes back, right stick scrolls panels taller than the screen |
 | Right trigger | Fire the selected energy weapon; starts with level 1 rapid shot (machine gun) |
 | RB | Quick-draw the neon-purple beam saber with blue electrical pulses; tap for a cut, hold then release for a charged wave |

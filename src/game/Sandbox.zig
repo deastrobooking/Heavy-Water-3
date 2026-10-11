@@ -1206,6 +1206,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .hero => |i| Frontier.recruit(self, i),
                     .wild_pet => |sp| Frontier.freePet(self, 0, sp),
                     .pet => |owner| Frontier.petPet(self, 0, owner),
+                    .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);
@@ -1218,13 +1219,8 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     else => {},
                 }
             }
-            if (actions.secondary) switch (self.target) {
-                .relic => |relic| {
-                    _ = try self.modifications.remove(relic.ref);
-                    // Salvage yields parts a market will buy (more with the salvage kit upgrade).
-                    self.kits[0].wallet.parts += self.kits[0].partsPerSalvage();
-                    self.progress.setFlag("salvaged");
-                },
+            if (actions.secondary and !primary) switch (self.target) {
+                .relic => |relic| try self.salvageRelic(relic.ref),
                 else => {},
             };
         },
@@ -1790,6 +1786,13 @@ fn hold(self: *Sandbox, index: u32) void {
 pub fn release(self: *Sandbox) void {
     if (self.held) |i| self.physics.setGravityScale(self.crates[i], 1);
     self.held = null;
+}
+
+fn salvageRelic(self: *Sandbox, relic: Modifications.ObjectRef) !void {
+    _ = try self.modifications.remove(relic);
+    // Salvage yields parts a market will buy (more with the salvage kit upgrade).
+    self.kits[0].wallet.parts += self.kits[0].partsPerSalvage();
+    self.progress.setFlag("salvaged");
 }
 
 /// Regenerates scatter for the 3×3 chunks around the eye when the eye changes chunk.

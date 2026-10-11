@@ -1110,6 +1110,13 @@ fn routePads(self: *App) void {
             // P1 shares the same direct energy/saber path as the guests.
             self.sandbox.padWeapons(cmd.fire, cmd.alt);
             self.actions.interact = self.actions.interact or cmd.interact;
+            if (cmd.interact and self.sandbox.target == .structure) self.inspecting = !self.inspecting;
+            // D-pad edges reach gameplay only after the UI routing branch above. Left/right
+            // cycle owned weapons; up/down choose the same three specials as keyboard Z/C/H.
+            self.actions.next_item = self.actions.next_item or cmd.left or cmd.right;
+            self.actions.special_1 = self.actions.special_1 or (cmd.up and !cmd.alt);
+            self.actions.special_2 = self.actions.special_2 or cmd.down;
+            self.actions.special_3 = self.actions.special_3 or (cmd.up and cmd.alt);
             if (self.sandbox.hangar.piloting and cmd.interact) self.actions.leave_jet = true;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
             continue;
@@ -2456,45 +2463,45 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     } else if (sandbox.seated) |m| {
         const placed = &sandbox.machines[m];
         const motor = placed.machine.blueprint.vehicle.?.motor;
-        renderer.hud_lines[1].set("{d:.1} M/S  POWER {d:.0}%  WASD DRIVE  SPACE BRAKE  CLICK EXIT", .{ placed.vehicle.?.forwardSpeed(&sandbox.physics), placed.machine.satisfaction(motor) * 100 });
+        renderer.hud_lines[1].set("{d:.1} M/S  POWER {d:.0}%  WASD DRIVE  SPACE BRAKE  X / CLICK EXIT", .{ placed.vehicle.?.forwardSpeed(&sandbox.physics), placed.machine.satisfaction(motor) * 100 });
     } else if (sandbox.held) |i| {
         renderer.hud_lines[1].set("HOLDING CRATE {d}  CLICK DROP", .{i});
     } else switch (sandbox.target) {
-        .prop => |i| renderer.hud_lines[1].set("CRATE {d}  CLICK GRAB", .{i}),
-        .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  RMB SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
+        .prop => |i| renderer.hud_lines[1].set("CRATE {d}  X / CLICK GRAB", .{i}),
+        .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  X / CLICK SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
-        .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  CLICK", .{Screens.keeperName(sandbox, i)}),
-        .walker => renderer.hud_lines[1].set("CANOPY LOCAL  CLICK TALK", .{}),
-        .car => |i| renderer.hud_lines[1].set("{s}  CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
-        .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  CLICK BOARD", .{}),
-        .fabricator => renderer.hud_lines[1].set("FABRICATOR  CLICK OPEN", .{}),
-        .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
-        .wild_pet => |sp| renderer.hud_lines[1].set("BREAK {s}'S HIVE COLLAR  CLICK", .{Sandbox.Pets.info(sp).name}),
+        .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  X / CLICK", .{Screens.keeperName(sandbox, i)}),
+        .walker => renderer.hud_lines[1].set("CANOPY LOCAL  X / CLICK TALK", .{}),
+        .car => |i| renderer.hud_lines[1].set("{s}  X / CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
+        .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  X / CLICK BOARD", .{}),
+        .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
+        .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
+        .wild_pet => |sp| renderer.hud_lines[1].set("BREAK {s}'S HIVE COLLAR  X / CLICK", .{Sandbox.Pets.info(sp).name}),
         .pet => |owner| if (sandbox.pets.out[owner]) |pet| {
             const kit = &sandbox.kits[owner];
             const next = kit.nextPet();
             if (owner == 0 and next != null and next.? != pet.species)
-                renderer.hud_lines[1].set("PET {s} LV {d}  CLICK  (SWAP TO {s})", .{ Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species), Sandbox.Pets.info(next.?).name })
+                renderer.hud_lines[1].set("PET {s} LV {d}  X / CLICK (SWAP TO {s})", .{ Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species), Sandbox.Pets.info(next.?).name })
             else if (owner == 0)
-                renderer.hud_lines[1].set("PET {s} LV {d}  CLICK", .{ Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species) })
+                renderer.hud_lines[1].set("PET {s} LV {d}  X / CLICK", .{ Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species) })
             else
-                renderer.hud_lines[1].set("PET P{d}'S {s} LV {d}  CLICK", .{ owner + 1, Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species) });
+                renderer.hud_lines[1].set("PET P{d}'S {s} LV {d}  X / CLICK", .{ owner + 1, Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species) });
         },
-        .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
+        .structure => |m| renderer.hud_lines[1].set("{s}  X / CLICK INVESTIGATE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;
             const def = machine.blueprint.device(ref.device);
             const shrine = sandbox.machines[ref.machine].shrine;
             switch (def.kind) {
                 .button => if (shrine != null and std.mem.eql(u8, def.name(), "reset"))
-                    renderer.hud_lines[1].set("SHRINE {d} RESET  CLICK: CRATES AND LATCHES RETURN", .{shrine.?})
+                    renderer.hud_lines[1].set("SHRINE {d} RESET  X / CLICK: RESET", .{shrine.?})
                 else if (shrine != null and std.mem.eql(u8, def.name(), "vault"))
-                    renderer.hud_lines[1].set("SEED VAULT  CLICK OPEN", .{})
+                    renderer.hud_lines[1].set("SEED VAULT  X / CLICK OPEN", .{})
                 else
-                    renderer.hud_lines[1].set("{s} BUTTON  CLICK PRESS", .{def.name()}),
+                    renderer.hud_lines[1].set("{s} BUTTON  X / CLICK PRESS", .{def.name()}),
                 .script => renderer.hud_lines[1].set("{s} SCRIPT {s}  OUT {d:.2}{s}", .{ def.name(), def.scriptName(), machine.outputs[ref.device][4], if (sandbox.scripts.find(def.scriptName()) == null) "  MISSING" else "" }),
                 .plate => renderer.hud_lines[1].set("WEIGHT PLATE {s}  {s}", .{ def.name(), if (machine.outputs[ref.device][0] > 0.5) "PRESSED" else "NEEDS A CRATE" }),
-                .seat => renderer.hud_lines[1].set("{s}  CLICK ENTER", .{machine.blueprint.name()}),
+                .seat => renderer.hud_lines[1].set("{s}  X / CLICK ENTER", .{machine.blueprint.name()}),
                 .transmitter, .receiver => renderer.hud_lines[1].set("{s} {s} CHANNEL {d}  [ ] CHANGE", .{ def.name(), @tagName(def.kind), def.channel }),
                 .root_sender, .root_listener => if (machine.root_group[ref.device]) |g|
                     renderer.hud_lines[1].set("{s} ROOTSONG CHANNEL {d}  ROOT GROUP {d}  [ ] CHANGE", .{ def.name(), def.channel, g })
