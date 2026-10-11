@@ -1414,7 +1414,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     };
     // Held weapons, at each armed player's right hand.
     for (&sb.combat.arsenals, 0..) |*arsenal, player| if (arsenal.grip) |g| if (arsenal.active) |kind| if (room(out, n, max_weapon_parts)) {
-        n += heldWeapon(out[n..], c.block, kind, g, arsenal, t, rgb3(Profile.accent_colors[sb.profileOf(player).accent]));
+        n += heldWeapon(out[n..], c.block, c.gem, c.spike, kind, g, arsenal, t, rgb3(Profile.accent_colors[sb.profileOf(player).accent]));
     };
     // Ranger sentries (a squat body, a head turned toward its target) and arc grenades.
     for (sb.specials.sentries) |slot| if (slot) |s| if (room(out, n, 3)) {
@@ -1517,7 +1517,7 @@ fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) u
 const max_weapon_parts = 8;
 /// A part of a held weapon: offset along the weapon's frame (+Z along the barrel or blade), size,
 /// colour, and glow (0 for plain metal).
-const Part = struct { at: [3]f32, size: [3]f32, color: [3]f32, glow: f32 = 0 };
+const Part = struct { at: [3]f32, size: [3]f32, color: [3]f32, glow: f32 = 0, shape: enum { block, gem, spike } = .block };
 const gunmetal: [3]f32 = .{ 0.16, 0.17, 0.2 };
 const plate: [3]f32 = .{ 0.62, 0.64, 0.68 };
 
@@ -1526,7 +1526,7 @@ fn rgb3(c: [4]f32) [3]f32 {
     return .{ c[0], c[1], c[2] };
 }
 
-fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
+fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
     const hum = 0.85 + 0.15 * @sin(t * 30);
     const heat = arsenal.charge();
     const parts: []const Part = switch (kind) {
@@ -1534,7 +1534,7 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
             .{ .at = .{ 0, 0, -0.02 }, .size = .{ 0.06, 0.06, 0.26 }, .color = gunmetal },
             .{ .at = .{ 0, 0, 0.13 }, .size = .{ 0.09, 0.09, 0.04 }, .color = plate },
             .{ .at = .{ 0.12, 0, 0.17 }, .size = .{ 0.24, 0.035, 0.045 }, .color = plate },
-            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.07, 0.07, 1.35 }, .color = accent, .glow = hum },
+            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.07, 0.07, 1.35 }, .color = accent, .glow = hum, .shape = .spike },
             .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.028, 0.028, 1.3 }, .color = .{ 0.92, 0.98, 1 }, .glow = 1.2 },
             .{ .at = .{ 0.035 * @sin(t * 43), 0.035 * @cos(t * 37), 0.2 + @mod(t * 2.4, 1.25) }, .size = .{ 0.055, 0.055, 0.19 }, .color = accent, .glow = 1 },
             .{ .at = .{ -0.035 * @cos(t * 39), 0.03 * @sin(t * 47), 0.2 + @mod(t * 2.4 + 0.62, 1.25) }, .size = .{ 0.05, 0.05, 0.14 }, .color = .{ 0.85, 0.96, 1 }, .glow = hum },
@@ -1546,14 +1546,14 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         },
         .sniper_rifle => &.{
             .{ .at = .{ 0, 0.03, 0.1 }, .size = .{ 0.07, 0.12, 0.55 }, .color = gunmetal },
-            .{ .at = .{ 0, 0.05, 0.75 }, .size = .{ 0.035, 0.035, 0.8 }, .color = plate },
+            .{ .at = .{ 0, 0.05, 0.75 }, .size = .{ 0.035, 0.035, 0.8 }, .color = plate, .shape = .spike },
             .{ .at = .{ 0, 0.14, 0.12 }, .size = .{ 0.05, 0.05, 0.3 }, .color = gunmetal },
             .{ .at = .{ 0, 0.14, 0.275 }, .size = .{ 0.04, 0.04, 0.01 }, .color = .{ 0.35, 1, 0.6 }, .glow = 0.6 + heat * 0.4 },
-            .{ .at = .{ 0, 0.05, 1.16 }, .size = .{ 0.05, 0.05, 0.04 }, .color = .{ 0.35, 1, 0.6 }, .glow = 0.8 },
+            .{ .at = .{ 0, 0.05, 1.16 }, .size = .{ 0.05, 0.05, 0.04 }, .color = .{ 0.35, 1, 0.6 }, .glow = 0.8, .shape = .gem },
         },
         .machine_gun => &.{
             .{ .at = .{ 0, 0.02, 0.12 }, .size = .{ 0.12, 0.15, 0.6 }, .color = gunmetal },
-            .{ .at = .{ 0, 0.04, 0.6 }, .size = .{ 0.06, 0.06, 0.4 }, .color = plate },
+            .{ .at = .{ 0, 0.04, 0.6 }, .size = .{ 0.06, 0.06, 0.4 }, .color = plate, .shape = .spike },
             .{ .at = .{ 0, -0.12, 0.1 }, .size = .{ 0.1, 0.14, 0.18 }, .color = plate },
             // The barrel shroud glows hotter as the gun heats.
             .{ .at = .{ 0, 0.04, 0.62 }, .size = .{ 0.075, 0.075, 0.3 }, .color = .{ 1, 0.45 + 0.3 * (1 - heat), 0.15 }, .glow = heat },
@@ -1565,7 +1565,7 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
             .{ .at = .{ -0.07, 0.05, 0.3 }, .size = .{ 0.012, 0.06, 0.4 }, .color = .{ 0.75, 0.45, 1 }, .glow = 0.5 + heat * 0.5 },
         },
         .energy_bazooka => &.{
-            .{ .at = .{ 0, 0.12, 0.05 }, .size = .{ 0.2, 0.2, 1.1 }, .color = plate },
+            .{ .at = .{ 0, 0.12, 0.05 }, .size = .{ 0.2, 0.2, 1.1 }, .color = plate, .shape = .spike },
             .{ .at = .{ 0, 0.12, 0.62 }, .size = .{ 0.24, 0.24, 0.06 }, .color = .{ 1, 0.4, 0.9 }, .glow = 0.4 + 0.6 * heat },
             .{ .at = .{ 0, -0.02, 0 }, .size = .{ 0.05, 0.14, 0.06 }, .color = gunmetal },
         },
@@ -1574,7 +1574,7 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
             .{ .at = .{ 0, 0, 0.08 }, .size = .{ 0.06, 0.16, 0.06 }, .color = gunmetal },
         },
         .tracking_missile => &.{
-            .{ .at = .{ 0, 0.1, 0.05 }, .size = .{ 0.24, 0.2, 0.45 }, .color = plate },
+            .{ .at = .{ 0, 0.1, 0.05 }, .size = .{ 0.24, 0.2, 0.45 }, .color = plate, .shape = .spike },
             .{ .at = .{ -0.06, 0.15, 0.28 }, .size = .{ 0.06, 0.06, 0.02 }, .color = .{ 0.6, 1, 0.5 }, .glow = 0.8 },
             .{ .at = .{ 0.06, 0.15, 0.28 }, .size = .{ 0.06, 0.06, 0.02 }, .color = .{ 0.6, 1, 0.5 }, .glow = 0.8 },
             .{ .at = .{ 0, 0.05, 0.28 }, .size = .{ 0.06, 0.06, 0.02 }, .color = .{ 0.6, 1, 0.5 }, .glow = 0.8 },
@@ -1598,11 +1598,13 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
     const rolled = aim.rotate(m.Vec3.unit_y);
     const rolled_y: V = .{ rolled.x, rolled.y, rolled.z };
     const roll = std.math.atan2(R.dot(R.cross(rolled_y, up), z), R.dot(rolled_y, up));
-    const rotation = quat(aim.mul(m.Quat.fromAxisAngle(m.Vec3.unit_z, roll)));
+    const weapon_rotation = aim.mul(m.Quat.fromAxisAngle(m.Vec3.unit_z, roll));
     for (parts, 0..) |part, i| {
         const at = R.add(grip.base, R.add(R.add(R.scale(side, part.at[0]), R.scale(up, part.at[1])), R.scale(z, part.at[2])));
         const color: [4]f32 = .{ part.color[0], part.color[1], part.color[2], 1 };
-        out[i] = .{ .mesh = block, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = rotation };
+        const mesh = switch (part.shape) { .block => block, .gem => gem_mesh, .spike => spike };
+        const shape_rotation = if (part.shape == .spike) weapon_rotation.mul(m.Quat.fromTo(m.Vec3.unit_y, m.Vec3.unit_z)) else weapon_rotation;
+        out[i] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = quat(shape_rotation) };
     }
     return parts.len;
 }

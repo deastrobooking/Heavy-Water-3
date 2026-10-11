@@ -187,6 +187,30 @@ pub fn build(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
 
     // Shared head parts.
     const Parts = struct {
+        /// Broad pads and tapered digits make the shared humanoid hands and feet read as paws.
+        fn paws(bb: Builder, sk_: *const sk.Skeleton, hh: f32, fur: spec.Rgb, pad: spec.Rgb, claws: bool) !void {
+            inline for (.{ sk.Joint.hand_l, sk.Joint.hand_r, sk.Joint.foot_l, sk.Joint.foot_r }) |joint| {
+                const at = sk_.worldPos(joint);
+                const is_foot = joint == .foot_l or joint == .foot_r;
+                const paw_scale = if (is_foot) @as(f32, 1.0) else 0.72;
+                try bb.ball(joint, at.add(V.init(0, -0.025 * hh, 0.018 * hh)), V.init(0.075 * hh * paw_scale, 0.055 * hh * paw_scale, 0.085 * hh * paw_scale), fur);
+                try bb.ball(joint, at.add(V.init(0, -0.05 * hh * paw_scale, 0.07 * hh)), V.init(0.05 * hh * paw_scale, 0.018 * hh * paw_scale, 0.045 * hh * paw_scale), pad);
+                if (claws) for ([_]f32{ -1, 1 }) |side| {
+                    try bb.blob(joint, at.add(V.init(side * 0.043 * hh * paw_scale, -0.04 * hh * paw_scale, 0.095 * hh)), V.init(0.012 * hh * paw_scale, 0.012 * hh * paw_scale, 0.04 * hh), Q.fromAxisAngle(V.unit_x, 0.25), spec.Rgb.hex(0x342b2a));
+                };
+            }
+        }
+
+        /// Layered belly plates and small shoulder scales break up the humanoid suit silhouette.
+        fn bellyPlates(bb: Builder, center: V, height: f32, width: f32, color: spec.Rgb, edge: spec.Rgb) !void {
+            for (0..4) |i| {
+                const t = @as(f32, @floatFromInt(i));
+                const y = center.y - height * (0.08 + 0.095 * t);
+                const w = width * (1 - 0.12 * t);
+                try bb.blob(.chest, V.init(0, y, center.z + 0.075 * height), V.init(w, 0.052 * height, 0.014 * height), Q.fromAxisAngle(V.unit_x, 0.12), if (i % 2 == 0) color else edge);
+            }
+        }
+
         fn snout(bb: Builder, at: V, length: f32, width: f32, height: f32, color: spec.Rgb, nose: ?spec.Rgb) !void {
             try bb.ball(.head, at.add(V.init(0, 0, length * 0.5)), V.init(width, height, length * 0.65), color);
             if (nose) |n| try bb.ball(.head, at.add(V.init(0, height * 0.35, length * 1.05)), V.init(width * 0.36, height * 0.3, width * 0.3), n);
@@ -424,6 +448,43 @@ pub fn build(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
                 try b.blob(hand, at.add(V.init(0, -0.08 * h, 0.07 * h)), V.init(0.018 * h, 0.06 * h, 0.018 * h), tilt(x_axis, 0.5), mark);
             }
             try Parts.snout(b, mouth, 0.1 * H, 0.18 * H, 0.1 * H, coat, null);
+        },
+    }
+
+    // Family-wide anatomy details tie the species features into the shared hero skeleton.
+    switch (family(p.species)) {
+        .human => unreachable,
+        .mammal => {
+            try Parts.paws(b, s, h, coat, mark, true);
+            for ([_]f32{ -1, 1 }) |side| {
+                const shoulder = s.worldPos(if (side < 0) .shoulder_l else .shoulder_r);
+                try b.blob(if (side < 0) .shoulder_l else .shoulder_r, shoulder.add(V.init(side * 0.015 * h, 0.025 * h, 0)), V.init(0.12 * h, 0.1 * h, 0.1 * h), Q.identity, coat);
+            }
+            try b.ball(.chest, V.init(0, chest.y - 0.08 * h, chest.z + 0.09 * h), V.init(0.09 * h, 0.12 * h, 0.018 * h), mark);
+        },
+        .reptile, .amphibian => {
+            try Parts.bellyPlates(b, chest, 0.58 * h, 0.12 * h, mark, coat);
+            inline for (.{ sk.Joint.hand_l, sk.Joint.hand_r, sk.Joint.foot_l, sk.Joint.foot_r }) |joint| {
+                const at = s.worldPos(joint);
+                try b.ball(joint, at.add(V.init(0, -0.035, 0.02)), V.init(0.075 * h, 0.045 * h, 0.085 * h), coat);
+                for ([_]f32{ -1, 1 }) |side| try b.blob(joint, at.add(V.init(side * 0.045 * h, -0.035, 0.075 * h)), V.init(0.012 * h, 0.012 * h, 0.035 * h), Q.fromAxisAngle(V.unit_x, 0.25), ivory);
+            }
+        },
+        .bird => {
+            try Parts.bellyPlates(b, chest, 0.5 * h, 0.13 * h, mark, coat);
+            inline for (.{ sk.Joint.foot_l, sk.Joint.foot_r }) |joint| {
+                const at = s.worldPos(joint);
+                for ([_]f32{ -1, 0, 1 }) |side| try b.blob(joint, at.add(V.init(side * 0.045 * h, -0.04, 0.07 * h)), V.init(0.018 * h, 0.018 * h, 0.075 * h), Q.fromAxisAngle(V.unit_x, 0.18), beak);
+            }
+        },
+        .insect, .arachnid => {
+            try b.ball(.chest, V.init(0, chest.y - 0.08 * h, chest.z + 0.06 * h), V.init(0.13 * h, 0.15 * h, 0.06 * h), mark);
+            for ([_]f32{ -1, 1 }) |side| {
+                const shoulder = s.worldPos(if (side < 0) .shoulder_l else .shoulder_r);
+                try b.blob(if (side < 0) .shoulder_l else .shoulder_r, shoulder.add(V.init(side * 0.03 * h, 0, 0)), V.init(0.095 * h, 0.13 * h, 0.1 * h), Q.fromAxisAngle(V.unit_z, side * 0.3), coat);
+                const hand = s.worldPos(if (side < 0) .hand_l else .hand_r);
+                try b.blob(if (side < 0) .hand_l else .hand_r, hand.add(V.init(side * 0.045 * h, -0.04, 0.05 * h)), V.init(0.025 * h, 0.025 * h, 0.09 * h), Q.fromAxisAngle(V.unit_x, 0.35), mark);
+            }
         },
     }
 }

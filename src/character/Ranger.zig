@@ -92,6 +92,14 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
         if (source.region == .face and source.uv.x >= 0 and source.uv.y >= 0) {
             const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = if (wildkin) 0.55 else if (feminine) 0.38 else 0.12 }, 0.008);
             if (decal.alpha > 0) c = toon.mix(c, decal.color, decal.alpha);
+        } else if (source.material == .hair) {
+            // Bake the broad, broken hair glint into the vertex color so it survives the
+            // GPU-skinned game path, which intentionally carries no character UV texture.
+            const facing = m.saturate(0.35 + 0.65 * @abs(source.normal.z));
+            const ring = toon.angelRing(source.uv, facing, 0.34, 0.075);
+            const comb = m.smoothstep(0.78, 0.96, @cos(source.uv.x * m.tau * 5 + source.uv.y * 0.35)) * facing;
+            const glint = toon.addc(c, spec.Rgb.init(0.22, 0.18, 0.15));
+            c = toon.mix(c, glint, @max(ring * 0.72, comb * 0.62));
         }
         // Face UVs drive the CPU decal bake above; game characters use a neutral renderer UV so
         // the world checker texture is not sampled across skin and facial colors.

@@ -7,6 +7,11 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - Expanded the character creator from five hair entries to eleven: short, ponytail, long, crest, hood, bob, twin tails, bun, braids, curls and undercut. Ponytail, paired braid, bun, curly, cropped and mohawk silhouettes now have separate procedural generation paths. New enum tags are appended so existing profile JSON names remain valid.
 - The pinned Debug check and ReleaseFast build passed; `zig-out/bin/heavy-water` was reinstalled. A Metal API Validation ReleaseSafe character preview for braids completed on Apple M3 Pro and was visually inspected. Headless tests were not run.
 
+## Anime hair shading — 2026-10-11
+
+- Ranger hair now bakes a broad broken highlight band plus narrow comb-strand glints into its vertex colors. This runs on GPU-skinned game characters; the CPU preview's existing cel light, face-shadow map, SDF facial decals and silhouette ink remain unchanged.
+- Pinned Debug check and ReleaseFast build passed; `zig-out/bin/heavy-water` was reinstalled. `MTL_DEBUG_LAYER=1` ReleaseSafe braid character preview completed on Apple M3 Pro and was inspected. Headless tests were not run; close-up readability, other hair colors and moving-light response remain unreviewed.
+
 ## Solar-system roster, fusion-pulse travel and democratic campaign — 2026-10-11
 
 - Added `procedural/SolarSystem.zig`, cataloging Mercury through Neptune, twelve visitable moon concepts, settlement/governance hooks, and one Scalari mining front per planet. Added a low-threat Scalari Talus Prospector enemy near the distant surface nest, with a compact drill rendering, 45 health, 20 XP and 2 scrap on defeat. Its mining-site records specify 4 abstract resource units/minute; a functioning mining economy is not connected.
@@ -749,6 +754,14 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - ReleaseSafe model reload smoke: `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Dreload-smoke=true -Dsmoke-frames=600 -Doptimize=ReleaseSafe`. Passed all 600 frames, including four split-screen views, machine building, in-memory save/restore, city traffic and rover driving. The isolated fixture's material changed, generation advanced 2 → 3, stale handle failed, and the GPU accepted the replacement **848 ms** after the source edit. No Metal validation errors. Initially macOS was not rendering the test window; bringing it forward allowed frame progression before the timed edit.
 - Full-watch ReleaseSafe smoke (`-Dhot-reload=true -Dsmoke-frames=300`) also completed: crate, all nine built-in blueprints and the installed Glowworks script staged successfully; four-player views, building and save/restore remained functional.
 - The smoke writes only an isolated fixture under `zig-out/reload-smoke`; tracked asset sources and sidecars are untouched. Physical blueprint layout edits, vehicle edits, path moves and package manifest changes require restart. Live heightmaps and generated geometry remain future work.
+
+## Wildkin anatomy and held weapon shapes — 2026-10-11
+
+- Added joint-bound family details to all non-human forms: mammal paws, claws and a small bib; reptile/amphibian belly bands and toe claws; bird bibs and talons; and insect/arachnid thorax and limb plates. Existing species-specific heads, tails and wings remain in place.
+- Held weapons now select the shared block, gem and spike meshes for individual parts. Saber blades and selected rifle barrels use tapered geometry; grips, rails and other mechanical parts retain their block shapes. No combat damage or balance values changed.
+- `python3 tools/zig.py build check` passed on the default Zig 0.16/Mach pair.
+- ReleaseSafe Metal art captures for `-Dshowcase=48` and `-Dshowcase=37` completed with `MTL_DEBUG_LAYER=1` on Apple M3 Pro. No Metal validation errors appeared. The lineup capture shows new paws clearly, though the heroes face away and the busy city backdrop limits face/material review. The saber capture still reads as a straightforward energy bar; this pass does not claim a finished weapon art direction.
+- Headless tests, smoke, 0.17 checks, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run for this visual pass.
 
 ## Ground flora and canopy trees
 
