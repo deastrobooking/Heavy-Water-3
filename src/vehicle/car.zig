@@ -78,6 +78,18 @@ pub fn build(gpa: Allocator, spec: CarSpec) !Parts {
     const body = &parts.body;
 
     try hull.buildHull(gpa, body, spec.hull);
+    // Raised, panoramic flight canopy: the hull's integrated glass alone is too shallow to
+    // read clearly at gameplay distance. Revolve a low ellipsoid along +Z over the cockpit.
+    var canopy_profile: [12]m.Vec2 = undefined;
+    for (&canopy_profile, 0..) |*p, i| {
+        const t = @as(f32, @floatFromInt(i)) / 11.0 * m.pi - m.pi / 2.0;
+        p.* = .{ .x = @cos(t), .y = @sin(t) };
+    }
+    try prims.lathe(gpa, body, &canopy_profile, 24, .{
+        .translation = Vec3.init(0, 1.16, 0.1),
+        .rotation = Quat.fromAxisAngle(Vec3.unit_x, m.pi / 2.0),
+        .scale = Vec3.init(0.55, 1.02, 0.31),
+    }, .glass);
     var mass = partMass(body, 0, spec.hull_mass);
 
     // Outboard fans with struts back to the hull sides.
@@ -108,6 +120,21 @@ pub fn build(gpa: Allocator, spec: CarSpec) !Parts {
         }
         mass = mass.combine(partMass(body, start, spec.wing_mass));
     }
+
+    // Short swept canards give the nose a recognizable aircraft profile in flight.
+    try airfoil.buildWing(gpa, body, .{
+        .section = airfoil.Naca4.fromDigits("0008"),
+        .span = 2.55,
+        .root_chord = 1.0,
+        .tip_chord = 0.28,
+        .sweep = m.radians(36),
+        .dihedral = m.radians(4),
+        .twist_root = 0,
+        .twist_tip = 0,
+        .inverted = false,
+        .root_le = Vec3.init(0, 0.47, 1.72),
+        .material = .paint_accent,
+    });
 
     // Supercar aero detailing: a swept front splitter, floating side blades around the
     // intake panels, twin canopy spines, and a three-fin rear diffuser. These hard edges make

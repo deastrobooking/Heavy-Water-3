@@ -42,7 +42,7 @@ The campaign expansion spans the Arbor Frontier, Hive/Scalari Homeworld, Gaia an
 | 1 / 2 / 3 / 4 / 5 | Hands / build / wire / bridge / weapon tools |
 | Weapon tool | Left click or trackpad click fires; hold to charge or draw. The first click also captures mouse look and fires immediately. Right button is the alternate; Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), hold after a cut to charge a wave, right button guards (parries bolts at first). Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
 | Z / C / H | Class specials. Ranger: arc grenade, sentry turret, overshield. Synthetic: phase dash, kinetic slam, lumen lance |
-| Left click a hover car, hands | Board it. W / S thrust, A / D turn, Space or E climb, Q descend, Shift boost, click to leave |
+| Left click the starter Skimmer, hands | Board it. W / S drive, A / D turn, Space or E climb, Q descend, Shift boost, F to leave |
 | Left click the fabricator kiosk | Fabricate cars, suits, armor, weapons and the Kestrel fighter from pickups |
 | Left click the Kestrel, hands | Board it. Mouse aims (the jet flies where you point), W / S throttle, A / D roll, Space or E climb and Q sink while hovering, Shift afterburner, left button cannons, hold right button to lock and release to fire a missile, F climbs out |
 | Q / E | Descend / ascend in flight |

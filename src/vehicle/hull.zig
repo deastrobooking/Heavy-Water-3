@@ -52,8 +52,9 @@ pub const HullSpec = struct {
     crown: f32 = 0.015,
     /// Subdivisions per knot interval (smoothness within a panel).
     subdiv: u32 = 3,
-    /// Cabin glass spans these knot indices [start, end).
-    glass_knots: [2]usize = .{ 3, 5 },
+    /// Cabin glass spans these knot indices [start, end); broad glazing makes the cockpit
+    /// legible at gameplay distance instead of reading as a tiny painted notch.
+    glass_knots: [2]usize = .{ 2, 6 },
     /// Windshield (roof strip glass) knot interval.
     windshield_knot: usize = 4,
     /// Side intake recess (carbon) knot interval.

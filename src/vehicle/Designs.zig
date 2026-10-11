@@ -34,7 +34,7 @@ pub fn about(d: Design) []const u8 {
 
 pub fn palette(d: Design) Palette {
     return switch (d) {
-        .skimmer => .{ .paint = .{ 0.85, 0.32, 0.12 }, .accent = .{ 0.12, 0.13, 0.15 }, .lights = .{ 0.3, 0.95, 0.9 } },
+        .skimmer => .{ .paint = .{ 0.055, 0.28, 0.68 }, .accent = .{ 0.035, 0.09, 0.19 }, .lights = .{ 0.2, 0.92, 1 } },
         .dart => .{ .paint = .{ 0.92, 0.88, 0.2 }, .accent = .{ 0.08, 0.08, 0.1 }, .lights = .{ 1, 0.35, 0.6 } },
         .courier => .{ .paint = .{ 0.2, 0.42, 0.7 }, .accent = .{ 0.85, 0.85, 0.82 }, .lights = .{ 1, 0.75, 0.3 } },
     };
@@ -88,7 +88,7 @@ fn color(material: cm.Material, p: Palette) [3]f32 {
     return switch (material) {
         .paint => p.paint,
         .paint_accent => p.accent,
-        .glass => .{ 0.08, 0.16, 0.22 },
+        .glass => .{ 0.12, 0.38, 0.52 },
         .carbon => .{ 0.1, 0.1, 0.11 },
         .metal => .{ 0.62, 0.64, 0.66 },
         .emissive => p.lights,

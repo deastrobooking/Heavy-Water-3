@@ -37,6 +37,12 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - The first pinned Debug check exposed a missing armor enum value plus syntax/name errors in the Scalari practice-patrol count and drone render local; these were corrected. `python3 tools/zig.py build check` and the ReleaseFast build both passed, rebuilding `zig-out/bin/heavy-water`.
 - Headless tests, Metal capture, and hands-on combat were not run. Enemy hit feel, control conflicts and animation quality remain unverified.
 
+## Starter Skimmer access and cockpit silhouette — 2026-10-11
+
+- Worlds with no vehicle now receive a Skimmer in the garage, including existing saves with no fabricated ride. Boarding reports the drive/flight controls: W/S thrust, A/D steer, Space/E ascend, Q descend, Shift boost; click or controller interact to exit.
+- The generated hovercar now has a raised panoramic canopy and swept nose canards. The Skimmer uses a deep blue shell, dark composite accents and cyan flight lighting. The existing four-fan hover controller supports close-to-ground driving and vertical flight.
+- The pinned Debug check and ReleaseFast build passed; `zig-out/bin/heavy-water` was reinstalled. A Metal API Validation ReleaseSafe showcase capture completed on an Apple M3 Pro, and the refreshed model was visually inspected. Headless tests and hands-on driving/flight were not run.
+
 ## City modules and enemy damage audit — 2026-10-11
 
 - Interior room roles now map to reusable fixture modules and local interaction anchors (exit, trade, evidence, power, alarm, loot, unlock, and Hive heart). This is a data contract for the runtime; rendering, entry transitions, doors, population, and actual interactions remain open.

@@ -435,6 +435,12 @@ pub fn refresh(sb: *Sandbox) void {
     if (sb.progress.fighter) sb.hangar.placeWithLevels(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels);
     sb.skies.configureKestrel(sb.progress.kestrel_levels);
     sb.garage = .{};
+    // A vehicle is a core traversal tool, not a late-game reward. Grant the starter aircar to
+    // fresh worlds and older saves that have never fabricated a ride.
+    if (sb.progress.vehicles == 0) {
+        sb.progress.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(Designs.Design.skimmer));
+        sb.say("prototype SKIMMER unlocked: board the blue-lit car at the garage to drive and fly", .{});
+    }
     for (0..Designs.count) |d| if (sb.progress.ownsVehicle(@enumFromInt(d))) sb.garage.park(sb.seed, Sandbox.spawn, sb.catalog, @enumFromInt(d));
     sb.collectibles.drops = @splat(null);
     sb.specials = .{};
@@ -1127,6 +1133,7 @@ fn arsenalEvents(sb: *Sandbox, p: u8, events: []const Combat.Event, camera: *Cam
 pub fn board(sb: *Sandbox, car: u8, camera: *Camera) void {
     sb.release();
     sb.garage.board(car, camera);
+    sb.say("{s}: W/S drive, A/D steer, SPACE or E ascend, Q descend, SHIFT boost, click / controller interact to exit", .{Designs.name(@enumFromInt(car))});
 }
 
 pub fn boardJet(sb: *Sandbox, camera: *Camera) void {
