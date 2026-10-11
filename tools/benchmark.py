@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--pack", type=int, default=0, help="Pack stress: write N (<=64) meshes of 1K-128K vertices and load them during measurement")
     parser.add_argument("--asset-upload-kib", type=int, default=4096, help="Late catalog mesh upload budget per frame")
     parser.add_argument("--field-upload-kib", type=int, default=2048, help="Scale workload instance upload budget per frame")
+    parser.add_argument("--cel-debug", type=int, default=0, help="Character look-dev debug bits (1 hides the ink hull) for ink on/off comparisons")
     parser.add_argument("--seed", type=int, default=310399555161)
     parser.add_argument("--upload-budget-kib", type=int, default=320)
     parser.add_argument("--timeout", type=int, default=180)
@@ -45,7 +46,7 @@ def main():
     if args.upload_budget_kib < 278:
         parser.error("--upload-budget-kib must be at least 278")
     command = [sys.executable, str(ROOT / "tools/zig.py"), "build", "run", "-Doptimize=ReleaseFast",
-               f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-frontier={str(args.frontier).lower()}", f"-Daudio={str(not args.silent).lower()}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}", f"-Dpack-stress={args.pack}", f"-Dasset-upload-kib={args.asset_upload_kib}"]
+               f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-frontier={str(args.frontier).lower()}", f"-Daudio={str(not args.silent).lower()}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dcel-debug={args.cel_debug}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}", f"-Dpack-stress={args.pack}", f"-Dasset-upload-kib={args.asset_upload_kib}"]
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, start_new_session=os.name != "nt")
     try:

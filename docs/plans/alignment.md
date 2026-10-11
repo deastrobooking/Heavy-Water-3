@@ -69,6 +69,19 @@ The pinned Mach lacks capabilities measured or needed during development:
 
 Adopt upstream changes only if everything passes and preserve Heavy Water's engine patches. Draft focused maintainer proposals for features or compatibility fixes that belong in Mach or Zig; record links and remove corresponding local patches when upstream includes them. The ignored dependency cache remains off-limits; engine work belongs in `vendor/mach`. Phases 13–16 are designed to work on the current pin.
 
+### Post-overhaul gate on main 1fe9e13 (2026-10-11)
+
+The character overhaul (HeadSpec, armor, hair styles, CelStyle, CharacterContent, `skin_lit`/`skin_hull` WGSL) was first checked only on the default pair. Re-run on 0.17.0 and the cross targets:
+
+| Gate | Result |
+| --- | --- |
+| 0.17 `build check` | Pass. |
+| 0.17 `build test` | Initially did not compile: `Ranger.zig` test used `std.meta.fields` (removed in 0.17). Fixed with `enum_compat.fields`. After the fix 414 of 419 pass; the five failures are the same five as on the default pair (Ranger armor suit counts, Meta sidecar, Sandbox controller, Screens layout, Enemies nest), so they are not migration regressions. |
+| Default pair `build test` | 414 of 419 pass; the same five failures. |
+| 0.17 cross-compile `check` | Pass: Linux x86_64 Vulkan, Linux x86_64 OpenGL, Windows x86_64 D3D12 (compile-only; nothing run). |
+| WGSL through Mach's compiler | All nine modules (scene, terrain, water, foliage, skinned, hull, outline, overlay, capture, spliced as `Renderer.zig` does) parse, analyze and generate MSL, HLSL and SPIR-V in a headless harness. SPIR-V found a real gap hidden by the Metal-only run: Mach's generator panicked on `exp` (used by `scene.wgsl` haze). Fixed in the fork (see FORK.md). GLSL (OpenGL) could not be exercised standalone: it needs runtime bindings and spirv-cross. No SPIR-V validator or Vulkan/D3D12/GL device was available, so non-Metal output is unvalidated. The debug allocator also reports a double-free diagnostic in Mach's SPIR-V `emitFn` (`toOwnedSlice`) for scene, terrain and water; not investigated. |
+| Not run | Metal smoke on 0.17, 0.18 snapshot, Linux/Windows execution. |
+
 ## Principles kept
 
 - **Native Zig:** engine systems are written in Zig, with no C or C++ libraries. The platform bridge (`gamepad.m`) is the only system-API exception.

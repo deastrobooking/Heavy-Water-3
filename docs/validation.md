@@ -2,6 +2,21 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Character ink hull cost and post-overhaul platform gate — 2026-10-11
+
+ReleaseFast, Apple M3 Pro, Metal, silent, default pair, 600 measured frames (`tools/benchmark.py`, new `--cel-debug 1` flag hides the ink hull, same as F8):
+
+| Route | Ink | Views | Render CPU p50 / p99 | Presentation interval p50 |
+| --- | --- | --- | --- | --- |
+| Frontier (four players, guests visible) | on | 4 | 3.18 / 4.46 ms | 20.85 ms |
+| Frontier | off | 4 | 3.29 / 4.70 ms | 20.85 ms |
+| Streaming (one view, no other characters in frame) | on | 1 | 0.36 / 0.56 ms | 20.85 ms |
+| Streaming | off | 1 | 0.33 / 0.51 ms | 20.85 ms |
+
+Findings: with four characters the ink hull adds no measurable CPU cost (the on/off difference is inside run-to-run noise, and ink-on was lower). Character skinning is 0.07 ms p50 either way. The presentation interval is identical in every run, including the empty one-view route, so it is set by display pacing, not rendering; **GPU time of the hull is not measured** (Mach has no timestamp queries). The hull is a second indexed draw per visible character, and `Characters.draw` already skips characters that are not visible, so no distance cut was added. Not measured: a true one-character route (the benchmark has only one view with no other characters, or four views); a lone character is drawn only in the creator. The frontier run also reports `simulation_step_budget` failing at p99 4.04 ms against a 4.0 ms budget with ink on and off, unrelated to rendering.
+
+Platform gate results for the same commit are in [engine alignment](plans/alignment.md#post-overhaul-gate-on-main-1fe9e13-2026-10-11).
+
 ## Anime face and head proportions — 2026-10-11
 
 - **Changed:** `HeadSpec` and the comptime `face_presets` table (six faces, with the new `hero`), keyframed head profile, short neck, 5.9 to 6.5 head ratio for humans, larger eyes, tapered brow strokes, flat nose with a shadow mark, adjustable mouth, `hand_scale` and `foot_scale`. `Profile.FaceStyle` gained `hero` at the end; no save format change (the tag is stored by name, old saves default to `classic`).
