@@ -712,15 +712,18 @@ fn drawInspect(c: *Canvas, hud: Hud) void {
 
 const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "IDENTITY", .first = .name },
+    .{ .title = "FACE", .first = .face_style },
     .{ .title = "BODY", .first = .height },
     .{ .title = "HAIR", .first = .hair_style },
     .{ .title = "GEAR", .first = .outfit },
+    .{ .title = "BOOTS", .first = .boot_style },
 };
 
 fn swatch(field: Profile.Field, p: Profile) ?Color {
     return switch (field) {
         .skin => Profile.skin_tones[p.skin],
         .hair_color => Profile.hair_colors[p.hair_color],
+        .hair_highlight => if (p.hair_highlight == 0) null else Profile.hair_colors[p.hair_highlight - 1],
         .outfit => Profile.outfit_colors[p.outfit],
         .accent => Profile.accent_colors[p.accent],
         .gemstone => switch (p.gemstone) {

@@ -55,24 +55,73 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     const synthetic = profile.class == .synthetic and profile.species == .human;
     const wildkin = profile.species != .human;
     const lumen = Profile.accent_colors[profile.accent];
+    var eyes = Beasts.eyes(profile.species, .{
+        .size = if (feminine) 0.15 else 0.13,
+        .aspect = if (feminine) 0.78 else 0.70,
+        .spacing = if (feminine) 0.19 else 0.18,
+        .height = if (feminine) 0.46 else 0.45,
+        .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82),
+        .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946),
+        .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31,
+        .highlight_count = 1,
+    }, rgb(lumen, 1.2));
+    switch (profile.face_style) {
+        .classic => {},
+        .soft => {
+            eyes.size *= 1.08;
+            eyes.aspect *= 1.08;
+            eyes.tilt *= 0.55;
+        },
+        .angular => {
+            eyes.size *= 0.92;
+            eyes.aspect *= 0.88;
+            eyes.tilt = -0.10;
+        },
+        .heroic => {
+            eyes.size *= 0.9;
+            eyes.height += 0.015;
+            eyes.highlight_count = 2;
+        },
+        .alien => {
+            eyes.size *= 1.12;
+            eyes.aspect *= 1.32;
+            eyes.pupil_size = 0.18;
+            eyes.iris_color = rgb(lumen, 1.4);
+            eyes.iris_dark = rgb(lumen, 0.66);
+            eyes.highlight_count = 2;
+        },
+    }
+    const hair_style: spec.HairStyle = switch (profile.hair_style) {
+        .short => .short_spiky,
+        .ponytail => .ponytail,
+        .long => .long_straight,
+        .crest => .mohawk,
+        .hood, .bob => .bob,
+        .twin_tails => .twin_tails,
+        .bun => .bun,
+        .braids => .braids,
+        .curly => .curly,
+        .undercut => .undercut,
+        .short_curly => .short_curly,
+        .curly_fade => .curly_fade,
+        .curly_coils => .curly_coils,
+        .afro => .afro,
+        .long_curls => .long_curls,
+        .textured_crop => .textured_crop,
+        .locs => .locs,
+        .swept_back => .swept_back,
+        .layered_shag => .layered_shag,
+        .nova_spike => .nova_spike,
+        .alien_crown => .alien_crown,
+        .crew_cut => .crew_cut,
+        .side_part => .side_part,
+    };
     var ch = try gen.Character.build(a, .{
         .body = bodySpec(profile),
         // Wildkin wear their coat where a human shows skin.
         .skin = if (wildkin) rgb(Profile.coat_colors[profile.coat], 1) else if (synthetic) mix(Profile.skin_tones[profile.skin], spec.Rgb.hex(0xe4eaef), 0.6) else rgb(Profile.skin_tones[profile.skin], 1),
-        .eyes = Beasts.eyes(profile.species, .{ .size = if (feminine) 0.15 else 0.13, .aspect = if (feminine) 0.78 else 0.70, .spacing = if (feminine) 0.19 else 0.18, .height = if (feminine) 0.46 else 0.45, .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82), .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946), .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31, .highlight_count = 1 }, rgb(lumen, 1.2)),
-        .hair = .{ .style = switch (profile.hair_style) {
-            .short => .short_spiky,
-            .ponytail => .ponytail,
-            .long => .long_straight,
-            .crest => .mohawk,
-            .hood => .bob,
-            .bob => .bob,
-            .twin_tails => .twin_tails,
-            .bun => .bun,
-            .braids => .braids,
-            .curly => .curly,
-            .undercut => .undercut,
-        }, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = 0.7, .bang_count = 5 },
+        .eyes = eyes,
+        .hair = .{ .style = hair_style, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = if (hair_style == .afro or hair_style == .alien_crown) 1.25 else 0.8, .spikiness = if (hair_style == .nova_spike or hair_style == .alien_crown) 0.95 else 0.35, .bang_count = if (hair_style == .nova_spike) 9 else 5 },
         .outfit = garments[0..outfit_len],
         .detail = 0.7,
     });
@@ -93,6 +142,17 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
             const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = if (wildkin) 0.55 else if (feminine) 0.38 else 0.12 }, 0.008);
             if (decal.alpha > 0) c = toon.mix(c, decal.color, decal.alpha);
         } else if (source.material == .hair) {
+            const secondary_hair: ?spec.Rgb = if (profile.hair_highlight > 0)
+                rgb(Profile.hair_colors[profile.hair_highlight - 1], 1)
+            else if (synthetic)
+                rgb(lumen, 1.25)
+            else
+                null;
+            if (secondary_hair) |highlight| {
+                const bands = @cos(source.uv.x * m.tau * 3 + @sin(source.uv.y * m.tau) * 0.35);
+                const mask = smoothstep(0.70, 0.98, bands) * m.saturate(0.45 + 0.55 * @abs(source.normal.z));
+                c = toon.mix(c, highlight, mask * 0.92);
+            }
             // Bake the broad, broken hair glint into the vertex color so it survives the
             // GPU-skinned game path, which intentionally carries no character UV texture.
             const facing = m.saturate(0.35 + 0.65 * @abs(source.normal.z));
@@ -374,7 +434,14 @@ pub fn bodySpec(profile: Profile) spec.BodySpec {
     const form = Beasts.scale(profile.species);
     const build = profile.build * form.build;
     const wildkin = profile.species != .human;
-    return .{ .height = 1.8 * profile.height * form.height, .head_ratio = Beasts.headRatio(profile.species), .femininity = if (feminine) 0.84 else 0.18, .bust = if (wildkin) 0.02 else if (feminine) 0.10 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * build, .head_width = if (wildkin) 0.9 else if (feminine) 0.80 else 0.83, .jaw_sharpness = if (wildkin) 0.2 else if (feminine) 0.65 else 0.28 };
+    const face: struct { head: f32, jaw: f32 } = if (wildkin) .{ .head = 0.9, .jaw = 0.2 } else switch (profile.face_style) {
+        .classic => .{ .head = if (feminine) @as(f32, 0.80) else 0.83, .jaw = if (feminine) @as(f32, 0.65) else 0.28 },
+        .soft => .{ .head = if (feminine) @as(f32, 0.86) else 0.88, .jaw = 0.14 },
+        .angular => .{ .head = if (feminine) @as(f32, 0.79) else 0.82, .jaw = 0.88 },
+        .heroic => .{ .head = if (feminine) @as(f32, 0.85) else 0.89, .jaw = 0.56 },
+        .alien => .{ .head = if (feminine) @as(f32, 0.76) else 0.78, .jaw = 0.44 },
+    };
+    return .{ .height = 1.8 * profile.height * form.height, .head_ratio = Beasts.headRatio(profile.species), .femininity = if (feminine) 0.84 else 0.18, .bust = if (wildkin) 0.02 else if (feminine) 0.10 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * build, .head_width = face.head, .jaw_sharpness = face.jaw };
 }
 
 fn mix(a: [4]f32, b: spec.Rgb, t: f32) spec.Rgb {
@@ -777,6 +844,7 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         },
         else => {},
     }
+    try bootDetails(a, ch, p, metal, accent);
     const wildkin = p.species != .human;
     if (p.helmet == .sealed or p.hair_style == .hood or wildkin) {
         // Conceal hair under the helmet/hood instead of allowing it to poke through. Wildkin
@@ -810,6 +878,42 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         try visorSurface(a, ch, center.add(V.init(0, 0.04 * lm.H, 0.004 * lm.H)), 0.72 * visor_half_width, 0.010 * lm.H, 0.044 * lm.H, accent, 2, 20);
         for ([_]f32{ -1, 1 }) |side| {
             try plateWithMaterial(a, ch, .head, center.add(V.init(side * visor_half_width, -0.01 * lm.H, -0.018 * lm.H)), V.init(0.035 * lm.H, 0.12 * lm.H, 0.045 * lm.H), metal, .armor);
+        }
+    }
+}
+
+fn bootDetails(a: std.mem.Allocator, ch: *gen.Character, p: Profile, metal: spec.Rgb, accent: spec.Rgb) !void {
+    const s = &ch.skeleton;
+    const h = 1.8 * p.height * Beasts.scale(p.species).height;
+    const dark = spec.Rgb.hex(0x17242f);
+    inline for ([_]sk.Joint{ .foot_l, .foot_r }, .{ @as(f32, 1), @as(f32, -1) }) |foot, side| {
+        const ankle = s.worldPos(foot);
+        const heel = ankle.add(V.init(0, -0.012 * h, -0.045 * h));
+        switch (p.boot_style) {
+            .trail_runner => {
+                try plateWithMaterial(a, ch, foot, heel, V.init(0.065 * h, 0.026 * h, 0.09 * h), dark, .armor);
+                try plateWithMaterial(a, ch, foot, heel.add(V.init(side * 0.045 * h, 0.008 * h, 0.012 * h)), V.init(0.009 * h, 0.012 * h, 0.055 * h), accent, .armor);
+            },
+            .field_boot => {
+                try plateWithMaterial(a, ch, foot, ankle.add(V.init(0, -0.005 * h, -0.01 * h)), V.init(0.066 * h, 0.085 * h, 0.06 * h), dark, .armor);
+                for ([_]f32{ -0.035, 0.012, 0.055 }) |y| try plateWithMaterial(a, ch, foot, ankle.add(V.init(side * 0.054 * h, y * h, 0.012 * h)), V.init(0.012 * h, 0.008 * h, 0.048 * h), metal, .armor);
+            },
+            .armored_sabatons => {
+                try plateWithMaterial(a, ch, foot, ankle.add(V.init(0, -0.010 * h, 0.045 * h)), V.init(0.071 * h, 0.042 * h, 0.074 * h), metal, .armor);
+                try plateWithMaterial(a, ch, foot, ankle.add(V.init(0, 0.022 * h, -0.025 * h)), V.init(0.068 * h, 0.043 * h, 0.057 * h), metal, .armor);
+                try plateWithMaterial(a, ch, foot, ankle.add(V.init(side * 0.071 * h, 0.012 * h, 0.005 * h)), V.init(0.014 * h, 0.036 * h, 0.06 * h), accent, .armor);
+            },
+            .magstep => {
+                try plateWithMaterial(a, ch, foot, heel.add(V.init(0, -0.026 * h, 0.025 * h)), V.init(0.073 * h, 0.019 * h, 0.11 * h), dark, .armor);
+                try plateWithMaterial(a, ch, foot, heel.add(V.init(side * 0.057 * h, -0.027 * h, 0.025 * h)), V.init(0.009 * h, 0.012 * h, 0.105 * h), accent, .armor);
+                try plateWithMaterial(a, ch, foot, ankle.add(V.init(0, -0.005 * h, -0.018 * h)), V.init(0.07 * h, 0.05 * h, 0.055 * h), metal, .armor);
+            },
+            .thruster => {
+                try plateWithMaterial(a, ch, foot, heel.add(V.init(0, -0.006 * h, -0.015 * h)), V.init(0.086 * h, 0.07 * h, 0.078 * h), metal, .armor);
+                try plateWithMaterial(a, ch, foot, heel.add(V.init(0, 0, -0.082 * h)), V.init(0.049 * h, 0.043 * h, 0.022 * h), dark, .armor);
+                try plateWithMaterial(a, ch, foot, heel.add(V.init(0, 0, -0.097 * h)), V.init(0.03 * h, 0.026 * h, 0.009 * h), accent, .armor);
+                try plateWithMaterial(a, ch, foot, ankle.add(V.init(side * 0.077 * h, -0.015 * h, 0.006 * h)), V.init(0.018 * h, 0.042 * h, 0.052 * h), accent, .armor);
+            },
         }
     }
 }

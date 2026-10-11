@@ -148,23 +148,38 @@ fn backPath(c: Ctx, phi: f32, lift: f32, len_h: f32, curl_in: f32) [6]Vec3 {
     const side = @sin(phi);
     var p4 = Vec3.init(leave.x * 1.05 + side * 0.04 * H, m.lerp(leave.y, y_end, 0.45), @min(leave.z, back_clear * @abs(@cos(phi))));
     var p5 = Vec3.init(leave.x * (1.0 - curl_in * 0.5) + side * 0.06 * H, y_end, @min(leave.z, back_clear * @abs(@cos(phi))) * (1 - curl_in * 0.3));
-    if (c.spec.style == .short_spiky or c.spec.style == .mohawk or c.spec.style == .undercut) {
+    if (c.spec.style == .short_spiky or c.spec.style == .mohawk or c.spec.style == .undercut or c.spec.style == .nova_spike or c.spec.style == .alien_crown or c.spec.style == .crew_cut or c.spec.style == .curly_fade) {
         // spiky: clumps leave the scalp and kick outward/back into points
         // spikes kick out mostly at the back; at the sides they hug the head
         const spike = c.spec.spikiness;
         const backness = m.smoothstep(1.6, 2.6, @min(@abs(phi), m.tau - @abs(phi)));
-        if (c.spec.style == .undercut) {
+        if (c.spec.style == .undercut or c.spec.style == .crew_cut or c.spec.style == .curly_fade) {
             p4 = c.s.point(phi, -0.68, 0.035 * H * v);
             p5 = c.s.point(phi, -0.88, 0.025 * H * v);
         } else {
-            const crest: f32 = if (c.spec.style == .mohawk) 0.45 else 1.0;
+            const crest: f32 = if (c.spec.style == .mohawk) 0.45 else if (c.spec.style == .nova_spike) 2.2 else if (c.spec.style == .alien_crown) 1.8 else 1.0;
             p4 = c.s.point(phi, -0.40, (0.06 + 0.06 * spike * backness * crest) * H * v);
             p5 = c.s.point(phi * 1.03, m.lerp(-0.75, -0.50, backness), (0.05 + (0.06 + 0.12 * spike * crest) * backness) * H * v);
         }
-    } else if (c.spec.style == .curly) {
-        // Loose S-shaped locks create a soft, rounded curl silhouette instead of straight panels.
-        p4 = Vec3.init(leave.x + @sin(phi * 3.0) * 0.12 * H, m.lerp(leave.y, y_end, 0.46), leave.z - 0.035 * H);
-        p5 = Vec3.init(leave.x - @sin(phi * 3.0) * 0.10 * H, y_end, leave.z - 0.08 * H);
+    } else if (isCurlStyle(c.spec.style)) {
+        // Repeated side-to-side turns through the hanging clumps give curls a springy outline.
+        const amp = switch (c.spec.style) {
+            .afro => 0.17 * H,
+            .curly_coils, .long_curls => 0.14 * H,
+            .curly_fade, .textured_crop => 0.07 * H,
+            else => 0.11 * H,
+        };
+        const phase = phi * 3.0;
+        p4 = Vec3.init(leave.x + @sin(phase + 2.4) * amp, m.lerp(leave.y, y_end, 0.46), leave.z - 0.035 * H + @cos(phase + 2.4) * amp * 0.38);
+        p5 = Vec3.init(leave.x + @sin(phase + 4.8) * amp * 0.7, y_end, leave.z - 0.08 * H + @cos(phase + 4.8) * amp * 0.55);
+    } else if (c.spec.style == .swept_back or c.spec.style == .side_part) {
+        const sweep: f32 = if (c.spec.style == .swept_back) 0.15 else 0.09;
+        p4 = Vec3.init(leave.x + sweep * H, leave.y + 0.12 * H, leave.z - 0.11 * H);
+        p5 = Vec3.init(leave.x + sweep * 1.4 * H, y_end + 0.12 * H, leave.z - 0.15 * H);
+    } else if (c.spec.style == .locs) {
+        const sway = @sin(phi * 8) * 0.045 * H;
+        p4 = Vec3.init(p4.x + sway, p4.y, p4.z - 0.025 * H);
+        p5 = Vec3.init(p5.x - sway, p5.y, p5.z - 0.045 * H);
     } else if (len_h < 0.4) {
         // short hair: end just below where it leaves the head, curling in
         p4 = leave.lerp(c.s.point(phi, -0.9, 0.04 * H), 0.5);
@@ -223,13 +238,19 @@ pub fn buildHair(
 
     const long_len: f32 = switch (hs.style) {
         .long_straight => hs.length,
+        .long_curls => 1.25,
+        .locs => 1.45,
+        .layered_shag => 0.58,
+        .swept_back, .side_part => 0.20,
         .twin_tails => 0.5,
         .ponytail => 0.12,
         .braids => 0.12,
         .curly => 0.62,
+        .curly_coils => 0.34,
+        .afro, .short_curly, .curly_fade, .textured_crop, .crew_cut => 0.08,
         .bun => 0.08,
         .bob => 0.1,
-        .short_spiky, .undercut, .mohawk => 0.0,
+        .short_spiky, .undercut, .mohawk, .nova_spike, .alien_crown => 0.0,
     };
     const curl_in: f32 = if (hs.style == .bob) 1.0 else 0.15;
 
@@ -246,7 +267,7 @@ pub fn buildHair(
     }
 
     // ---- back & side clumps (two layers: inner shorter, outer longer)
-    const n_back: usize = 16;
+    const n_back: usize = if (hs.style == .afro or hs.style == .curly_coils or hs.style == .long_curls) 22 else 16;
     for (0..2) |layer| {
         const lift: f32 = if (layer == 0) 0.0 else 0.05;
         for (0..n_back) |i| {
@@ -259,8 +280,8 @@ pub fn buildHair(
             const path = backPath(c, phi, lift, len_h, curl_in);
             var cl: Clump = .{
                 .pts = path,
-                .width = (m.tau - 2.1) / @as(f32, @floatFromInt(n_back)) * 0.5 * lm.scalp_radii.z * 2.4 * (1 + jitter(rnd, 0.15)),
-                .thickness = 0.035 * H * hs.volume,
+                .width = (m.tau - 2.1) / @as(f32, @floatFromInt(n_back)) * 0.5 * lm.scalp_radii.z * 2.4 * (1 + jitter(rnd, 0.15)) * (if (isCurlStyle(hs.style)) @as(f32, 1.28) else 1),
+                .thickness = 0.035 * H * hs.volume * (if (isCurlStyle(hs.style) or hs.style == .locs) @as(f32, 1.25) else 1),
                 .taper = taper_base * (1 + jitter(rnd, 0.2)),
                 .ref_normal = c.s.normal(phi, 0.2),
             };
@@ -283,8 +304,16 @@ pub fn buildHair(
         // center bangs a bit longer, sides shorter; spikiness adds variation
         const centered = 1 - @abs(u * 2 - 1);
         const tip_y = brow_y - 0.05 * H * centered + jitter(rnd, 0.04 * H * (0.5 + spiky));
+        var bang = bangPath(c, phi, tip_y);
+        if (isCurlStyle(hs.style)) {
+            for (3..6) |j| {
+                const t: f32 = @floatFromInt(j - 2);
+                bang[j].x += @sin(t * 2.2 + phi * 4) * 0.055 * H;
+                bang[j].z += @cos(t * 2.2 + phi * 4) * 0.025 * H;
+            }
+        }
         try clumps.append(gpa, .{
-            .pts = bangPath(c, phi, tip_y),
+            .pts = bang,
             .width = 2.0 / @as(f32, @floatFromInt(nb)) * 0.5 * lm.scalp_radii.z * 2.1,
             .thickness = 0.03 * H * hs.volume,
             .taper = taper_base * 0.9,
@@ -388,22 +417,27 @@ pub fn buildHair(
     }
 
     // ---- spiky crown: a few clumps that stand up and sweep back
-    if (hs.style == .short_spiky or hs.style == .mohawk) {
-        for (0..6) |i| {
-            const spread: f32 = if (hs.style == .mohawk) 0.28 else 0.8;
-            const phi = m.lerp(-spread, spread, @as(f32, @floatFromInt(i)) / 5) + m.pi + jitter(rnd, 0.1);
-            const tip_lift = (0.06 + 0.10 * spiky) * H * (if (hs.style == .mohawk) @as(f32, 1.5) else 1);
+    if (hs.style == .short_spiky or hs.style == .mohawk or hs.style == .nova_spike or hs.style == .alien_crown) {
+        const spike_count: usize = if (hs.style == .nova_spike) 11 else if (hs.style == .alien_crown) 13 else 6;
+        for (0..spike_count) |i| {
+            const spread: f32 = if (hs.style == .mohawk) 0.28 else if (hs.style == .alien_crown) m.pi else 0.8;
+            const u = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(spike_count - 1));
+            const phi = m.lerp(-spread, spread, u) + m.pi + jitter(rnd, 0.1);
+            const height_factor: f32 = if (hs.style == .nova_spike) 4.2 else if (hs.style == .alien_crown) 3.1 else if (hs.style == .mohawk) 1.5 else 1;
+            const tip_lift = (0.06 + 0.10 * spiky) * H * height_factor;
+            const sweep = if (hs.style == .nova_spike) 0.075 * H else if (hs.style == .alien_crown) 0.045 * H else 0;
+            const spike_width: f32 = if (hs.style == .nova_spike) 0.22 else if (hs.style == .alien_crown) 0.17 else 0.20;
             try clumps.append(gpa, .{
                 .pts = .{
-                    c.s.point(phi * 0.2, 1.40, 0),
-                    c.s.point(phi * 0.5, 1.25, 0.03 * H),
-                    c.s.point(phi * 0.8, 1.05, 0.06 * H),
-                    c.s.point(phi, 0.85, 0.10 * H),
-                    c.s.point(phi, 0.70, 0.10 * H + tip_lift * 0.6),
-                    c.s.point(phi * 1.05, 0.62, 0.10 * H + tip_lift),
+                    c.s.point(phi * 0.2, 1.40, 0.015 * H),
+                    c.s.point(phi * 0.5, 1.25, 0.04 * H),
+                    c.s.point(phi * 0.8, 1.05, 0.08 * H),
+                    c.s.point(phi, 0.85, 0.12 * H + tip_lift * 0.15),
+                    c.s.point(phi, 0.70, 0.12 * H + tip_lift * 0.58),
+                    c.s.point(phi * 1.05, 0.62, 0.12 * H + tip_lift).add(Vec3.init(@sin(phi) * sweep, 0, @cos(phi) * sweep)),
                 },
-                .width = 0.20 * H,
-                .thickness = 0.035 * H,
+                .width = spike_width * H,
+                .thickness = 0.04 * H,
                 .taper = 1.4,
                 .ref_normal = c.s.normal(phi, 1.0),
             });
@@ -506,8 +540,9 @@ fn buildCap(gpa: Allocator, out: *Mesh, c: Ctx, spec: spec_mod.CharacterSpec) !v
     const rows = spec.res(14, 6);
     const keys_phi = [_]f32{ 0, 0.9, 1.6, 2.4, m.pi };
     var keys_el = [_]f32{ 0.62, 0.42, -0.12, -0.75, -0.95 };
-    if (spec.hair.style == .undercut) keys_el = .{ 0.62, 0.42, 0.34, -0.65, -0.92 };
-    if (spec.hair.style == .mohawk) keys_el = .{ 0.62, 0.20, -0.30, -0.88, -0.95 };
+    if (spec.hair.style == .undercut or spec.hair.style == .crew_cut or spec.hair.style == .curly_fade or spec.hair.style == .textured_crop) keys_el = .{ 0.62, 0.42, 0.34, -0.65, -0.92 };
+    if (spec.hair.style == .mohawk or spec.hair.style == .nova_spike) keys_el = .{ 0.62, 0.20, -0.30, -0.88, -0.95 };
+    if (spec.hair.style == .afro) keys_el = .{ 0.92, 0.72, 0.50, -0.18, -0.42 };
     const first = out.vertexCount();
     for (0..rows) |r| {
         const rt = @as(f32, @floatFromInt(r + 1)) / @as(f32, @floatFromInt(rows));
@@ -516,14 +551,23 @@ fn buildCap(gpa: Allocator, out: *Mesh, c: Ctx, spec: spec_mod.CharacterSpec) !v
             const ap = @min(phi, m.tau - phi);
             const el_min = curve.spline1D(&keys_phi, &keys_el, ap);
             const el = m.lerp(m.pi / 2.0, el_min, rt);
-            const p = c.s.point(phi, el, 0.006 * c.H);
+            const cap_lift = if (spec.hair.style == .afro) 0.11 * c.H else if (spec.hair.style == .alien_crown) 0.045 * c.H else 0.006 * c.H;
+            const p = c.s.point(phi, el, cap_lift);
             _ = try out.addVertex(gpa, .{ .pos = p, .uv = .{ .x = phi / m.tau, .y = rt * 0.3 }, .region = .hair, .material = .hair, .joints = .{ Joint.head.idx(), 0, 0, 0 } });
         }
     }
     // ring order runs top->down, cols increase toward +X from front: stitch then flip as needed
     try out.stitchRings(gpa, first, @intCast(rows), @intCast(cols), true, true);
-    const top = try out.addVertex(gpa, .{ .pos = c.s.point(0, m.pi / 2.0, 0.006 * c.H), .uv = .{ .x = 0.5, .y = 0 }, .region = .hair, .material = .hair, .joints = .{ Joint.head.idx(), 0, 0, 0 } });
+    const cap_lift = if (spec.hair.style == .afro) 0.11 * c.H else if (spec.hair.style == .alien_crown) 0.045 * c.H else 0.006 * c.H;
+    const top = try out.addVertex(gpa, .{ .pos = c.s.point(0, m.pi / 2.0, cap_lift), .uv = .{ .x = 0.5, .y = 0 }, .region = .hair, .material = .hair, .joints = .{ Joint.head.idx(), 0, 0, 0 } });
     try out.capRing(gpa, first, @intCast(cols), top, false);
+}
+
+fn isCurlStyle(style: spec_mod.HairStyle) bool {
+    return switch (style) {
+        .curly, .short_curly, .curly_fade, .curly_coils, .afro, .long_curls, .textured_crop => true,
+        else => false,
+    };
 }
 
 test "hair builds for every style and stays above the shoulders except long hair" {

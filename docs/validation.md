@@ -807,6 +807,14 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 - ReleaseSafe Metal art captures for `-Dshowcase=48` and `-Dshowcase=37` completed with `MTL_DEBUG_LAYER=1` on Apple M3 Pro. No Metal validation errors appeared. The lineup capture shows new paws clearly, though the heroes face away and the busy city backdrop limits face/material review. The saber capture still reads as a straightforward energy bar; this pass does not claim a finished weapon art direction.
 - Headless tests, smoke, 0.17 checks, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run for this visual pass.
 
+## Character appearance options and Scalari palette crash — 2026-10-11
+
+- Expanded human hair choices to 24 cuts and styles, including short and long curl patterns, fades, coils, afro, locs, swept-back and shag shapes, plus oversized nova and alien crown spikes. Hair color has 14 choices, with a separate optional highlight color and automatic lumen highlights for synthetic characters.
+- Added five face shapes and five boot designs to the persistent character profile and creator. Older profiles use classic face, no explicit hair highlight, and trail runner boots by default.
+- Fixed the startup crash in `Ranger.suitTones`: two Scalari enemy profiles selected accent index 5 even though the palette has indices 0–4. Both now use index 4.
+- `python3 tools/zig.py build check` and `python3 tools/zig.py build` passed on the default Zig 0.16/Mach pair. `git diff --check` passed.
+- A ReleaseSafe Metal showcase capture was attempted for the nova spike style but did not finish compiling in the available session; no visual capture was inspected. Tests, smoke, Zig 0.17, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run for this pass.
+
 ## Ground flora and canopy trees
 
 - Scatter remains deterministic by seed, chunk and candidate ID. Generator version 3 adds sparse broadleaf, needleleaf and willow trees among grass, ferns and wildflowers. Each streamed chunk groups the new forms into instanced mesh draws; slope filters, biome thinning and stable removal IDs remain in place.

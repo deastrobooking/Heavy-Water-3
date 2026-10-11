@@ -13,6 +13,8 @@ pub const skin_tones = [_][4]f32{
 pub const hair_colors = [_][4]f32{
     .{ 0.08, 0.07, 0.07, 1 }, .{ 0.26, 0.16, 0.10, 1 }, .{ 0.45, 0.23, 0.12, 1 }, .{ 0.62, 0.24, 0.14, 1 },
     .{ 0.90, 0.76, 0.42, 1 }, .{ 0.82, 0.84, 0.88, 1 }, .{ 0.30, 0.55, 0.36, 1 }, .{ 0.36, 0.62, 0.92, 1 },
+    .{ 0.62, 0.28, 0.92, 1 }, .{ 0.98, 0.30, 0.68, 1 }, .{ 0.18, 0.86, 0.88, 1 }, .{ 0.96, 0.34, 0.18, 1 },
+    .{ 0.24, 0.16, 0.44, 1 }, .{ 0.95, 0.96, 1.00, 1 },
 };
 pub const outfit_colors = [_][4]f32{
     .{ 0.22, 0.42, 0.28, 1 }, .{ 0.42, 0.29, 0.18, 1 }, .{ 0.25, 0.36, 0.52, 1 }, .{ 0.62, 0.18, 0.18, 1 },
@@ -62,7 +64,9 @@ pub const Species = enum {
 };
 pub const species_count = enum_compat.fields(Species).len;
 // Keep the original tags so existing JSON save profiles continue to decode unchanged.
-pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut };
+pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part };
+pub const FaceStyle = enum { classic, soft, angular, heroic, alien };
+pub const BootStyle = enum { trail_runner, field_boot, armored_sabatons, magstep, thruster };
 pub const Presentation = enum { masculine, feminine };
 /// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
 /// Synthetics are engineered humans with powers (phase dash, kinetic slam, lumen lance): a
@@ -75,7 +79,7 @@ pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, 
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, class, species, presentation, height, build, skin, coat, marking, hair_style, hair_color, outfit, clothing, armor, helmet, accent, gemstone, gem_cut };
+pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -92,6 +96,10 @@ build: f32 = 1,
 skin: u8 = 2,
 hair_style: HairStyle = .short,
 hair_color: u8 = 1,
+/// Zero disables streaks; 1..hair_colors.len selects a contrasting streak color.
+hair_highlight: u8 = 0,
+face_style: FaceStyle = .classic,
+boot_style: BootStyle = .trail_runner,
 outfit: u8 = 0,
 accent: u8 = 0,
 clothing: Clothing = .field_jacket,
@@ -139,15 +147,18 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .coat => self.coat = cycle(self.coat, delta, coat_colors.len),
         .marking => self.marking = cycle(self.marking, delta, coat_colors.len),
         .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, enum_compat.fields(Presentation).len)),
+        .face_style => self.face_style = @enumFromInt(cycle(@intFromEnum(self.face_style), delta, enum_compat.fields(FaceStyle).len)),
         .height => self.height = std.math.clamp(self.height + @as(f32, @floatFromInt(delta)) * 0.02, 0.9, 1.1),
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
         .skin => self.skin = cycle(self.skin, delta, skin_tones.len),
         .hair_style => self.hair_style = @enumFromInt(cycle(@intFromEnum(self.hair_style), delta, enum_compat.fields(HairStyle).len)),
         .hair_color => self.hair_color = cycle(self.hair_color, delta, hair_colors.len),
+        .hair_highlight => self.hair_highlight = cycle(self.hair_highlight, delta, hair_colors.len + 1),
         .outfit => self.outfit = cycle(self.outfit, delta, outfit_colors.len),
         .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, enum_compat.fields(Clothing).len)),
         .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, enum_compat.fields(Armor).len)),
         .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, 3)),
+        .boot_style => self.boot_style = @enumFromInt(cycle(@intFromEnum(self.boot_style), delta, enum_compat.fields(BootStyle).len)),
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
         .gemstone => self.gemstone = @enumFromInt(cycle(@intFromEnum(self.gemstone), delta, enum_compat.fields(Gemstone).len)),
         .gem_cut => self.gem_cut = @enumFromInt(cycle(@intFromEnum(self.gem_cut), delta, enum_compat.fields(GemCut).len)),
@@ -172,6 +183,9 @@ pub const Doc = struct {
     skin: u8,
     hair_style: HairStyle,
     hair_color: u8,
+    hair_highlight: u8 = 0,
+    face_style: FaceStyle = .classic,
+    boot_style: BootStyle = .trail_runner,
     outfit: u8,
     accent: u8,
     clothing: Clothing = .field_jacket,
@@ -182,7 +196,7 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .outfit = self.outfit, .accent = self.accent, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .gemstone = self.gemstone, .gem_cut = self.gem_cut };
+    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -190,7 +204,7 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     try result.setName(doc.name);
     if (!(doc.height >= 0.9 and doc.height <= 1.1) or !(doc.build >= 0.85 and doc.build <= 1.15)) return error.InvalidProfile;
     if (doc.coat >= coat_colors.len or doc.marking >= coat_colors.len) return error.InvalidProfile;
-    if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
+    if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.hair_highlight > hair_colors.len or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
     result.height = doc.height;
     result.build = doc.build;
     result.class = doc.class;
@@ -201,6 +215,9 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.skin = doc.skin;
     result.hair_style = doc.hair_style;
     result.hair_color = doc.hair_color;
+    result.hair_highlight = doc.hair_highlight;
+    result.face_style = doc.face_style;
+    result.boot_style = doc.boot_style;
     result.outfit = doc.outfit;
     result.accent = doc.accent;
     result.clothing = doc.clothing;

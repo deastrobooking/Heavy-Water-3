@@ -60,7 +60,7 @@ pub const EyeSpec = struct {
     highlight_count: u8 = 2,
 };
 
-pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk };
+pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part };
 
 pub const HairSpec = struct {
     /// The single antenna strand on top.

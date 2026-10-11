@@ -96,15 +96,18 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
         .coat => std.fmt.bufPrint(buffer, "COAT {d} OF {d}", .{ p.coat + 1, Profile.coat_colors.len }) catch buffer,
         .marking => std.fmt.bufPrint(buffer, "MARKING {d} OF {d}", .{ p.marking + 1, Profile.coat_colors.len }) catch buffer,
         .presentation => @tagName(p.presentation),
+        .face_style => @tagName(p.face_style),
         .height => std.fmt.bufPrint(buffer, "{d:.2} M", .{1.8 * p.height}) catch buffer,
         .build => std.fmt.bufPrint(buffer, "{d:.0}%", .{p.build * 100}) catch buffer,
         .skin => std.fmt.bufPrint(buffer, "TONE {d} OF {d}", .{ p.skin + 1, Profile.skin_tones.len }) catch buffer,
         .hair_style => @tagName(p.hair_style),
         .hair_color => std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.hair_color + 1, Profile.hair_colors.len }) catch buffer,
+        .hair_highlight => if (p.hair_highlight == 0) (if (p.class == .synthetic) "AUTO LUMEN" else "OFF") else std.fmt.bufPrint(buffer, "COLOR {d}", .{p.hair_highlight}) catch buffer,
         .outfit => std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.outfit + 1, Profile.outfit_colors.len }) catch buffer,
         .clothing => @tagName(p.clothing),
         .armor => @tagName(p.armor),
         .helmet => @tagName(p.helmet),
+        .boot_style => @tagName(p.boot_style),
         .accent => std.fmt.bufPrint(buffer, "LUMEN {d} OF {d}", .{ p.accent + 1, Profile.accent_colors.len }) catch buffer,
         .gemstone => @tagName(p.gemstone),
         .gem_cut => @tagName(p.gem_cut),
@@ -160,7 +163,7 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     var panel: [24]Line = undefined;
     c.begin(result.confirmed);
     const count = c.lines(&panel);
-    try std.testing.expectEqual(@as(usize, 21), count);
+    try std.testing.expectEqual(@as(usize, 24), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
 }
 
