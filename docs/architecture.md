@@ -139,6 +139,12 @@ Armor pieces are *hard* garments (`GarmentSpec.hard`; coverages `cuirass`, `paul
 
 With a hardsuit or vanguard, the old ellipsoid `armor` plates (scout and sentinel) give way to the suit, and only their chest accent lights remain.
 
+Each suit has its own two-tone scheme (`Ranger.suitTones`), with the outfit colour always showing: the exo rig is a light frame in the outfit colour over graphite, the hardsuit ivory plate with outfit-coloured secondary panels, the vanguard gunmetal with outfit-coloured trim. `suitDetail` adds the hard-surface kit, all rigid `armor` on its joint:
+- every suit: over-bright lumen strips down the forearms and shins, domed knee and elbow cops, a lit belt buckle, and (with an open face) a headset of earpieces with lit rings;
+- the hardsuit and vanguard: a collar ring, a sternum plate with a core light, and a back power pack with lit vents; the vanguard's pack carries twin thrusters.
+
+Faces shade from a smoothed sphere (`softenFace`): head and face skin normals are pulled 80% of the way onto an upward-leaning sphere around the head. Without it the cel ramp's shadow band lay across every jaw and chin and read as a beard.
+
 The avatar appears in your own view in third person (F2), the creator, conversations and the wardrobe, on foot only. It is always published for the other split-screen views (see local co-op below). The third-person camera sits 4 m behind and 0.3 m above the eyes, kept above the terrain. Aiming, picking, holding, and building still start at the eyes, so the same target is chosen in either view. While the creator is open, input and tools are frozen and the camera faces the character.
 
 ## Menus, GUI and conversations
@@ -212,6 +218,21 @@ The avatar appears in your own view in third person (F2), the creator, conversat
   - **Rewards:** downed wasps drop alloy to the floor below. A downed carrier drops six alloy, two rotor cores and a vital cell, and stays down (`carrier_N_down`).
 - **HUD:** the flight HUD shows speed, height, throttle and afterburner, hull and gun heat, a nose marker, and a lock reticle that closes as the lock builds. Both marks are projected from the camera.
 - **Sound:** a turbine (the engine loop pitched with throttle) and afterburner roar, cannon, missile, flak and stinger cues.
+
+## Bio-synth pets
+
+`game/Pets.zig` replaces the old test-only `Companion`. Four pets (hound GARU, falcon SKYE, golem MOSS, moth LUMI) wait in Hive collars at seeded spots on a 150–230 m ring around the spawn, one per sector, each under a Hive-red beam within 400 m.
+- **Freeing:** aiming at a wild pet offers to break its collar (`Sandbox.Target.wild_pet`). Clicking frees it (`Progress.freePet`) and brings it out. Clicking the party's pet (`.pet`) makes it do a trick, or with more pets freed, sends it home and brings out the next.
+- **Following and fighting:** P1's pet follows behind (fliers hover 2.3 m up, at the shoulder) on the terrain or the deck below. It catches up at once if left 60 m behind. It engages the nearest Hive unit within 22 m of its ranger: the hound pounces (`strikeArea`, 1.6 m), the golem slams (3.4 m), and the falcon and moth strike from range (`strikeAlong`). The moth mends rangers within about 12 m every 5 s.
+- **Growing:** every Hive unit downed within 35 m of the pet gives it 20 experience. Levels need 60 × level more (to level 20), and damage grows per level.
+- **Pets are never hurt:** the game is for all ages, and a pet never needs rescuing.
+- **Saves:** `Progress` keeps the freed set, each pet's experience and the active pet. The save document lists pets by name; older saves have none.
+- **Looks:** each pet is a cel puppet of world props built from three catalog meshes (`orb`, a unit sphere; `block`; `spike`, a unit cone), with zero UVs so the props' checker never patterns them. They are animated procedurally from the pet's gait, stride, action and time:
+  - the hound trots in diagonal pairs and wags a lit-tipped tail;
+  - the falcon beats pitched feather slabs and tucks into a dive;
+  - the golem sways and raises both fists to slam;
+  - the moth flutters glowing wings.
+- **Collars and eyes:** a wild pet's collar and eyes glow Hive red (the hound's collar is spiked); a freed pet's collar glows in its ranger's accent.
 
 ## Wildkin heroes and the Starbowl
 
@@ -316,7 +337,22 @@ Keyboard edges (Space, Ctrl, X, G, B) latch in `Input` until a fixed step consum
 
 `engine/Gamepads.zig` polls up to four controllers once per frame through `platform/gamepad.m`. Mach's pinned platform layer has no controller API, so this Objective-C bridge discovers Apple's Extended and Micro Gamepad profiles and keeps each pad in a stable slot; the vendor and product category appear in the discovery notice. Xbox-, PlayStation- and Switch-style pads use the operating system's standardized profile when macOS exposes one. Custom maps cover all logical actions, axis swaps/inversion, radial deadzone and analog trigger threshold. Buttons are captured in Controls → Gamepad Setup. Eight named-by-slot JSON files can be imported/exported at `saves/controller-presets/slot-01.json` through `slot-08.json`; users can upload an exported file to the community preset page or place a downloaded file over a slot to import it. The file format is versioned and platform-neutral. macOS cannot expose a pad that the GameController framework itself does not recognize, and other operating systems still need native backends.
 
-`Sandbox.guests` holds three drop-in `Guest` players. Each has its own `Player`, `Camera`, first- or third-person view, profile (a distinct accent and outfit), gait and target. Guests step after P1 and before the machines, so proximity sensors see them through `Machine.Environment.other_feet`. Their hands pick along their own eye ray and can press buttons. Tools, carrying, vehicles and saves stay with P1.
+`Sandbox.guests` holds three drop-in `Guest` players. Each has its own `Player`, `Camera`, first- or third-person view, profile (a distinct accent and outfit), gait and target. Guests step after P1 and before the machines, so proximity sensors see them through `Machine.Environment.other_feet`. Their hands pick along their own eye ray: they press buttons, trade at stalls, meet Wildkin heroes, free wild pets and pet any player's pet. Tools, carrying and vehicles stay with P1.
+
+**Every player has their own progression.** `game/Kit.zig` is one player's kit:
+- their wallet (scrap, parts, build kits) and suit upgrades;
+- the suits, armor accents and weapons they own, and the weapon tiers installed;
+- the pickups they hold (vital cells raise their own health);
+- their pets and each pet's experience.
+
+`Sandbox.kits[p]` holds one kit per screen slot (P1 first). `game/Progress.zig` keeps only what the team shares: story flags, the Wildkin roster (anyone can play as them), world pickups already taken, the garage (hover cars and the Kestrel with its upgrades and paint), and the arena record.
+- **Earning:** a pickup goes to whoever reaches it; arena rewards pay every present player.
+- **Spending:** a guest trades at a stall from their own wallet; P1's tinker, wardrobe and fabricator spend P1's kit (cars and the Kestrel join the team garage).
+- **Fighting:** each player fights with their own weapons and tiers, and has their own maximum health, suit tuning and pet.
+
+`Sandbox.known` marks slots with a character of their own. A known guest who leaves and rejoins comes back as themselves, with their kit. Swapping screen positions moves the kit, pet and character together.
+
+**Ranger files.** Every save also writes each known player's ranger file, `saves/rangers/<NAME>.json` (`Save.RangerFile`: their own ranger, not a Wildkin form they were playing, and their kit). FOUR PLAYER SETUP > LOAD NEXT SAVED RANGER puts the next saved ranger (alphabetically, skipping any another present player is playing) into the selected seat. So a player can play as a teammate, or carry a character into another team's world. The setup screen shows each seat's character and scrap.
 
 Every walking body is published as props tagged with `World.Prop.owner` (1–4). Each view hides only its own owner in first person, so everyone sees everyone else. Split-screen layout lives in `render/Layout.zig`.
 
@@ -369,24 +405,25 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 
 ## Saves
 
-`game/Save.zig` writes JSON format v12 (content version 7). It records:
+`game/Save.zig` writes JSON format v13 (content version 7). It records:
 - the format, seed, generator and content versions, and the tick;
 - the player's pose and mode, and their profile;
 - every crate by slot, and the removed relic IDs;
 - every machine by slot: its full blueprint document as edited in the world, origin, quarter-turn yaw, workshop flag, per-device state, market-kit flag, shrine index, and for vehicles the chassis pose and velocities;
 - the captured prefab library;
 - player bridge endpoint pairs (bridges already closing are left out);
-- the market wallet (scrap, parts, kits) and each stall's stock with its market day;
+- every known player (`members`, by slot): the character they play, their own ranger if they are playing a Wildkin hero, and their kit;
+- each stall's stock with its market day;
 - the installed mods by name and version.
 - the best completed lap time on the seeded sprint circuit.
 
-Optional fields in format 12 have defaults for documents that omit them:
-- **progress:** suit upgrade levels, owned suits, armor accents, weapons and their Mk II/Mk III tiers (older saves default to Mk I), cars and the fighter, held pickups, collected pickup IDs, and story flags (including destroyed nests and carriers);
+Optional fields in format 13 have defaults for documents that omit them:
+- **progress:** what the team shares: story flags (including destroyed nests and carriers), the hero roster, collected pickup IDs, the cars, and the fighter with its upgrades and paint;
 - **cars:** each hover car's pose;
 - **fighter:** the Kestrel's pose.
 - **race_best:** the saved course best, or zero until a lap is completed.
 
-Format 11 saves migrate with no recorded lap; formats before v11 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. City life, guests, Hive units, wasps and shots are not saved either.
+Format 12 saves migrate: their one wallet and the personal fields they kept in `progress` become P1's kit (`Progress.legacyKit`). Formats before v12 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. Guests' positions and who is joined are not saved (controllers decide that), nor are city life, Hive units, wasps and shots.
 
 Writes go to a temporary file, then rename over `saves/quicksave.json`. Loading validates everything before tearing down and rebuilding the session:
 - versions, seed, slot ranges and duplicates;
@@ -394,7 +431,7 @@ Writes go to a temporary file, then rename over `saves/quicksave.json`. Loading 
 - each blueprint through `fromDoc`, with machine state restored into scratch machines;
 - at most one workshop, and physics body and rigid capacity;
 - district graph validation;
-- progress ranges.
+- progress and every kit's ranges (unknown or unfreed pets are rejected).
 
 Bridge colliders are allocated into staging first, with cleanup on failure, so a rejected save changes nothing. Procedural content is never stored: it is regenerated from the seed and generator version, and the saved deltas are applied on top.
 

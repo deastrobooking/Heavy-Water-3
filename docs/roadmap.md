@@ -116,6 +116,34 @@ Next:
 - guests picking heroes from their own pads;
 - a hero gallery viewer.
 
+## Team saves: every player on their own — implemented
+
+- **Kits:** each of the four players has a kit of their own (`game/Kit.zig`): wallet, suit upgrades, owned suits, armor and weapons with tiers, held pickups and health cells, and pets with their experience. The team shares only the world and story (`Progress`): flags, the hero roster, world pickups, the garage and Kestrel, and the arena record. Pickups go to whoever reaches them; arena waves pay every present player; guests trade from their own wallets and fight with their own weapons.
+- **Saves:** save format 13 stores every known player's character and kit. Format 12 saves migrate into P1. A guest who leaves and rejoins comes back as themselves.
+- **Ranger files:** every save writes each player's ranger file, `saves/rangers/<NAME>.json`. FOUR PLAYER SETUP > LOAD NEXT SAVED RANGER seats any saved ranger, so players can play as teammates or bring a character to another world. Wildkin forms are still chosen in the Heroes menu.
+
+Acceptance: tests for kit purchases and round-trips, team progress and format 12 migration, the save's members, a guest trading from and fighting with their own kit, a departed guest's wallet surviving save and load, and ranger files; the smoke saves and restores P1 and P2 kits and round-trips P2's ranger file; capture `-Dshowcase=54` shows each seat's character and scrap.
+
+Next, toward the sanctuary-city loop:
+- city liberation state: each city's Hive grip, with the wild zones around it and the collaborators inside it;
+- evidence and informants in the canopy district that reveal Hive alliances (scientists, officials);
+- loot rarities and per-player gear drops for the hack-and-slash zones.
+
+## Bio-synth pets and armor detail — implemented
+
+- **Pets:** four collared bio-synth pets wait on the meadow ring: GARU the plasma hound, SKYE the chitin falcon, MOSS the root golem and LUMI the lumen moth. Break a collar to free one. It follows P1, fights the Hive (pounce, dive dart, ground slam, lumen zap), levels up as the party downs bots near it, and does a trick when petted. The moth mends. One pet is out at a time; petting it with others freed brings out the next. Freed pets and their levels are saved. The bodies are animated cel puppets.
+- **Armor:** each suit has its own two-tone scheme with the outfit colour showing. Every suit gains lit lumen strips, knee and elbow cops, a lit buckle and an open-face headset; the hardsuit and vanguard add a collar ring, a sternum core light and a back power pack (twin thrusters on the vanguard).
+- **Faces:** smoothed face shading removes the cel shadow band that read as a beard on every jaw.
+
+Acceptance: tests for pet levels and damage, ring placement, following and fighting (every species downs a trooper; the moth mends), puppet parts, pet save round-trip and rejection, suit detail (lit strips, power pack standing off the back, the vanguard's farthest) and jaw shading; the smoke frees a pet through the real pick, sees it follow and fight a trooper down; captures `-Dshowcase=16`, `17` (armor) and `58`, `59` (pets).
+
+Next:
+- pets for guests;
+- evolutions at levels 10 and 20;
+- pet commands (stay, fetch a pickup);
+- per-pet voice chirps;
+- a Pets page in the pause menu.
+
 ## Nature: ground, water, foliage and footing — implemented
 
 The terrain, rivers and plants get their own shading stages over the cel shader, and the ground now matters underfoot.

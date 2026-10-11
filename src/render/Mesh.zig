@@ -81,6 +81,55 @@ pub fn wheel(allocator: std.mem.Allocator) !Mesh {
     return .{ .vertices = vertices, .indices = indices };
 }
 
+/// Smooth sphere of unit diameter, centred on the origin. UVs are all zero so the surface checker
+/// never patterns it (pets and other puppets tint it per part).
+pub fn orb(allocator: std.mem.Allocator) !Mesh {
+    const rows = 10;
+    const cols = 16;
+    const vertices = try allocator.alloc(Vertex, (rows + 1) * (cols + 1));
+    errdefer allocator.free(vertices);
+    const indices = try allocator.alloc(u32, rows * cols * 6);
+    for (0..rows + 1) |r| for (0..cols + 1) |c| {
+        const lat = std.math.pi * @as(f32, @floatFromInt(r)) / rows;
+        const lon = 2 * std.math.pi * @as(f32, @floatFromInt(c)) / cols;
+        const n = [3]f32{ @sin(lat) * @cos(lon), @cos(lat), @sin(lat) * @sin(lon) };
+        vertices[r * (cols + 1) + c] = .{ .position = .{ n[0] * 0.5, n[1] * 0.5, n[2] * 0.5 }, .normal = n, .uv = .{ 0, 0 } };
+    };
+    var k: usize = 0;
+    for (0..rows) |r| for (0..cols) |c| {
+        const a: u32 = @intCast(r * (cols + 1) + c);
+        const b: u32 = a + cols + 1;
+        for ([_]u32{ a, b, a + 1, a + 1, b, b + 1 }) |i| {
+            indices[k] = i;
+            k += 1;
+        }
+    };
+    return .{ .vertices = vertices, .indices = indices };
+}
+
+/// A smooth cone of unit base diameter: base at the origin, tip at +y (ears, beaks, horns).
+pub fn spike(allocator: std.mem.Allocator) !Mesh {
+    const sides = 12;
+    const vertices = try allocator.alloc(Vertex, sides * 2 + 1);
+    errdefer allocator.free(vertices);
+    const indices = try allocator.alloc(u32, sides * 6);
+    const slope = 0.5;
+    for (0..sides) |i| {
+        const a = @as(f32, @floatFromInt(i)) / sides * 2 * std.math.pi;
+        const n = [3]f32{ @cos(a), slope, @sin(a) };
+        const l = @sqrt(1 + slope * slope);
+        vertices[i] = .{ .position = .{ @cos(a) * 0.5, 0, @sin(a) * 0.5 }, .normal = .{ n[0] / l, n[1] / l, n[2] / l }, .uv = .{ 0, 0 } };
+        vertices[sides + i] = .{ .position = .{ 0, 1, 0 }, .normal = .{ n[0] / l, n[1] / l, n[2] / l }, .uv = .{ 0, 0 } };
+    }
+    vertices[sides * 2] = .{ .position = .{ 0, 0, 0 }, .normal = .{ 0, -1, 0 }, .uv = .{ 0, 0 } };
+    for (0..sides) |i| {
+        const next: u32 = @intCast((i + 1) % sides);
+        const at: u32 = @intCast(i);
+        for ([_]u32{ at, sides + at, next, next, sides * 2, at }, 0..) |v, j| indices[i * 6 + j] = v;
+    }
+    return .{ .vertices = vertices, .indices = indices };
+}
+
 /// A faceted, six-sided alien shrub. Shared by all vegetation instances.
 pub fn vegetation(allocator: std.mem.Allocator) !Mesh {
     const vertices = try allocator.alloc(Vertex, 18);

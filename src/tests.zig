@@ -109,6 +109,6 @@ test {
     _ = @import("physics/TriangleMesh.zig");
     _ = @import("combat/CombatSystem.zig");
     _ = @import("game/SuperMobility.zig");
-    _ = @import("game/Companion.zig");
+    _ = @import("game/Pets.zig");
     _ = @import("ai/Hive.zig");
 }

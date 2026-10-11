@@ -210,7 +210,7 @@ fn setupFrontierBenchmark(self: *App) void {
     const sb = &self.sandbox;
     const Combat = @import("game/Combat.zig");
     sb.progress.fighter = true;
-    sb.progress.weapons = (@as(u16, 1) << @intFromEnum(Combat.WeaponKind.blaster)) |
+    sb.kits[0].weapons = (@as(u16, 1) << @intFromEnum(Combat.WeaponKind.blaster)) |
         (@as(u16, 1) << @intFromEnum(Combat.WeaponKind.machine_gun));
     @import("game/Frontier.zig").refresh(sb);
     const carrier = sb.skies.carriers[0].position();
@@ -450,6 +450,7 @@ fn runCommand(self: *App, command: Menu.Command) void {
             }
             for (&self.pads.commands) |*cmd| cmd.* = .{ .connected = cmd.connected };
         },
+        .party_ranger => self.loadNextRanger(),
         .party_position => {
             const p: usize = self.menu.hero_player;
             const next = (p + 1) % 4;
@@ -473,6 +474,10 @@ fn runCommand(self: *App, command: Menu.Command) void {
                 std.mem.swap(@TypeOf(self.engine.camera), &self.engine.camera, &g.camera);
             }
             std.mem.swap(@TypeOf(sb.own_profiles[0]), &sb.own_profiles[p], &sb.own_profiles[next]);
+            // Each player keeps their own kit and pet as they change seats.
+            std.mem.swap(Sandbox.Kit, &sb.kits[p], &sb.kits[next]);
+            std.mem.swap(bool, &sb.known[p], &sb.known[next]);
+            std.mem.swap(?Sandbox.Pets.Pet, &sb.pets.out[p], &sb.pets.out[next]);
             std.mem.swap(@TypeOf(sb.specials.players[0]), &sb.specials.players[p], &sb.specials.players[next]);
             std.mem.swap(@TypeOf(sb.combat.arsenals[0]), &sb.combat.arsenals[p], &sb.combat.arsenals[next]);
             std.mem.swap(@TypeOf(sb.combat.vitals[0]), &sb.combat.vitals[p], &sb.combat.vitals[next]);
@@ -1203,6 +1208,26 @@ fn showcase(self: *App) void {
         eye = .{ Sandbox_.spawn[0] + 0.25, ground + 1.3, Sandbox_.spawn[2] + 0.45 };
         // 17: a three-quarter close-up of the hardsuit.
         if (v == 17) eye = .{ Sandbox_.spawn[0] + 0.9, ground + 1.35, Sandbox_.spawn[2] + 1.35 };
+    } else if (v == 58 or v == 59) {
+        // The pets in a row on the open meadow by the spawn (where the Wildkin line up), looking
+        // out toward the mountains: 58 in their Hive collars, 59 freed.
+        const Sandbox_ = @import("game/Sandbox.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const pets = &self.sandbox.pets;
+        const base: [3]f32 = .{ Sandbox_.spawn[0] + 30, 0, Sandbox_.spawn[2] - 40 };
+        const yaw: f32 = 2.6;
+        const fwd: [3]f32 = .{ @sin(yaw), 0, @cos(yaw) };
+        const right: [3]f32 = .{ -@cos(yaw), 0, @sin(yaw) };
+        for (&pets.spots, 0..) |*spot, i| {
+            const x = base[0] + fwd[0] * 5 + right[0] * (@as(f32, @floatFromInt(i)) - 1.5) * 2.1;
+            const z = base[2] + fwd[2] * 5 + right[2] * (@as(f32, @floatFromInt(i)) - 1.5) * 2.1;
+            spot.* = .{ .position = .{ x, Terrain.surface(self.sandbox.seed, x, z).height, z }, .yaw = yaw + std.math.pi };
+        }
+        pets.placed = true;
+        pets.showcase_free = v == 59;
+        const ground = Terrain.surface(self.sandbox.seed, base[0], base[2]).height;
+        eye = .{ base[0], ground + 1.7, base[2] };
+        target = .{ base[0] + fwd[0] * 5, ground + 0.9, base[2] + fwd[2] * 5 };
     } else if (v == 36) {
         const Hydrology = @import("procedural/Hydrology.zig");
         const Seed = @import("procedural/Seed.zig");
@@ -1317,10 +1342,10 @@ fn guiShowcase(self: *App, v: u32) void {
     sb.view = .third;
     self.engine.camera.yaw = std.math.atan2(-out[0], -out[2]);
     self.engine.camera.pitch = -0.15;
-    sb.wallet = .{ .scrap = 182, .parts = 6, .kits = .{ 1, 0, 2 } };
-    sb.progress.levels = .{ 1, 0, 2, 0, 1, 0 };
-    sb.progress.buySuit(.exo_rig, &sb.wallet) catch {};
-    sb.wallet.scrap = 182;
+    sb.kits[0].wallet = .{ .scrap = 182, .parts = 6, .kits = .{ 1, 0, 2 } };
+    sb.kits[0].levels = .{ 1, 0, 2, 0, 1, 0 };
+    sb.kits[0].buySuit(.exo_rig) catch {};
+    sb.kits[0].wallet.scrap = 182;
     sb.profile.setName("MIRA-7") catch {};
     switch (v) {
         19 => sb.startTalk(.{ .keeper = 0 }),
@@ -1356,7 +1381,7 @@ fn guiShowcase(self: *App, v: u32) void {
                 const z = nest[2] + dz;
                 sb.enemies.units[slot] = .{ .kind = .trooper, .nest = 0, .position = .{ x, @import("procedural/Terrain.zig").surface(sb.seed, x, z).height, z }, .health = 120, .orbit = 0 };
             }
-            sb.progress.weapons = 0b10;
+            sb.kits[0].weapons = 0b10;
             sb.combat.arsenals[0].active = .blaster;
             sb.tools.tool = .weapon;
         },
@@ -1395,7 +1420,7 @@ fn guiShowcase(self: *App, v: u32) void {
                 39 => .machine_gun,
                 else => .heavy_rifle,
             };
-            sb.progress.weapons = @as(u16, 1) << @intCast(@intFromEnum(kind));
+            sb.kits[0].weapons = @as(u16, 1) << @intCast(@intFromEnum(kind));
             sb.combat.arsenals[0].active = kind;
             sb.tools.tool = .weapon;
             // The saber reads from behind; guns and powers from the eyes, as a viewmodel.
@@ -1535,7 +1560,7 @@ fn guiShowcase(self: *App, v: u32) void {
             sb.player.mode = .walk;
         },
         31 => {
-            sb.progress.inventory = .{ 14, 3, 9, 2 };
+            sb.kits[0].inventory = .{ 14, 3, 9, 2 };
             sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 0 };
         },
         28 => {
@@ -1599,8 +1624,81 @@ fn quicksave(self: *App) void {
     const bytes = self.sandbox.save(self.allocator, self.engine.camera) catch |err| return self.report("SAVE FAILED {s}", .{@errorName(err)});
     defer self.allocator.free(bytes);
     Save.writeFile(self.io, Save.default_path, bytes) catch |err| return self.report("SAVE FAILED {s}", .{@errorName(err)});
-    self.report("SAVED {s}", .{Save.default_path});
+    const rangers = self.saveRangers();
+    self.report("SAVED {s} AND {d} RANGER FILE{s}", .{ Save.default_path, rangers, if (rangers == 1) "" else "S" });
 }
+
+/// Every known player's own ranger file, beside the team save; returns how many were written.
+fn saveRangers(self: *App) usize {
+    var written: usize = 0;
+    for (0..Sandbox.max_players) |p| {
+        if (!self.sandbox.known[p]) continue;
+        var arena_state: std.heap.ArenaAllocator = .init(self.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+        const file = self.sandbox.rangerFile(arena, p) catch continue;
+        const json = std.json.Stringify.valueAlloc(arena, file, .{ .whitespace = .indent_2 }) catch continue;
+        var buffer: [96]u8 = undefined;
+        const path = Save.rangerPath(&buffer, file.profile.name) catch continue;
+        Save.writeFile(self.io, path, json) catch |err| {
+            self.report("RANGER SAVE FAILED {s}", .{@errorName(err)});
+            continue;
+        };
+        written += 1;
+    }
+    return written;
+}
+
+/// FOUR PLAYER SETUP: the selected player takes up the next saved ranger after the one in their
+/// seat (alphabetically, wrapping), skipping rangers another present player is playing.
+fn loadNextRanger(self: *App) void {
+    const sb = &self.sandbox;
+    const p: usize = self.menu.hero_player;
+    if (!sb.present(p)) return self.report("JOIN P{d} BEFORE LOADING A RANGER", .{p + 1});
+    var dir = std.Io.Dir.cwd().openDir(self.io, Save.ranger_dir, .{ .iterate = true }) catch return self.report("NO SAVED RANGERS YET: SAVE THE GAME FIRST", .{});
+    defer dir.close(self.io);
+    // File names, sorted; the names are uppercase letters, digits, hyphens and underscores.
+    var names: [64][48]u8 = undefined;
+    var lens: [64]usize = undefined;
+    var n: usize = 0;
+    var it = dir.iterate();
+    while (it.next(self.io) catch null) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".json") or entry.name.len > 48 or n == names.len) continue;
+        @memcpy(names[n][0..entry.name.len], entry.name);
+        lens[n] = entry.name.len;
+        n += 1;
+    }
+    if (n == 0) return self.report("NO SAVED RANGERS YET: SAVE THE GAME FIRST", .{});
+    var order: [64]usize = undefined;
+    for (order[0..n], 0..) |*o, i| o.* = i;
+    const Ctx = struct { names: *const [64][48]u8, lens: *const [64]usize };
+    std.mem.sort(usize, order[0..n], Ctx{ .names = &names, .lens = &lens }, struct {
+        fn less(c: Ctx, a: usize, b: usize) bool {
+            return std.mem.order(u8, c.names[a][0..c.lens[a]], c.names[b][0..c.lens[b]]) == .lt;
+        }
+    }.less);
+    // Start after the ranger in this seat.
+    var current: [96]u8 = undefined;
+    const here = Save.rangerPath(&current, (if (sb.own_profiles[p]) |*o| o else sb.profileOf(p)).name()) catch "";
+    const here_file = here[@min(here.len, Save.ranger_dir.len + 1)..];
+    var first: usize = 0;
+    for (order[0..n], 0..) |i, k| if (std.mem.eql(u8, names[i][0..lens[i]], here_file)) {
+        first = k + 1;
+    };
+    for (0..n) |step| {
+        const i = order[(first + step) % n];
+        const file = names[i][0..lens[i]];
+        const bytes = dir.readFileAlloc(self.io, file, self.allocator, .limited(Save.max_bytes)) catch continue;
+        defer self.allocator.free(bytes);
+        const ranger = Save.decodeRanger(self.allocator, bytes) catch continue;
+        if (sb.rangerInPlay(ranger.profile.name(), p)) continue;
+        sb.takeRanger(p, ranger);
+        sb.cue(.ui_confirm, null);
+        return self.report("P{d} IS NOW {s} ({d} SCRAP)", .{ p + 1, ranger.profile.name(), ranger.kit.wallet.scrap });
+    }
+    self.report("EVERY SAVED RANGER IS ALREADY IN PLAY", .{});
+}
+
 
 fn quickload(self: *App) bool {
     const bytes = Save.readFile(self.io, self.allocator, Save.default_path) catch |err| {
@@ -1723,7 +1821,7 @@ fn exerciseSmoke(self: *App) void {
                 trips += car.trips;
             };
             std.log.info("Smoke traffic: {d} cars, {d} pedestrians, {d} trips, {d} recoveries, {d} deadlocks broken", .{ self.sandbox.life.rigidCount(), Life.walker_count, trips, self.sandbox.life.resets, self.sandbox.life.deadlocks });
-            std.log.info("Smoke market: day {d}, stall stock {any}, salvaged parts {d}", .{ self.sandbox.market.day, self.sandbox.market.stalls[0].stock, self.sandbox.wallet.parts });
+            std.log.info("Smoke market: day {d}, stall stock {any}, salvaged parts {d}", .{ self.sandbox.market.day, self.sandbox.market.stalls[0].stock, self.sandbox.kits[0].wallet.parts });
             std.log.info("Smoke city: six plazas, bridge {d} > {d} restored with collision; save {d} bytes", .{ self.sandbox.bridges[0].?.edge.a, self.sandbox.bridges[0].?.edge.b, bytes.len });
         },
         else => {},
@@ -1743,12 +1841,12 @@ fn smokeGui(self: *App) void {
     // Reveal, ask about the suit, reveal, and open the upgrades.
     for ([_]Menu.Key{ .confirm, .confirm, .confirm, .confirm }) |k| self.uiNav(k);
     const opened = sb.shop != null and sb.shop.?.kind == .upgrades;
-    const scrap = sb.wallet.scrap;
-    sb.wallet.scrap += 40;
+    const scrap = sb.kits[0].wallet.scrap;
+    sb.kits[0].wallet.scrap += 40;
     self.uiNav(.confirm);
-    const level = sb.progress.level(.fuel_tank);
+    const level = sb.kits[0].level(.fuel_tank);
     self.uiNav(.back);
-    sb.wallet.scrap = scrap;
+    sb.kits[0].wallet.scrap = scrap;
     std.log.info("Smoke GUI: pause/settings closed={any}, keeper greeting {s}, upgrades opened={any}, fuel tank level {d}, panels closed={any}", .{ menu_closed, greeting, opened, level, !self.uiActive() });
 }
 
@@ -1758,9 +1856,9 @@ fn smokeFrontier(self: *App) void {
     const sb = &self.sandbox;
     const Combat = @import("game/Combat.zig");
     const keep = sb.progress;
-    const wallet = sb.wallet;
-    sb.progress.inventory = .{ 20, 6, 20, 0 };
-    sb.wallet.scrap += 200;
+    const wallet = sb.kits[0].wallet;
+    sb.kits[0].inventory = .{ 20, 6, 20, 0 };
+    sb.kits[0].wallet.scrap += 200;
     sb.shop = .{ .kind = .fabricate };
     self.uiNav(.confirm);
     sb.shop.?.tab = 3;
@@ -1768,7 +1866,7 @@ fn smokeFrontier(self: *App) void {
     self.uiNav(.confirm);
     self.uiNav(.back);
     const cars = sb.garage.cars[0] != null;
-    const blaster = sb.progress.ownsWeapon(.blaster);
+    const blaster = sb.kits[0].ownsWeapon(.blaster);
     // Fly the Skimmer for two seconds.
     var camera = self.engine.camera;
     sb.garage.board(0, &camera);
@@ -1783,18 +1881,18 @@ fn smokeFrontier(self: *App) void {
     var downed = false;
     for (0..60) |k| {
         if (k == 1) aim.fire = false;
-        const n = sb.combat.step(0, &sb.physics, &sb.enemies, sb.progress.weapons, aim, 1.0 / 60.0, &events);
+        const n = sb.combat.step(0, &sb.physics, &sb.enemies, sb.kits[0].weapons, aim, 1.0 / 60.0, &events);
         for (events[0..@min(n, events.len)]) |e| if (e == .hive and e.hive == .unit_down) {
             downed = true;
         };
     }
     std.log.info("Smoke frontier: skimmer parked={any} flew {d:.1} m, blaster={any}, drone downed={any}; {d} nests, {d} pickups", .{ cars, flown, blaster, downed, sb.enemies.nest_count, sb.collectibles.count });
     // The Kestrel: fabricate it through the panel, lift off on its jets, and gun down a wasp.
-    sb.progress.inventory = .{ 20, 8, 20, 0 };
+    sb.kits[0].inventory = .{ 20, 8, 20, 0 };
     // The smoke stages vehicle handling directly, so provide the story reward normally earned
     // by asking Maro after spotting a carrier.
     sb.progress.setFlag("kestrel_blueprint");
-    sb.wallet.scrap += 200;
+    sb.kits[0].wallet.scrap += 200;
     sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 3 };
     self.uiNav(.confirm);
     self.uiNav(.back);
@@ -1826,9 +1924,11 @@ fn smokeFrontier(self: *App) void {
     self.smokeCombat();
     self.smokeCaves();
     self.smokeHeroes();
+    self.smokePets();
+    self.smokeTeam();
     // Leave the run's progress as it was (later stages log the market and wallet).
     sb.progress = keep;
-    sb.wallet = wallet;
+    sb.kits[0].wallet = wallet;
     @import("game/Frontier.zig").refresh(sb);
 }
 
@@ -1839,8 +1939,8 @@ fn smokeCombat(self: *App) void {
     const Combat = @import("game/Combat.zig");
     const Specials = @import("game/Specials.zig");
     const Fabricator = @import("game/Fabricator.zig");
-    sb.progress.inventory = .{ 30, 4, 30, 0 };
-    sb.wallet.scrap += 100;
+    sb.kits[0].inventory = .{ 30, 4, 30, 0 };
+    sb.kits[0].wallet.scrap += 100;
     var list: [Fabricator.recipes.len]u8 = undefined;
     for (Fabricator.onTab(.weapons, &list), 0..) |index, row| {
         const w = switch (Fabricator.recipes[index].output) {
@@ -1852,7 +1952,7 @@ fn smokeCombat(self: *App) void {
         self.uiNav(.confirm);
         self.uiNav(.back);
     }
-    const made = sb.progress.ownsWeapon(.beam_saber) and sb.progress.ownsWeapon(.sniper_rifle);
+    const made = sb.kits[0].ownsWeapon(.beam_saber) and sb.kits[0].ownsWeapon(.sniper_rifle);
     const dt = 1.0 / 60.0;
     var events: [32]Combat.Event = undefined;
     const feet: [3]f32 = .{ 0, 298.4, 0 };
@@ -1908,7 +2008,7 @@ fn smokeHeroes(self: *App) void {
     const keep_player = sb.player;
     const keep_profile = sb.profile;
     const keep_progress = sb.progress;
-    const keep_wallet = sb.wallet;
+    const keep_kits = sb.kits;
     var camera = self.engine.camera;
     // Meet the first unmet hero with a spot: stand before them and look at their chest.
     var met: ?u8 = null;
@@ -1946,22 +2046,110 @@ fn smokeHeroes(self: *App) void {
     // The Starbowl: wave one starts, is cleared, and pays out.
     Frontier.enterArena(sb, &camera);
     const entered = sb.arena.active;
-    const scrap = sb.wallet.scrap;
+    const scrap = sb.kits[0].wallet.scrap;
     for (0..60 * 4) |_| sb.step(&camera, .{}, .{}, 1.0 / 60.0) catch break;
     const bots = sb.enemies.unitCount(@import("game/Enemies.zig").arena_nest);
     for (&sb.enemies.units) |*u| if (u.*) |unit| if (unit.nest == @import("game/Enemies.zig").arena_nest) {
         u.* = null;
     };
     for (0..30) |_| sb.step(&camera, .{}, .{}, 1.0 / 60.0) catch break;
-    const paid = sb.wallet.scrap > scrap and sb.progress.arena_best >= 1;
+    const paid = sb.kits[0].wallet.scrap > scrap and sb.progress.arena_best >= 1;
     Frontier.leaveArena(sb, &camera);
     std.log.info("Smoke heroes: met {s} joined={any}, played as them={any}, powers used {d}/3; arena entered={any} wave 1 bots {d}, cleared and paid={any}, left={any}", .{ if (met) |h| Heroes.roster[h].name else "none", joined, became, used, entered, bots, paid, !sb.arena.active });
     sb.player = keep_player;
     sb.profile = keep_profile;
     sb.progress = keep_progress;
-    sb.wallet = keep_wallet;
+    sb.kits = keep_kits;
     sb.own_profiles = @splat(null);
     sb.specials = .{};
+}
+
+/// Pets through the real paths: aim at a wild pet and break its collar, walk away and see it
+/// follow, then let it fight a Hive trooper beside its ranger until the trooper falls.
+fn smokePets(self: *App) void {
+    const sb = &self.sandbox;
+    const Pets = Sandbox.Pets;
+    const Frontier = @import("game/Frontier.zig");
+    const keep_player = sb.player;
+    const keep_progress = sb.progress;
+    const keep_kits = sb.kits;
+    const keep_mode = sb.player.mode;
+    var camera = self.engine.camera;
+    var freed: ?Pets.Species = null;
+    for (sb.pets.spots, 0..) |spot, k| if (freed == null) {
+        const sp: Pets.Species = @enumFromInt(k);
+        if (sb.kits[0].hasPet(sp)) continue;
+        const lift: f32 = if (Pets.info(sp).flies) Pets.hover else 0.7;
+        const eye: [3]f32 = .{ spot.position[0], spot.position[1] + lift, spot.position[2] - 3 };
+        const target = Frontier.pick(sb, eye, .{ 0, 0, 1 }, 8, 8);
+        if (target != null and target.? == .wild_pet and target.?.wild_pet == sp) {
+            Frontier.freePet(sb, 0, sp);
+            freed = sp;
+            sb.player.feet = spot.position;
+        }
+    };
+    const out = sb.pets.out[0] != null and freed != null and sb.pets.out[0].?.species == freed.?;
+    // Walk off 12 m; the pet keeps up.
+    sb.player.mode = .walk;
+    sb.player.feet = R3.add(sb.player.feet, .{ 12, 0, 0 });
+    sb.player.feet[1] = @import("procedural/Terrain.zig").surface(sb.seed, sb.player.feet[0], sb.player.feet[2]).height;
+    for (0..120) |_| sb.step(&camera, .{}, .{}, 1.0 / 60.0) catch break;
+    const gap = if (sb.pets.out[0]) |pet| R3.length(R3.sub(.{ pet.position[0], 0, pet.position[2] }, .{ sb.player.feet[0], 0, sb.player.feet[2] })) else 999;
+    // A weak trooper beside the ranger; the pet fights it down and learns from it.
+    const xp_before = if (freed) |sp| sb.kits[0].pet_xp[@intFromEnum(sp)] else 0;
+    var downed = false;
+    if (sb.enemies.nest_count > 0) {
+        const at = R3.add(sb.player.feet, .{ 5, 0, 3 });
+        if (sb.enemies.spawnAt(.trooper, 0, at, 0.3)) for (0..60 * 8) |_| {
+            sb.combat.vitals[0].health = sb.combat.vitals[0].max;
+            sb.step(&camera, .{}, .{}, 1.0 / 60.0) catch break;
+            if (freed) |sp| if (sb.kits[0].pet_xp[@intFromEnum(sp)] > xp_before) {
+                downed = true;
+                break;
+            };
+        };
+    }
+    std.log.info("Smoke pets: freed {s}={any}, followed within {d:.1} m, fought a trooper down and learned={any}", .{ if (freed) |sp| Pets.info(sp).name else "none", out, gap, downed });
+    sb.player = keep_player;
+    sb.player.mode = keep_mode;
+    sb.progress = keep_progress;
+    sb.kits = keep_kits;
+    sb.pets.out = @splat(null);
+}
+
+/// Every player saves on their own: P2 joins, P1 and P2 earn and free different things, and a
+/// save round trip (in memory; no files are written) brings each player's kit back to their seat.
+/// P2's ranger file also round-trips.
+fn smokeTeam(self: *App) void {
+    const sb = &self.sandbox;
+    const keep_kits = sb.kits;
+    const keep_known = sb.known;
+    const was_active = sb.guests[0].active;
+    if (!was_active) sb.joinGuest(0);
+    sb.kits[0].wallet.scrap = 111;
+    sb.kits[1].wallet.scrap = 222;
+    _ = sb.kits[1].freePet(.golem);
+    var camera = self.engine.camera;
+    var restored = false;
+    var ranger_ok = false;
+    if (sb.save(self.allocator, camera)) |bytes| {
+        defer self.allocator.free(bytes);
+        sb.kits = @splat(.{});
+        if (sb.restore(self.allocator, bytes, &camera)) |_| {
+            restored = sb.kits[0].wallet.scrap == 111 and sb.kits[1].wallet.scrap == 222 and sb.kits[1].hasPet(.golem) and !sb.kits[0].hasPet(.golem);
+        } else |_| {}
+    } else |_| {}
+    var arena_state: std.heap.ArenaAllocator = .init(self.allocator);
+    defer arena_state.deinit();
+    if (sb.rangerFile(arena_state.allocator(), 1)) |file| {
+        if (std.json.Stringify.valueAlloc(arena_state.allocator(), file, .{})) |json| {
+            if (Save.decodeRanger(self.allocator, json)) |ranger| ranger_ok = ranger.kit.wallet.scrap == 222 else |_| {}
+        } else |_| {}
+    } else |_| {}
+    std.log.info("Smoke team: each player's kit restored to their seat={any}, P2 ranger file round trip={any}", .{ restored, ranger_ok });
+    sb.kits = keep_kits;
+    sb.known = keep_known;
+    if (!was_active) sb.leaveGuest(0);
 }
 
 fn smokeCaves(self: *App) void {
@@ -2188,7 +2376,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     };
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
     const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "FLY" else @tagName(sandbox.player.motion);
-    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.wallet.scrap, sandbox.wallet.parts });
+    renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.kits[0].wallet.scrap, sandbox.kits[0].wallet.parts });
     if (sandbox.hangar.piloting) {
         const f = &sandbox.hangar.fighter.?;
         const g = &sandbox.skies.guns;
@@ -2216,6 +2404,17 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
+        .wild_pet => |sp| renderer.hud_lines[1].set("BREAK {s}'S HIVE COLLAR  CLICK", .{Sandbox.Pets.info(sp).name}),
+        .pet => |owner| if (sandbox.pets.out[owner]) |pet| {
+            const kit = &sandbox.kits[owner];
+            const next = kit.nextPet();
+            if (owner == 0 and next != null and next.? != pet.species)
+                renderer.hud_lines[1].set("PET {s} LV {d}  CLICK  (SWAP TO {s})", .{ Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species), Sandbox.Pets.info(next.?).name })
+            else if (owner == 0)
+                renderer.hud_lines[1].set("PET {s} LV {d}  CLICK", .{ Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species) })
+            else
+                renderer.hud_lines[1].set("PET P{d}'S {s} LV {d}  CLICK", .{ owner + 1, Sandbox.Pets.info(pet.species).name, kit.petLevel(pet.species) });
+        },
         .structure => |m| renderer.hud_lines[1].set("{s} STRUCTURE", .{sandbox.machines[m].blueprint.name()}),
         .device => |ref| {
             const machine = &sandbox.machines[ref.machine].machine;

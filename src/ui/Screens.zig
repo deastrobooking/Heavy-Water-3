@@ -191,7 +191,8 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
     switch (menu.screen) {
         .pause, .confirm_quit, .party, .player => {
             const list = menu.items();
-            const r = menuRect(c, 400, 92 + @as(f32, @floatFromInt(list.len)) * 36 + (if (sb != null) @as(f32, 34) else 0));
+            // The party setup is wider: each seat shows its pad, its character and their scrap.
+            const r = menuRect(c, if (menu.screen == .party) @min(560, c.width - 24) else 400, 92 + @as(f32, @floatFromInt(list.len)) * 36 + (if (sb != null) @as(f32, 34) else 0));
             panel(c, r, switch (menu.screen) {
                 .party => "FOUR PLAYER SETUP",
                 .player => "PLAYER MENU",
@@ -211,12 +212,20 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
                     for (menu.controller_players, 0..) |p, index| if (p == i) {
                         controller = index + 1;
                     };
-                    c.print(row.x + 105, row.y + 9, 1, accent, "{s} PAD {d}{s} {s}", .{ if (menu.players_present & (@as(u8, 1) << @intCast(i)) != 0) "JOINED" else "EMPTY", controller, if (controller > 0 and menu.controllers_connected[controller - 1]) " ON" else " OFF", if (menu.hero_player == i) "<" else "" });
+                    // Who sits there (name and their own scrap), then their pad on the right.
+                    const joined = menu.players_present & (@as(u8, 1) << @intCast(i)) != 0;
+                    if (sb) |team| if (team.known[i]) {
+                        const who = if (team.own_profiles[i]) |*own| own else team.profileOf(i);
+                        const name = who.name();
+                        c.print(row.x + 105, row.y + 9, 1, if (joined) accent else dim, "{s}", .{name[0..@min(name.len, 12)]});
+                        c.print(row.x + 250, row.y + 9, 1, if (joined) gold else dim, "{d} SCRAP", .{team.kits[i].wallet.scrap});
+                    } else c.text(row.x + 105, row.y + 9, if (joined) "JOINED" else "EMPTY", 1, dim);
+                    c.print(row.x + row.w - 120, row.y + 9, 1, if (joined) accent else dim, "PAD {d}{s} {s}", .{ controller, if (controller > 0 and menu.controllers_connected[controller - 1]) " ON" else " OFF", if (menu.hero_player == i) "<" else "" });
                 }
                 y += 36;
             }
             if (sb) |s| if (menu.screen == .pause) {
-                c.print(r.x + 18, r.y + r.h - 28, 1, dim, "DAY {d}   SCRAP {d}   PARTS {d}   UNSAVED PROGRESS IS LOST ON QUIT", .{ s.market.day, s.wallet.scrap, s.wallet.parts });
+                c.print(r.x + 18, r.y + r.h - 28, 1, dim, "DAY {d}   SCRAP {d}   PARTS {d}   UNSAVED PROGRESS IS LOST ON QUIT", .{ s.market.day, s.kits[0].wallet.scrap, s.kits[0].wallet.parts });
             };
         },
         .world_map => if (sb) |s| drawWorldMap(c, menu, s),
@@ -547,12 +556,12 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
     // Wallet and clock, top right.
     {
         var buffer: [48]u8 = undefined;
-        const scrap = std.fmt.bufPrint(&buffer, "{d} SCRAP", .{sb.wallet.scrap}) catch "";
+        const scrap = std.fmt.bufPrint(&buffer, "{d} SCRAP", .{sb.kits[0].wallet.scrap}) catch "";
         const w: f32 = 290;
         const r: Rect = .{ .x = v.x + v.w - w - 20, .y = v.y + 20, .w = w, .h = 72 };
         c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
         c.text(r.x + 14, r.y + 10, scrap, 1.3, gold);
-        c.print(r.x + 14, r.y + 32, 1, ink, "{d} PARTS   {d} KITS", .{ sb.wallet.parts, kits(sb.wallet) });
+        c.print(r.x + 14, r.y + 32, 1, ink, "{d} PARTS   {d} KITS", .{ sb.kits[0].wallet.parts, kits(sb.kits[0].wallet) });
         inventoryLine(c, sb, r.x + 14, r.y + 50, 1);
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
     }
@@ -652,14 +661,14 @@ fn prompt(c: *Canvas, v: Rect, text: []const u8, tint: Color) void {
 }
 
 /// A guest's split view: vitals, the aimed prompt, and a compact stall panel while trading
-/// (the party shares P1's wallet, shown in P1's view).
+/// (paid from the guest's own wallet).
 fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const g = &sb.guests[guest.index];
     const v = guest.view;
     const tint = Profile.accent_colors[g.profile.accent];
     vitals(c, v, g.player, g.profile, sb.combat.vitals[guest.index + 1]);
     specials(c, v, sb, guest.index + 1, g.profile, .{ "UP", "DN", "R3+UP" });
-    if (sb.progress.weapons != 0) weaponLine(c, v, sb, guest.index + 1);
+    if (sb.kits[guest.index + 1].weapons != 0) weaponLine(c, v, sb, guest.index + 1);
     const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
     const w = @min(v.w - 40, 460);
     const h = 84 + @as(f32, Sandbox.trade_rows) * 26;
@@ -669,13 +678,14 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     var title: [48]u8 = undefined;
     var upper: [48]u8 = undefined;
     c.text(r.x + 14, r.y + 12, pretty(&upper, std.fmt.bufPrint(&title, "{s}'S STALL", .{keeperName(sb, stall)}) catch ""), 1.2, tint);
-    c.print(r.x + w - 200, r.y + 14, 1, gold, "{d} SCRAP  {d} PARTS", .{ sb.wallet.scrap, sb.wallet.parts });
+    const purse = sb.kits[guest.index + 1].wallet;
+    c.print(r.x + w - 200, r.y + 14, 1, gold, "{d} SCRAP  {d} PARTS", .{ purse.scrap, purse.parts });
     var y = r.y + 38;
     for (0..Sandbox.trade_rows) |i| {
         const row: Rect = .{ .x = r.x + 8, .y = y, .w = r.w - 16, .h = 22 };
         rowBack(c, row, g.trade_row == i);
         var line: Sandbox.TradeLine = .{};
-        sb.tradeRow(stall, @intCast(i), false, &line);
+        sb.tradeRow(guest.index + 1, stall, @intCast(i), false, &line);
         var shown: [96]u8 = undefined;
         c.text(row.x + 8, row.y + 7, pretty(&shown, std.mem.trimStart(u8, line.slice(), " ")), 0.9, if (g.trade_row == i) tint else ink);
         y += 26;
@@ -777,8 +787,8 @@ pub fn keeperName(sb: *const Sandbox, stall: usize) []const u8 {
 }
 
 fn walletLine(c: *Canvas, sb: *const Sandbox, x: f32, y: f32) void {
-    c.print(x, y, 1.1, gold, "{d} SCRAP", .{sb.wallet.scrap});
-    c.print(x + 140, y, 1.1, ink, "{d} PARTS", .{sb.wallet.parts});
+    c.print(x, y, 1.1, gold, "{d} SCRAP", .{sb.kits[0].wallet.scrap});
+    c.print(x + 140, y, 1.1, ink, "{d} PARTS", .{sb.kits[0].wallet.parts});
 }
 
 /// A shop panel on the right of the view, or on the left when the character is on show.
@@ -806,8 +816,8 @@ fn drawShop(c: *Canvas, sb: *const Sandbox, stall: u8, v: Rect) void {
         c.hit(row, hitId(.trade_row, i));
         if (i == 0) {
             const price = sb.market.partPrice(stall);
-            c.text(row.x + 14, row.y + 10, "SELL SALVAGED PARTS", 1.1, if (sb.wallet.parts == 0) dim else ink);
-            c.print(row.x + row.w - 260, row.y + 10, 1, if (sb.wallet.parts == 0) dim else gold, "{d} X {d} = +{d} SCRAP", .{ sb.wallet.parts, price, sb.wallet.parts * price });
+            c.text(row.x + 14, row.y + 10, "SELL SALVAGED PARTS", 1.1, if (sb.kits[0].wallet.parts == 0) dim else ink);
+            c.print(row.x + row.w - 260, row.y + 10, 1, if (sb.kits[0].wallet.parts == 0) dim else gold, "{d} X {d} = +{d} SCRAP", .{ sb.kits[0].wallet.parts, price, sb.kits[0].wallet.parts * price });
         } else {
             const ware: Market.Ware = @enumFromInt(i - 1);
             const stock = sb.market.stalls[stall].stock[i - 1];
@@ -816,9 +826,9 @@ fn drawShop(c: *Canvas, sb: *const Sandbox, stall: u8, v: Rect) void {
             var buffer: [40]u8 = undefined;
             const name = std.fmt.bufPrint(&buffer, "{s} KIT", .{ware_names[i - 1]}) catch "";
             c.text(row.x + 14, row.y + 10, pretty(&name_buffer, name), 1.1, if (stock == 0) dim else ink);
-            c.print(row.x + row.w - 260, row.y + 10, 1, if (stock == 0) dim else if (price > sb.wallet.scrap) bad else gold, "{d} SCRAP", .{price});
+            c.print(row.x + row.w - 260, row.y + 10, 1, if (stock == 0) dim else if (price > sb.kits[0].wallet.scrap) bad else gold, "{d} SCRAP", .{price});
             if (stock == 0) c.text(row.x + row.w - 150, row.y + 10, "SOLD OUT", 1, bad) else c.print(row.x + row.w - 150, row.y + 10, 1, dim, "STOCK {d}", .{stock});
-            c.print(row.x + row.w - 64, row.y + 10, 1, dim, "HAVE {d}", .{sb.wallet.kits[i - 1]});
+            c.print(row.x + row.w - 64, row.y + 10, 1, dim, "HAVE {d}", .{sb.kits[0].wallet.kits[i - 1]});
         }
         y += 34;
     }
@@ -860,18 +870,18 @@ fn drawUpgrades(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
         rowBack(c, row, selected == i);
         c.hit(row, hitId(.shop_row, i));
         c.text(row.x + 14, row.y + 10, Progress.info[i].name, 1.1, if (selected == i) accent else ink);
-        pips(c, row.x + 230, row.y + 9, sb.progress.level(u));
+        pips(c, row.x + 230, row.y + 9, sb.kits[0].level(u));
         var buffer: [40]u8 = undefined;
-        if (sb.progress.level(u) >= Progress.max_level) {
+        if (sb.kits[0].level(u) >= Progress.max_level) {
             c.text(row.x + row.w - 200, row.y + 10, "FULLY TUNED", 1, good);
         } else {
-            const cost = sb.progress.cost(u);
-            c.text(row.x + row.w - 200, row.y + 10, costText(&buffer, cost), 1, if (affordable(sb.wallet, cost)) gold else bad);
+            const cost = sb.kits[0].cost(u);
+            c.text(row.x + row.w - 200, row.y + 10, costText(&buffer, cost), 1, if (affordable(sb.kits[0].wallet, cost)) gold else bad);
         }
         y += 34;
     }
-    const s = sb.progress.suit();
-    c.print(r.x + 18, y + 10, 1, dim, "FUEL {d:.0}  BURN {d:.0}%  SPRINT {d:.1} M/S  GRAPPLE {d:.0} M  PARTS/RELIC {d}", .{ s.fuel_max, s.burn * 100, s.sprint, s.grapple_range, sb.progress.partsPerSalvage() });
+    const s = sb.kits[0].suit();
+    c.print(r.x + 18, y + 10, 1, dim, "FUEL {d:.0}  BURN {d:.0}%  SPRINT {d:.1} M/S  GRAPPLE {d:.0} M  PARTS/RELIC {d}", .{ s.fuel_max, s.burn * 100, s.sprint, s.grapple_range, sb.kits[0].partsPerSalvage() });
     c.text(r.x + 18, r.y + r.h - 50, Progress.info[@min(selected, Progress.upgrade_count - 1)].summary, 1, ink);
     c.text(r.x + 18, r.y + r.h - 28, "ENTER INSTALL NEXT LEVEL  ESC CLOSE  UPGRADES APPLY TO THE WHOLE PARTY", 0.9, alpha(dim, 0.8));
 }
@@ -899,11 +909,11 @@ fn drawWardrobe(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
         var buffer: [40]u8 = undefined;
         if (sb.profile.clothing == clothing) {
             c.text(row.x + row.w - 200, row.y + 10, "WEARING", 1, good);
-        } else if (sb.progress.owns(clothing)) {
+        } else if (sb.kits[0].owns(clothing)) {
             c.text(row.x + row.w - 200, row.y + 10, "OWNED", 1, ink);
         } else {
             const cost = Progress.suitPrice(clothing);
-            c.text(row.x + row.w - 200, row.y + 10, costText(&buffer, cost), 1, if (affordable(sb.wallet, cost)) gold else bad);
+            c.text(row.x + row.w - 200, row.y + 10, costText(&buffer, cost), 1, if (affordable(sb.kits[0].wallet, cost)) gold else bad);
         }
         y += 34;
     }
@@ -921,7 +931,7 @@ fn inventoryLine(c: *Canvas, sb: *const Sandbox, x: f32, y: f32, scale: f32) voi
         const t = Collectibles.tint(kind);
         c.rect(.{ .x = cx, .y = y + 1, .w = 8 * scale, .h = 8 * scale }, .{ t[0], t[1], t[2], 1 });
         var buffer: [24]u8 = undefined;
-        const text = std.fmt.bufPrint(&buffer, "{d}", .{sb.progress.count(kind)}) catch "";
+        const text = std.fmt.bufPrint(&buffer, "{d}", .{sb.kits[0].count(kind)}) catch "";
         c.text(cx + 12 * scale, y + 1, text, scale, ink);
         cx += 12 * scale + Canvas.textWidth(text, scale) + 16;
     }
@@ -952,12 +962,12 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
         c.hit(row, hitId(.shop_row, i));
         var buffer: [24]u8 = undefined;
         c.text(row.x + 14, row.y + 10, Fabricator.name(recipe.output, &buffer), 1.1, if (shop.row == i) accent else ink);
-        if (Fabricator.status(&sb.progress, recipe.output)) |status| {
+        if (Fabricator.status(&sb.progress, &sb.kits[0], recipe.output)) |status| {
             const state_color = if (std.mem.eql(u8, status, "FABRICATE KESTREL FIRST")) bad else good;
             c.text(row.x + row.w - 250, row.y + 10, status, 1, state_color);
         } else if (Fabricator.progressCost(&sb.progress, recipe.output)) |cost| {
             var text_buffer: [40]u8 = undefined;
-            c.text(row.x + row.w - 250, row.y + 10, costText(&text_buffer, cost), 1, if (affordable(sb.wallet, cost)) gold else bad);
+            c.text(row.x + row.w - 250, row.y + 10, costText(&text_buffer, cost), 1, if (affordable(sb.kits[0].wallet, cost)) gold else bad);
         } else {
             // Cost chips, red where short.
             var cx = row.x + row.w - 250;
@@ -968,7 +978,7 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
                 .{ .kind = null, .amount = recipe.cost.scrap },
             };
             for (parts) |p| if (p.amount > 0) {
-                const have = if (p.kind) |k| sb.progress.count(k) else sb.wallet.scrap;
+                const have = if (p.kind) |k| sb.kits[0].count(k) else sb.kits[0].wallet.scrap;
                 var text: [16]u8 = undefined;
                 const label = if (p.kind == null) std.fmt.bufPrint(&text, "{d} SCRAP", .{p.amount}) catch "" else std.fmt.bufPrint(&text, "{d}", .{p.amount}) catch "";
                 if (p.kind) |k| {
@@ -1101,7 +1111,7 @@ test "every screen lays out inside the window and records hits" {
     m.open(.none);
     // Panels: customization, every conversation node, the stall, upgrades and the wardrobe.
     sb.creator.begin(sb.profile);
-    sb.creator.owned = Progress.free_suits;
+    sb.creator.owned = Sandbox.Kit.free_suits;
     c.reset(1280, 720);
     draw(&c, &m, &sb, hud);
     try expectInside(&c);

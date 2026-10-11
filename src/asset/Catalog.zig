@@ -43,6 +43,9 @@ pub const Content = struct {
     plant: MeshHandle,
     flora: [Vegetation.variant_count]MeshHandle,
     tree_trunk: MeshHandle,
+    /// Puppet parts (pets): a unit sphere and a unit cone.
+    orb: MeshHandle,
+    spike: MeshHandle,
     /// Faceted field stones scattered over rough ground.
     boulders: [Vegetation.boulder_count]MeshHandle,
     crate: MeshHandle,
@@ -220,6 +223,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (i < Vegetation.tree_first) try Vegetation.plant(allocator, @intCast(i)) else try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)), .named(Vegetation.names[i], Vegetation.colors[i])));
     self.content.plant = self.content.flora[0];
     self.content.tree_trunk = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator), .named("canopy trunk", .{ 0.24, 0.15, 0.09, 1 })));
+    self.content.orb = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.orb(allocator), .named("orb", .{ 1, 1, 1, 1 })));
+    self.content.spike = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.spike(allocator), .named("spike", .{ 1, 1, 1, 1 })));
     for (&self.content.boulders, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.boulder(allocator, @intCast(i)), .named(Vegetation.boulder_names[i], Vegetation.stone ++ [_]f32{1})));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
@@ -303,7 +308,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "broadleaf", .handle = self.content.flora[3] },                                      .{ .name = "needleleaf", .handle = self.content.flora[4] },
         .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "canopy_trunk", .handle = self.content.tree_trunk },
         .{ .name = "boulder_round", .handle = self.content.boulders[0] },                                .{ .name = "boulder_tall", .handle = self.content.boulders[1] },
-        .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
+        .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "orb", .handle = self.content.orb },
+        .{ .name = "spike", .handle = self.content.spike },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
         .{ .name = "test_arbor", .handle = self.content.test_arbor },                                   .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
         .{ .name = "district", .handle = self.content.district },                                       .{ .name = "arbor_1", .handle = self.arbors[0].mesh },
         .{ .name = "arbor_1_lod", .handle = self.arbors[0].lod },                                       .{ .name = "arbor_2", .handle = self.arbors[1].mesh },

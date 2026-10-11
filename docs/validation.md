@@ -295,6 +295,42 @@ The experiment was terminated and the programmatic size change removed from the 
 - Existing narrow-Arbor canopy benchmark, with the district resident: **300 measured frames**, 60 warm-up frames, ReleaseFast. Render CPU P50/P95/P99 **0.877/1.009/1.084 ms**; presentation interval P99 **20.983 ms**. Fourteen chunk crossings, 95 uploads, 70 evictions, peak 25 resident chunks, zero underfilled frames, and unchanged fixed pool allocation counts. All benchmark checks passed. This measures renderer CPU submission and presentation intervals, not GPU execution time or city simulation performance. Report: `.tools/city-canopy-benchmark.json`.
 - New saves use format **7**, content **5**, district generator **1**; old formats/content are rejected. One district and three Arbors remain resident. Runtime woody grafting/growth, city streaming, traffic, trading, and manual visual review remain future work. The original test-Arbor entrance keeps its 10% bridge; the new district roads enforce the 6% limit.
 
+## Team saves: every player on their own — 2026-10-10
+
+- **What changed:**
+  - personal progression moved from the shared `Progress` into a per-player `Kit` (wallet included);
+  - save format 13 stores every known player, and format 12 migrates into P1;
+  - each save writes a ranger file per player;
+  - FOUR PLAYER SETUP can seat any saved ranger;
+  - pets became per player;
+  - guests can meet heroes, free pets and pet any pet;
+  - the setup screen widened to show each seat's character and scrap.
+- **Tests:** **371/371 pass**, plus the app check.
+  - Updated to the new rules: a guest trades from their own wallet and fires their own blaster.
+  - The four-player test now checks that P4's kit and character survive a save and load after P4 leaves.
+  - New: kit purchases and round-trips, team progress with format 12 migration, save members (duplicate slots rejected), and ranger files.
+- **A bug the tests caught:** saving read each seat's profile through a by-value accessor, so the saved name was a slice into a temporary. `profileOf` now returns a pointer.
+- **Smoke:** the Metal-validated ReleaseSafe smoke passed every stage. The new `Smoke team` line read: each player's kit restored to their seat=true, P2 ranger file round trip=true. That run was throttled (2,175 ticks).
+- **Capture:** `-Dshowcase=54` first showed seat names overlapping the pad status in the 400-unit panel. The party panel is now 560 wide, with columns for character, scrap and pad.
+- **Not checked:**
+  - LOAD NEXT SAVED RANGER by hand, with real files and controllers;
+  - two seats playing the same ranger file. It is prevented only among present players, and a second team could still diverge a file: the last save wins.
+
+## Pets and armor detail — 2026-10-10
+
+- **Captures reviewed and fixed:**
+  - The armor lineup (`-Dshowcase=16`, `17`) showed a dark band on every jaw that read as a beard. It was the cel shadow on downward-facing jaw normals; faces now shade from a smoothed sphere.
+  - The suits read as plain bodysuits. They now have distinct palettes, lit strips, cops, buckles, headsets, collar rings, core lights and power packs.
+  - Pet captures (`58`, `59`): the moth's and falcon's wings were edge-on from the front, and are now pitched to face the eye. The moth's wings sat dark in their own shadow and now glow softly. The lineup moved to the open meadow, clear of spawn crates and buildings.
+- **Tests:** **370/370 pass**, plus the app check.
+  - New: pet levels and damage; spots on the ring and apart; every species follows, then attacks a trooper until it falls (and the moth mends); puppets use their part meshes and the golem stands tallest; the pet save round-trips and rejects unknown or unfreed pets; suits carry lit strips and a back pack standing off by suit; jaw normals.
+  - The old test-only `Companion.zig` is removed; `Pets` replaces it.
+- **Smoke:** the Metal-validated ReleaseSafe smoke (300 frames, 395 ticks) passed every stage. The new `Smoke pets` line read: freed GARU=true, followed within 1.8 m, fought a trooper down and learned=true.
+- **Not checked:**
+  - hand play: pet pacing next to a running ranger, attack readability in a big fight, and swapping pets by petting;
+  - pets on bridges and in caves (the ground lookup takes the deck below, but this is untested);
+  - the frame cost of up to five puppets (about 40 props each).
+
 ## Nature pass: ground, water, foliage and footing — 2026-10-10
 
 - **What changed:**
@@ -366,7 +402,7 @@ The experiment was terminated and the programmatic size change removed from the 
   - **Preset string ownership:** `PadPreset.parse` could return strings aliasing the input buffer, which `loadSlot` frees first. It now always copies (regression test added).
   - **Flag limit:** `Progress` kept at most 48 story flags and silently dropped the rest; nests, carriers, caves and conversations can exceed that. Raised to 96 (test added).
   - Untyped HID name properties are type-checked before use.
-  - **Noted, not changed:** `SuperMobility`, `Companion` and `QuestLog` logic exist but are only referenced from tests (the quest log screen draws from `QuestLog`, but nothing drives the other two in play). The rigid-body pair contacts and character rigid floors read correctly.
+  - **Noted, not changed:** `SuperMobility`, `Companion` (since replaced by `Pets`) and `QuestLog` logic exist but are only referenced from tests (the quest log screen draws from `QuestLog`, but nothing drives the other two in play). The rigid-body pair contacts and character rigid floors read correctly.
 - **After the expansion:** **340/340 tests pass** (Debug), plus the app check.
 - **Metal smoke** (ReleaseSafe, `MTL_DEBUG_LAYER=1`, 300 frames, unlocked, 391 ticks): `Smoke heroes: met ROOK BANDIT joined=true, played as them=true, powers used 3/3; arena entered=true wave 1 bots 2, cleared and paid=true, left=true`. Every other stage was unchanged and there were no validation messages.
   - An earlier run of the same build logged 71,259 ticks because the window was throttled during a long run; an immediate rerun with the screen confirmed unlocked logged 391.

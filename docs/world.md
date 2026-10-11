@@ -20,6 +20,16 @@ Three ways to play, braided so each feeds the others. None is a mode; the player
 
 A good session moves around the loop: a shrine yields a pump blueprint, the pump powers a new lift, the lift reaches a branch where a new district can take root.
 
+## Two kinds of ground: the wilds and the sanctuary cities
+
+The game changes pace at the city gates.
+- **Outside the sanctuary cities** (the frontier, the mountain caves, the Hive-held zones), Heavy Water is a hack-and-slash. It is fast, readable fights against Hive waves, nests and carriers. Loot drops for each player to keep, and pets and heroes fight alongside. A player's power comes from what they find and fabricate out here.
+- **Inside the sanctuary cities** (the canopy districts), the pace drops to exploring. Players find upgrades, shops and tinkers, talk to people, and uncover how the Hive holds the world: the alliances it has made with scientists and with governments. Evidence found in a city points to the collaborators, and the fights outside its walls are how the party breaks their grip.
+
+**The arc:** free the cities of Earth one by one from the Hive and its human allies, and later the Colonies (Gaia and beyond, see the multi-world direction below). Each city is freed through both halves: the party clears the Hive from the wilds around it and exposes the alliance inside it.
+
+**The team:** up to four players share one world and its story. Each keeps their own saved character, gear, wallet and pets, and any of them can play as a teammate's saved ranger or as any Wildkin hero the team has met.
+
 ## The player
 
 The protagonist is the player's own ranger-engineer: named and customized, not a fixed hero. A new game opens the character creator, and it can be reopened at any time.
@@ -137,7 +147,7 @@ The target is grounded, hopeful science fantasy: painterly cel shading and panor
 ## Open questions
 
 - Traversal verbs beyond walking, driving, and lifts: a glider, climbing, grapple vines?
-- Threats: wildlife and ancient guardians in the Rootdeep, blight on the trees, or rival factions in the city?
+- Threats: settled at the top level (the Hive outside, its human allies inside the cities). Still open: wildlife and ancient guardians in the Rootdeep, and blight on the trees.
 - Economy: what shops trade, and whether sap is currency.
 - How fast grafting and city growth run relative to a play session.
 

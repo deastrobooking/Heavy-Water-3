@@ -73,6 +73,7 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
     // The generator consumes outfit specifications synchronously; never retain a stack slice.
     ch.spec.outfit = &.{};
     try equip(a, &ch, profile);
+    softenFace(&ch);
     var inst = try gen.Instance.init(a, &ch);
     errdefer inst.deinit(a);
     const vertices = try a.alloc(Mesh.Vertex, ch.mesh.vertices.items.len);
@@ -405,18 +406,9 @@ pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
                 .vanguard => 0.004,
                 else => unreachable,
             };
-            const steel = switch (profile.clothing) {
-                .exo_rig => mix(cloth, spec.Rgb.hex(0x84939a), 0.58),
-                .hardsuit => mix(cloth, spec.Rgb.hex(0xc2bcae), 0.70),
-                .vanguard => mix(cloth, spec.Rgb.hex(0x35434b), 0.76),
-                else => unreachable,
-            };
-            const trim = switch (profile.clothing) {
-                .exo_rig => mix(cloth, spec.Rgb.hex(0x202c33), 0.62),
-                .hardsuit => mix(cloth, spec.Rgb.hex(0x37434a), 0.68),
-                .vanguard => mix(cloth, spec.Rgb.hex(0x1d292f), 0.76),
-                else => unreachable,
-            };
+            const tones = suitTones(profile);
+            const steel = tones.plate;
+            const trim = tones.trim;
             Add.one(out, &n, .{ .coverage = .gauntlets, .color = trim, .layer = 2, .looseness = 0.002, .hard = true, .bulge = 0.002 });
             Add.one(out, &n, .{ .coverage = .sabatons, .color = trim, .layer = 3, .looseness = 0.004, .hard = true, .bulge = 0.003 });
             Add.one(out, &n, .{ .coverage = .vambraces, .color = steel, .layer = 3, .looseness = 0.002 + lift, .hard = true, .bulge = bulge, .segments = 2, .coverage_extent = extent });
@@ -430,6 +422,23 @@ pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
         },
     }
     return n;
+}
+
+/// A suit's two-tone scheme: each suit has its own identity, and the outfit colour always shows.
+/// The exo rig is a light frame in the outfit colour over graphite; the hardsuit is ivory plate
+/// with outfit-coloured secondary panels; the vanguard is gunmetal with outfit-coloured trim.
+/// `glow` is the lumen of light strips and cores (over-bright, so it reads as lit).
+pub const SuitTones = struct { plate: spec.Rgb, trim: spec.Rgb, glow: spec.Rgb };
+
+pub fn suitTones(profile: Profile) SuitTones {
+    const cloth = Profile.outfit_colors[profile.outfit];
+    const glow = rgb(Profile.accent_colors[profile.accent], 1.55);
+    return switch (profile.clothing) {
+        .exo_rig => .{ .plate = mix(cloth, spec.Rgb.hex(0x9aa7ad), 0.35), .trim = spec.Rgb.hex(0x1c252b), .glow = glow },
+        .hardsuit => .{ .plate = mix(cloth, spec.Rgb.hex(0xe9e5da), 0.78), .trim = mix(cloth, spec.Rgb.hex(0x2a343b), 0.3), .glow = glow },
+        .vanguard => .{ .plate = mix(cloth, spec.Rgb.hex(0x3a464e), 0.72), .trim = mix(cloth, spec.Rgb.hex(0x0e1418), 0.45), .glow = glow },
+        else => .{ .plate = rgb(cloth, 1), .trim = spec.Rgb.hex(0x18242c), .glow = glow },
+    };
 }
 
 /// Smooth, closed ellipsoidal armor pieces, attached rigidly to a joint. Flexible fabric keeps
@@ -625,6 +634,7 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
             try plate(a, ch, .head, V.init(side * 0.056 * h, lm.chin_y + 0.25 * lm.H, 0.084 * h), V.init(0.0035 * h, 0.028 * h, 0.004 * h), seam);
         };
     }
+    if (p.clothing == .exo_rig or p.clothing == .hardsuit or p.clothing == .vanguard) try suitDetail(a, ch, p);
     // A full armor suit already plates the limbs and torso; only its chest lights are added.
     const suited = p.clothing == .hardsuit or p.clothing == .vanguard;
     if (p.armor != .none and suited) {
@@ -706,6 +716,73 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
         for ([_]f32{ -1, 1 }) |side| {
             try plateWithMaterial(a, ch, .head, center.add(V.init(side * visor_half_width, -0.01 * lm.H, -0.018 * lm.H)), V.init(0.035 * lm.H, 0.12 * lm.H, 0.045 * lm.H), metal, .armor);
         }
+    }
+}
+
+/// The hard-surface kit that turns a suit's shells into armor: lit lumen strips down the
+/// forearms and shins, knee and elbow cops, a belt buckle, and an earpiece headset when the face
+/// is open. The hardsuit and vanguard add a collar ring, a sternum plate with a core light and a
+/// back power pack (the vanguard's with twin thrusters). Every piece is rigid `.armor` on its joint.
+fn suitDetail(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
+    const lm = ch.landmarks;
+    const s = &ch.skeleton;
+    const h = p.height;
+    const t = suitTones(p);
+    const heavy = p.clothing == .vanguard;
+    const full = p.clothing != .exo_rig;
+    const bulk: f32 = if (heavy) 1.25 else if (full) 1.1 else 1;
+    inline for ([_]sk.Joint{ .lower_arm_l, .lower_arm_r }, [_]sk.Joint{ .shin_l, .shin_r }, .{ @as(f32, 1), @as(f32, -1) }) |forearm, shin, side| {
+        const elbow = s.worldPos(forearm);
+        const knee = s.worldPos(shin);
+        // Lumen strips: down the outside of each forearm and the front of each shin.
+        try plateWithMaterial(a, ch, forearm, elbow.add(V.init(side * 0.034 * h * bulk, -0.075 * h, 0.012 * h)), V.init(0.005 * h, 0.07 * h, 0.012 * h), t.glow, .armor);
+        try plateWithMaterial(a, ch, shin, knee.add(V.init(0, -0.13 * h, 0.05 * h * bulk)), V.init(0.011 * h, 0.075 * h, 0.006 * h), t.glow, .armor);
+        // Cops: a domed plate over each knee and behind each elbow.
+        try plateWithMaterial(a, ch, shin, knee.add(V.init(0, 0.004 * h, 0.04 * h * bulk)), V.init(0.034 * h * bulk, 0.032 * h, 0.022 * h), t.plate, .armor);
+        try plateWithMaterial(a, ch, forearm, elbow.add(V.init(side * 0.006 * h, 0, -0.03 * h * bulk)), V.init(0.026 * h * bulk, 0.03 * h, 0.02 * h), t.trim, .armor);
+    }
+    // Belt buckle.
+    try plateWithMaterial(a, ch, .hips, V.init(0, lm.waist_y - 0.08 * h, lm.waist_half_depth + 0.03 + 0.012 * h), V.init(0.032 * h, 0.022 * h, 0.008 * h), t.glow, .armor);
+    if (p.helmet == .open and p.species == .human) {
+        // Headset: earpieces with lit rings, so an open face still reads as kit.
+        for ([_]f32{ -1, 1 }) |side| {
+            const ear = V.init(side * (lm.head_half_width + 0.004 * h), lm.chin_y + 0.42 * lm.H, -0.02 * lm.H);
+            try plateWithMaterial(a, ch, .head, ear, V.init(0.012 * h, 0.034 * h, 0.03 * h), t.plate, .armor);
+            try plateWithMaterial(a, ch, .head, ear.add(V.init(side * 0.009 * h, 0, 0)), V.init(0.004 * h, 0.02 * h, 0.018 * h), t.glow, .armor);
+        }
+    }
+    if (!full) return;
+    const chest = s.worldPos(.chest);
+    const neck = s.worldPos(.neck);
+    // Collar ring.
+    try plateWithMaterial(a, ch, .neck, neck.add(V.init(0, -0.012 * h, 0)), V.init(0.075 * h * bulk, 0.016 * h, 0.07 * h * bulk), t.trim, .armor);
+    // Sternum plate on the cuirass, with a core light.
+    const core_y = chest.y + 0.035 * h;
+    const front = (surfaceZ(ch, 0, core_y, .armor) orelse chest.z + 0.15 * h) + 0.004 * h;
+    try plateWithMaterial(a, ch, .chest, V.init(0, core_y, front - 0.004 * h), V.init(0.05 * h, 0.04 * h, 0.01 * h), t.trim, .armor);
+    try plateWithMaterial(a, ch, .chest, V.init(0, core_y, front + 0.004 * h), V.init(0.018 * h, 0.018 * h, 0.006 * h), t.glow, .armor);
+    // Power pack on the back, with lit vents; the vanguard's carries twin thrusters.
+    const pack = chest.add(V.init(0, 0.01 * h, -0.13 * h - 0.02 * h * bulk));
+    try plateWithMaterial(a, ch, .chest, pack, V.init(0.09 * h * bulk, 0.11 * h, 0.04 * h * bulk), t.trim, .armor);
+    for ([_]f32{ -1, 1 }) |side| {
+        try plateWithMaterial(a, ch, .chest, pack.add(V.init(side * 0.045 * h * bulk, 0.02 * h, -0.036 * h * bulk)), V.init(0.008 * h, 0.06 * h, 0.006 * h), t.glow, .armor);
+        if (heavy) {
+            try plateWithMaterial(a, ch, .chest, pack.add(V.init(side * 0.075 * h, -0.05 * h, -0.02 * h)), V.init(0.026 * h, 0.07 * h, 0.026 * h), t.plate, .armor);
+            try plateWithMaterial(a, ch, .chest, pack.add(V.init(side * 0.075 * h, -0.12 * h, -0.02 * h)), V.init(0.018 * h, 0.012 * h, 0.018 * h), t.glow, .armor);
+        }
+    }
+}
+
+/// Cel shading puts a hard shadow band across anything facing down, and on a face that band lies
+/// over the jaw and chin and reads as a beard. Anime faces avoid it by shading from a smoothed,
+/// upward-leaning sphere: the face's normals are pulled most of the way (80%) onto one.
+fn softenFace(ch: *gen.Character) void {
+    const lm = ch.landmarks;
+    const center = V.init(0, lm.chin_y + 0.5 * lm.H, -0.04 * lm.H);
+    for (ch.mesh.vertices.items) |*v| {
+        if ((v.region != .face and v.region != .head) or v.material != .skin) continue;
+        const sphere = v.pos.sub(center).normalize().add(V.init(0, 1.0, 0)).normalize();
+        v.normal = v.normal.scale(0.2).add(sphere.scale(0.8)).normalize();
     }
 }
 
@@ -989,4 +1066,46 @@ test "the GPU palette skins every vertex where the CPU skinning puts it" {
             try std.testing.expect(worst < 1e-4);
         }
     }
+}
+
+test "faces shade from an upward-leaning sphere, so the jaw does not fall into shadow" {
+    const a = std.testing.allocator;
+    var r = try init(a, .{ .armor = .none, .helmet = .open });
+    defer r.deinit(a);
+    const lm = r.character.landmarks;
+    var jaw: usize = 0;
+    var lit: usize = 0;
+    for (r.character.mesh.vertices.items) |v| {
+        if (v.region != .face and v.region != .head) continue;
+        // The visible jaw and chin, from the head's lower rim to the mouth (the dome capping
+        // the underside sits inside the neck).
+        if (v.material != .skin or v.pos.z < 0 or v.pos.y < lm.chin_y + 0.1 * lm.H or v.pos.y > lm.chin_y + 0.25 * lm.H) continue;
+        jaw += 1;
+        if (v.normal.y > -0.2) lit += 1;
+    }
+    // Only the very underside of the chin still faces down.
+    try std.testing.expect(jaw > 20 and lit * 100 >= jaw * 95);
+}
+
+test "suits carry lit strips, cops and a buckle; full suits add a core and a back power pack" {
+    const a = std.testing.allocator;
+    var backs: [3]f32 = undefined;
+    for ([_]Profile.Clothing{ .exo_rig, .hardsuit, .vanguard }, 0..) |clothing, k| {
+        const profile: Profile = .{ .clothing = clothing, .armor = .none, .helmet = .open };
+        var r = try init(a, profile);
+        defer r.deinit(a);
+        const glow = suitTones(profile).glow;
+        var lit: usize = 0;
+        var back: f32 = 0;
+        const chest = r.character.skeleton.worldPos(.chest);
+        for (r.character.mesh.vertices.items, r.character.color_index.items) |v, ci| {
+            if (v.material != .armor) continue;
+            if (std.meta.eql(r.character.palette.items[ci], glow)) lit += 1;
+            if (@abs(v.pos.y - chest.y) < 0.15) back = @max(back, chest.z - v.pos.z);
+        }
+        try std.testing.expect(lit > 200);
+        backs[k] = back;
+    }
+    // The power pack stands off the back; the vanguard's farthest.
+    try std.testing.expect(backs[1] > backs[0] + 0.02 and backs[2] > backs[1]);
 }

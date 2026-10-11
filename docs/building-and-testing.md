@@ -189,6 +189,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 53 | The Starbowl arena, wave 1, as Bolt Quill |
 | 56 | The Heroes screen at 150% interface size, scrolled to BACK |
 | 57 | The pause menu at 150% interface size, scrolled to its last item |
+| 58, 59 | The four pets on the meadow: in their Hive collars; freed, in the ranger's colours |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.
 

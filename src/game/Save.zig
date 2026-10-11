@@ -6,6 +6,7 @@ const Player = @import("Player.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Profile = @import("Profile.zig");
 const Market = @import("../city/Market.zig");
+const Kit = @import("Kit.zig");
 
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
 /// into a world with the same seed, generator version, and content version; old worlds must not
@@ -17,9 +18,12 @@ const Market = @import("../city/Market.zig");
 /// the market wallet (scrap, salvaged parts) and each stall's stock with the day it was stocked;
 /// v9 tags Rootdeep shrine machines (their doors, latches, and sealed vault persist as machine
 /// state; the solver-verified layout is regenerated from the seed); v10 records installed mods;
-/// v11 records each player bridge's structural style; v12 records the sprint course's best lap.
-/// v11 saves migrate with no recorded best lap; older saves are rejected.
-pub const format_version: u32 = 12;
+/// v11 records each player bridge's structural style; v12 records the sprint course's best lap;
+/// v13 saves every player on the team on their own (`members`: their character and their kit of
+/// upgrades, gear, pickups, pets and wallet), leaving only what the team shares in `progress`.
+/// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
+/// Older saves are rejected.
+pub const format_version: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -46,6 +50,10 @@ pub const ModState = struct { name: []const u8, version: []const u8 };
 pub const FighterState = struct { position: [3]f32, yaw: f32 };
 pub const CarState = struct { design: @import("../vehicle/Designs.zig").Design, position: [3]f32, yaw: f32 };
 pub const PlayerState = struct { feet: [3]f32, yaw: f32, pitch: f32, mode: Player.Mode };
+/// One player on the team, by screen slot: the character they play (`profile`; for P1 the same
+/// as the document's `profile`), their own ranger while they play a Wildkin hero (`own`), and
+/// their kit.
+pub const MemberState = struct { slot: u8, profile: Profile.Doc, own: ?Profile.Doc = null, kit: Kit.Doc };
 pub const Document = struct {
     format: u32 = format_version,
     seed: u64,
@@ -61,7 +69,10 @@ pub const Document = struct {
     collected: []const Modifications.ObjectRef,
     machines: []const MachineState,
     prefabs: []const Blueprint.Doc,
-    wallet: Market.Wallet,
+    /// Format 12's one shared wallet (P1's after migration); format 13 keeps wallets in `members`.
+    wallet: Market.Wallet = .{},
+    /// Every player on the team (format 13).
+    members: []const MemberState = &.{},
     /// Where each hover car was left (its centre of mass) and its heading.
     cars: []const CarState = &.{},
     /// Where the Kestrel was left, if fabricated.
@@ -100,6 +111,11 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;
     if (doc.machines.len > machine_slots) return error.InvalidSave;
     if (doc.mods.len > 16) return error.InvalidSave;
+    if (doc.members.len > 4) return error.InvalidSave;
+    for (doc.members, 0..) |m, i| {
+        if (m.slot >= 4) return error.InvalidSave;
+        for (doc.members[0..i]) |other| if (other.slot == m.slot) return error.InvalidSave;
+    }
     if (!finite(doc.race_best) or doc.race_best < 0) return error.InvalidSave;
     if (doc.cars.len > @import("../vehicle/Designs.zig").count) return error.InvalidSave;
     if (doc.fighter) |f| {
@@ -137,6 +153,48 @@ fn finite(v: f32) bool {
     return std.math.isFinite(v) and @abs(v) < 1e6;
 }
 
+/// A player's own character file, `saves/rangers/<NAME>.json`: their ranger and their kit,
+/// written with every team save. Any player can load one into their seat, so a character can be
+/// played by a teammate, or carried into another team's world.
+pub const ranger_dir = "saves/rangers";
+pub const ranger_format: u32 = 1;
+pub const RangerFile = struct { format: u32 = ranger_format, profile: Profile.Doc, kit: Kit.Doc };
+pub const Ranger = struct { profile: Profile, kit: Kit };
+
+/// `saves/rangers/<NAME>.json`, with spaces in the name as underscores.
+pub fn rangerPath(buffer: []u8, name: []const u8) ![]const u8 {
+    const path = try std.fmt.bufPrint(buffer, "{s}/{s}.json", .{ ranger_dir, name });
+    for (path[ranger_dir.len + 1 ..]) |*c| if (c.* == ' ') {
+        c.* = '_';
+    };
+    return path;
+}
+
+pub fn decodeRanger(allocator: std.mem.Allocator, bytes: []const u8) !Ranger {
+    const parsed = std.json.parseFromSlice(RangerFile, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
+    defer parsed.deinit();
+    if (parsed.value.format != ranger_format) return error.UnsupportedSaveFormat;
+    return .{ .profile = Profile.fromDoc(parsed.value.profile) catch return error.InvalidSave, .kit = Kit.fromDoc(parsed.value.kit) catch return error.InvalidSave };
+}
+
+test "ranger files round-trip a character and their kit, and name their path" {
+    const allocator = std.testing.allocator;
+    var profile: Profile = .{};
+    try profile.setName("Sora Vale");
+    var kit: Kit = .{ .wallet = .{ .scrap = 321 } };
+    _ = kit.freePet(.moth);
+    var arena: std.heap.ArenaAllocator = .init(allocator);
+    defer arena.deinit();
+    const bytes = try std.json.Stringify.valueAlloc(arena.allocator(), RangerFile{ .profile = profile.toDoc(), .kit = try kit.toDoc(arena.allocator()) }, .{});
+    const back = try decodeRanger(allocator, bytes);
+    try std.testing.expectEqualStrings("SORA VALE", back.profile.name());
+    try std.testing.expectEqual(@as(u32, 321), back.kit.wallet.scrap);
+    try std.testing.expect(back.kit.hasPet(.moth));
+    var buffer: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("saves/rangers/SORA_VALE.json", try rangerPath(&buffer, back.profile.name()));
+    try std.testing.expectError(error.InvalidSave, decodeRanger(allocator, "{\"format\":1}"));
+}
+
 /// Writes to a temporary file, then renames it over the save, so a crash never leaves a torn save.
 pub fn writeFile(io: std.Io, path: []const u8, bytes: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
@@ -157,7 +215,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const collected = [_]Modifications.ObjectRef{.{ .x = -3, .z = 2, .id = 17 }};
     const devices = [_]Blueprint.DocDevice{.{ .id = "lamp", .kind = .lamp, .watts = 5 }};
     const machines = [_]MachineState{.{ .slot = 3, .blueprint = .{ .format = 1, .name = "bench", .devices = &devices }, .origin = .{ 1, 2, 3 }, .yaw = 1, .states = &.{0} }};
-    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{}, .wallet = .{ .scrap = 40, .parts = 2 }, .race_best = 93.25, .market_day = 3, .market_stock = &.{ .{ 1, 0, 2 }, .{ 0, 0, 1 }, .{ 3, 3, 3 } } };
+    const doc: Document = .{ .seed = 0xFFFF_FFFF_FFFF_FFF1, .tick = 9, .player = .{ .feet = .{ 0, 1, 0 }, .yaw = 0.5, .pitch = -0.1, .mode = .walk }, .profile = (Profile{}).toDoc(), .props = &props, .collected = &collected, .machines = &machines, .prefabs = &.{}, .members = &.{.{ .slot = 2, .profile = (Profile{}).toDoc(), .kit = .{ .wallet = .{ .scrap = 40, .parts = 2 } } }}, .race_best = 93.25, .market_day = 3, .market_stock = &.{ .{ 1, 0, 2 }, .{ 0, 0, 1 }, .{ 3, 3, 3 } } };
     const bytes = try encode(allocator, doc);
     defer allocator.free(bytes);
     const back = try decode(allocator, bytes, doc.seed, 4, 8);
@@ -168,7 +226,8 @@ test "save documents round-trip and reject mismatched or malformed input" {
     try std.testing.expectEqualSlices(f32, machines[0].states, back.value.machines[0].states);
     try std.testing.expectEqualStrings("lamp", back.value.machines[0].blueprint.devices[0].id);
     try std.testing.expectEqual(@as(u8, 1), back.value.machines[0].yaw);
-    try std.testing.expectEqual(Market.Wallet{ .scrap = 40, .parts = 2 }, back.value.wallet);
+    try std.testing.expectEqual(Market.Wallet{ .scrap = 40, .parts = 2 }, back.value.members[0].kit.wallet);
+    try std.testing.expectEqual(@as(u8, 2), back.value.members[0].slot);
     try std.testing.expectEqualSlices([Market.ware_count]u8, doc.market_stock, back.value.market_stock);
     try std.testing.expectEqual(doc.race_best, back.value.race_best);
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 4, 2));
@@ -179,13 +238,21 @@ test "save documents round-trip and reject mismatched or malformed input" {
     defer allocator.free(invalid_best);
     try std.testing.expectError(error.InvalidSave, decode(allocator, invalid_best, doc.seed, 4, 8));
 
-    const v11_header = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 12", "\"format\": 11");
-    defer allocator.free(v11_header);
-    const v11 = try std.mem.replaceOwned(u8, allocator, v11_header, "  \"race_best\": 93.25,\n", "");
-    defer allocator.free(v11);
-    const migrated = try decode(allocator, v11, doc.seed, 4, 8);
+    // A format 12 save (one wallet, no members) still loads; the caller migrates it to P1's kit.
+    var v12_doc = doc;
+    v12_doc.format = 12;
+    v12_doc.members = &.{};
+    v12_doc.wallet = .{ .scrap = 55 };
+    const v12 = try encode(allocator, v12_doc);
+    defer allocator.free(v12);
+    const migrated = try decode(allocator, v12, doc.seed, 4, 8);
     defer migrated.deinit();
-    try std.testing.expectEqual(@as(f32, 0), migrated.value.race_best);
+    try std.testing.expectEqual(@as(u32, 55), migrated.value.wallet.scrap);
+    var twice = doc;
+    twice.members = &.{ .{ .slot = 1, .profile = (Profile{}).toDoc(), .kit = .{} }, .{ .slot = 1, .profile = (Profile{}).toDoc(), .kit = .{} } };
+    const dup = try encode(allocator, twice);
+    defer allocator.free(dup);
+    try std.testing.expectError(error.InvalidSave, decode(allocator, dup, doc.seed, 4, 8));
 
     try std.testing.expectError(error.SeedMismatch, decode(allocator, bytes, 1, 4, 8));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 1, 8));
@@ -193,7 +260,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 5", "\"generator\": 2");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 12", "\"format\": 10");
+    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 13", "\"format\": 11");
     defer allocator.free(old_format);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, old_format, doc.seed, 4, 8));
 }

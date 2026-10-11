@@ -280,10 +280,10 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
 
 pub fn place(sb: *Sandbox, p: Preview) !void {
     if (blueprintOf(sb, p.entry)) |bp| {
-        if (p.entry == .kit and sb.wallet.kits[@intFromEnum(p.entry.kit)] == 0) return sb.say("no {s} kits: buy one at a market", .{entryName(sb, p.entry)});
+        if (p.entry == .kit and sb.kits[0].wallet.kits[@intFromEnum(p.entry.kit)] == 0) return sb.say("no {s} kits: buy one at a market", .{entryName(sb, p.entry)});
         const m = sb.spawnMachine(null, bp.*, p.origin, p.yaw, false) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)});
         if (p.entry == .kit) {
-            sb.wallet.kits[@intFromEnum(p.entry.kit)] -= 1;
+            sb.kits[0].wallet.kits[@intFromEnum(p.entry.kit)] -= 1;
             sb.machines[m].kit = p.entry.kit;
         }
         return sb.say("placed {s}", .{entryName(sb, p.entry)});
@@ -333,7 +333,7 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
             if (!sb.closeBridge(i)) return sb.say("bridge closed: removed once traffic clears", .{});
             sb.say("removed bridge", .{});
         },
-        .relic, .stall, .walker, .car, .fabricator, .jet, .hero, .none => sb.say("nothing to remove", .{}),
+        .relic, .stall, .walker, .car, .fabricator, .jet, .hero, .wild_pet, .pet, .none => sb.say("nothing to remove", .{}),
     }
 }
 
@@ -344,7 +344,7 @@ fn removeMachine(sb: *Sandbox, m: u8) void {
     const kit = sb.machines[m].kit;
     sb.removeMachine(m);
     if (kit) |ware| {
-        sb.wallet.kits[@intFromEnum(ware)] +|= 1;
+        sb.kits[0].wallet.kits[@intFromEnum(ware)] +|= 1;
         return sb.say("removed {s}: kit returned", .{std.mem.sliceTo(&name, 0)});
     }
     sb.say("removed {s}", .{std.mem.sliceTo(&name, 0)});
@@ -568,7 +568,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
         } else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
         .build => switch (current(sb)) {
-            .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.wallet.kits[@intFromEnum(ware)] }) catch buffer,
+            .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.kits[0].wallet.kits[@intFromEnum(ware)] }) catch buffer,
             else => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE", .{entryName(sb, current(sb))}) catch buffer,
         },
         .wire => if (pendingWire(sb)) |w| blk: {

@@ -1,9 +1,11 @@
 //! The fabricator at the garage turns collectibles (and some scrap) into hover cars, armor suits,
 //! armor accents and weapons. Recipes are grouped in tabs; each makes one thing once. The first
 //! weapons need no Hive alloy, since alloy only comes from beating Hive units. Nothing changes
-//! when a recipe cannot be paid.
+//! when a recipe cannot be paid. Cars and the Kestrel join the team's garage (`Progress`);
+//! suits, armor and weapons are the maker's own, paid from their kit's pickups and wallet.
 const std = @import("std");
 const Progress = @import("Progress.zig");
+const Kit = @import("Kit.zig");
 const Profile = @import("Profile.zig");
 const Collectibles = @import("Collectibles.zig");
 const Market = @import("../city/Market.zig");
@@ -97,29 +99,29 @@ pub fn onTab(tab: Tab, out: *[recipes.len]u8) []const u8 {
     return out[0..n];
 }
 
-pub fn made(p: *const Progress, output: Output) bool {
+pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
     return switch (output) {
         .vehicle => |d| p.ownsVehicle(d),
         .fighter => p.fighter,
-        .suit => |c| p.owns(c),
-        .armor => |a| p.ownsArmor(a),
-        .weapon => |w| p.ownsWeapon(w),
-        .weapon_upgrade => |u| p.weaponLevel(u.weapon) >= u.tier,
+        .suit => |c| k.owns(c),
+        .armor => |a| k.ownsArmor(a),
+        .weapon => |w| k.ownsWeapon(w),
+        .weapon_upgrade => |u| k.weaponLevel(u.weapon) >= u.tier,
         .kestrel_upgrade => |u| p.kestrelLevel(u) >= Progress.max_level,
         .kestrel_paint => |paint| p.ownsKestrelPaint(paint),
     };
 }
 
-pub fn status(p: *const Progress, output: Output) ?[]const u8 {
+pub fn status(p: *const Progress, k: *const Kit, output: Output) ?[]const u8 {
     return switch (output) {
         .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
-        .weapon_upgrade => |u| if (!p.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (p.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (p.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
+        .weapon_upgrade => |u| if (!k.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (k.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (k.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
             .kestrel_upgrade => |u| if (p.kestrelLevel(u) >= Progress.max_level) "MAX LEVEL" else null,
             .kestrel_paint => |paint| if (p.ownsKestrelPaint(paint)) (if (p.kestrel_paint == paint) "EQUIPPED" else "OWNED") else null,
             else => unreachable,
         },
-        else => if (made(p, output)) "MADE" else null,
+        else => if (made(p, k, output)) "MADE" else null,
     };
 }
 
@@ -131,25 +133,26 @@ pub fn progressCost(p: *const Progress, output: Output) ?Progress.Cost {
     };
 }
 
-pub fn affordable(p: *const Progress, wallet: Market.Wallet, c: Cost) ?Error {
-    if (p.count(.lumen_shard) < c.lumen) return error.NotEnoughLumen;
-    if (p.count(.rotor_core) < c.rotor) return error.NotEnoughRotors;
-    if (p.count(.hive_alloy) < c.alloy) return error.NotEnoughAlloy;
-    if (wallet.scrap < c.scrap) return error.NotEnoughScrap;
+pub fn affordable(k: *const Kit, c: Cost) ?Error {
+    if (k.count(.lumen_shard) < c.lumen) return error.NotEnoughLumen;
+    if (k.count(.rotor_core) < c.rotor) return error.NotEnoughRotors;
+    if (k.count(.hive_alloy) < c.alloy) return error.NotEnoughAlloy;
+    if (k.wallet.scrap < c.scrap) return error.NotEnoughScrap;
     return null;
 }
 
-/// Pays for and makes recipe `index`.
-pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
+/// Pays for and makes recipe `index` for the player holding kit `k`.
+pub fn make(p: *Progress, k: *Kit, index: usize) Error!Output {
+    const wallet = &k.wallet;
     const r = recipes[index];
     if (r.output == .fighter and !p.fighter and !p.hasFlag("kestrel_blueprint")) return error.NoBlueprint;
     if ((r.output == .kestrel_upgrade or r.output == .kestrel_paint) and !p.fighter) return error.NoFighter;
     if (r.output == .kestrel_upgrade and p.kestrelLevel(r.output.kestrel_upgrade) >= Progress.max_level) return error.MaxLevel;
     if (r.output == .weapon_upgrade) {
         const u = r.output.weapon_upgrade;
-        if (!p.ownsWeapon(u.weapon)) return error.WeaponRequired;
-        if (p.weaponLevel(u.weapon) >= u.tier) return error.AlreadyMade;
-        if (p.weaponLevel(u.weapon) + 1 < u.tier) return error.PreviousTierRequired;
+        if (!k.ownsWeapon(u.weapon)) return error.WeaponRequired;
+        if (k.weaponLevel(u.weapon) >= u.tier) return error.AlreadyMade;
+        if (k.weaponLevel(u.weapon) + 1 < u.tier) return error.PreviousTierRequired;
     }
     if (r.output == .kestrel_paint) {
         const paint = r.output.kestrel_paint;
@@ -158,7 +161,7 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
             return r.output;
         }
     }
-    if (made(p, r.output)) return error.AlreadyMade;
+    if (made(p, k, r.output)) return error.AlreadyMade;
     switch (r.output) {
         .kestrel_upgrade => |u| {
             p.buyKestrelUpgrade(u, wallet) catch |err| return switch (err) {
@@ -180,18 +183,18 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
         },
         else => {},
     }
-    if (affordable(p, wallet.*, r.cost)) |err| return err;
-    p.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] -= r.cost.lumen;
-    p.inventory[@intFromEnum(Collectibles.Kind.rotor_core)] -= r.cost.rotor;
-    p.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] -= r.cost.alloy;
+    if (affordable(k, r.cost)) |err| return err;
+    k.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] -= r.cost.lumen;
+    k.inventory[@intFromEnum(Collectibles.Kind.rotor_core)] -= r.cost.rotor;
+    k.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] -= r.cost.alloy;
     wallet.scrap -= r.cost.scrap;
     switch (r.output) {
         .vehicle => |d| p.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d)),
         .fighter => p.fighter = true,
-        .suit => |c| p.suits |= Progress.bit(c),
-        .armor => |a| p.armors |= Progress.armorBit(a),
-        .weapon => |w| p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),
-        .weapon_upgrade => |u| p.weapon_upgrades[@intFromEnum(u.weapon)] = u.tier - 1,
+        .suit => |c| k.suits |= Kit.bit(c),
+        .armor => |a| k.armors |= Kit.armorBit(a),
+        .weapon => |w| k.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),
+        .weapon_upgrade => |u| k.weapon_upgrades[@intFromEnum(u.weapon)] = u.tier - 1,
         .kestrel_upgrade, .kestrel_paint => unreachable,
     }
     return r.output;
@@ -199,18 +202,18 @@ pub fn make(p: *Progress, wallet: *Market.Wallet, index: usize) Error!Output {
 
 test "recipes pay exactly, make once, and refuse what cannot be paid" {
     var p: Progress = .{};
-    var wallet: Market.Wallet = .{ .scrap = 100 };
+    var k: Kit = .{ .wallet = .{ .scrap = 100 } };
     var tab: [recipes.len]u8 = undefined;
     const vehicles = onTab(.vehicles, &tab);
     try std.testing.expectEqual(@as(usize, 4), vehicles.len);
-    try std.testing.expectError(error.NotEnoughLumen, make(&p, &wallet, vehicles[0]));
-    p.inventory = .{ 10, 2, 0, 0 };
-    const out = try make(&p, &wallet, vehicles[0]);
+    try std.testing.expectError(error.NotEnoughLumen, make(&p, &k, vehicles[0]));
+    k.inventory = .{ 10, 2, 0, 0 };
+    const out = try make(&p, &k, vehicles[0]);
     try std.testing.expectEqual(Designs.Design.skimmer, out.vehicle);
     try std.testing.expect(p.ownsVehicle(.skimmer));
-    try std.testing.expectEqual([4]u32{ 2, 0, 0, 0 }, p.inventory);
-    try std.testing.expectEqual(@as(u32, 70), wallet.scrap);
-    try std.testing.expectError(error.AlreadyMade, make(&p, &wallet, vehicles[0]));
+    try std.testing.expectEqual([4]u32{ 2, 0, 0, 0 }, k.inventory);
+    try std.testing.expectEqual(@as(u32, 70), k.wallet.scrap);
+    try std.testing.expectError(error.AlreadyMade, make(&p, &k, vehicles[0]));
     // The first two weapons need no alloy: they are reachable before the first fight.
     var weapons_tab: [recipes.len]u8 = undefined;
     for (onTab(.weapons, &weapons_tab)[0..2]) |i| try std.testing.expectEqual(@as(u32, 0), recipes[i].cost.alloy);
@@ -219,56 +222,56 @@ test "recipes pay exactly, make once, and refuse what cannot be paid" {
 }
 
 test "weapon tiers require ownership and the prior tier, then persist as installed upgrades" {
-    var p: Progress = .{ .weapons = 0 };
-    var wallet: Market.Wallet = .{ .scrap = 1_000 };
+    var p: Progress = .{};
+    var k: Kit = .{ .weapons = 0, .wallet = .{ .scrap = 1_000 } };
     var rows: [recipes.len]u8 = undefined;
     const weapons = onTab(.weapons, &rows);
     const tier2 = weapons[weapons.len - 6];
     const tier3 = weapons[weapons.len - 5];
-    try std.testing.expectEqualStrings("FABRICATE WEAPON FIRST", status(&p, recipes[tier2].output).?);
-    try std.testing.expectError(error.WeaponRequired, make(&p, &wallet, tier2));
+    try std.testing.expectEqualStrings("FABRICATE WEAPON FIRST", status(&p, &k, recipes[tier2].output).?);
+    try std.testing.expectError(error.WeaponRequired, make(&p, &k, tier2));
 
-    p.weapons |= @as(u16, 1) << @intCast(@intFromEnum(WeaponKind.beam_saber));
-    try std.testing.expectError(error.PreviousTierRequired, make(&p, &wallet, tier3));
-    p.inventory = .{ 100, 100, 100, 0 };
-    _ = try make(&p, &wallet, tier2);
-    try std.testing.expectEqual(@as(u8, 2), p.weaponLevel(.beam_saber));
-    _ = try make(&p, &wallet, tier3);
-    try std.testing.expectEqual(@as(u8, 3), p.weaponLevel(.beam_saber));
-    try std.testing.expectEqualStrings("INSTALLED", status(&p, recipes[tier3].output).?);
+    k.weapons |= @as(u16, 1) << @intCast(@intFromEnum(WeaponKind.beam_saber));
+    try std.testing.expectError(error.PreviousTierRequired, make(&p, &k, tier3));
+    k.inventory = .{ 100, 100, 100, 0 };
+    _ = try make(&p, &k, tier2);
+    try std.testing.expectEqual(@as(u8, 2), k.weaponLevel(.beam_saber));
+    _ = try make(&p, &k, tier3);
+    try std.testing.expectEqual(@as(u8, 3), k.weaponLevel(.beam_saber));
+    try std.testing.expectEqualStrings("INSTALLED", status(&p, &k, recipes[tier3].output).?);
 }
 
 test "Maro's Kestrel blueprint gates fabrication until the carrier sighting conversation" {
     var progress: Progress = .{};
-    var wallet: Market.Wallet = .{ .scrap = 100 };
+    var kit: Kit = .{ .wallet = .{ .scrap = 100 } };
     var rows: [recipes.len]u8 = undefined;
     const vehicles = onTab(.vehicles, &rows);
-    try std.testing.expectEqualStrings("BLUEPRINT REQUIRED", status(&progress, .fighter).?);
-    try std.testing.expectError(error.NoBlueprint, make(&progress, &wallet, vehicles[3]));
+    try std.testing.expectEqualStrings("BLUEPRINT REQUIRED", status(&progress, &kit, .fighter).?);
+    try std.testing.expectError(error.NoBlueprint, make(&progress, &kit, vehicles[3]));
     progress.setFlag("carrier_seen");
-    try std.testing.expectError(error.NoBlueprint, make(&progress, &wallet, vehicles[3]));
+    try std.testing.expectError(error.NoBlueprint, make(&progress, &kit, vehicles[3]));
     progress.setFlag("kestrel_blueprint");
-    progress.inventory = .{ 12, 5, 14, 0 };
-    _ = try make(&progress, &wallet, vehicles[3]);
+    kit.inventory = .{ 12, 5, 14, 0 };
+    _ = try make(&progress, &kit, vehicles[3]);
     try std.testing.expect(progress.fighter);
-    try std.testing.expectEqualStrings("MADE", status(&progress, .fighter).?);
+    try std.testing.expectEqualStrings("MADE", status(&progress, &kit, .fighter).?);
 }
 
 test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint" {
     var progress: Progress = .{};
-    var wallet: Market.Wallet = .{ .scrap = 5000, .parts = 100 };
+    var kit: Kit = .{ .wallet = .{ .scrap = 5000, .parts = 100 } };
     var rows: [recipes.len]u8 = undefined;
     const aircraft = onTab(.aircraft, &rows);
     try std.testing.expectEqual(@as(usize, 8), aircraft.len);
-    try std.testing.expectError(error.NoFighter, make(&progress, &wallet, aircraft[2]));
+    try std.testing.expectError(error.NoFighter, make(&progress, &kit, aircraft[2]));
     progress.fighter = true;
-    _ = try make(&progress, &wallet, aircraft[2]); // engine level 1
+    _ = try make(&progress, &kit, aircraft[2]); // engine level 1
     try std.testing.expectEqual(@as(u8, 1), progress.kestrelLevel(.engine));
-    _ = try make(&progress, &wallet, aircraft[2]); // engine level 2 costs more
+    _ = try make(&progress, &kit, aircraft[2]); // engine level 2 costs more
     try std.testing.expectEqual(@as(u8, 2), progress.kestrelLevel(.engine));
-    _ = try make(&progress, &wallet, aircraft[5]); // buy and equip azure
+    _ = try make(&progress, &kit, aircraft[5]); // buy and equip azure
     try std.testing.expectEqual(Progress.Paint.azure, progress.kestrel_paint);
-    _ = try make(&progress, &wallet, aircraft[4]); // reselect the free ivory finish
+    _ = try make(&progress, &kit, aircraft[4]); // reselect the free ivory finish
     try std.testing.expectEqual(Progress.Paint.ivory, progress.kestrel_paint);
-    try std.testing.expectEqualStrings("EQUIPPED", status(&progress, recipes[aircraft[4]].output).?);
+    try std.testing.expectEqualStrings("EQUIPPED", status(&progress, &kit, recipes[aircraft[4]].output).?);
 }

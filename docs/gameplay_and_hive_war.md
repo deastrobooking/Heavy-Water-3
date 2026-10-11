@@ -9,6 +9,10 @@ Generations after ancient cataclysms, Earth has healed into a vibrant, mystical,
 
 ---
 
+### Pace: hack-and-slash outside, discovery inside
+
+Outside the sanctuary cities, play is hack-and-slash: Hive waves, nests, carriers and cave dungeons, with loot for each player, pets and heroes alongside. Inside the cities, play turns to exploring: finding upgrades and uncovering the Hive's alliances with scientists and governments. Freeing a city takes both: break the Hive outside, expose its allies inside. Earth's cities come first, then the Colonies. Each of the four players keeps their own saved character, gear, wallet and pets ([world](world.md#two-kinds-of-ground-the-wilds-and-the-sanctuary-cities)).
+
 ## 2. Super-Mobility: The Four Pillars of Traversal
 
 To match anime-level heroism and freedom across vertical ecosystems:
@@ -72,7 +76,7 @@ The first mesh pass for all five ships is in `vehicle/ScalariMeshes.zig`; catalo
 ### Synthetic allies and chimeras
 
 - **Synthetic Humanoids:** Cybernetic warriors (arm cannons, thrusters, visor helmets). Freeing them from their override collars recruits them as customized NPC battle allies.
-- **Bio-Synth Pets & Chimeras:** Wild fauna infused with cybernetic armor and beam weaponry. Freeing them tames them as levelable companion pets who gain XP, evolve, and fight beside you.
+- **Bio-Synth Pets & Chimeras:** Wild fauna infused with cybernetic armor and beam weaponry. Freeing them tames them as levelable companion pets who gain XP, evolve, and fight beside you. *Built:* four pets (hound, falcon, golem, moth) freed from Hive collars on the meadow ring follow P1, fight, level to 20, and the moth mends. Evolutions, chimeras and pets for guests are still to come.
 
 ---
 

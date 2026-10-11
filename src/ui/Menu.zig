@@ -9,7 +9,7 @@ const Menu = @This();
 
 pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, travel };
+pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
 pub const title_items = [_]Item{
@@ -41,7 +41,7 @@ pub const confirm_items = [_]Item{
 };
 pub const party_items = [_]Item{
     .{ .label = "PLAYER 1" },                                               .{ .label = "PLAYER 2" },                                             .{ .label = "PLAYER 3" },                                                   .{ .label = "PLAYER 4" },
-    .{ .label = "JOIN / LEAVE SELECTED PLAYER", .command = .party_toggle }, .{ .label = "ASSIGN NEXT CONTROLLER", .command = .party_controller }, .{ .label = "SWAP WITH NEXT SCREEN POSITION", .command = .party_position }, .{ .label = "RESUME", .command = .@"resume" },
+    .{ .label = "JOIN / LEAVE SELECTED PLAYER", .command = .party_toggle }, .{ .label = "ASSIGN NEXT CONTROLLER", .command = .party_controller }, .{ .label = "SWAP WITH NEXT SCREEN POSITION", .command = .party_position }, .{ .label = "LOAD NEXT SAVED RANGER", .command = .party_ranger }, .{ .label = "RESUME", .command = .@"resume" },
 };
 pub const player_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
@@ -597,6 +597,8 @@ test "party setup keeps four unique controller owners and selects empty slots" {
         try std.testing.expectEqual(@as(u8, 15), seen);
     }
     m.row = 7;
+    try std.testing.expectEqual(Command.party_ranger, m.key(.confirm));
+    m.row = 8;
     try std.testing.expectEqual(Command.new_game, m.key(.confirm));
     m.open(.pause);
     m.open(.player);

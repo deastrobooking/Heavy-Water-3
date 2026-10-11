@@ -61,8 +61,8 @@ pub fn snapshot(sb: *const Sandbox, camera: Camera, paused: bool) Snapshot {
     var s: Snapshot = .{
         .listener = .{ camera.position.x(), camera.position.y(), camera.position.z() },
         .yaw = camera.yaw,
-        .scrap = sb.wallet.scrap,
-        .parts = sb.wallet.parts,
+        .scrap = sb.kits[0].wallet.scrap,
+        .parts = sb.kits[0].wallet.parts,
         .vault_opened = sb.progress.hasFlag("shrine_complete"),
         .market_day = sb.market.day,
         .notice_serial = sb.notice_until,

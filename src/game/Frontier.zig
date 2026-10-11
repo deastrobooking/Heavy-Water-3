@@ -31,6 +31,7 @@ const Profile = @import("Profile.zig");
 const Specials = @import("Specials.zig");
 const Heroes = @import("Heroes.zig");
 const Encounters = @import("Encounters.zig");
+const Pets = @import("Pets.zig");
 const Arena = @import("Arena.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
@@ -96,6 +97,7 @@ pub fn init(sb: *Sandbox) void {
     var hero_plazas: [District.node_count]Encounters.Plaza = undefined;
     for (sb.catalog.district.nodes, &hero_plazas) |node, *p| p.* = .{ .position = node.position, .arbor = node.kind == .arbor };
     sb.encounters = Encounters.place(.{ .seed = sb.seed, .spawn = spawn, .plazas = &hero_plazas, .caves = &sb.caves });
+    sb.pets.place(sb.seed, spawn);
     // Settle every pickup onto what is really there: above the terrain (not inside a cave),
     // onto any deck, roof or cave floor.
     for (sb.collectibles.items[0..sb.collectibles.count]) |*item| {
@@ -165,7 +167,10 @@ fn stepArena(sb: *Sandbox, camera: *Camera, dt: f32) void {
         },
         .wave_cleared => |c| {
             sb.cue(.vault, null);
-            sb.wallet.scrap += c.reward.scrap;
+            // Every player in the bowl is paid.
+            for (0..Sandbox.max_players) |p| if (sb.present(p)) {
+                sb.kits[p].wallet.scrap += c.reward.scrap;
+            };
             const center = R.add(sb.arena.center, .{ 0, 1, 0 });
             const loot = [_]struct { kind: Collectibles.Kind, count: u8 }{ .{ .kind = .lumen_shard, .count = c.reward.lumen }, .{ .kind = .hive_alloy, .count = c.reward.alloy }, .{ .kind = .rotor_core, .count = c.reward.rotor }, .{ .kind = .vital_cell, .count = c.reward.vital } };
             var k: usize = 0;
@@ -200,6 +205,129 @@ pub fn recruit(sb: *Sandbox, hero: u8) void {
     sb.cue(.vault, null);
     sb.say("{s} joined your heroes! Pause > HEROES to play as them", .{h.name});
     sb.progress.setFlag("met_wildkin");
+}
+
+/// Player `p` breaks a wild pet's Hive collar: the pet is theirs and comes out at once. The wild
+/// one stays for teammates who have not freed their own.
+pub fn freePet(sb: *Sandbox, p: usize, species: Pets.Species) void {
+    if (!sb.kits[p].freePet(species)) return;
+    const spot = sb.pets.spots[@intFromEnum(species)];
+    sb.pets.summon(p, species, spot.position);
+    sb.pets.cheer(p);
+    const i = Pets.info(species);
+    burst(sb, R.add(spot.position, .{ 0, 1, 0 }), 2.5, i.glow);
+    sb.cue(.vault, spot.position);
+    sb.say("P{d}: collar broken! {s} the {s} joins you", .{ p + 1, i.name, i.kind });
+    sb.progress.setFlag("freed_pet");
+}
+
+/// Player `p` pets `owner`'s pet: a happy trick, or (their own, with more freed) the next one
+/// comes out.
+pub fn petPet(sb: *Sandbox, p: usize, owner: usize) void {
+    const pet = sb.pets.out[owner] orelse return;
+    const kit = &sb.kits[owner];
+    if (p == owner) if (kit.nextPet()) |next| if (next != pet.species) {
+        kit.pet_active = next;
+        sb.pets.summon(owner, next, sb.feetOf(owner));
+        sb.pets.cheer(owner);
+        sb.cuePitch(.pickup, pet.position, 0.8);
+        sb.say("{s} heads home; {s} the {s} comes out (level {d})", .{ Pets.info(pet.species).name, Pets.info(next).name, Pets.info(next).kind, kit.petLevel(next) });
+        return;
+    };
+    sb.pets.cheer(owner);
+    sb.cuePitch(.pickup, pet.position, 1.3);
+    sb.say("{s} loves that! (level {d})", .{ Pets.info(pet.species).name, kit.petLevel(pet.species) });
+}
+
+/// Every present player's pet: bring it out after a load or a join (in step with their kit),
+/// let it follow and fight, and apply what it did. Pets of players who left go home.
+fn stepPet(sb: *Sandbox, camera: *Camera, dt: f32) void {
+    for (0..Sandbox.max_players) |owner| {
+        const want = if (sb.present(owner)) sb.kits[owner].pet_active else null;
+        const species = want orelse {
+            sb.pets.out[owner] = null;
+            continue;
+        };
+        if (sb.pets.out[owner] == null or sb.pets.out[owner].?.species != species) sb.pets.summon(owner, species, sb.feetOf(owner));
+        var hive_events: [16]Enemies.Event = undefined;
+        var hn: usize = 0;
+        var events: [4]Pets.Event = undefined;
+        const n = sb.pets.step(owner, .{ .owner = sb.feetOf(owner), .owner_yaw = sb.yawOf(owner), .level = sb.kits[owner].petLevel(species), .seed = sb.seed, .physics = &sb.physics }, &sb.enemies, dt, &hive_events, &hn, &events);
+        for (events[0..@min(n, events.len)]) |e| switch (e) {
+            .attack => |a| sb.cuePitch(switch (a.species) {
+                .hound, .golem => .impact,
+                .falcon, .moth => .zap,
+            }, a.at, if (a.species == .golem) 0.7 else 1.2),
+            .mend => |m_| {
+                var mended = false;
+                for (0..Sandbox.max_players) |p| {
+                    if (!sb.present(p)) continue;
+                    if (R.length(R.sub(sb.feetOf(p), m_.at)) > m_.radius + 2.5) continue;
+                    const v = &sb.combat.vitals[p];
+                    if (v.health >= v.max or v.health <= 0) continue;
+                    v.health = @min(v.max, v.health + m_.amount);
+                    mended = true;
+                }
+                if (mended) burst(sb, m_.at, 1.2, Pets.info(.moth).glow);
+            },
+        };
+        for (hive_events[0..@min(hn, hive_events.len)]) |e| hive(sb, e, camera);
+    }
+}
+
+/// A Hive unit downed near a pet teaches it something.
+fn petLearns(sb: *Sandbox, at: V) void {
+    for (sb.pets.out, 0..) |maybe, owner| {
+        const pet = maybe orelse continue;
+        if (R.length(R.sub(pet.position, at)) > Pets.share_radius) continue;
+        const k = @intFromEnum(pet.species);
+        const xp = &sb.kits[owner].pet_xp[k];
+        const before = Pets.levelFor(xp.*);
+        xp.* +|= Pets.xp_per_unit;
+        const after = Pets.levelFor(xp.*);
+        if (after > before) {
+            sb.pets.cheer(owner);
+            sb.say("P{d}'s {s} grew to level {d}!", .{ owner + 1, Pets.info(pet.species).name, after });
+        }
+    }
+}
+
+/// Whether some present player has yet to free `species` (so its wild one still waits).
+fn petWaiting(sb: *const Sandbox, species: Pets.Species) bool {
+    for (0..Sandbox.max_players) |p| if (sb.present(p) and !sb.kits[p].hasPet(species)) return true;
+    return false;
+}
+
+/// Wild pets near P1 (collared, idling at their spots, with a beam to find them by) while a
+/// present player has yet to free them, and every player's pet in their accent, as puppets.
+fn publishPets(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    var n = start;
+    const c = &sb.catalog.content;
+    const parts: Pets.Parts = .{ .orb = c.orb, .block = c.block, .spike = c.spike };
+    const accentOf = struct {
+        fn f(profile: Profile) [3]f32 {
+            const lumen = Profile.accent_colors[profile.accent];
+            return .{ lumen[0], lumen[1], lumen[2] };
+        }
+    }.f;
+    if (sb.pets.placed) for (sb.pets.spots, 0..) |spot, k| {
+        const sp: Pets.Species = @enumFromInt(k);
+        if (!petWaiting(sb, sp) and !sb.pets.showcase_free) continue;
+        const d = R.length(R.sub(spot.position, sb.player.feet));
+        if (d > 400) continue;
+        if (n < out.len and !sb.pets.showcase_free) {
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(spot.position, .{ 0, 18, 0 }) }, .tint = Material.emissive(.{ 1.0, 0.25, 0.4, 1 }, 0.45 + 0.2 * @sin(t * 3)), .size = .{ 0.14, 32, 0.14 } };
+            n += 1;
+        }
+        if (d > 90) continue;
+        const flies = Pets.info(sp).flies;
+        const at = if (flies) R.add(spot.position, .{ 0, Pets.hover + 0.15 * @sin(t * 2), 0 }) else spot.position;
+        n = Pets.draw(sp, .{ .position = at, .yaw = spot.yaw + 0.3 * @sin(t * 0.7 + @as(f32, @floatFromInt(k))), .time = t + @as(f32, @floatFromInt(k)), .wild = !sb.pets.showcase_free, .collar = accentOf(sb.profile) }, parts, out, n);
+    };
+    for (sb.pets.out, 0..) |maybe, owner| if (maybe) |pet| {
+        n = Pets.draw(pet.species, .{ .position = pet.position, .yaw = pet.yaw, .gait = pet.gait, .stride = pet.stride, .action = pet.action, .trick = pet.trick, .engaged = pet.engaged, .time = t + @as(f32, @floatFromInt(owner)) * 0.37, .collar = accentOf(sb.profileOf(owner).*) }, parts, out, n);
+    };
+    return n;
 }
 
 /// The cave dungeons: a Hive nest in each heart chamber, and loot through the chambers (lumen
@@ -303,12 +431,13 @@ pub fn refresh(sb: *Sandbox) void {
     for (0..Designs.count) |d| if (sb.progress.ownsVehicle(@enumFromInt(d))) sb.garage.park(sb.seed, Sandbox.spawn, sb.catalog, @enumFromInt(d));
     sb.collectibles.drops = @splat(null);
     sb.specials = .{};
-    sb.combat.setMaxHealth(sb.progress.maxHealth());
-    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + Specials.loadout(sb.profile).health);
+    for (0..Sandbox.max_players) |p| sb.combat.setPlayerMax(p, sb.kits[p].maxHealth() + Specials.loadout(sb.profileOf(p).*).health);
     for (&sb.combat.vitals) |*v| v.health = v.max;
-    // Whatever the loaded ranger already wears stays available.
-    sb.progress.suits |= Progress.bit(sb.profile.clothing);
-    sb.progress.armors |= Progress.armorBit(sb.profile.armor);
+    // Whatever each loaded ranger already wears stays available to them.
+    for (0..Sandbox.max_players) |p| {
+        sb.kits[p].suits |= Progress.bit(sb.profileOf(p).clothing);
+        sb.kits[p].armors |= Progress.armorBit(sb.profileOf(p).armor);
+    }
 }
 
 /// First campaign beat: corruption advances once the frontier reaches its first new market day.
@@ -390,6 +519,23 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
         nearest = hit.distance;
         result = .fabricator;
     };
+    // Wild pets in their collars, and the party's own pet.
+    if (sb.pets.placed) for (sb.pets.spots, 0..) |spot, k| {
+        const sp: Pets.Species = @enumFromInt(k);
+        if (!petWaiting(sb, sp)) continue;
+        const lift: f32 = if (Pets.info(sp).flies) Pets.hover else 0.7;
+        if (Enemies.segmentSphere(eye, dir, nearest, R.add(spot.position, .{ 0, lift, 0 }), 0.9)) |t| {
+            nearest = t;
+            result = .{ .wild_pet = sp };
+        }
+    };
+    for (sb.pets.out, 0..) |maybe, owner| if (maybe) |pet| {
+        const lift: f32 = if (Pets.info(pet.species).flies) 0 else 0.6;
+        if (Enemies.segmentSphere(eye, dir, nearest, R.add(pet.position, .{ 0, lift, 0 }), 0.8)) |t| {
+            nearest = t;
+            result = .{ .pet = @intCast(owner) };
+        }
+    };
     // Wildkin waiting to be met.
     for (sb.encounters) |maybe| if (maybe) |spot| if (!sb.progress.hasHero(spot.hero)) {
         if (Enemies.segmentSphere(eye, dir, nearest, R.add(spot.position, .{ 0, 1.1, 0 }), 0.9)) |t| {
@@ -469,6 +615,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             sb.cue(.boom, u.position);
             sb.progress.setFlag("hive_fought");
             sb.say("hive {s} down", .{@tagName(u.kind)});
+            petLearns(sb, u.position);
         },
         .deflected => |d| {
             sb.combat.deflect(d.player, d.position, d.velocity);
@@ -545,26 +692,31 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
     // Hover cars: the piloted one takes P1's movement keys; parked ones idle.
     sb.garage.step(&sb.physics, if (frozen) .{} else Garage.controls(input), dt);
 
-    // Pickups for every local player.
+    // Pickups for every local player: whoever reaches one keeps it.
     var feet: [Sandbox.max_players]V = undefined;
+    var slots: [Sandbox.max_players]usize = undefined;
     var fn_count: usize = 0;
     if (sb.garage.piloting == null and sb.seated == null) {
         feet[0] = sb.player.feet;
+        slots[0] = 0;
         fn_count = 1;
     }
-    for (sb.guests) |g| if (g.active) {
+    for (sb.guests, 1..) |g, slot| if (g.active) {
         feet[fn_count] = g.player.feet;
+        slots[fn_count] = slot;
         fn_count += 1;
     };
     var picked: [8]Collectibles.Event = undefined;
     const got = sb.collectibles.collect(&sb.progress.picked, feet[0..fn_count], dt, &picked);
     for (picked[0..@min(got, picked.len)]) |p| {
-        sb.progress.inventory[@intFromEnum(p.kind)] += 1;
+        const who = slots[p.player];
+        const kit = &sb.kits[who];
+        kit.inventory[@intFromEnum(p.kind)] += 1;
         sb.cue(.pickup, p.position);
         if (p.kind == .vital_cell) {
-            sb.combat.setMaxHealth(sb.progress.maxHealth());
-            sb.say("vital cell: max health {d:.0}", .{sb.progress.maxHealth()});
-        } else sb.say("+1 {s} ({d})", .{ Collectibles.label(p.kind), sb.progress.count(p.kind) });
+            sb.combat.setPlayerMax(who, kit.maxHealth() + Specials.loadout(sb.profileOf(who).*).health);
+            sb.say("P{d} vital cell: max health {d:.0}", .{ who + 1, kit.maxHealth() });
+        } else sb.say("P{d} +1 {s} ({d})", .{ who + 1, Collectibles.label(p.kind), kit.count(p.kind) });
         sb.progress.setFlag("collected");
     }
     if (timing) |profile| profile.metrics.record(.frontier_setup, phase_timer.lap() * 1000);
@@ -586,12 +738,12 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
     // Arsenals: P1 with the weapon tool on foot, guests with the right trigger.
     if (timing != null) phase_timer.reset();
     sb.combat.tick(dt);
-    for (&sb.combat.arsenals) |*arsenal| arsenal.weapon_upgrades = sb.progress.weapon_upgrades;
+    for (&sb.combat.arsenals, &sb.kits) |*arsenal, *kit| arsenal.weapon_upgrades = kit.weapon_upgrades;
     const armed = !frozen and sb.tools.tool == .weapon and sb.garage.piloting == null and sb.seated == null;
     const aim_camera = sb.aimCameraPublic(camera.*);
     const f = aim_camera.forward();
     var out: [32]Combat.Event = undefined;
-    const fought = sb.combat.step(0, &sb.physics, &sb.enemies, sb.progress.weapons, .{
+    const fought = sb.combat.step(0, &sb.physics, &sb.enemies, sb.kits[0].weapons, .{
         .eye = .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() },
         .forward = .{ f.x(), f.y(), f.z() },
         .feet = sb.player.feet,
@@ -613,7 +765,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         if (!g.active) continue;
         const eye = g.player.eye();
         const gf = g.camera.forward();
-        const n = sb.combat.step(@intCast(p), &sb.physics, &sb.enemies, sb.progress.weapons, .{
+        const n = sb.combat.step(@intCast(p), &sb.physics, &sb.enemies, sb.kits[p].weapons, .{
             .eye = .{ eye.x(), eye.y(), eye.z() },
             .forward = .{ gf.x(), gf.y(), gf.z() },
             .feet = g.player.feet,
@@ -631,6 +783,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
     }
     stepSpecials(sb, camera, actions, frozen, dt);
+    if (!frozen) stepPet(sb, camera, dt);
     if (timing) |profile| profile.metrics.record(.arsenal, phase_timer.lap() * 1000);
 }
 
@@ -654,7 +807,7 @@ fn stepSpecials(sb: *Sandbox, camera: *Camera, actions: Sandbox.Actions, frozen:
     const eye = sb.player.eye();
     const own = Specials.loadout(sb.profile);
     sb.combat.arsenals[0].melee_scale = own.melee;
-    sb.combat.setPlayerMax(0, sb.progress.maxHealth() + own.health);
+    sb.combat.setPlayerMax(0, sb.kits[0].maxHealth() + own.health);
     const pressed: [3]bool = if (on_foot) .{ actions.special_1, actions.special_2, actions.special_3 } else @splat(false);
     var n = sb.specials.step(0, sb.profile, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ eye.x(), eye.y(), eye.z() }, .forward = .{ f.x(), f.y(), f.z() }, .feet = sb.player.feet, .pressed = pressed }, dt, &events);
     specialEvents(sb, events[0..@min(n, events.len)], camera);
@@ -663,7 +816,7 @@ fn stepSpecials(sb: *Sandbox, camera: *Camera, actions: Sandbox.Actions, frozen:
         if (!g.active) continue;
         const theirs = Specials.loadout(g.profile);
         sb.combat.arsenals[p].melee_scale = theirs.melee;
-        sb.combat.setPlayerMax(p, sb.progress.maxHealth() + theirs.health);
+        sb.combat.setPlayerMax(p, sb.kits[p].maxHealth() + theirs.health);
         const ge = g.player.eye();
         const gf = g.camera.forward();
         n = sb.specials.step(@intCast(p), g.profile, &sb.physics, &sb.enemies, &sb.combat, .{ .eye = .{ ge.x(), ge.y(), ge.z() }, .forward = .{ gf.x(), gf.y(), gf.z() }, .feet = g.player.feet, .pressed = if (frozen) @splat(false) else g.special }, dt, &events);
@@ -970,6 +1123,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n += sb.garage.publish(sb.catalog, out[n..]);
     n = publishMountains(sb, out, n, t);
     n = publishWildkin(sb, out, n, t);
+    n = publishPets(sb, out, n, t);
     n = publishArena(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);

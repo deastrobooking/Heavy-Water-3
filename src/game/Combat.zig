@@ -826,7 +826,7 @@ test "all four players start rapid fire, quick draw saber, then return to their 
     defer physics.deinit();
     var enemies: Enemies = .{};
     var c: Combat = .{};
-    const owned = @import("Progress.zig").starter_weapons;
+    const owned = @import("Kit.zig").starter_weapons;
     var events: [32]Event = undefined;
     const dt = 1.0 / 60.0;
     for (0..4) |p| {

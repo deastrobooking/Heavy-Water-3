@@ -5,7 +5,7 @@
 //! - **Rotor cores** (rare): on tower roofs, beside the Rootdeep shrines, guarded at Hive nests.
 //!   Hover cars need them.
 //! - **Hive alloy**: dropped by Hive units and cached at nests. Weapons and armor need it.
-//! - **Vital cells**: upgrade items, each adding to the party's maximum health. One on the
+//! - **Vital cells**: upgrade items, each adding to the collector's maximum health. One on the
 //!   tallest roof, one at each shrine, one at the largest nest.
 //!
 //! World pickups have stable IDs, so collecting one is remembered in the save; drops are not
@@ -148,17 +148,18 @@ pub fn drop(self: *Collectibles, kind: Kind, position: V) void {
 }
 
 pub const Picked = std.StaticBitSet(max_items);
-pub const Event = struct { kind: Kind, position: V };
+/// `player` indexes the `players` slice given to `collect`: who picked it up.
+pub const Event = struct { kind: Kind, position: V, player: u8 = 0 };
 
 /// Collects everything within reach of any of `players`; returns how many events were written.
 pub fn collect(self: *Collectibles, picked: *Picked, players: []const V, dt: f32, out: []Event) usize {
     var n: usize = 0;
     for (self.items[0..self.count], 0..) |item, i| {
-        if (picked.isSet(i)) continue;
-        for (players) |p| if (near(p, item.position)) {
+        if (picked.isSet(i) or n == out.len) continue;
+        for (players, 0..) |p, who| if (near(p, item.position)) {
             picked.set(i);
             if (n < out.len) {
-                out[n] = .{ .kind = item.kind, .position = item.position };
+                out[n] = .{ .kind = item.kind, .position = item.position, .player = @intCast(who) };
                 n += 1;
             }
             break;
@@ -171,9 +172,11 @@ pub fn collect(self: *Collectibles, picked: *Picked, players: []const V, dt: f32
             slot.* = null;
             continue;
         }
-        for (players) |p| if (near(p, d.position)) {
+        // Leave excess loot in the world until its reward can be delivered.
+        if (n == out.len) continue;
+        for (players, 0..) |p, who| if (near(p, d.position)) {
             if (n < out.len) {
-                out[n] = .{ .kind = d.kind, .position = d.position };
+                out[n] = .{ .kind = d.kind, .position = d.position, .player = @intCast(who) };
                 n += 1;
             }
             slot.* = null;
@@ -228,4 +231,29 @@ test "walking over pickups collects each once; drops expire" {
     c.drop(.hive_alloy, .{ 30, 1, 0 });
     _ = c.collect(&picked, &.{}, drop_lifetime + 1, &events);
     try std.testing.expectEqual(@as(usize, 0), c.collect(&picked, &.{.{ 30, 0, 0 }}, 0.1, &events));
+}
+
+test "pickup overflow waits for capacity without losing world items or drops" {
+    var c: Collectibles = .{};
+    c.add(.lumen_shard, .{ 0, 1, 0 });
+    c.add(.rotor_core, .{ 0, 1, 0 });
+    c.drop(.hive_alloy, .{ 0, 1, 0 });
+    var picked: Picked = .initEmpty();
+    var events: [1]Event = undefined;
+    const players = [_]V{.{ 0, 0, 0 }};
+    try std.testing.expectEqual(@as(usize, 0), c.collect(&picked, &players, 0.1, &.{}));
+    try std.testing.expectEqual(@as(usize, 1), c.remaining(&picked, .lumen_shard));
+    for ([_]Kind{ .lumen_shard, .rotor_core, .hive_alloy }) |kind| {
+        try std.testing.expectEqual(@as(usize, 1), c.collect(&picked, &players, 0.1, &events));
+        try std.testing.expectEqual(kind, events[0].kind);
+    }
+    try std.testing.expectEqual(@as(usize, 0), c.collect(&picked, &players, 0.1, &events));
+}
+
+test "drop age accumulates over successive frames" {
+    var c: Collectibles = .{};
+    c.drop(.hive_alloy, .{ 0, 1, 0 });
+    var picked: Picked = .initEmpty();
+    for (0..4) |_| _ = c.collect(&picked, &.{}, drop_lifetime / 3, &.{});
+    try std.testing.expect(c.drops[0] == null);
 }

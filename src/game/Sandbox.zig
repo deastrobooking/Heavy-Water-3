@@ -4,6 +4,8 @@ const math = @import("mach").math;
 const Physics = @import("../physics/Physics.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const Biome = @import("../procedural/Biome.zig");
+pub const Pets = @import("Pets.zig");
+pub const Kit = @import("Kit.zig");
 const Hydrology = @import("../procedural/Hydrology.zig");
 const Scatter = @import("../procedural/Scatter.zig");
 const Catalog = @import("../asset/Catalog.zig");
@@ -115,6 +117,10 @@ pub const Target = union(enum) {
     jet,
     /// A Wildkin hero waiting to be met, by roster index.
     hero: u8,
+    /// A wild bio-synth pet in its Hive collar, by species.
+    wild_pet: Pets.Species,
+    /// A player's pet, by owner slot (pet it; your own, with more freed, swaps to the next).
+    pet: u8,
 };
 /// Panels the tinker opens from a conversation: suit upgrades or the armor wardrobe.
 /// A sound for the application to play, placed in the world when it has a position.
@@ -280,6 +286,8 @@ arena: @import("Arena.zig") = .{},
 own_profiles: [max_players]?Profile = @splat(null),
 /// Where each Wildkin hero waits to be met (`Encounters.place`), set when the frontier is built.
 encounters: [Heroes.count]?@import("Encounters.zig").Spot = @splat(null),
+/// Bio-synth pets: where the wild ones wait, and P1's companion.
+pets: Pets = .{},
 /// The caves in the mountain ranges (layout from the seed), and each system's collider, built
 /// when a player first comes near it.
 caves: Caves.Layout = undefined,
@@ -300,9 +308,13 @@ mod_count: usize = 0,
 /// Mods the last loaded save used that are missing or at another version.
 mod_warnings: usize = 0,
 market: Market = .{},
-wallet: Market.Wallet = .{},
-/// Suit upgrades, owned armor and story flags (saved).
+/// What the team shares: story flags, the hero roster, the garage, world pickups taken (saved).
 progress: Progress = .{},
+/// Each player's own progression and wallet, by player slot (P1 first); saved per player.
+kits: [max_players]Kit = @splat(.{}),
+/// Slots with a character of their own (P1 always; a guest once they have joined or a save named
+/// them). A known guest rejoins as themselves, with their kit.
+known: [max_players]bool = .{ true, false, false, false },
 /// Conversation data (embedded and validated at init) and the open conversation.
 dialogue: Dialogue = undefined,
 talk: ?Dialogue.Session = null,
@@ -867,16 +879,64 @@ pub fn wardrobeOpen(self: *const Sandbox) bool {
 }
 
 /// Guest `index` (0 = P2) joins beside P1 with a distinct accent and outfit.
+/// A guest joins as player `index + 2`: as themselves when the slot already has a character
+/// (from earlier in the session, a save or a ranger file), otherwise as a fresh ranger.
 pub fn joinGuest(self: *Sandbox, index: usize) void {
-    var profile: Profile = .{ .accent = @intCast((index + 1) % Profile.accent_colors.len), .outfit = @intCast((index * 3 + 2) % Profile.outfit_colors.len), .hair_color = @intCast((index * 2 + 3) % Profile.hair_colors.len) };
-    var name: [2]u8 = .{ 'P', '2' + @as(u8, @intCast(index)) };
-    profile.setName(&name) catch unreachable;
+    var profile = self.guests[index].profile;
+    if (!self.known[index + 1]) {
+        profile = .{ .accent = @intCast((index + 1) % Profile.accent_colors.len), .outfit = @intCast((index * 3 + 2) % Profile.outfit_colors.len), .hair_color = @intCast((index * 2 + 3) % Profile.hair_colors.len) };
+        var name: [2]u8 = .{ 'P', '2' + @as(u8, @intCast(index)) };
+        profile.setName(&name) catch unreachable;
+        self.known[index + 1] = true;
+    }
     self.guests[index] = .{ .active = true, .profile = profile };
     self.respawnGuest(index);
 }
 
 pub fn leaveGuest(self: *Sandbox, index: usize) void {
     self.guests[index].active = false;
+}
+
+/// Whether player slot `p` is in play (P1 always; guests once joined).
+pub fn present(self: *const Sandbox, p: usize) bool {
+    return p == 0 or self.guests[p - 1].active;
+}
+
+/// Player slot `p`'s feet, body facing and current character.
+pub fn feetOf(self: *const Sandbox, p: usize) Physics.Vec3 {
+    return if (p == 0) self.player.feet else self.guests[p - 1].player.feet;
+}
+pub fn yawOf(self: *const Sandbox, p: usize) f32 {
+    return if (p == 0) self.body_yaw else self.guests[p - 1].body_yaw;
+}
+pub fn profileOf(self: *const Sandbox, p: usize) *const Profile {
+    return if (p == 0) &self.profile else &self.guests[p - 1].profile;
+}
+
+/// Player `p`'s ranger file: their own ranger (kept aside while they play a Wildkin hero) and kit.
+pub fn rangerFile(self: *const Sandbox, arena: std.mem.Allocator, p: usize) !Save.RangerFile {
+    const own = if (self.own_profiles[p]) |*o| o else self.profileOf(p);
+    return .{ .profile = own.toDoc(), .kit = try self.kits[p].toDoc(arena) };
+}
+
+/// Whether a present player other than `except` plays a ranger named `name`.
+pub fn rangerInPlay(self: *const Sandbox, name: []const u8, except: usize) bool {
+    for (0..max_players) |p| {
+        if (p == except or !self.present(p)) continue;
+        const own = if (self.own_profiles[p]) |*o| o else self.profileOf(p);
+        if (std.mem.eql(u8, own.name(), name)) return true;
+    }
+    return false;
+}
+
+/// Player `p` takes up a saved ranger: the character and kit in their seat become the file's.
+pub fn takeRanger(self: *Sandbox, p: usize, ranger: Save.Ranger) void {
+    if (p == 0) self.profile = ranger.profile else self.guests[p - 1].profile = ranger.profile;
+    self.kits[p] = ranger.kit;
+    self.own_profiles[p] = null;
+    self.known[p] = true;
+    self.pets.out[p] = null;
+    self.combat.setPlayerMax(p, ranger.kit.maxHealth() + Specials.loadout(ranger.profile).health);
 }
 
 pub fn guestCount(self: *const Sandbox) usize {
@@ -904,7 +964,8 @@ fn stride(player: Player, phase: *f32, amount: *f32, dt: f32) void {
     amount.* = if (player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
 }
 
-fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
+/// `slot` is the guest's player slot (1–3).
+fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
     defer {
         g.interact = false;
         g.toggle_view = false;
@@ -915,7 +976,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
     // At a stall the pad drives the trade panel and the body stands still.
     if (g.trading) |stall| {
         const key: ?TradeKey = if (g.input.dodge) .close else if (g.interact) .confirm else if (g.trade_up) .up else if (g.trade_down) .down else null;
-        if (key) |k| if (self.trade(stall, &g.trade_row, k)) {
+        if (key) |k| if (self.trade(slot, stall, &g.trade_row, k)) {
             g.trading = null;
         };
         const d = R.sub(self.stallPosition(stall), g.player.feet);
@@ -932,6 +993,19 @@ fn stepGuest(self: *Sandbox, g: *Guest, dt: f32) void {
     // Hands only: aim from the eyes, press buttons, and open market stalls.
     const eye = g.player.eye();
     g.target = self.pick(eye, g.camera.forward(), reach, false, true);
+    if (g.target == .none) {
+        const f = g.camera.forward();
+        if (Frontier.pick(self, .{ eye.x(), eye.y(), eye.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |t| switch (t) {
+            .hero, .wild_pet, .pet => g.target = t,
+            else => {},
+        };
+    }
+    if (g.interact) switch (g.target) {
+        .hero => |i| Frontier.recruit(self, i),
+        .wild_pet => |sp| Frontier.freePet(self, slot, sp),
+        .pet => |owner| Frontier.petPet(self, slot, owner),
+        else => {},
+    };
     if (g.interact and g.target == .stall) {
         g.trading = g.target.stall;
         g.trade_row = 0;
@@ -955,13 +1029,12 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (raw_actions.open_creator and self.seated == null and !self.creator.open) self.creator.begin(self.profile);
     if (raw_actions.toggle_view) self.view = if (self.view == .first) .third else .first;
     // The creator, conversations and tinker panels freeze the character and every tool.
-    self.creator.owned = self.progress.suits;
-    self.creator.owned_armor = self.progress.armors;
+    self.creator.owned = self.kits[0].suits;
+    self.creator.owned_armor = self.kits[0].armors;
     self.creator.owned_species = Heroes.forms(self.progress.heroes);
     const frozen = self.creator.open or self.talk != null or self.shop != null;
-    const suit = self.progress.suit();
-    self.player.suit = heroSuit(suit, self.profile);
-    for (&self.guests) |*g| g.player.suit = heroSuit(suit, g.profile);
+    self.player.suit = heroSuit(self.kits[0].suit(), self.profile);
+    for (&self.guests, 1..) |*g, k| g.player.suit = heroSuit(self.kits[k].suit(), g.profile);
     if (self.talk) |*session| Dialogue.advance(session, dt);
     const input: Input = if (frozen) .{} else raw_input;
     const actions: Actions = if (frozen) .{} else raw_actions;
@@ -988,7 +1061,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (self.seated == null and self.garage.piloting == null and !self.hangar.piloting) self.player.stepIn(&self.physics, camera, input, self.surroundings(self.player.feet), dt);
     if (!frozen) self.body_yaw = camera.yaw;
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
-    for (&self.guests) |*g| if (g.active) self.stepGuest(g, dt);
+    for (&self.guests, 1..) |*g, slot| if (g.active) self.stepGuest(g, slot, dt);
     if (timing) |profile| profile.metrics.record(.players, stage_timer.lap() * 1000);
     if (timing != null) stage_timer.reset();
     self.stepMachines(dt);
@@ -1074,6 +1147,8 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .fabricator => self.shop = .{ .kind = .fabricate },
                     .jet => Frontier.boardJet(self, camera),
                     .hero => |i| Frontier.recruit(self, i),
+                    .wild_pet => |sp| Frontier.freePet(self, 0, sp),
+                    .pet => |owner| Frontier.petPet(self, 0, owner),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);
@@ -1090,7 +1165,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                 .relic => |relic| {
                     _ = try self.modifications.remove(relic.ref);
                     // Salvage yields parts a market will buy (more with the salvage kit upgrade).
-                    self.wallet.parts += self.progress.partsPerSalvage();
+                    self.kits[0].wallet.parts += self.kits[0].partsPerSalvage();
                     self.progress.setFlag("salvaged");
                 },
                 else => {},
@@ -1326,24 +1401,25 @@ pub fn stallPosition(self: *const Sandbox, i: usize) Physics.Vec3 {
 /// buys one kit of that blueprint for the build palette.
 pub fn tradeKey(self: *Sandbox, key: TradeKey) void {
     const stall = self.trading orelse return;
-    if (self.trade(stall, &self.trade_row, key)) self.trading = null;
+    if (self.trade(0, stall, &self.trade_row, key)) self.trading = null;
 }
 
-/// One trade-panel key for any player at `stall`; returns true when the panel closes.
-fn trade(self: *Sandbox, stall: u8, row: *u8, key: TradeKey) bool {
+/// One trade-panel key for player `p` at `stall`, paid from their own wallet; returns true when
+/// the panel closes.
+fn trade(self: *Sandbox, p: usize, stall: u8, row: *u8, key: TradeKey) bool {
     switch (key) {
         .up => row.* = (row.* + trade_rows - 1) % trade_rows,
         .down => row.* = (row.* + 1) % trade_rows,
         .close => return true,
         .confirm => if (row.* == 0) {
-            const earned = self.market.sellParts(stall, &self.wallet) catch {
+            const earned = self.market.sellParts(stall, &self.kits[p].wallet) catch {
                 self.say("no salvaged parts to sell", .{});
                 return false;
             };
             self.say("sold parts for {d} scrap", .{earned});
         } else {
             const ware: Market.Ware = @enumFromInt(row.* - 1);
-            self.market.buy(stall, ware, &self.wallet) catch |err| {
+            self.market.buy(stall, ware, &self.kits[p].wallet) catch |err| {
                 self.say("cannot buy: {s}", .{reason(err)});
                 return false;
             };
@@ -1354,20 +1430,21 @@ fn trade(self: *Sandbox, stall: u8, row: *u8, key: TradeKey) bool {
 }
 
 /// One trade-panel row's text (row 0 sells parts; others are wares), marked when selected.
-pub fn tradeRow(self: *const Sandbox, stall: u8, row: u8, selected: bool, out: *TradeLine) void {
+pub fn tradeRow(self: *const Sandbox, p: usize, stall: u8, row: u8, selected: bool, out: *TradeLine) void {
     const marker = if (selected) "> " else "  ";
-    if (row == 0) return out.set("{s}SELL {d} PARTS AT {d} SCRAP EACH", .{ marker, self.wallet.parts, self.market.partPrice(stall) });
+    const wallet = self.kits[p].wallet;
+    if (row == 0) return out.set("{s}SELL {d} PARTS AT {d} SCRAP EACH", .{ marker, wallet.parts, self.market.partPrice(stall) });
     const w = row - 1;
     const ware: Market.Ware = @enumFromInt(w);
-    out.set("{s}{s} KIT  {d} SCRAP  STOCK {d}  HELD {d}", .{ marker, @tagName(ware), self.market.price(stall, ware), self.market.stalls[stall].stock[w], self.wallet.kits[w] });
+    out.set("{s}{s} KIT  {d} SCRAP  STOCK {d}  HELD {d}", .{ marker, @tagName(ware), self.market.price(stall, ware), self.market.stalls[stall].stock[w], wallet.kits[w] });
 }
 
 pub const TradeLine = @import("Build.zig").PanelLine;
 /// The open stall's panel: header, one line per row (the selected one marked), and help.
 pub fn tradeLines(self: *const Sandbox, out: []TradeLine) usize {
     const stall = self.trading orelse return 0;
-    out[0].set("MARKET {d}  DAY {d}  SCRAP {d}  PARTS {d}", .{ Market.stall_plazas[stall], self.market.day, self.wallet.scrap, self.wallet.parts });
-    for (0..trade_rows) |r| self.tradeRow(stall, @intCast(r), r == self.trade_row, &out[1 + r]);
+    out[0].set("MARKET {d}  DAY {d}  SCRAP {d}  PARTS {d}", .{ Market.stall_plazas[stall], self.market.day, self.kits[0].wallet.scrap, self.kits[0].wallet.parts });
+    for (0..trade_rows) |r| self.tradeRow(0, stall, @intCast(r), r == self.trade_row, &out[1 + r]);
     out[1 + trade_rows].set("UP/DOWN CHOOSE  ENTER TRADE  ESC CLOSE  RESTOCKS AT DAWN", .{});
     return 2 + trade_rows;
 }
@@ -1413,9 +1490,10 @@ fn endTalk(self: *Sandbox) void {
 /// Conversation input. A choice with an action ends the conversation and opens its panel.
 pub fn talkKey(self: *Sandbox, key: Dialogue.Key) void {
     const session = if (self.talk) |*t| t else return;
-    const scrap = self.wallet.scrap;
-    const outcome = self.dialogue.key(session, key, &self.progress, &self.wallet);
-    if (self.wallet.scrap > scrap) self.say("received {d} scrap", .{self.wallet.scrap - scrap});
+    const wallet = &self.kits[0].wallet;
+    const scrap = wallet.scrap;
+    const outcome = self.dialogue.key(session, key, &self.progress, wallet);
+    if (wallet.scrap > scrap) self.say("received {d} scrap", .{wallet.scrap - scrap});
     switch (outcome) {
         .talking => {},
         .ended => self.endTalk(),
@@ -1485,13 +1563,13 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
         .confirm => switch (shop.kind) {
             .upgrades => {
                 const u: Progress.Upgrade = @enumFromInt(shop.row);
-                self.progress.buy(u, &self.wallet) catch |err| return self.say("cannot upgrade: {s}", .{reason(err)});
-                self.say("{s} now level {d}", .{ Progress.info[shop.row].name, self.progress.level(u) });
+                self.kits[0].buy(u) catch |err| return self.say("cannot upgrade: {s}", .{reason(err)});
+                self.say("{s} now level {d}", .{ Progress.info[shop.row].name, self.kits[0].level(u) });
             },
             .fabricate => {
                 var buffer: [Fabricator.recipes.len]u8 = undefined;
                 const index = Fabricator.onTab(@enumFromInt(shop.tab), &buffer)[shop.row];
-                const made = Fabricator.make(&self.progress, &self.wallet, index) catch |err| return self.say("cannot fabricate: {s}", .{reason(err)});
+                const made = Fabricator.make(&self.progress, &self.kits[0], index) catch |err| return self.say("cannot fabricate: {s}", .{reason(err)});
                 var name_buffer: [24]u8 = undefined;
                 const name = Fabricator.name(made, &name_buffer);
                 switch (made) {
@@ -1529,7 +1607,7 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
             },
             .wardrobe => {
                 const c: Profile.Clothing = @enumFromInt(shop.row);
-                if (!self.progress.owns(c)) self.progress.buySuit(c, &self.wallet) catch |err| return self.say("cannot buy: {s}", .{reason(err)});
+                if (!self.kits[0].owns(c)) self.kits[0].buySuit(c) catch |err| return self.say("cannot buy: {s}", .{reason(err)});
                 self.profile.clothing = c;
                 self.say("wearing the {s}", .{@tagName(c)});
             },
@@ -1967,7 +2045,16 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
         .machines = machines[0..machine_count],
-        .wallet = self.wallet,
+        .members = members: {
+            var list: std.ArrayList(Save.MemberState) = .empty;
+            for (0..max_players) |p| if (self.known[p]) try list.append(arena, .{
+                .slot = @intCast(p),
+                .profile = self.profileOf(p).toDoc(),
+                .own = if (self.own_profiles[p]) |own| own.toDoc() else null,
+                .kit = try self.kits[p].toDoc(arena),
+            });
+            break :members list.items;
+        },
         .progress = try self.progress.toDoc(arena),
         .race_best = self.garage.race.best,
         .fighter = if (self.hangar.fighter) |f| .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .yaw = f.heading() } else null,
@@ -2007,6 +2094,20 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     const doc = parsed.value;
     const profile = try Profile.fromDoc(doc.profile);
     const progress = Progress.fromDoc(doc.progress) catch return error.InvalidSave;
+    // Every player's character and kit; a format 12 save's one wallet and personal progression
+    // become P1's kit.
+    var kits: [max_players]Kit = @splat(.{});
+    var known: [max_players]bool = .{ true, false, false, false };
+    var characters: [max_players]?Profile = @splat(null);
+    var owns: [max_players]?Profile = @splat(null);
+    if (doc.format < Save.format_version) {
+        kits[0] = Progress.legacyKit(doc.progress, doc.wallet) catch return error.InvalidSave;
+    } else for (doc.members) |m| {
+        kits[m.slot] = Kit.fromDoc(m.kit) catch return error.InvalidSave;
+        known[m.slot] = true;
+        characters[m.slot] = try Profile.fromDoc(m.profile);
+        if (m.own) |own| owns[m.slot] = try Profile.fromDoc(own);
+    }
     const blueprints = try allocator.alloc(Blueprint, doc.machines.len);
     defer allocator.free(blueprints);
     var bodies: usize = doc.props.len;
@@ -2085,8 +2186,13 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
         };
     }
     self.market = market;
-    self.wallet = doc.wallet;
     self.progress = progress;
+    self.kits = kits;
+    self.known = known;
+    self.own_profiles = owns;
+    for (&self.guests, 1..) |*g, slot| if (characters[slot]) |c| {
+        g.profile = c;
+    };
     self.endTalk();
     self.shop = null;
     self.trading = null;
@@ -2806,7 +2912,8 @@ test "four local players: guests join beside P1, move and look independently, pr
     try run(&sandbox, &camera, .{}, .{}, 150);
     try std.testing.expectApproxEqAbs(@as(f32, 1), sandbox.machines[0].machine.state[door.device], 0.0001);
 
-    // Leaving removes the body; saves ignore guests, and loading returns them beside P1.
+    // Leaving removes the body. Saves keep every known player's character and kit (P4 too,
+    // though they left), and loading returns those present beside P1.
     sandbox.leaveGuest(2);
     try std.testing.expectEqual(@as(usize, 2), sandbox.guestCount());
     owned = @splat(0);
@@ -2814,10 +2921,14 @@ test "four local players: guests join beside P1, move and look independently, pr
         owned[part.owner] += 1;
     };
     try std.testing.expectEqual(@as(usize, 0), owned[4]);
+    sandbox.kits[3].wallet.scrap = 77;
     const bytes = try sandbox.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
-    try std.testing.expect(std.mem.indexOf(u8, bytes, "guest") == null);
+    sandbox.kits[3].wallet.scrap = 0;
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"members\"") != null);
     try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expect(sandbox.known[3] and std.mem.eql(u8, sandbox.guests[2].profile.name(), "P4"));
+    try std.testing.expectEqual(@as(u32, 77), sandbox.kits[3].wallet.scrap);
     for (sandbox.guests[0..2]) |guest| try std.testing.expect(R.length(R.sub(guest.player.feet, sandbox.player.feet)) < 3);
 }
 
@@ -2909,7 +3020,7 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
     camera.pitch = 0;
     try run(&sb, &camera, .{}, .{}, 1);
     try run(&sb, &camera, .{}, .{ .secondary = true }, 1);
-    try std.testing.expectEqual(@as(u32, 1), sb.wallet.parts);
+    try std.testing.expectEqual(@as(u32, 1), sb.kits[0].wallet.parts);
 
     // Walk up to the stall at plaza 1, aim under its canopy, and open it.
     sb.player.mode = .walk;
@@ -2934,21 +3045,21 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
     try std.testing.expectEqual(@as(usize, trade_rows + 2), sb.tradeLines(&lines));
 
     // Sell six parts (five more from the field), then buy one ware until it sells out.
-    sb.wallet.parts += 5;
+    sb.kits[0].wallet.parts += 5;
     sb.tradeKey(.confirm);
-    try std.testing.expectEqual(Market.Wallet{ .scrap = 6 * sb.market.partPrice(0) }, sb.wallet);
-    sb.wallet.scrap += 200;
+    try std.testing.expectEqual(Market.Wallet{ .scrap = 6 * sb.market.partPrice(0) }, sb.kits[0].wallet);
+    sb.kits[0].wallet.scrap += 200;
     const w: usize = for (0..Market.ware_count) |i| {
         if (sb.market.stalls[0].stock[i] > 0) break i;
     } else unreachable;
     const ware: Market.Ware = @enumFromInt(w);
     for (0..w + 1) |_| sb.tradeKey(.down);
     const stocked = sb.market.stalls[0].stock[w];
-    const scrap = sb.wallet.scrap;
+    const scrap = sb.kits[0].wallet.scrap;
     for (0..stocked + 1) |_| sb.tradeKey(.confirm);
-    try std.testing.expectEqual(stocked, sb.wallet.kits[w]);
+    try std.testing.expectEqual(stocked, sb.kits[0].wallet.kits[w]);
     try std.testing.expectEqual(@as(u8, 0), sb.market.stalls[0].stock[w]);
-    try std.testing.expectEqual(scrap - stocked * sb.market.price(0, ware), sb.wallet.scrap);
+    try std.testing.expectEqual(scrap - stocked * sb.market.price(0, ware), sb.kits[0].wallet.scrap);
 
     // Walking away closes the stall.
     try standAt(&sb, &camera, .{ spawn[0], Terrain.surface(sb.seed, spawn[0], spawn[2]).height, spawn[2] });
@@ -2963,7 +3074,7 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
     const machines = sb.machineCount();
     try Build.place(&sb, preview);
     try std.testing.expectEqual(machines + 1, sb.machineCount());
-    try std.testing.expectEqual(stocked - 1, sb.wallet.kits[w]);
+    try std.testing.expectEqual(stocked - 1, sb.kits[0].wallet.kits[w]);
     const m: u8 = for (sb.machines, 0..) |placed, i| {
         if (placed.kit == ware) break @intCast(i);
     } else unreachable;
@@ -2972,23 +3083,23 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
     Build.capture(&sb);
     try std.testing.expectEqual(prefabs, sb.prefab_count);
     Build.remove(&sb, .{ .structure = m });
-    try std.testing.expectEqual(stocked, sb.wallet.kits[w]);
-    const held = sb.wallet.kits[w];
-    sb.wallet.kits[w] = 0;
+    try std.testing.expectEqual(stocked, sb.kits[0].wallet.kits[w]);
+    const held = sb.kits[0].wallet.kits[w];
+    sb.kits[0].wallet.kits[w] = 0;
     try Build.place(&sb, preview);
     try std.testing.expectEqual(machines, sb.machineCount());
-    sb.wallet.kits[w] = held;
+    sb.kits[0].wallet.kits[w] = held;
     try Build.place(&sb, preview);
 
     // Wallet, stock, market day, and the kit machine survive a save round trip.
     const bytes = try sb.save(std.testing.allocator, camera);
     defer std.testing.allocator.free(bytes);
-    const saved_wallet = sb.wallet;
+    const saved_wallet = sb.kits[0].wallet;
     const saved_stalls = sb.market.stalls;
-    sb.wallet = .{};
+    sb.kits[0].wallet = .{};
     sb.market = Market.init(sb.seed, 0);
     try sb.restore(std.testing.allocator, bytes, &camera);
-    try std.testing.expectEqual(saved_wallet, sb.wallet);
+    try std.testing.expectEqual(saved_wallet, sb.kits[0].wallet);
     try std.testing.expectEqual(saved_stalls, sb.market.stalls);
     try std.testing.expectEqual(ware, sb.machines[m].kit.?);
 
@@ -3120,7 +3231,7 @@ test "cars wait at the edge of a plaza another car is inside, then go when it le
     try std.testing.expectEqual(@as(u32, 0), sb.life.resets);
 }
 
-test "a guest trades at a stall with the party wallet while standing still, and B closes it" {
+test "a guest trades at a stall from their own wallet while standing still, and B closes it" {
     var catalog: Catalog = undefined;
     var camera: Camera = .{};
     var sb: Sandbox = undefined;
@@ -3150,10 +3261,12 @@ test "a guest trades at a stall with the party wallet while standing still, and 
     try run(&sb, &camera, .{}, .{}, 30);
     try std.testing.expect(R.length(R.sub(g.player.feet, feet)) < 0.05);
     g.input = .{};
-    sb.wallet = .{ .parts = 3, .scrap = 200 };
-    g.interact = true; // Row 0: sell the party's parts.
+    sb.kits[1].wallet = .{ .parts = 3, .scrap = 200 };
+    sb.kits[0].wallet = .{ .parts = 5 };
+    g.interact = true; // Row 0: sell the guest's own parts; P1's are untouched.
     try run(&sb, &camera, .{}, .{}, 1);
-    try std.testing.expectEqual(@as(u32, 0), sb.wallet.parts);
+    try std.testing.expectEqual(@as(u32, 0), sb.kits[1].wallet.parts);
+    try std.testing.expectEqual(@as(u32, 5), sb.kits[0].wallet.parts);
     const w: u8 = for (0..Market.ware_count) |i| {
         if (sb.market.stalls[1].stock[i] > 0) break @intCast(i);
     } else unreachable;
@@ -3164,7 +3277,7 @@ test "a guest trades at a stall with the party wallet while standing still, and 
     try std.testing.expectEqual(w + 1, g.trade_row);
     g.interact = true;
     try run(&sb, &camera, .{}, .{}, 1);
-    try std.testing.expectEqual(@as(u8, 1), sb.wallet.kits[w]);
+    try std.testing.expectEqual(@as(u8, 1), sb.kits[1].wallet.kits[w]);
     // B closes the stall; the guest can walk again.
     g.input = .{ .dodge = true };
     try run(&sb, &camera, .{}, .{}, 1);
@@ -3426,10 +3539,10 @@ test "every bridge style is built, stood on along lanes and walkways, and keeps 
     defer sb.deinit();
     // The district's own roads show every buildable style.
     for (@import("BridgeTool.zig").buildable) |style| {
-        const present = for (catalog.district.edges) |e| {
+        const shown = for (catalog.district.edges) |e| {
             if (e.style == style) break true;
         } else false;
-        try std.testing.expect(present);
+        try std.testing.expect(shown);
     }
     try std.testing.expect(catalog.district.building_count >= 12);
     for (@import("BridgeTool.zig").buildable) |style| {
@@ -3531,7 +3644,7 @@ test "hover cars stay where they were left across a save, and pickups stay colle
     try std.testing.expect(sb.garage.cars[1] == null);
 }
 
-test "a guest fires the party's blaster with the trigger and downs a drone" {
+test "a guest fires their own blaster with the trigger and downs a drone" {
     var catalog: Catalog = undefined;
     var camera: Camera = .{};
     var sb: Sandbox = undefined;
@@ -3539,7 +3652,7 @@ test "a guest fires the party's blaster with the trigger and downs a drone" {
     defer catalog.deinit(std.testing.allocator);
     defer sb.deinit();
     sb.joinGuest(0);
-    sb.progress.weapons = 1 << @intFromEnum(@import("../combat/Weapon.zig").WeaponKind.blaster);
+    sb.kits[1].weapons = 1 << @intFromEnum(@import("../combat/Weapon.zig").WeaponKind.blaster);
     try run(&sb, &camera, .{}, .{}, 30);
     const g = &sb.guests[0];
     // Aim level so the drone stands in open air, not under the slope ahead.
