@@ -163,7 +163,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 7, 8 | City overview, by day and at dusk |
 | 9 | Street level |
 | 10–15 | Roads 1–6 at dusk |
-| 16, 17 | Armor lineup; hardsuit close-up |
+| 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |
 | 20 | Suit upgrades |

@@ -880,3 +880,9 @@ Review of the flight, air war, combat, garage and frontier code since the vehicl
 The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminator with the nose wedge.
 
 **Not checked:** the Watercolor and Flat presets were not captured; hair and Wildkin and beasts were not reviewed closely; four-player split-screen ink widths (the view pixel height is per view but only one view was captured); dusk and night; Vulkan, OpenGL and D3D12 (compile-only for the shared Zig, WGSL not compiled there); the 0.17 channel; benchmarks (the hull doubles skinned-character draws). Ink on thin geometry such as hair strands can look busy at distance. The CPU-skinned fallback path (`-Dcpu-skinning`) still uses the scene ramp and has no ink.
+
+## Mecha armor sets and ShapeSpec review — 2026-10-11
+
+- New: `character/armor.zig` (data-driven sets, `ArmorSetDef.validate`, rigid fitted pieces), `ShapeSpec` on hard garments, four sets (mobile_suit, buster, iron_titan, battle_plate), 16-bit armor ownership masks, four fabricator recipes. Saves: armor is stored by tag name, old tags unchanged, so `Save.format_version` is not bumped; Profile and Kit round-trip tests cover the new tags. A save with a new tag will not load in an older build.
+- Tests: armor finite/rigid/winding/bounded for every set at two body sizes, fit test (fails if fitting is disabled; checked by mutation), shapes differ, determinism, validation errors, shell fin test, Ranger builds every armor over undersuit and hardsuit with open and sealed helmets while walking.
+- Looked at: ReleaseFast Metal captures `-Dcharacter-showcase=30..33` (front only, creator panel overlaps the left). Not looked at: back and side views, women, the 0.9 and 1.1 heights visually, MTL_DEBUG_LAYER capture, extreme poses (pauldrons can sink into the chest when arms are raised, since plates bind to one joint). Linux, Windows and the 0.17 channel were not run.

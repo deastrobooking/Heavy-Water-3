@@ -310,6 +310,26 @@ pub const Coverage = enum {
 
 pub const Neckline = enum { crew, v, high };
 
+/// Overall outline of a hard-surface plate, the first thing the eye reads on a mecha silhouette.
+/// `round` is the plain domed plate; `angular` flattens the dome into a keel ridge and facets;
+/// `finned` raises fins along the outer sides; `dome` swells the plate into a shell; `wedge`
+/// tapers a keel to a point toward the plate's far edge.
+pub const Silhouette = enum { round, angular, finned, dome, wedge };
+
+/// How a hard-surface garment (and the standalone armor pieces in `armor.zig`) is shaped. The
+/// defaults reproduce the plain domed plate, so a garment that does not set a shape is unchanged.
+pub const ShapeSpec = struct {
+    silhouette: Silhouette = .round,
+    /// Flare of each plate's far edge, 0 = none, 1 = strongly kicked out (a skirt or bell hem).
+    flare: f32 = 0.0,
+    /// Fin, keel or crest height in meters on a 1.8 m body (scaled with the body).
+    crest: f32 = 0.0,
+    /// 0 = boxy and chamfered, 0.6 and up = fully round. Also softens plate rims.
+    roundness: f32 = 0.6,
+    /// 0 = plates butt with a visible gap, 1 = each plate rides up over the next.
+    overlap: f32 = 0.0,
+};
+
 pub const GarmentSpec = struct {
     kind: GarmentKind = .shell,
     coverage: Coverage = .tshirt,
@@ -322,6 +342,8 @@ pub const GarmentSpec = struct {
     /// do not stretch), plates dome outward by `bulge` toward their centers, and rims thicken.
     hard: bool = false,
     bulge: f32 = 0.006,
+    /// Hard garments: silhouette, flare, crest height, bevel and plate overlap.
+    shape: ShapeSpec = .{},
     /// Hard garments: plate count along the limb (or abdomen bands for a cuirass), separated by
     /// small gaps so the armor articulates; 0 or 1 = one piece.
     segments: u8 = 0,

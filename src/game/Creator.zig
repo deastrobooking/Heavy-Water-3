@@ -24,7 +24,7 @@ confirmed: bool = false,
 /// Clothing the player owns, one bit per `Profile.Clothing`; others are skipped when cycling.
 owned: u8 = 0xff,
 /// Armor accents owned, one bit per `Profile.Armor`.
-owned_armor: u8 = 0xff,
+owned_armor: u16 = 0xffff,
 /// Forms unlocked, one bit per `Profile.Species` (human always; a Wildkin form once its hero
 /// has joined the roster).
 owned_species: u32 = 1,
@@ -72,7 +72,7 @@ pub fn adjust(self: *Creator, delta: i32) void {
     }
     if (self.field == .armor) {
         for (0..enum_compat.fields(Profile.Armor).len) |_| {
-            if (self.owned_armor & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.armor))) != 0) return;
+            if (self.owned_armor & (@as(u16, 1) << @intCast(@intFromEnum(self.draft.armor))) != 0) return;
             self.draft.adjust(.armor, delta);
         }
         return;
