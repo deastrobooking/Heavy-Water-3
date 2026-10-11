@@ -290,15 +290,16 @@ test "mod entries follow the built-ins in the creator, and leaving them restores
     var registry = try testRegistry(std.testing.allocator);
     defer registry.deinit();
     var c: Creator = .{ .registry = &registry };
-    c.begin(.{ .hair_style = .side_part });
+    const last_style = std.enums.values(Profile.HairStyle)[std.enums.values(Profile.HairStyle).len - 1];
+    c.begin(.{ .hair_style = last_style });
     c.field = .hair_style;
     var buffer: [40]u8 = undefined;
-    // side_part is the last built-in; the next option is the first mod entry.
+    // The last built-in style comes before the mod entries; the next option is the first mod entry.
     _ = c.key(.right);
     try std.testing.expectEqualStrings("testmod.flame", c.draft.mod.get(.hair_style).?.slice());
     try std.testing.expectEqualStrings("Flame Crest", c.value(.hair_style, &buffer));
     // The built-in stays as the fallback underneath.
-    try std.testing.expectEqual(Profile.HairStyle.side_part, c.draft.hair_style);
+    try std.testing.expectEqual(last_style, c.draft.hair_style);
     _ = c.key(.right);
     try std.testing.expectEqualStrings("Wisp", c.value(.hair_style, &buffer));
     _ = c.key(.right);

@@ -737,7 +737,7 @@ test "style adjustments change the hair, and a head of a different width still f
     try std.testing.expect(heights[1] > heights[0] + 0.01);
 
     var wide: spec_mod.CharacterSpec = .{ .hair = .{ .custom = def }, .detail = 0.6 };
-    wide.body.head_width *= 1.3;
+    wide.body.head.cranium_width *= 1.3;
     const lm = body.computeLandmarks(wide);
     var skel = try body.buildSkeleton(gpa, wide, lm);
     defer skel.deinit(gpa);
