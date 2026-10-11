@@ -1,9 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const MachGpuBackend = enum { default, webgpu, d3d12, metal, vulkan, opengl };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
     options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1 scout, 2 sentinel, 3 unarmored masculine, 4 unarmored feminine, 5 synthetic") orelse 0);
     options.addOption(bool, "cpu_skinning", b.option(bool, "cpu-skinning", "Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback)") orelse false);
@@ -25,7 +28,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(usize, "field_upload", (b.option(usize, "field-upload-kib", "Scale workload instance upload budget per frame in KiB") orelse 2048) * 1024);
     options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
     options.addOption(bool, "audio", b.option(bool, "audio", "Open the system audio device (default true; false runs silent)") orelse true);
-    const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true, .sysaudio = true });
+    const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .core = true, .sysaudio = true, .sysgpu_backend = mach_gpu_backend });
     const enum_compat = b.createModule(.{ .root_source_file = b.path("src/compat/enum.zig"), .target = target, .optimize = optimize });
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
     // output is embedded, so the app never parses glTF at runtime.

@@ -1848,6 +1848,14 @@ const Command = union(enum) {
         base_vertex: i32,
         first_instance: u32,
     },
+    draw_indirect: struct {
+        buffer: *Buffer,
+        offset: u64,
+    },
+    draw_indexed_indirect: struct {
+        buffer: *Buffer,
+        offset: u64,
+    },
     set_compute_bind_group: struct {
         group_index: u32,
         group: *BindGroup,
@@ -2212,6 +2220,24 @@ pub const CommandBuffer = struct {
                         cmd.base_vertex,
                         cmd.first_instance,
                     );
+                },
+                .draw_indirect => |cmd| {
+                    if (vertex_state.apply_count > 0)
+                        applyVertexBuffers(gl, &vertex_state, render_pipeline.?);
+
+                    gl.bindBuffer(c.GL_DRAW_INDIRECT_BUFFER, cmd.buffer.handle);
+                    gl.drawArraysIndirect(render_pipeline.?.mode, @ptrFromInt(cmd.offset));
+                    gl.bindBuffer(c.GL_DRAW_INDIRECT_BUFFER, 0);
+                    cmd.buffer.manager.release();
+                },
+                .draw_indexed_indirect => |cmd| {
+                    if (vertex_state.apply_count > 0)
+                        applyVertexBuffers(gl, &vertex_state, render_pipeline.?);
+
+                    gl.bindBuffer(c.GL_DRAW_INDIRECT_BUFFER, cmd.buffer.handle);
+                    gl.drawElementsIndirect(render_pipeline.?.mode, index_type, @ptrFromInt(cmd.offset));
+                    gl.bindBuffer(c.GL_DRAW_INDIRECT_BUFFER, 0);
+                    cmd.buffer.manager.release();
                 },
                 .set_index_buffer => |cmd| {
                     const buffer = cmd.buffer;
@@ -2702,6 +2728,30 @@ pub const RenderPassEncoder = struct {
             .base_vertex = base_vertex,
             .first_instance = first_instance,
         } });
+    }
+
+    pub fn drawIndexedIndirect(encoder: *RenderPassEncoder, buffer: *Buffer, offset: u64) !void {
+        if (!buffer.usage.indirect) return error.BufferMissingIndirectUsage;
+        if (offset % 4 != 0) return error.IndirectOffsetMisaligned;
+        if (offset > buffer.size or buffer.size - offset < @sizeOf(sysgpu.DrawIndexedIndirectArgs)) {
+            return error.IndirectArgumentsOutOfBounds;
+        }
+
+        try encoder.reference_tracker.referenceBuffer(buffer);
+        buffer.manager.reference();
+        try encoder.commands.append(allocator, .{ .draw_indexed_indirect = .{ .buffer = buffer, .offset = offset } });
+    }
+
+    pub fn drawIndirect(encoder: *RenderPassEncoder, buffer: *Buffer, offset: u64) !void {
+        if (!buffer.usage.indirect) return error.BufferMissingIndirectUsage;
+        if (offset % 4 != 0) return error.IndirectOffsetMisaligned;
+        if (offset > buffer.size or buffer.size - offset < @sizeOf(sysgpu.DrawIndirectArgs)) {
+            return error.IndirectArgumentsOutOfBounds;
+        }
+
+        try encoder.reference_tracker.referenceBuffer(buffer);
+        buffer.manager.reference();
+        try encoder.commands.append(allocator, .{ .draw_indirect = .{ .buffer = buffer, .offset = offset } });
     }
 
     pub fn end(encoder: *RenderPassEncoder) !void {

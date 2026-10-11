@@ -23,6 +23,8 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `python3 tools/zig.py build sounds` | Writes every synthesized sound to `zig-out/sounds/*.wav` for listening. |
 | `python3 tools/zig.py build heightmap -- <in.pgm> <out.hwmh> [width depth elevation base]` | Imports a PGM heightmap to the runtime terrain format. |
 
+For backend-specific development builds, pass `-Dmach_gpu_backend=metal`, `vulkan`, `opengl`, or `d3d12`. The default selects the platform backend. Each backend requires a supported target and its native platform libraries.
+
 The fork's build scripts, game enum reflection, static bitsets, and Mach vector types have compatibility paths for newer compilers. The Zig 0.17 and 0.18 game builds reach Mach's module reflection and currently stop at old `Type.StructField` usage plus Zig's removed `@cImport` builtin in Mach's shader, font, audio, and platform modules. Keep the proven Mach compiler as the default until the full compile passes. Run `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` or `HEAVYWATER_ZIG_CHANNEL=0.18-dev python3 tools/zig.py build check` to inspect compatibility progress.
 
 ### Optimization modes

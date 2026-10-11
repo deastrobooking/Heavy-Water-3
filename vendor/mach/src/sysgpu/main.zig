@@ -984,22 +984,20 @@ pub const Impl = sysgpu.Interface(struct {
     }
 
     pub inline fn renderPassEncoderDrawIndexedIndirect(render_pass_encoder: *sysgpu.RenderPassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) void {
-        if (backend_type == .metal) {
-            const encoder: *impl.RenderPassEncoder = @ptrCast(@alignCast(render_pass_encoder));
-            const buffer: *impl.Buffer = @ptrCast(@alignCast(indirect_buffer));
-            encoder.drawIndexedIndirect(buffer, indirect_offset) catch @panic("api error");
-        } else {
-            @panic("drawIndexedIndirect is not implemented for this backend");
+        const encoder: *impl.RenderPassEncoder = @ptrCast(@alignCast(render_pass_encoder));
+        const buffer: *impl.Buffer = @ptrCast(@alignCast(indirect_buffer));
+        switch (backend_type) {
+            .metal, .vulkan, .opengl => encoder.drawIndexedIndirect(buffer, indirect_offset) catch @panic("api error"),
+            else => @panic("drawIndexedIndirect is not implemented for this backend"),
         }
     }
 
     pub inline fn renderPassEncoderDrawIndirect(render_pass_encoder: *sysgpu.RenderPassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) void {
-        if (backend_type == .metal) {
-            const encoder: *impl.RenderPassEncoder = @ptrCast(@alignCast(render_pass_encoder));
-            const buffer: *impl.Buffer = @ptrCast(@alignCast(indirect_buffer));
-            encoder.drawIndirect(buffer, indirect_offset) catch @panic("api error");
-        } else {
-            @panic("drawIndirect is not implemented for this backend");
+        const encoder: *impl.RenderPassEncoder = @ptrCast(@alignCast(render_pass_encoder));
+        const buffer: *impl.Buffer = @ptrCast(@alignCast(indirect_buffer));
+        switch (backend_type) {
+            .metal, .vulkan, .opengl => encoder.drawIndirect(buffer, indirect_offset) catch @panic("api error"),
+            else => @panic("drawIndirect is not implemented for this backend"),
         }
     }
 

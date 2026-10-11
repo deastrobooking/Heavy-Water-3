@@ -3209,6 +3209,7 @@ pub const RenderPassEncoder = struct {
     framebuffer: vk.Framebuffer,
     extent: vk.Extent2D,
     pipeline: ?*RenderPipeline = null,
+    index_buffer_set: bool = false,
 
     pub fn init(cmd_encoder: *CommandEncoder, desc: *const sysgpu.RenderPassDescriptor) !*RenderPassEncoder {
         const device = cmd_encoder.device;
@@ -3398,6 +3399,41 @@ pub const RenderPassEncoder = struct {
         vkd.cmdDrawIndexed(vk_command_buffer, index_count, instance_count, first_index, base_vertex, first_instance);
     }
 
+    pub fn drawIndexedIndirect(encoder: *RenderPassEncoder, buffer: *Buffer, offset: u64) !void {
+        if (!buffer.usage.indirect) return error.BufferMissingIndirectUsage;
+        if (offset % 4 != 0) return error.IndirectOffsetMisaligned;
+        if (offset > buffer.size or buffer.size - offset < @sizeOf(sysgpu.DrawIndexedIndirectArgs)) {
+            return error.IndirectArgumentsOutOfBounds;
+        }
+        if (!encoder.index_buffer_set) return error.IndexBufferNotSet;
+
+        try encoder.reference_tracker.referenceBuffer(buffer);
+        vkd.cmdDrawIndexedIndirect(
+            encoder.vk_command_buffer,
+            buffer.vk_buffer,
+            offset,
+            1,
+            @sizeOf(sysgpu.DrawIndexedIndirectArgs),
+        );
+    }
+
+    pub fn drawIndirect(encoder: *RenderPassEncoder, buffer: *Buffer, offset: u64) !void {
+        if (!buffer.usage.indirect) return error.BufferMissingIndirectUsage;
+        if (offset % 4 != 0) return error.IndirectOffsetMisaligned;
+        if (offset > buffer.size or buffer.size - offset < @sizeOf(sysgpu.DrawIndirectArgs)) {
+            return error.IndirectArgumentsOutOfBounds;
+        }
+
+        try encoder.reference_tracker.referenceBuffer(buffer);
+        vkd.cmdDrawIndirect(
+            encoder.vk_command_buffer,
+            buffer.vk_buffer,
+            offset,
+            1,
+            @sizeOf(sysgpu.DrawIndirectArgs),
+        );
+    }
+
     pub fn setBindGroup(
         encoder: *RenderPassEncoder,
         group_index: u32,
@@ -3438,6 +3474,7 @@ pub const RenderPassEncoder = struct {
         try encoder.reference_tracker.referenceBuffer(buffer);
 
         vkd.cmdBindIndexBuffer(vk_command_buffer, buffer.vk_buffer, offset, conv.vulkanIndexType(format));
+        encoder.index_buffer_set = true;
     }
 
     pub fn setPipeline(encoder: *RenderPassEncoder, pipeline: *RenderPipeline) !void {
