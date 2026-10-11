@@ -57,10 +57,11 @@ pub fn computeLandmarks(spec: CharacterSpec) Landmarks {
     const B = h / 6.3;
     const f = b.femininity;
     const chin_y = h - H;
-    const shoulder_y = chin_y - 0.36 * B;
+    // Anime necks are short: the shoulder line sits `neck_length` body units under the chin.
+    const shoulder_y = chin_y - b.head.neck_length * B;
     const crotch_y = b.leg_ratio * h;
     const span = shoulder_y - crotch_y;
-    const head_half = 0.5 * b.head_width * H;
+    const head_half = 0.5 * b.head.cranium_width * b.head.cranium_size * H;
     const scalp_c = Vec3.init(0, chin_y + 0.60 * H, -0.04 * H);
     return .{
         .H = H,
@@ -75,12 +76,12 @@ pub fn computeLandmarks(spec: CharacterSpec) Landmarks {
         .hip_half_width = m.lerp(0.55, 0.64, f) * b.hip_width * B,
         .head_half_width = head_half,
         .scalp_center = scalp_c,
-        .scalp_radii = Vec3.init(head_half * 1.08, (h - scalp_c.y) * 1.05, 0.52 * H),
+        .scalp_radii = Vec3.init(head_half * 1.08, (h - scalp_c.y) * 1.05, 0.54 * b.head.cranium_depth * b.head.cranium_size * H),
         .arm_dir_l = Vec3.init(@cos(b.arm_rest_angle), -@sin(b.arm_rest_angle), 0),
         .upper_arm_len = 0.172 * h,
         .forearm_len = 0.142 * h,
-        .hand_len = 0.092 * h,
-        .foot_len = 0.13 * h,
+        .hand_len = 0.092 * h * b.hand_scale,
+        .foot_len = 0.13 * h * b.foot_scale,
     };
 }
 
@@ -104,7 +105,7 @@ pub fn buildSkeleton(gpa: Allocator, spec: CharacterSpec, lm: Landmarks) !Skelet
     const hips = try s.addBone(gpa, "hips", @intCast(root), Vec3.init(0, lm.crotch_y + 0.22 * span, -0.02 * H));
     const spine = try s.addBone(gpa, "spine", @intCast(hips), Vec3.init(0, lm.crotch_y + 0.50 * span, -0.04 * H));
     const chest = try s.addBone(gpa, "chest", @intCast(spine), Vec3.init(0, lm.crotch_y + 0.76 * span, -0.04 * H));
-    const neck = try s.addBone(gpa, "neck", @intCast(chest), Vec3.init(0, lm.chin_y - 0.22 * H, -0.08 * H));
+    const neck = try s.addBone(gpa, "neck", @intCast(chest), Vec3.init(0, lm.chin_y - 0.6 * b.head.neck_length * H, -0.08 * H));
     _ = try s.addBone(gpa, "head", @intCast(neck), Vec3.init(0, lm.chin_y + 0.12 * lm.H, -0.10 * lm.H));
 
     inline for (.{ 1.0, -1.0 }, .{ "_l", "_r" }) |side, suffix| {
@@ -286,7 +287,7 @@ fn buildNeck(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks, sk
     defer gpa.free(line);
     const ctx: NeckCtx = .{
         // Keep a visible, anatomical taper without the thin-post look at gameplay scale.
-        .r = m.lerp(0.19, 0.16, spec.body.femininity) * H,
+        .r = m.lerp(0.19, 0.16, spec.body.femininity) * spec.body.head.neck_thickness * H,
         .pivots = .{ skel.worldPos(.chest).y, skel.worldPos(.neck).y, skel.worldPos(.head).y },
         .H = H,
     };
@@ -298,63 +299,71 @@ const HeadCtx = struct {
     chin_y: f32,
     H: f32,
     half: f32,
-    us: [7]f32,
-    a: [7]f32,
-    b: [7]f32,
-    z: [7]f32,
+    prof: spec_mod.HeadSpec.Profile,
+    head: spec_mod.HeadSpec,
     y0: f32,
     y1: f32,
     eye_y: f32,
     eye_size: f32,
     eye_spacing: f32,
+    brow_y: f32,
+    nose_y: f32,
 
     pub fn uOf(c: *const HeadCtx, t: f32) f32 {
         return (m.lerp(c.y0, c.y1, t) - c.chin_y) / c.H;
     }
+    /// Center of the skull cross-section along z at face height `u`.
+    fn centerZ(c: *const HeadCtx, u: f32) f32 {
+        const uc = m.clamp(u, c.prof.us[0], c.prof.us[c.prof.us.len - 1]);
+        return 0.5 * c.H * (curve.spline1D(&c.prof.us, &c.prof.front, uc) + curve.spline1D(&c.prof.us, &c.prof.back, uc));
+    }
     pub fn section(c: *const HeadCtx, t: f32) Section {
         const u = c.uOf(t);
+        const front = curve.spline1D(&c.prof.us, &c.prof.front, u);
+        const back = curve.spline1D(&c.prof.us, &c.prof.back, u);
         return .{
-            .a = curve.spline1D(&c.us, &c.a, u),
-            .b = curve.spline1D(&c.us, &c.b, u),
+            .a = curve.spline1D(&c.prof.us, &c.prof.half_w, u) * c.H,
+            .b = 0.5 * (front - back) * c.H,
             .n = 2.1,
-            .offset = .{ .y = curve.spline1D(&c.us, &c.z, u) },
+            .offset = .{ .y = 0.5 * (front + back) * c.H },
         };
     }
     pub fn displace(c: *const HeadCtx, _: f32, _: f32, p: Vec3, fr: curve.Frame) Vec3 {
         var out = p;
         const u = (p.y - c.chin_y) / c.H;
-        const center_z = fr.origin.z + curve.spline1D(&c.us, &c.z, m.clamp(u, 0, 1));
-        const fwd = p.z - center_z;
+        const fwd = p.z - (fr.origin.z + c.centerZ(u));
         if (fwd > 0) {
-            // Retain a readable front plane while letting the cheeks and nose turn in profile.
+            // Retain a readable front plane while letting the cheeks turn in profile.
             const front = m.saturate(fwd / (0.45 * c.H));
             const lat = m.saturate(1 - @abs(p.x) / c.half);
             const band = m.smoothstep(0.12, 0.30, u) * (1 - m.smoothstep(0.62, 0.80, u));
             out.z -= fwd * 0.10 * front * front * lat * band;
 
-            // Shallow orbital transitions keep the decal eyes seated in the face.
             const eye_x = 2 * c.eye_spacing * c.half;
             inline for (.{ -1.0, 1.0 }) |side| {
+                // Shallow orbital transition keeps the decal eyes seated in the face.
                 const ex = (p.x - side * eye_x) / (1.25 * c.eye_size * c.half);
                 const ey = (u - c.eye_y) / 0.075;
                 out.z -= 0.006 * c.H * bump(ex * ex + ey * ey) * front;
 
-                // A restrained brow and cheek plane gives the face volume without a heavy mask.
-                const bx = (p.x - side * 0.34 * c.half) / (0.30 * c.half);
-                const by = (u - (c.eye_y + 0.095)) / 0.055;
-                out.z += 0.010 * c.H * bump(bx * bx + by * by) * front;
-                const cx = (p.x - side * 0.43 * c.half) / (0.34 * c.half);
-                const cy = (u - 0.30) / 0.15;
-                out.z += 0.014 * c.H * bump(cx * cx + cy * cy) * front;
+                // Brow ridge over each eye, and a soft cheek pad under it.
+                const bx = (p.x - side * eye_x) / (1.1 * c.eye_size * c.half);
+                const by = (u - c.brow_y) / 0.05;
+                out.z += c.head.brow_ridge * c.H * bump(bx * bx + by * by) * front;
+                const cx = (p.x - side * 1.05 * eye_x) / (0.8 * c.eye_size * c.half + 0.12 * c.half);
+                const cy = (u - c.head.cheek_height) / 0.13;
+                out.z += c.head.cheek_fullness * c.H * bump(cx * cx + cy * cy) * front;
             }
 
-            // A continuous bridge meets a small tip instead of one round bump.
-            const bridge_x = p.x / (0.11 * c.H);
-            const bridge_y = (u - 0.405) / 0.15;
-            out.z += 0.018 * c.H * bump(bridge_x * bridge_x + bridge_y * bridge_y) * front;
-            const tip_x = p.x / (0.075 * c.H);
-            const tip_y = (u - 0.345) / 0.07;
-            out.z += 0.050 * c.H * bump(tip_x * tip_x + tip_y * tip_y) * front;
+            // The nose is a narrow low bridge ending in a tiny tip; a shadow mark in the face
+            // decal does the rest of the work, so profile views stay clean.
+            const bridge_mid = 0.5 * (c.eye_y - 0.02 + c.nose_y);
+            const bridge_x = p.x / (0.05 * c.H);
+            const bridge_y = (u - bridge_mid) / (0.6 * (c.eye_y - 0.02 - c.nose_y));
+            out.z += c.head.nose_bridge * c.H * bump(bridge_x * bridge_x + bridge_y * bridge_y) * front;
+            const tip_x = p.x / (0.05 * c.H);
+            const tip_y = (u - c.nose_y) / 0.04;
+            out.z += c.head.nose_tip * c.H * bump(tip_x * tip_x + tip_y * tip_y) * front;
         }
         return out;
     }
@@ -365,8 +374,7 @@ const HeadCtx = struct {
         const u = (v.pos.y - c.chin_y) / c.H;
         // planar face UV: x across face, y chin(0) -> crown(1)
         const fu = 0.5 + v.pos.x / (2.0 * c.half);
-        const center_z = curve.spline1D(&c.us, &c.z, m.clamp(u, 0, 1));
-        const is_face = v.pos.z - center_z > 0.18 * c.H and u > -0.05 and u < 0.80;
+        const is_face = v.pos.z - c.centerZ(u) > 0.18 * c.H and u > -0.05 and u < 0.80;
         v.region = if (is_face) .face else .head;
         // Non-face verts get UVs outside [0,1] so face decals (eyes) never land on them.
         v.uv = if (is_face) .{ .x = fu, .y = u } else .{ .x = -1, .y = -1 };
@@ -375,21 +383,21 @@ const HeadCtx = struct {
 
 fn headContext(spec: CharacterSpec, lm: Landmarks) HeadCtx {
     const H = lm.H;
-    const half = lm.head_half_width;
-    const jaw = spec.body.jaw_sharpness;
+    const prof = spec.body.head.profile();
+    const e = spec.eyes;
     return .{
         .chin_y = lm.chin_y,
         .H = H,
-        .half = half,
-        .us = .{ 0.08, 0.22, 0.36, 0.50, 0.62, 0.72, 0.80 },
-        .a = .{ m.lerp(0.16, 0.10, jaw) * H, half * m.lerp(0.74, 0.56, jaw), half * 0.92, half, half * 1.02, half, half * 0.9 },
-        .b = .{ 0.09 * H, 0.32 * H, 0.42 * H, 0.46 * H, 0.48 * H, 0.48 * H, 0.45 * H },
-        .z = .{ 0.20 * H, 0.10 * H, 0.04 * H, 0.0, -0.02 * H, -0.03 * H, -0.04 * H },
-        .y0 = lm.chin_y + 0.08 * H,
-        .y1 = lm.chin_y + 0.72 * H,
-        .eye_y = spec.eyes.height,
-        .eye_size = spec.eyes.size,
-        .eye_spacing = spec.eyes.spacing,
+        .half = lm.head_half_width,
+        .prof = prof,
+        .head = spec.body.head,
+        .y0 = lm.chin_y + prof.us[0] * H,
+        .y1 = lm.chin_y + prof.us[prof.us.len - 1] * H,
+        .eye_y = e.height,
+        .eye_size = e.size,
+        .eye_spacing = e.spacing,
+        .brow_y = e.height + 0.5 * e.size * e.aspect + e.brow_gap,
+        .nose_y = e.nose_height,
     };
 }
 
@@ -507,13 +515,14 @@ fn buildHand(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks, sk
     const palm_n = d.cross(Vec3.unit_z).scale(side).normalize(); // faces the thigh
     const joint = sideIndex(.hand_l, .hand_r, side);
     const region: Region = if (side > 0) .hand_l else .hand_r;
+    const hs = spec.body.hand_scale; // finger and palm girth follows the hand length
     const palm_len = 0.50 * lm.hand_len;
     const cols = spec.res(14, 6);
 
     // palm
     {
         const pts = [_]Vec3{ wr.addScaled(d, -0.02 * H), wr.addScaled(d, 0.5 * palm_len), wr.addScaled(d, palm_len) };
-        const ctx: SimpleCtx = .{ .a0 = 0.11 * H, .a1 = 0.15 * H, .b0 = 0.06 * H, .b1 = 0.045 * H, .n = 2.6, .joint = joint };
+        const ctx: SimpleCtx = .{ .a0 = 0.11 * H * hs, .a1 = 0.15 * H * hs, .b0 = 0.06 * H * hs, .b1 = 0.045 * H * hs, .n = 2.6, .joint = joint };
         _ = try loft_mod.loft(gpa, mesh, &pts, .{ .cols = cols, .ref_normal = across, .region = region, .cap_start = .dome, .cap_end = .dome, .cap_length = 0.6 }, &ctx);
     }
     // fingers: index..pinky, slight natural curl toward the palm
@@ -521,12 +530,12 @@ fn buildHand(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks, sk
     const lens = [_]f32{ 0.44, 0.48, 0.45, 0.36 };
     for (offs, lens) |o, l| {
         const fl = l * lm.hand_len;
-        const base = wr.addScaled(d, palm_len * 0.92).addScaled(across, o * H);
+        const base = wr.addScaled(d, palm_len * 0.92).addScaled(across, o * H * hs);
         const mid = base.addScaled(d, fl * 0.5).addScaled(palm_n, fl * 0.10);
         const tip = mid.addScaled(d.scale(0.75).add(palm_n.scale(0.6)).normalize(), fl * 0.5);
         const pts = try curveThrough(gpa, &.{ base, mid, tip }, 6);
         defer gpa.free(pts);
-        const ctx: SimpleCtx = .{ .a0 = 0.032 * H, .a1 = 0.026 * H, .b0 = 0.028 * H, .b1 = 0.023 * H, .joint = joint };
+        const ctx: SimpleCtx = .{ .a0 = 0.032 * H * hs, .a1 = 0.026 * H * hs, .b0 = 0.028 * H * hs, .b1 = 0.023 * H * hs, .joint = joint };
         _ = try loft_mod.loft(gpa, mesh, pts, .{ .cols = spec.res(8, 5), .ref_normal = across, .region = region, .cap_end = .dome, .cap_rings = 2 }, &ctx);
     }
     // thumb
@@ -538,7 +547,7 @@ fn buildHand(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks, sk
         const tip = mid.addScaled(dir.add(palm_n.scale(0.3)).normalize(), tl * 0.5);
         const pts = try curveThrough(gpa, &.{ base, mid, tip }, 6);
         defer gpa.free(pts);
-        const ctx: SimpleCtx = .{ .a0 = 0.045 * H, .a1 = 0.03 * H, .b0 = 0.04 * H, .b1 = 0.027 * H, .joint = joint };
+        const ctx: SimpleCtx = .{ .a0 = 0.045 * H * hs, .a1 = 0.03 * H * hs, .b0 = 0.04 * H * hs, .b1 = 0.027 * H * hs, .joint = joint };
         _ = try loft_mod.loft(gpa, mesh, pts, .{ .cols = spec.res(8, 5), .ref_normal = across, .region = region, .cap_start = .dome, .cap_end = .dome, .cap_rings = 2 }, &ctx);
     }
 }
@@ -634,8 +643,9 @@ fn buildFoot(gpa: Allocator, mesh: *Mesh, spec: CharacterSpec, lm: Landmarks, sk
     const toe = skel.worldPos(if (side > 0) .toe_l else .toe_r);
     const fl = lm.foot_len;
     const ctx_ts = [5]f32{ 0, 0.25, 0.55, 0.78, 1 };
-    const ctx_a = [5]f32{ 0.11 * H, 0.14 * H, 0.155 * H, 0.15 * H, 0.10 * H };
-    const ctx_b = [5]f32{ 0.10 * H, 0.15 * H, 0.10 * H, 0.07 * H, 0.055 * H };
+    const fs = spec.body.foot_scale;
+    const ctx_a = [5]f32{ 0.11 * H * fs, 0.14 * H * fs, 0.155 * H * fs, 0.15 * H * fs, 0.10 * H * fs };
+    const ctx_b = [5]f32{ 0.10 * H, 0.15 * H * fs, 0.10 * H * fs, 0.07 * H * fs, 0.055 * H * fs };
     // centerline height follows the half-height so the sole sits on y=0
     const heel_z = an.z - 0.22 * fl;
     const rows = spec.res(14, 6);
