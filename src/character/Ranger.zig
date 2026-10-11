@@ -12,6 +12,9 @@ const m = @import("math.zig");
 const toon = @import("toon.zig");
 const Beasts = @import("Beasts.zig");
 const armor_kit = @import("armor.zig");
+const hair_def = @import("hair_style.zig");
+const cel_style = @import("CelStyle.zig");
+const CharacterContent = @import("../game/CharacterContent.zig");
 const Mesh = @import("../render/Mesh.zig");
 const V = m.Vec3;
 const Q = m.Quat;
@@ -44,19 +47,63 @@ profile: Profile,
 controller: Animation.Controller = .{},
 last_pose: ?Pose = null,
 last_blend: ?Animation.Blend = null,
+/// How many entries the content registry held when this was built; the owner rebuilds when a
+/// mod installs later, so a saved choice appears as soon as its mod does.
+content_count: usize = 0,
 
 fn rgb(c: [4]f32, factor: f32) spec.Rgb {
     return .{ .r = c[0] * factor, .g = c[1] * factor, .b = c[2] * factor };
 }
 pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
+    return initContent(a, profile, null);
+}
+
+/// The installed mod entry a profile picked for `slot`, or null: unset, mod missing or no registry.
+fn modEntry(profile: Profile, slot: CharacterContent.Slot, content: ?*const CharacterContent.Registry) ?*const CharacterContent.Entry {
+    const registry = content orelse return null;
+    const handle = profile.mod.resolve(slot, registry) orelse return null;
+    return registry.get(handle);
+}
+
+/// The face a profile wears: the mod preset it chose, else its built-in face style.
+pub fn facePresetFor(profile: Profile, content: ?*const CharacterContent.Registry) spec.FacePreset {
+    if (modEntry(profile, .face_preset, content)) |entry| {
+        if (CharacterContent.facePreset(entry)) |preset| return preset else |_| {}
+    }
+    return facePreset(profile.face_style);
+}
+
+/// The armor set a profile wears: the mod set it chose (built into `storage`, which the result
+/// borrows) or the set matching its built-in armor tag.
+fn resolveArmor(profile: Profile, content: ?*const CharacterContent.Registry, storage: *armor_kit.ArmorSetDef) *const armor_kit.ArmorSetDef {
+    if (modEntry(profile, .armor_set, content)) |entry| {
+        if (CharacterContent.armorSet(entry)) |def| {
+            storage.* = def;
+            return storage;
+        } else |_| {}
+    }
+    return armorDef(profile);
+}
+
+/// The cel style the profile's mod selection asks for, validated; null means the game's own look.
+pub fn modCelStyle(profile: Profile, content: ?*const CharacterContent.Registry) ?cel_style.CelStyle {
+    const entry = modEntry(profile, .cel_style, content) orelse return null;
+    return CharacterContent.celStyle(entry) catch null;
+}
+
+/// Builds a character, drawing the profile's chosen mod face, hair and armor from `content`
+/// (anything unresolved falls back to the built-in choice). The result borrows nothing from it.
+pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const CharacterContent.Registry) !Ranger {
+    var armor_storage: armor_kit.ArmorSetDef = undefined;
+    const armor_def = resolveArmor(profile, content, &armor_storage);
     var garments: [16]spec.GarmentSpec = undefined;
-    const outfit_len = outfit(profile, &garments);
+    const outfit_len = outfitShaped(profile, &garments, armor_def.shape);
     const feminine = profile.presentation == .feminine;
     // Synthetics: a cool porcelain sheen over the chosen tone, and eyes lit in the accent.
     const synthetic = profile.class == .synthetic and profile.species == .human;
     const wildkin = profile.species != .human;
     const lumen = Profile.accent_colors[profile.accent];
-    const preset = facePreset(profile.face_style);
+    const preset = facePresetFor(profile, content);
     var eyes = Beasts.eyes(profile.species, .{
         .size = (if (feminine) @as(f32, 0.22) else 0.20) * preset.eye_size_scale,
         .aspect = (if (feminine) @as(f32, 0.92) else 0.84) * preset.eye_aspect_scale,
@@ -112,26 +159,35 @@ pub fn init(a: std.mem.Allocator, profile: Profile) !Ranger {
         .topknot => .topknot,
         .spike_tail => .spike_tail,
     };
+    var hair_storage: hair_def.StyleDef = undefined;
+    var custom_hair: ?*const hair_def.StyleDef = null;
+    if (modEntry(profile, .hair_style, content)) |entry| {
+        if (CharacterContent.hairStyle(entry)) |def| {
+            hair_storage = def;
+            custom_hair = &hair_storage;
+        } else |_| {}
+    }
     var ch = try gen.Character.build(a, .{
-        .body = bodySpec(profile),
+        .body = bodySpecWith(profile, preset),
         // Wildkin wear their coat where a human shows skin.
         .skin = if (wildkin) rgb(Profile.coat_colors[profile.coat], 1) else if (synthetic) mix(Profile.skin_tones[profile.skin], spec.Rgb.hex(0xe4eaef), 0.6) else rgb(Profile.skin_tones[profile.skin], 1),
         .eyes = eyes,
-        .hair = .{ .style = hair_style, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = if (hair_style == .afro or hair_style == .alien_crown) 1.25 else 0.8, .spikiness = if (hair_style == .nova_spike or hair_style == .alien_crown) 0.95 else 0.35, .bang_count = if (hair_style == .nova_spike) 9 else 5, .spike_scale = Profile.hairFactor(profile.hair_spike), .volume_scale = Profile.hairFactor(profile.hair_volume), .length_scale = Profile.hairFactor(profile.hair_length) },
+        .hair = .{ .custom = custom_hair, .style = hair_style, .color = rgb(Profile.hair_colors[profile.hair_color], 1), .ahoge = false, .chain_joints = 0, .length = 1.4, .volume = if (hair_style == .afro or hair_style == .alien_crown) 1.25 else 0.8, .spikiness = if (hair_style == .nova_spike or hair_style == .alien_crown) 0.95 else 0.35, .bang_count = if (hair_style == .nova_spike) 9 else 5, .spike_scale = Profile.hairFactor(profile.hair_spike), .volume_scale = Profile.hairFactor(profile.hair_volume), .length_scale = Profile.hairFactor(profile.hair_length) },
         .outfit = garments[0..outfit_len],
         .detail = 0.7,
     });
     errdefer ch.deinit(a);
     // The generator consumes outfit specifications synchronously; never retain a stack slice.
     ch.spec.outfit = &.{};
-    try equip(a, &ch, profile);
+    ch.spec.hair.custom = null;
+    try equip(a, &ch, profile, armor_def);
     softenFace(&ch);
     var inst = try gen.Instance.init(a, &ch);
     errdefer inst.deinit(a);
     const vertices = try a.alloc(Mesh.Vertex, ch.mesh.vertices.items.len);
     errdefer a.free(vertices);
     const indices = try a.dupe(u32, ch.mesh.indices.items);
-    var self: Ranger = .{ .character = ch, .instance = inst, .mesh = .{ .vertices = vertices, .indices = indices }, .profile = profile };
+    var self: Ranger = .{ .character = ch, .instance = inst, .mesh = .{ .vertices = vertices, .indices = indices }, .profile = profile, .content_count = if (content) |registry| registry.count else 0 };
     for (self.mesh.vertices, self.character.mesh.vertices.items, self.character.color_index.items) |*v, source, color| {
         var c = self.character.palette.items[color];
         if (source.region == .face and source.uv.x >= 0 and source.uv.y >= 0) {
@@ -170,7 +226,8 @@ pub fn deinit(self: *Ranger, a: std.mem.Allocator) void {
     self.character.deinit(a);
 }
 pub fn sameAppearance(a: Profile, b: Profile) bool {
-    // Names do not affect mesh generation.
+    // Names do not affect mesh generation. Everything else does, including the namespaced mod
+    // ids in `Profile.mod`, so picking or clearing mod content rebuilds the mesh.
     var x = a;
     var y = b;
     x.name_buffer = @splat(0);
@@ -435,12 +492,20 @@ pub fn facePreset(style: Profile.FaceStyle) spec.FacePreset {
 
 /// The body part of a profile's character spec (everything the skeleton depends on).
 pub fn bodySpec(profile: Profile) spec.BodySpec {
+    return bodySpecWith(profile, facePreset(profile.face_style));
+}
+
+/// `bodySpec` with the mod face a profile chose, when `content` holds it.
+pub fn bodySpecContent(profile: Profile, content: ?*const CharacterContent.Registry) spec.BodySpec {
+    return bodySpecWith(profile, facePresetFor(profile, content));
+}
+
+fn bodySpecWith(profile: Profile, preset: spec.FacePreset) spec.BodySpec {
     const feminine = profile.presentation == .feminine;
     // Wildkin forms scale height and build, and carry cartoon-heroic heads.
     const form = Beasts.scale(profile.species);
     const build = profile.build * form.build;
     const wildkin = profile.species != .human;
-    const preset = facePreset(profile.face_style);
     const head: spec.HeadSpec = if (wildkin) .{ .cranium_width = 0.9, .jaw_taper = 0.2, .neck_length = 0.36, .neck_thickness = 1.0 } else if (feminine) preset.feminine else preset.masculine;
     return .{ .height = 1.8 * profile.height * form.height, .head_ratio = if (wildkin) Beasts.headRatio(profile.species) else preset.head_ratio, .femininity = if (feminine) 0.84 else 0.18, .bust = if (wildkin) 0.02 else if (feminine) 0.10 else 0.02, .shoulder_width = (if (feminine) @as(f32, 0.98) else 1.10) * build, .waist_width = (if (feminine) @as(f32, 0.94) else 1.12) * build, .hip_width = (if (feminine) @as(f32, 1.06) else 0.96) * build, .limb_thickness = (if (feminine) @as(f32, 0.98) else 1.08) * build, .head = head, .hand_scale = if (wildkin) 1.0 else 1.15, .foot_scale = if (wildkin) 1.0 else 1.1 };
 }
@@ -453,6 +518,11 @@ fn mix(a: [4]f32, b: spec.Rgb, t: f32) spec.Rgb {
 /// Armor plates are rigid, domed, segmented shells from the character generator (see
 /// `clothing.zig`), layered outside the suit so nothing clips.
 pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
+    return outfitShaped(profile, out, armorDef(profile).shape);
+}
+
+/// `outfit` with the silhouette of whichever armor set (built-in or mod) the profile wears.
+fn outfitShaped(profile: Profile, out: *[16]spec.GarmentSpec, shape: spec.ShapeSpec) usize {
     const cloth = Profile.outfit_colors[profile.outfit];
     const dark = spec.Rgb.hex(0x18242c);
     var n: usize = 0;
@@ -500,7 +570,6 @@ pub fn outfit(profile: Profile, out: *[16]spec.GarmentSpec) usize {
                 else => unreachable,
             };
             const tones = suitTones(profile);
-            const shape = armorDef(profile).shape;
             const steel = tones.plate;
             const trim = tones.trim;
             Add.one(out, &n, .{ .coverage = .gauntlets, .color = trim, .layer = 2, .looseness = 0.002, .hard = true, .bulge = 0.002 });
@@ -697,13 +766,12 @@ fn armorContext(p: Profile, lm: @import("body.zig").Landmarks) armor_kit.Context
     };
 }
 
-fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile) !void {
+fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile, def: *const armor_kit.ArmorSetDef) !void {
     const lm = ch.landmarks;
     const s = &ch.skeleton;
     const h = p.height;
     const w = p.build;
     const dark = spec.Rgb.hex(0x17242f);
-    const def = armorDef(p);
     const metal = def.metal;
     const accent = rgb(Profile.accent_colors[p.accent], 1.2);
     // Belt, boot cuffs and wrist seals bridge fabric transitions.
@@ -1253,6 +1321,141 @@ test "every armor set builds finite rigid meshes over each suit and helmet, and 
         try std.testing.expect(counts[i] > counts[@intFromEnum(Profile.Armor.none)] + 1500);
         for (first_mecha..i) |j| try std.testing.expect(counts[i] != counts[j]);
     }
+}
+
+fn meshHash(r: *const Ranger) u64 {
+    var h = std.hash.Wyhash.init(0);
+    h.update(std.mem.sliceAsBytes(r.mesh.vertices));
+    h.update(std.mem.sliceAsBytes(r.mesh.indices));
+    return h.final();
+}
+
+fn countMaterial(r: *const Ranger, material: cm.Material) usize {
+    var n: usize = 0;
+    for (r.character.mesh.vertices.items) |v| {
+        if (v.material == material) n += 1;
+    }
+    return n;
+}
+
+fn modProfile(slot: CharacterContent.Slot, id: []const u8) Profile {
+    var p: Profile = .{};
+    p.mod.set(slot, CharacterContent.Id.parse(id).?);
+    return p;
+}
+
+test "mod armor, hair and face are drawn, and a missing mod falls back to the built-in" {
+    const a = std.testing.allocator;
+    var registry = try @import("../mod/Mod.zig").testEmberRegistry(a);
+    defer registry.deinit();
+
+    const plain_profile: Profile = .{ .helmet = .sealed };
+    var plain = try initContent(a, plain_profile, &registry);
+    defer plain.deinit(a);
+
+    // Armor: the mod set replaces the built-in one, so the mesh changes and gains plates.
+    var armored_profile = plain_profile;
+    armored_profile.mod.set(.armor_set, CharacterContent.Id.parse("emberwear.phoenix").?);
+    var armored = try initContent(a, armored_profile, &registry);
+    defer armored.deinit(a);
+    try std.testing.expect(meshHash(&armored) != meshHash(&plain));
+    try std.testing.expect(countMaterial(&armored, .armor) != countMaterial(&plain, .armor));
+    // The finned pauldrons and backpack wings widen and heighten the silhouette.
+    try std.testing.expect(armored.character.mesh.vertices.items.len > plain.character.mesh.vertices.items.len);
+
+    // Hair: the mod style differs from the base style, and the second mod style from the first.
+    var hair_profile: Profile = .{};
+    hair_profile.mod.set(.hair_style, CharacterContent.Id.parse("emberwear.flame_crest").?);
+    var open_plain = try initContent(a, .{}, &registry);
+    defer open_plain.deinit(a);
+    var flame = try initContent(a, hair_profile, &registry);
+    defer flame.deinit(a);
+    try std.testing.expect(meshHash(&flame) != meshHash(&open_plain));
+    try std.testing.expect(countMaterial(&flame, .hair) > 0);
+    hair_profile.mod.set(.hair_style, CharacterContent.Id.parse("emberwear.wind_swept").?);
+    var swept = try initContent(a, hair_profile, &registry);
+    defer swept.deinit(a);
+    try std.testing.expect(meshHash(&swept) != meshHash(&flame));
+
+    // Face: the mod preset reaches the skeleton's body spec and the eye decal inputs.
+    const face_profile = modProfile(.face_preset, "emberwear.ember_eyes");
+    const modded_body = bodySpecContent(face_profile, &registry);
+    try std.testing.expect(!std.meta.eql(modded_body.head, bodySpec(face_profile).head));
+    try std.testing.expectEqual(@as(f32, 6.4), modded_body.head_ratio);
+    try std.testing.expect(!std.meta.eql(modded_body, bodySpec(.{})));
+    var faced = try initContent(a, face_profile, &registry);
+    defer faced.deinit(a);
+    try std.testing.expect(meshHash(&faced) != meshHash(&open_plain));
+
+    // A profile naming a mod that is not installed (or no registry at all) draws the built-in.
+    const ghost = modProfile(.armor_set, "gone.suit");
+    var ghost_armor = try initContent(a, ghost, &registry);
+    defer ghost_armor.deinit(a);
+    var unregistered = try initContent(a, armored_profile, null);
+    defer unregistered.deinit(a);
+    var builtin = try init(a, .{});
+    defer builtin.deinit(a);
+    try std.testing.expectEqual(meshHash(&builtin), meshHash(&ghost_armor));
+    try std.testing.expectEqual(meshHash(&plain), meshHash(&unregistered));
+    try std.testing.expectEqual(meshHash(&builtin), meshHash(&open_plain));
+}
+
+test "mod data that stops validating is ignored instead of reaching the generators" {
+    const a = std.testing.allocator;
+    var registry = try @import("../mod/Mod.zig").testEmberRegistry(a);
+    defer registry.deinit();
+    var builtin = try init(a, .{});
+    defer builtin.deinit(a);
+    // A corrupted entry (as from a bad hot reload) must fall back, not build a broken mesh.
+    const hair_id = CharacterContent.Id.parse("emberwear.flame_crest").?;
+    registry.entries[registry.find(.hair_style, &hair_id).?].data.hair_style.clumps[0].length = std.math.nan(f32);
+    var broken = try initContent(a, modProfile(.hair_style, "emberwear.flame_crest"), &registry);
+    defer broken.deinit(a);
+    try std.testing.expectEqual(meshHash(&builtin), meshHash(&broken));
+    const armor_id = CharacterContent.Id.parse("emberwear.phoenix").?;
+    registry.entries[registry.find(.armor_set, &armor_id).?].data.armor_set.pieces[0].size = .{ 9, 9, 9 };
+    var broken_armor = try initContent(a, modProfile(.armor_set, "emberwear.phoenix"), &registry);
+    defer broken_armor.deinit(a);
+    try std.testing.expectEqual(meshHash(&builtin), meshHash(&broken_armor));
+    const style_id = CharacterContent.Id.parse("emberwear.ink_wash").?;
+    registry.entries[registry.find(.cel_style, &style_id).?].data.cel_style.face_softness = 0;
+    try std.testing.expect(modCelStyle(modProfile(.cel_style, "emberwear.ink_wash"), &registry) == null);
+}
+
+test "a mod cel style resolves per profile and matches its packed table" {
+    const a = std.testing.allocator;
+    var registry = try @import("../mod/Mod.zig").testEmberRegistry(a);
+    defer registry.deinit();
+    try std.testing.expect(modCelStyle(.{}, &registry) == null);
+    try std.testing.expect(modCelStyle(modProfile(.cel_style, "gone.ink"), &registry) == null);
+    try std.testing.expect(modCelStyle(modProfile(.cel_style, "emberwear.ink_wash"), null) == null);
+    const style = modCelStyle(modProfile(.cel_style, "emberwear.ink_wash"), &registry).?;
+    try std.testing.expectEqual(@as(f32, 3.4), style.get(.armor).outline.width_px);
+    const table = cel_style.pack(&style, .{});
+    try std.testing.expectEqualDeep(style.get(.armor).*, cel_style.unpack(&table, .armor));
+    try std.testing.expect(table[0][0] != cel_style.pack(&cel_style.heavy_water, .{})[0][0]);
+}
+
+test "appearance changes with mod ids, so characters rebuild when a mod choice changes" {
+    const base: Profile = .{};
+    var hair = base;
+    hair.mod.set(.hair_style, CharacterContent.Id.parse("emberwear.flame_crest").?);
+    var other = base;
+    other.mod.set(.hair_style, CharacterContent.Id.parse("emberwear.wind_swept").?);
+    var cel_only = base;
+    cel_only.mod.set(.cel_style, CharacterContent.Id.parse("emberwear.ink_wash").?);
+    try std.testing.expect(sameAppearance(hair, hair));
+    try std.testing.expect(!sameAppearance(base, hair));
+    try std.testing.expect(!sameAppearance(hair, other));
+    try std.testing.expect(!sameAppearance(base, cel_only));
+    var cleared = hair;
+    cleared.mod.clear(.hair_style);
+    try std.testing.expect(sameAppearance(base, cleared));
+    // Only the name is ignored.
+    var renamed = hair;
+    renamed.name_buffer[0] = 'Z';
+    renamed.name_len = 1;
+    try std.testing.expect(sameAppearance(hair, renamed));
 }
 
 test "every Profile.Armor tag has a valid armor set definition" {

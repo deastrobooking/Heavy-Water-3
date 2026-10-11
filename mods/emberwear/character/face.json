@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "face_presets": [
+    {
+      "id": "ember_eyes",
+      "name": "Ember Eyes",
+      "masculine": { "cranium_width": 0.84, "jaw_taper": 0.8, "chin_point": 0.6, "chin_jut": 0.02, "cheek_width": 0.98, "brow_ridge": 0.013 },
+      "feminine": { "cranium_width": 0.82, "jaw_taper": 0.85, "chin_point": 0.7, "chin_jut": 0.02, "cheek_width": 0.98, "neck_length": 0.24, "neck_thickness": 0.86 },
+      "head_ratio": 6.4,
+      "eye_size_scale": 1.15,
+      "eye_aspect_scale": 0.9,
+      "eye_tilt": 0.16,
+      "brow_weight": 0.013,
+      "brow_tilt": 0.3,
+      "brow_gap": 0.04,
+      "nose_mark": 0.5,
+      "mouth_width": 0.05
+    }
+  ]
+}

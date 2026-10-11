@@ -202,6 +202,24 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.clothing = .hardsuit;
             self.sandbox.profile.helmet = if (options.character_showcase == 31 or options.character_showcase == 33) .visor else .sealed;
         }
+        if (options.character_showcase >= 40 and options.character_showcase <= 43) {
+            // The emberwear example mod in the creator: 40 hair, face and cel style; 41 the
+            // phoenix armor over a hardsuit with a visor; 42 sealed; 43 second hairstyle on the
+            // exo rig with the open-faced armor.
+            const Id = @import("game/CharacterContent.zig").Id;
+            const p = &self.sandbox.profile;
+            p.mod.set(.cel_style, Id.parse("emberwear.ink_wash").?);
+            p.mod.set(.face_preset, Id.parse("emberwear.ember_eyes").?);
+            p.mod.set(.hair_style, Id.parse(if (options.character_showcase == 43) "emberwear.wind_swept" else "emberwear.flame_crest").?);
+            if (options.character_showcase != 40) p.mod.set(.armor_set, Id.parse("emberwear.phoenix").?);
+            if (options.character_showcase == 41 or options.character_showcase == 42) p.clothing = .hardsuit;
+            if (options.character_showcase == 43) p.clothing = .exo_rig;
+            p.helmet = switch (options.character_showcase) {
+                41 => .visor,
+                42 => .sealed,
+                else => .open,
+            };
+        }
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -2484,6 +2502,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.show_metrics = self.show_metrics;
     renderer.cel_style = self.cel_style;
     renderer.cel_debug = self.cel_debug;
+    renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {

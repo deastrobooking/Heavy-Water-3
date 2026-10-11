@@ -64,6 +64,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dpack-stress=N` | 0 | Write and stream a pack of N meshes during the benchmark. |
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
 | `-Dcharacter-showcase=6..38` | 0 | Hairstyle review in the creator, in `Profile.HairStyle` order (6 = short, 30..38 = the anime cuts). |
+| `-Dcharacter-showcase=40..43` | 0 | The `emberwear` example mod in the creator: 40 hair, face and ink cel style; 41 phoenix armor over a hardsuit; 42 sealed helmet; 43 second hairstyle on the exo rig. |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
 | `-Dcel-style=0..3`, `-Dcel-debug=bits` | 0, 0 | Character look-dev: starting cel style (Heavy Water, Watercolor, Comic ink, Flat) and debug views (1 hide ink, 2 ramp bands, 4 face shadow mask). In any running build, F3 cycles the style, F8 toggles ink and F10 cycles normal, ramp bands and face mask (it logs the state). |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |

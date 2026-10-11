@@ -96,12 +96,11 @@ clock: f32 = 0,
 /// group (null with `-Dcpu-skinning=true`).
 skin_pipeline: ?*gpu.RenderPipeline = null,
 hull_pipeline: ?*gpu.RenderPipeline = null,
-/// The packed `CelStyle` uniform, rewritten when `cel_style`/`cel_debug` change.
+/// One packed `CelStyle` uniform per character id (see `Characters.cel_stride`).
 cel_buffer: ?*gpu.Buffer = null,
 /// Look-dev state for character shading: which preset, and debug views. Set by the app.
 cel_style: usize = 0,
 cel_debug: CelStyle.Debug = .{},
-cel_uploaded: ?struct { usize, u8 } = null,
 skin_layout: ?*gpu.BindGroupLayout = null,
 skin_palette: ?*gpu.Buffer = null,
 skin_group: ?*gpu.BindGroup = null,
@@ -334,7 +333,7 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
     defer shader.release();
     self.skin_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
         gpu.BindGroupLayout.Entry.initBuffer(0, .{ .vertex = true }, .uniform, true, Ranger.palette_bytes),
-        gpu.BindGroupLayout.Entry.initBuffer(1, .{ .vertex = true, .fragment = true }, .uniform, false, CelStyle.table_bytes),
+        gpu.BindGroupLayout.Entry.initBuffer(1, .{ .vertex = true, .fragment = true }, .uniform, true, CelStyle.table_bytes),
     } }));
     const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{ frame_layout, self.skin_layout.? } }));
     defer pipeline_layout.release();
@@ -377,7 +376,7 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
         .primitive = .{ .cull_mode = .none },
         .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .false, .depth_compare = .greater },
     });
-    self.cel_buffer = device.createBuffer(&.{ .label = "character cel style", .size = CelStyle.table_bytes, .usage = .{ .uniform = true, .copy_dst = true } });
+    self.cel_buffer = device.createBuffer(&.{ .label = "character cel styles", .size = Ranger.capacity * Characters.cel_stride, .usage = .{ .uniform = true, .copy_dst = true } });
     self.skin_palette = device.createBuffer(&.{ .label = "character palettes", .size = Ranger.capacity * Ranger.palette_bytes, .usage = .{ .uniform = true, .copy_dst = true } });
     self.skin_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.skin_layout.?, .entries = &.{
         gpu.BindGroup.Entry.initBuffer(0, self.skin_palette.?, 0, Ranger.palette_bytes, Ranger.palette_bytes),
@@ -504,15 +503,11 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             }
         }
     }
-    if (self.cel_buffer) |buffer| {
-        // Rewritten only when look-dev changes it; the table is a few hundred bytes.
-        const key: struct { usize, u8 } = .{ self.cel_style, @bitCast(self.cel_debug) };
-        if (self.cel_uploaded == null or !std.meta.eql(self.cel_uploaded.?, key)) {
-            const table = CelStyle.pack(CelStyle.presets[self.cel_style % CelStyle.presets.len].style, self.cel_debug);
-            encoder.writeBuffer(buffer, 0, &table);
-            self.cel_uploaded = key;
-        }
-    }
+    // Each character has its own cel table: a mod style from its player's profile, else the
+    // look selected here. `Characters` rewrites a table only when its style or the debug bits change.
+    self.characters.cel_buffer = self.cel_buffer;
+    self.characters.cel_default = CelStyle.presets[self.cel_style % CelStyle.presets.len].style;
+    self.characters.cel_debug = self.cel_debug;
     try self.characters.prepare(self.allocator, self.timer.io, window.device, encoder, self.props[0..self.prop_count], character_visible, if (measure_character_prepare) &self.character_skin_times else null);
     if (measure_character_prepare) self.character_prepare_times.record(character_timer.lap() * 1000);
     // Catalog meshes installed after startup (deferred builds, reloads) upload under a budget.

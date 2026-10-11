@@ -270,26 +270,41 @@ pub const FileList = struct {
 
 const ember_manifest = @embedFile("emberwear.mod");
 const ember_hair = @embedFile("emberwear.hair");
+const ember_face = @embedFile("emberwear.face");
 const ember_armor = @embedFile("emberwear.armor");
 const ember_style = @embedFile("emberwear.style");
 
-fn emberFiles(items: *[4]FileList.Item, manifest: []const u8, hair: []const u8, armor: []const u8) FileList {
+fn emberFiles(items: *[5]FileList.Item, manifest: []const u8, hair: []const u8, armor: []const u8) FileList {
     items.* = .{
         .{ .path = "mod.json", .bytes = manifest },
         .{ .path = "character/hair.json", .bytes = hair },
+        .{ .path = "character/face.json", .bytes = ember_face },
         .{ .path = "character/armor.json", .bytes = armor },
         .{ .path = "character/style.json", .bytes = ember_style },
     };
     return .{ .items = items };
 }
 
-test "the example character mod loads, installs, and lists in stable order" {
-    var items: [4]FileList.Item = undefined;
+/// A registry holding the example mod, for tests of anything that draws mod content.
+pub fn testEmberRegistry(allocator: std.mem.Allocator) !CharacterContent.Registry {
+    var items: [5]FileList.Item = undefined;
+    var report: CharacterContent.Report = .{};
+    var pkg = try loadReported(allocator, "emberwear", emberFiles(&items, ember_manifest, ember_hair, ember_armor), &report);
+    defer pkg.deinit();
+    var registry = try CharacterContent.Registry.init(allocator, 32);
+    errdefer registry.deinit();
+    try registry.canInstall(pkg.character.?, &report);
+    _ = registry.install(pkg.character.?);
+    return registry;
+}
+
+test "the example character mod loads, installs, converts, and lists in stable order" {
+    var items: [5]FileList.Item = undefined;
     var report: CharacterContent.Report = .{};
     var pkg = try loadReported(std.testing.allocator, "emberwear", emberFiles(&items, ember_manifest, ember_hair, ember_armor), &report);
     defer pkg.deinit();
     try std.testing.expect(report.ok());
-    try std.testing.expectEqual(@as(usize, 9), pkg.characterCount());
+    try std.testing.expectEqual(@as(usize, 6), pkg.characterCount());
     var registry = try CharacterContent.Registry.init(std.testing.allocator, 32);
     defer registry.deinit();
     try registry.canInstall(pkg.character.?, &report);
@@ -297,9 +312,22 @@ test "the example character mod loads, installs, and lists in stable order" {
     const hair = registry.list(.hair_style);
     try std.testing.expectEqual(@as(usize, 2), hair.len);
     try std.testing.expectEqualStrings("Flame Crest", registry.get(hair[0]).name());
+    // Each kind converts into the struct its generator takes, through the real validators.
+    const flame = try CharacterContent.hairStyle(registry.get(hair[0]));
+    try std.testing.expectEqual(@as(usize, 9), flame.clumps.len);
     const phoenix = registry.get(registry.find(.armor_set, &CharacterContent.Id.parse("emberwear.phoenix").?).?);
-    try std.testing.expectEqual(@as(usize, 3), phoenix.refCount("pieces"));
-    try std.testing.expectEqualStrings("Slit Visor", registry.get(phoenix.refAt("pieces", 1).?).name());
+    const set = try CharacterContent.armorSet(phoenix);
+    try std.testing.expectEqualStrings("phoenix", set.name);
+    try std.testing.expectEqualStrings("Phoenix Guard", set.title);
+    try std.testing.expectEqual(@as(usize, 13), set.pieces.len);
+    try std.testing.expectEqual(@import("../character/spec.zig").Silhouette.finned, set.pieces[0].shape.?.silhouette);
+    const face = registry.get(registry.find(.face_preset, &CharacterContent.Id.parse("emberwear.ember_eyes").?).?);
+    try std.testing.expectEqual(@as(f32, 0.16), (try CharacterContent.facePreset(face)).eye_tilt);
+    const ink = registry.get(registry.find(.cel_style, &CharacterContent.Id.parse("emberwear.ink_wash").?).?);
+    const style = try CharacterContent.celStyle(ink);
+    try std.testing.expectEqual(@as(f32, 3.4), style.get(.armor).outline.width_px);
+    // A material the mod does not mention keeps the base preset's values.
+    try std.testing.expectEqual(@import("../character/CelStyle.zig").comic_ink.get(.cloth_top).*, style.get(.cloth_top).*);
     // Mods without character files, like glowworks, carry no batch.
     var glow = try load(std.testing.allocator, "glowworks", glowworksFiles(@embedFile("glowworks.mod")));
     defer glow.deinit();
@@ -310,10 +338,13 @@ test "bad character content rejects the whole mod with file, key and reason; not
     const a = std.testing.allocator;
     const Case = struct { file: enum { manifest, hair, armor }, from: []const u8, to: []const u8, err: Error, key: []const u8 = "", code: CharacterContent.Code = .invalid_json };
     const cases = [_]Case{
-        .{ .file = .hair, .from = "\"spike\"", .to = "\"spikes\"", .err = error.InvalidCharacterContent, .key = "hair_styles[0].spikes", .code = .unknown_key },
-        .{ .file = .hair, .from = "\"cards\": 32", .to = "\"cards\": 500", .err = error.InvalidCharacterContent, .key = "hair_styles[0].cards", .code = .out_of_range },
-        .{ .file = .armor, .from = "\"slit_visor\", \"ash_greave\"", .to = "\"visor_x\", \"ash_greave\"", .err = error.InvalidCharacterContent, .key = "armor_sets[0].pieces[1]", .code = .unknown_ref },
-        .{ .file = .armor, .from = "\"silhouette\": \"fin\"", .to = "\"silhouette\": \"spiral\"", .err = error.InvalidCharacterContent, .key = "armor_pieces[0].silhouette", .code = .bad_choice },
+        .{ .file = .hair, .from = "\"pitch\": 1.35", .to = "\"pitches\": 1.35", .err = error.InvalidCharacterContent, .key = "hair_styles[0].clumps[0].pitches", .code = .unknown_key },
+        .{ .file = .hair, .from = "\"length\": 0.95", .to = "\"length\": 9", .err = error.InvalidCharacterContent, .key = "hair_styles[0].clumps[0].length", .code = .out_of_range },
+        .{ .file = .hair, .from = "\"layer\": 2 }", .to = "\"layer\": 9 }", .err = error.InvalidCharacterContent, .key = "hair_styles[0].clumps[0].layer", .code = .out_of_range },
+        .{ .file = .armor, .from = "\"fist_guard\"", .to = "\"fist_gard\"", .err = error.InvalidCharacterContent, .key = "armor_sets[0].pieces[1].kind", .code = .bad_choice },
+        .{ .file = .armor, .from = "\"offset\": [0.045, -0.035, 0]", .to = "\"offset\": [4, -0.035, 0]", .err = error.InvalidCharacterContent, .key = "armor_sets[0].pieces[0].offset", .code = .out_of_range },
+        .{ .file = .armor, .from = "\"crest\": 0.11", .to = "\"crest\": 0.9", .err = error.InvalidCharacterContent, .key = "armor_sets[0].pieces[0].shape.crest", .code = .out_of_range },
+        .{ .file = .armor, .from = "\"metal\": \"#b8401f\",", .to = "", .err = error.InvalidCharacterContent, .key = "armor_sets[0].metal", .code = .missing_key },
         .{ .file = .manifest, .from = "character/hair.json", .to = "../hair.json", .err = error.UnsafePath },
         .{ .file = .manifest, .from = "character/hair.json", .to = "character/nope.json", .err = error.MissingFile },
     };
@@ -326,7 +357,7 @@ test "bad character content rejects the whole mod with file, key and reason; not
         const changed = try std.mem.replaceOwned(u8, a, target, c.from, c.to);
         defer a.free(changed);
         try std.testing.expect(!std.mem.eql(u8, changed, target));
-        var items: [4]FileList.Item = undefined;
+        var items: [5]FileList.Item = undefined;
         const files = switch (c.file) {
             .manifest => emberFiles(&items, changed, ember_hair, ember_armor),
             .hair => emberFiles(&items, ember_manifest, changed, ember_armor),

@@ -7,6 +7,8 @@ const std = @import("std");
 const mach = @import("mach");
 const gpu = @import("mach").gpu;
 const Ranger = @import("../character/Ranger.zig");
+const CelStyle = @import("../character/CelStyle.zig");
+const CharacterContent = @import("../game/CharacterContent.zig");
 const World = @import("../world/World.zig");
 const GpuMesh = @import("GpuMesh.zig");
 const Instance = @import("StreamingScene.zig").Instance;
@@ -28,13 +30,39 @@ pub const SkinnedMesh = struct {
 /// The skinned pipeline's resources, owned by the renderer: the pipeline, the palette uniform
 /// buffer (one `Ranger.palette_bytes` slot per character id) and its bind group.
 pub const Skinning = struct { pipeline: *gpu.RenderPipeline, hull: *gpu.RenderPipeline, palette: *gpu.Buffer, group: *gpu.BindGroup };
-const Slot = struct { ranger: Ranger, gpu_mesh: ?GpuMesh = null, skinned: ?SkinnedMesh = null };
+/// One cel table per character id, at this stride in the cel buffer (dynamic offsets must be
+/// 256-byte aligned). A character with no mod cel style gets the game's selected look.
+pub const cel_stride = std.mem.alignForward(usize, CelStyle.table_bytes, 256);
+const CelKey = struct { style: usize, debug: u8 };
+const Slot = struct {
+    ranger: Ranger,
+    gpu_mesh: ?GpuMesh = null,
+    skinned: ?SkinnedMesh = null,
+    /// The player's own cel style from a mod, validated when the character was built.
+    cel: ?*CelStyle.CelStyle = null,
+    /// What was last written to this character's cel table, so it is rewritten only on change.
+    cel_key: ?CelKey = null,
+
+    fn release(self: *Slot, a: std.mem.Allocator) void {
+        if (self.gpu_mesh) |m| m.deinit();
+        if (self.skinned) |m| m.deinit();
+        if (self.cel) |c| a.destroy(c);
+        self.ranger.deinit(a);
+    }
+};
 slots: [Ranger.capacity]?Slot = @splat(null),
 /// Set by the renderer when the skinned pipeline exists; null skins every character on the CPU.
 skinning: ?Skinning = null,
 visible: [Ranger.capacity]bool = @splat(false),
 owners: [Ranger.capacity]u8 = @splat(0),
 instances: ?*gpu.Buffer = null,
+/// Installed mod content; a profile's mod ids resolve against it (set by the app each frame).
+content: ?*const CharacterContent.Registry = null,
+/// The cel table buffer (`Ranger.capacity` tables at `cel_stride`), the look used by characters
+/// without a mod cel style, and the look-dev debug bits. Set by the renderer before `prepare`.
+cel_buffer: ?*gpu.Buffer = null,
+cel_default: ?*const CelStyle.CelStyle = null,
+cel_debug: CelStyle.Debug = .{},
 
 pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu.Device, encoder: *gpu.CommandEncoder, props: []const World.Prop, visible_ids: [Ranger.capacity]bool, skin_times: ?*FrameStats) !void {
     self.visible = @splat(false);
@@ -46,11 +74,17 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
         const i = descriptor.id;
         if (i >= Ranger.capacity or !visible_ids[i]) continue;
         var upload_vertices = false;
-        if (self.slots[i] == null or !Ranger.sameAppearance(self.slots[i].?.ranger.profile, descriptor.profile)) {
+        if (self.slots[i] == null or !Ranger.sameAppearance(self.slots[i].?.ranger.profile, descriptor.profile) or self.contentChanged(&self.slots[i].?, descriptor.profile)) {
             // Finish the replacement before releasing the live appearance.
-            var ranger = try Ranger.init(a, descriptor.profile);
+            var ranger = try Ranger.initContent(a, descriptor.profile, self.content);
             errdefer ranger.deinit(a);
             var next: Slot = .{ .ranger = ranger };
+            if (Ranger.modCelStyle(descriptor.profile, self.content)) |style| {
+                const owned = try a.create(CelStyle.CelStyle);
+                owned.* = style;
+                next.cel = owned;
+            }
+            errdefer if (next.cel) |c| a.destroy(c);
             if (self.skinning != null and ranger.gpuSkinnable()) {
                 const vertices = try ranger.skinnedVertices(a);
                 defer a.free(vertices);
@@ -67,15 +101,12 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
                 encoder.writeBuffer(mesh.indices, 0, ranger.mesh.indices);
                 next.gpu_mesh = mesh;
             }
-            if (self.slots[i]) |*old| {
-                if (old.gpu_mesh) |m| m.deinit();
-                if (old.skinned) |m| m.deinit();
-                old.ranger.deinit(a);
-            }
+            if (self.slots[i]) |*old| old.release(a);
             self.slots[i] = next;
             upload_vertices = true;
         }
         const slot = &self.slots[i].?;
+        self.writeCel(encoder, i, slot);
         if (skin_times != null) skin_timer.reset();
         if (slot.skinned != null) {
             // GPU path: only the joint palette changes.
@@ -97,6 +128,25 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
     encoder.writeBuffer(self.instances.?, 0, &transforms);
     if (skin_times) |stats| stats.record(@as(f32, @floatFromInt(skin_ns)) / 1_000_000);
 }
+/// Whether mod content arrived since `slot` was built and its profile asked for some.
+fn contentChanged(self: *const Characters, slot: *const Slot, profile: @TypeOf(slot.ranger.profile)) bool {
+    const registry = self.content orelse return false;
+    if (slot.ranger.content_count == registry.count) return false;
+    for (std.enums.values(CharacterContent.Slot)) |which| if (profile.mod.get(which) != null) return true;
+    return false;
+}
+
+/// Uploads the character's cel table when its style or the debug bits changed.
+fn writeCel(self: *const Characters, encoder: *gpu.CommandEncoder, id: usize, slot: *Slot) void {
+    const buffer = self.cel_buffer orelse return;
+    const style: *const CelStyle.CelStyle = slot.cel orelse (self.cel_default orelse return);
+    const key: CelKey = .{ .style = @intFromPtr(style), .debug = @bitCast(self.cel_debug) };
+    if (slot.cel_key) |last| if (std.meta.eql(last, key)) return;
+    const table = CelStyle.pack(style, self.cel_debug);
+    encoder.writeBuffer(buffer, id * cel_stride, &table);
+    slot.cel_key = key;
+}
+
 /// Draws every visible character for a view: CPU-skinned ones with the pipeline already set,
 /// then GPU-skinned ones with the skinned pipeline (each with its palette slot), and leaves
 /// `scene_pipeline` and the view's frame bind group set again for whatever draws next.
@@ -119,7 +169,7 @@ pub fn draw(self: *const Characters, pass: *gpu.RenderPassEncoder, hide_owner: u
         for (self.slots, self.visible, self.owners, 0..) |slot, visible, owner, i| {
             if (!visible or (hide_owner != 0 and owner == hide_owner)) continue;
             const m = (slot orelse continue).skinned orelse continue;
-            pass.setBindGroup(1, skinning.group, &.{@as(u32, @intCast(i * Ranger.palette_bytes))});
+            pass.setBindGroup(1, skinning.group, &.{ @as(u32, @intCast(i * Ranger.palette_bytes)), @as(u32, @intCast(i * cel_stride)) });
             pass.setVertexBuffer(0, m.vertices, 0, m.vertex_bytes);
             pass.setIndexBuffer(m.indices, .uint32, 0, m.index_count * 4);
             pass.drawIndexed(m.index_count, 1, 0, 0, @intCast(i));
@@ -130,9 +180,7 @@ pub fn draw(self: *const Characters, pass: *gpu.RenderPassEncoder, hide_owner: u
 }
 pub fn deinit(self: *Characters, a: std.mem.Allocator) void {
     for (&self.slots) |*slot| if (slot.*) |*s| {
-        if (s.gpu_mesh) |m| m.deinit();
-        if (s.skinned) |m| m.deinit();
-        s.ranger.deinit(a);
+        s.release(a);
         slot.* = null;
     };
     if (self.instances) |b| b.release();

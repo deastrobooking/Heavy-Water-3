@@ -1,55 +1,35 @@
 {
   "format": 1,
-  "armor_pieces": [
-    {
-      "id": "wing_pauldron",
-      "name": "Wing Pauldron",
-      "part": "pauldron",
-      "attach_joint": "shoulder",
-      "silhouette": "fin",
-      "size": [0.28, 0.2, 0.36],
-      "offset": [0.06, 0.1, 0.0],
-      "flare": 1.4,
-      "fins": 3,
-      "bevel": 0.3,
-      "mirror": true,
-      "tint": "trim",
-      "emissive": 0.2
-    },
-    {
-      "id": "slit_visor",
-      "name": "Slit Visor",
-      "part": "helmet",
-      "attach_joint": "head",
-      "silhouette": "dome",
-      "size": [0.26, 0.24, 0.28],
-      "mirror": false,
-      "tint": "accent"
-    },
-    {
-      "id": "ash_greave",
-      "name": "Ash Greave",
-      "part": "greave",
-      "attach_joint": "shin",
-      "silhouette": "wedge",
-      "flare": 0.6
-    }
-  ],
-  "palettes": [
-    {
-      "id": "ember",
-      "name": "Ember",
-      "role": "outfit",
-      "colors": ["#2b0f0a", "#c8381a", [0.95, 0.62, 0.2]]
-    }
-  ],
   "armor_sets": [
     {
       "id": "phoenix",
       "name": "Phoenix Guard",
-      "base": "starforge",
-      "pieces": ["wing_pauldron", "slit_visor", "ash_greave"],
-      "palette": "ember"
+      "metal": "#b8401f",
+      "secondary": "#2a1b18",
+      "trim": "#f0a23c",
+      "dark": "#1a1210",
+      "shape": { "silhouette": "angular", "flare": 0.4, "crest": 0.06, "roundness": 0.35, "overlap": 0.4 },
+      "visor": "slit",
+      "pieces": [
+        { "kind": "dome_pauldron", "anchor": "upper_arm", "offset": [0.045, -0.035, 0], "size": [0.12, 0.095, 0.115],
+          "shape": { "silhouette": "finned", "flare": 0.45, "crest": 0.11, "roundness": 0.25, "overlap": 0.3 } },
+        { "kind": "fist_guard", "anchor": "hand", "color": "secondary" },
+        { "kind": "finned_greave", "anchor": "shin",
+          "shape": { "silhouette": "finned", "flare": 0.5, "crest": 0.08, "roundness": 0.2 } },
+        { "kind": "skirt_plate", "anchor": "thigh", "offset": [0, 0.08, 0.07], "size": [0.08, 0.1, 0.02], "color": "trim" },
+        { "kind": "skirt_plate", "anchor": "hips", "offset": [0.19, -0.09, 0], "size": [0.022, 0.09, 0.08], "color": "secondary", "fit": false },
+        { "kind": "chest_dome", "anchor": "chest", "sides": "center", "offset": [0, 0.04, 0], "size": [0.15, 0.115, 0.065] },
+        { "kind": "core", "anchor": "chest", "sides": "center", "offset": [0, 0.0, 0.02], "size": [0.032, 0.032, 0.032] },
+        { "kind": "collar", "anchor": "neck", "sides": "center", "color": "trim",
+          "shape": { "silhouette": "finned", "crest": 0.09, "roundness": 0.3 } },
+        { "kind": "backpack", "anchor": "chest", "sides": "center", "offset": [0, 0.03, 0], "size": [0.1, 0.13, 0.05],
+          "shape": { "silhouette": "finned", "crest": 0.16, "roundness": 0.3 } },
+        { "kind": "blob", "anchor": "forearm", "offset": [0.018, -0.035, 0.061], "size": [0.008, 0.085, 0.006], "color": "glow", "fit": false },
+        { "kind": "crest", "anchor": "head", "when": "sealed", "color": "trim" },
+        { "kind": "antenna", "anchor": "head", "when": "helmeted", "color": "trim", "offset": [0.03, 0.01, -0.02],
+          "shape": { "silhouette": "finned", "crest": 0.14 } },
+        { "kind": "ear_fin", "anchor": "head", "when": "helmeted", "color": "trim" }
+      ]
     }
   ]
 }

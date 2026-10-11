@@ -272,7 +272,7 @@ test "clothing cycles only through owned types" {
 fn testRegistry(allocator: std.mem.Allocator) !CharacterContent.Registry {
     const json =
         \\{ "format": 1,
-        \\  "hair_styles": [ { "id": "flame", "name": "Flame Crest", "base": "crest" }, { "id": "wisp", "name": "Wisp", "base": "bob" } ],
+        \\  "hair_styles": [ { "id": "flame", "name": "Flame Crest", "clumps": [ { "az": 0, "el": 1.2 } ] }, { "id": "wisp", "name": "Wisp", "clumps": [ { "az": 0.5, "el": 1 } ] } ],
         \\  "palettes": [ { "id": "ember", "name": "Ember", "role": "outfit", "colors": ["#ff0000"] } ],
         \\  "cel_styles": [ { "id": "ink", "name": "Ink Wash" } ] }
     ;
@@ -350,15 +350,4 @@ test "a profile that names a missing mod falls back to the built-in and keeps th
     // The id survives a save round trip even though nothing resolves it.
     const back = try Profile.fromDoc(p.toDoc());
     try std.testing.expectEqualStrings("removed.curls", back.mod.get(.hair_style).?.slice());
-}
-
-test "schema base choices name real Profile enum tags" {
-    const checks = [_]struct { names: []const []const u8, T: type }{
-        .{ .names = &CharacterContent.base_hair, .T = Profile.HairStyle },
-        .{ .names = &CharacterContent.base_face, .T = Profile.FaceStyle },
-        .{ .names = &CharacterContent.base_armor, .T = Profile.Armor },
-    };
-    inline for (checks) |check| {
-        for (check.names) |name| try std.testing.expect(std.meta.stringToEnum(check.T, name) != null);
-    }
 }
