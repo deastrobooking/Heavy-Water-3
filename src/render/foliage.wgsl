@@ -28,7 +28,19 @@
     out.clip = frame.view_projection * vec4<f32>(world, 1.0);
     out.normal = rotate(rotation, normal / stretch.xyz);
     out.uv = uv;
-    out.tint = vec4<f32>(tint.rgb * color, tint.a);
+    // Tiny light-bearing flecks sit on leaf surfaces, with the crown and blade tips carrying
+    // more of them than stems. Large instances are trees; their willow leaves can hang low.
+    // The shared scene fragment stage turns alpha above 1 into emissive light at night.
+    let radial = length(position.xz);
+    let tree = step(4.0, translation_scale.w);
+    let crown = mix(smoothstep(0.035, 0.12, radial) * smoothstep(0.24, 0.52, position.y),
+        smoothstep(0.035, 0.10, radial) * smoothstep(0.04, 0.20, position.y), tree);
+    let fleck_hash = hash2(floor(position.xz * 43.0 + root * 0.73) + vec2<f32>(floor(position.y * 29.0), 13.0));
+    let flecks = smoothstep(0.52, 0.78, fleck_hash);
+    let pulse = 0.82 + 0.18 * sin(t * 1.25 + phase * 1.7 + fleck_hash * 6.28);
+    let bio = crown * flecks * pulse * frame.horizon.a * 0.82;
+    let leaf_color = tint.rgb * color;
+    out.tint = vec4<f32>(mix(leaf_color, vec3<f32>(0.08, 0.88, 0.66), bio), tint.a + bio);
     out.world = world;
     return out;
 }

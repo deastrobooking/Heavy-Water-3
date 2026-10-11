@@ -2,6 +2,21 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Energy net and greatblade — 2026-10-11
+
+- Added a fabricable energy net. Its fast lattice shot reaches 120 m/s, damages every Hive flyer intersecting a broad capture corridor, and briefly freezes survivors for 1.45 seconds so they are easier to hit again. It has a 1.1-second firing cooldown and a distinct cyan lattice visual. The existing firearm shots still damage flyers through the shared Skies shot path.
+- Expanded the held saber into an oversized, curved, segmented plasma blade with a white-hot center and accent-colored outer facets. The animated swing trail is wider, longer, and uses the player's weapon accent; the damage sweep reach now matches the larger silhouette.
+- `python3 tools/zig.py build check` passed on the default Zig 0.16/Mach pair.
+- `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=37 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. Capture `zig-out/energy-blade-review.png` was inspected. The blade reads at a dramatically larger scale; the showcase image shows the held silhouette more clearly than its active swing, so the swing's pose and feel still need hands-on review.
+- Headless tests, full smoke, Zig 0.17, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run. Flyer net damage and snare behavior were reviewed in code but were not separately exercised in a gameplay run.
+
+## Nighttime bioluminescent flora — 2026-10-11
+
+- Foliage leaf surfaces receive sparse, softly pulsing mint-cyan emissive flecks, and grassy low-slope ground receives small scattered glow patches. Both are driven by the shared sky night factor; snow and steep rock are masked out of the ground treatment. No new textures, draw calls, or test fixtures were added.
+- `python3 tools/zig.py build check` passed on the default Zig 0.16/Mach pair.
+- `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=8 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. Capture: `zig-out/biolume-review.png`; inspected for glow intensity and night-scene readability.
+- Headless tests, full smoke, Zig 0.17, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run for this rendering increment.
+
 ## Controller interaction and D-pad routing — 2026-10-11
 
 - Reviewed the controller factory mapping and preset example. The factory layout already assigns all 16 standardized physical inputs; A is jump and X is contextual interact. The actual gameplay gap was P1 routing: D-pad edges were only used in UI, while guests already used left/right for weapon cycling and up/down for specials.

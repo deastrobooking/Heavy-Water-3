@@ -130,6 +130,7 @@ pub const Wasp = struct {
     orbit: f32 = 0,
     flap: f32 = 0,
     flash: f32 = 0,
+    netted: f32 = 0,
     jink: V = @splat(0),
     /// Staggers the structure ray.
     check: u8 = 0,
@@ -218,7 +219,7 @@ pub const Carrier = struct {
 };
 pub const carrier_speed: f32 = tuning.carrier_speed;
 
-pub const ShotKind = enum { cannon, missile, sting, flak };
+pub const ShotKind = enum { cannon, missile, sting, flak, energy_net };
 pub const Shot = struct {
     kind: ShotKind,
     position: V,
@@ -462,6 +463,8 @@ fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet
         w.flap = @mod(w.flap + dt * 38, 2 * std.math.pi);
         w.cooldown = @max(0, w.cooldown - dt);
         w.timer = @max(0, w.timer - dt);
+        w.netted = @max(0, w.netted - dt);
+        if (w.netted > 0) continue;
         if (!anyone) continue;
         // Choose a target: the jet if it flies within 900 m, else the nearest ranger on foot.
         var target_pos: ?V = null;
@@ -610,10 +613,14 @@ fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet
         const travel = R.scale(s.velocity, dt);
         const length = R.length(travel);
         const dir = R.scale(travel, 1 / @max(length, 1e-4));
-        const player_shot = s.kind == .cannon or s.kind == .missile;
+        const player_shot = s.kind == .cannon or s.kind == .missile or s.kind == .energy_net;
         var consumed = false;
         if (player_shot) {
-            consumed = self.strikeAlong(enemies, s.position, dir, length, if (s.kind == .missile) 2 else 0.6, s.damage, out, &n);
+            if (s.kind == .energy_net) {
+                consumed = self.strikeNet(s.position, dir, length, s.damage, out, &n);
+            } else {
+                consumed = self.strikeAlong(enemies, s.position, dir, length, if (s.kind == .missile) 2 else 0.6, s.damage, out, &n);
+            }
             if (consumed and s.kind == .missile) push(out, &n, .{ .burst = s.position });
         } else if (s.kind == .flak) {
             // Proximity fuse near the jet, or at the end of its flight.
@@ -850,6 +857,33 @@ fn strikeAlong(self: *Skies, enemies: *Enemies, origin: V, dir: V, length: f32, 
 /// An aimed ground weapon beam can hit a Hive flyer along the ranger's existing aim ray.
 pub fn fireRanger(self: *Skies, origin: V, dir: V, damage: f32) void {
     self.addShot(.{ .kind = .cannon, .position = origin, .velocity = R.scale(R.normalize(dir), 800), .damage = damage, .life = 0.9 });
+}
+
+/// Wide, fast energy mesh for catching agile flyers; each net hit damages and briefly snares.
+pub fn fireRangerNet(self: *Skies, origin: V, dir: V, damage: f32) void {
+    self.addShot(.{ .kind = .energy_net, .position = origin, .velocity = R.scale(R.normalize(dir), 120), .damage = damage, .life = 1.8 });
+}
+
+fn strikeNet(self: *Skies, origin: V, dir: V, length: f32, damage: f32, out: []Event, n: *usize) bool {
+    var hit_any = false;
+    for (&self.wasps) |*slot| {
+        const w = &(slot.* orelse continue);
+        if (Enemies.segmentSphere(origin, dir, length, w.position, wasp_radius + 7.5) == null) continue;
+        hit_any = true;
+        w.health -= damage;
+        w.flash = 0.18;
+        w.netted = @max(w.netted, 1.45);
+        if (w.health <= 0) {
+            if (w.kind == .beetle_bomber and self.raid_active) {
+                self.raid_active = false;
+                push(out, n, .{ .raid_repelled = self.raid_plaza });
+            }
+            push(out, n, .{ .wasp_down = w.position });
+            slot.* = null;
+        }
+    }
+    if (hit_any) push(out, n, .{ .burst = R.add(origin, R.scale(dir, @min(length, 14))) });
+    return hit_any;
 }
 
 /// The Kestrel's weapons for one step: cannons while `fire` is held, missile lock while `alt`

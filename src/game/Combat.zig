@@ -43,8 +43,8 @@ pub const tuning = .{
     .regen_delay = 5.0,
     .regen_rate = 10.0,
     .parry_window = 0.3,
-    .blade_length = 1.35,
-    .blade_radius = 0.4,
+    .blade_length = 3.4,
+    .blade_radius = 0.52,
 };
 pub const regen_delay: f32 = tuning.regen_delay;
 pub const regen_rate: f32 = tuning.regen_rate;
@@ -167,6 +167,7 @@ pub const Arsenal = struct {
     melee: Melee = .{},
     martial: Martial = .{},
     firearm: Firearms.State = .{},
+    net_cooldown: f32 = 0,
     /// The last bazooka orb, for the alternate to detonate.
     orb: ?usize = null,
     /// Field-of-view factor (1, or less while a sniper scope is up), eased.
@@ -247,6 +248,7 @@ pub const Arsenal = struct {
             .giant_blast => if (self.beam != null) 1 else @min(1, s.giant_blast.charge / 2.4),
             .protective_shield => s.shield.health / s.shield.max_health,
             .tracking_missile => 0,
+            .energy_net => if (self.net_cooldown > 0) 1 - @min(1, self.net_cooldown / 1.1) else 0,
         };
     }
 };
@@ -305,6 +307,7 @@ pub fn tick(self: *Combat, dt: f32) void {
         v.quiet += dt;
         if (v.quiet > regen_delay) v.health = @min(v.max, v.health + regen_rate * dt);
     }
+    for (&self.arsenals) |*arsenal| arsenal.net_cooldown = @max(0, arsenal.net_cooldown - dt);
 }
 
 /// One fixed step of player `p`'s arsenal: weapon timers, triggers, projectiles and the beam.
@@ -364,6 +367,11 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
         },
         .beam_saber => self.stepSaber(arsenal, enemies, aim, pressed, released, dt, out, &n, &hive, &hn),
         .sniper_rifle, .machine_gun, .heavy_rifle, .energy_bazooka => self.fireArm(arsenal, k, physics, enemies, aim, muzzle, dt, out, &n, &hive, &hn),
+        .energy_net => if (pressed and arsenal.net_cooldown == 0) {
+            arsenal.net_cooldown = 1.1;
+            push(out, &n, .{ .fired = .energy_net });
+            self.effect(.{ .kind = .muzzle, .position = R.add(muzzle, R.scale(aim.forward, 1.2)), .dir = aim.forward, .life = 0.3, .size = 2.2, .color = aim.weapon_accent });
+        },
         .energy_bow => {
             if (pressed or alt_pressed) s.drawBow(true);
             if (released or alt_released) if (s.fireBow(muzzle, aim.forward, alt_released) != null) push(out, &n, .{ .fired = .energy_bow });
@@ -525,7 +533,7 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
         }
         if (enemies.cutBolts(b.base, b.dir, blade_length, blade_radius + 0.15) > 0) push(out, n, .{ .cut = tip });
     }
-    self.effect(.{ .kind = .trail, .position = R.add(b.base, R.scale(b.dir, blade_length / 2)), .dir = b.dir, .life = 0.12, .size = 0.08, .length = blade_length, .color = .{ 0.8, 0.1, 1 } });
+    self.effect(.{ .kind = .trail, .position = R.add(b.base, R.scale(b.dir, blade_length / 2)), .dir = b.dir, .life = 0.17, .size = 0.2 + 0.08 * @sin(sw.t * std.math.pi), .length = blade_length * 1.35, .color = aim.weapon_accent });
     if (sw.t >= 1) {
         mel.swing = null;
         if (mel.queued) {

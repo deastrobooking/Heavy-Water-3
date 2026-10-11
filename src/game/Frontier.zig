@@ -852,6 +852,7 @@ fn rangerAirShots(sb: *Sandbox, origin: V, direction: V, events: []const Combat.
         .machine_gun => sb.skies.fireRanger(origin, direction, 9),
         .heavy_rifle => sb.skies.fireRanger(origin, direction, 55),
         .energy_bazooka => sb.skies.fireRanger(origin, direction, 90),
+        .energy_net => sb.skies.fireRangerNet(origin, direction, 38),
         else => {},
     };
 }
@@ -953,6 +954,7 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sand
             .missile => sb.cue(.dash, null),
             .flak => sb.cuePitch(.impact, s.position, 0.6),
             .sting => sb.cuePitch(.hive_zap, s.position, 1.4),
+            .energy_net => sb.cuePitch(.impact, s.position, 1.4),
         },
         .burst => |at| {
             burst(sb, at, 4, .{ 1, 0.55, 0.2 });
@@ -1104,6 +1106,7 @@ fn arsenalEvents(sb: *Sandbox, p: u8, events: []const Combat.Event, camera: *Cam
             .machine_gun => 1.6,
             .heavy_rifle => 0.8,
             .beam_saber => 0.7,
+            .energy_net => 1.25,
             else => 1,
         }),
         .slash => sb.cue(.slash, at),
@@ -1403,12 +1406,18 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .crashing => {},
         };
     };
-    for (sb.skies.shots) |slot| if (slot) |s| if (room(out, n, 1)) {
+    for (sb.skies.shots) |slot| if (slot) |s| {
+        if (s.kind == .energy_net) {
+            if (room(out, n, 14)) n += energyNet(out[n..], c.block, s.position, s.velocity);
+            continue;
+        }
+        if (!room(out, n, 1)) continue;
         out[n] = switch (s.kind) {
             .cannon => .{ .mesh = c.block, .transform = .{ .position = s.position }, .tint = Material.emissive(.{ 0.4, 0.95, 1, 1 }, 1), .size = .{ 0.12, 0.12, 2.2 }, .rotation = facing(s.velocity) },
             .sting => .{ .mesh = c.block, .transform = .{ .position = s.position }, .tint = Material.emissive(.{ 1, 0.2, 0.1, 1 }, 1), .size = .{ 0.14, 0.14, 1.6 }, .rotation = facing(s.velocity) },
             .missile => .{ .mesh = c.block, .transform = .{ .position = s.position }, .tint = Material.emissive(.{ 1, 0.95, 0.85, 1 }, 1), .size = .{ 0.3, 0.3, 1.8 }, .rotation = facing(s.velocity) },
             .flak => .{ .mesh = c.gem, .transform = .{ .position = s.position }, .tint = Material.emissive(.{ 1, 0.6, 0.2, 1 }, 1), .size = @splat(0.8) },
+            .energy_net => unreachable,
         };
         n += 1;
     };
@@ -1514,7 +1523,7 @@ fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) u
     return n;
 }
 
-const max_weapon_parts = 8;
+const max_weapon_parts = 16;
 /// A part of a held weapon: offset along the weapon's frame (+Z along the barrel or blade), size,
 /// colour, and glow (0 for plain metal).
 const Part = struct { at: [3]f32, size: [3]f32, color: [3]f32, glow: f32 = 0, shape: enum { block, gem, spike } = .block };
@@ -1527,18 +1536,41 @@ fn rgb3(c: [4]f32) [3]f32 {
 }
 
 fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
-    const hum = 0.85 + 0.15 * @sin(t * 30);
     const heat = arsenal.charge();
+    // A broad, segmented plasma greatblade gives the swing a readable curved silhouette at
+    // gameplay distance. Its white-hot spine sits inside the colored blade; segments overlap
+    // slightly so the arc reads as one continuous energized edge while preserving the curve.
+    if (kind == .beam_saber) {
+        const z = R.normalize(grip.dir);
+        const side = if (@abs(z[1]) > 0.98) @as(V, .{ 1, 0, 0 }) else R.normalize(R.cross(.{ 0, 1, 0 }, z));
+        const up = R.cross(z, side);
+        const frame = m.Quat.fromTo(m.Vec3.unit_z, m.Vec3.init(z[0], z[1], z[2]));
+        const write = struct {
+            fn prop(props: []World.Prop, index: *usize, mesh: @TypeOf(block), base: V, side_v: V, up_v: V, forward: V, local: [3]f32, size: V, tint: [4]f32, rotation: m.Quat) void {
+                const at = R.add(base, R.add(R.add(R.scale(side_v, local[0]), R.scale(up_v, local[1])), R.scale(forward, local[2])));
+                props[index.*] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = tint, .size = size, .rotation = quat(rotation) };
+                index.* += 1;
+            }
+        }.prop;
+        var count: usize = 0;
+        write(out, &count, block, grip.base, side, up, z, .{ 0, 0, -0.03 }, .{ 0.12, 0.12, 0.32 }, .{ gunmetal[0], gunmetal[1], gunmetal[2], 1 }, frame);
+        write(out, &count, gem_mesh, grip.base, side, up, z, .{ 0, 0, 0.17 }, .{ 0.22, 0.18, 0.16 }, Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 1.1), frame);
+        write(out, &count, block, grip.base, side, up, z, .{ 0.12, 0, 0.12 }, .{ 0.42, 0.075, 0.11 }, .{ plate[0], plate[1], plate[2], 1 }, frame);
+        for (0..6) |i| {
+            const f: f32 = @floatFromInt(i);
+            const curve = f * f * 0.032;
+            const along = 0.43 + f * 0.51;
+            const shimmer = 0.88 + 0.12 * @sin(t * 13 + f * 1.7);
+            const taper = 0.19 + 0.13 * @sin(f * std.math.pi / 5);
+            const segment_frame = frame.mul(m.Quat.fromAxisAngle(m.Vec3.unit_y, f * 0.095));
+            write(out, &count, block, grip.base, side, up, z, .{ curve, f * 0.018, along }, .{ taper, 0.105, 0.57 }, Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 0.78 * shimmer), segment_frame);
+            write(out, &count, block, grip.base, side, up, z, .{ curve + 0.045, f * 0.018 + 0.055, along + 0.008 }, .{ taper * 0.31, 0.048, 0.56 }, Material.emissive(.{ 0.86, 0.97, 1, 1 }, 1.35), segment_frame);
+        }
+        write(out, &count, gem_mesh, grip.base, side, up, z, .{ 0.99, 0.20, 3.49 }, .{ 0.18, 0.16, 0.22 }, Material.emissive(.{ 0.92, 0.99, 1, 1 }, 1.65), frame.mul(m.Quat.fromAxisAngle(m.Vec3.unit_y, 0.55)));
+        return count;
+    }
     const parts: []const Part = switch (kind) {
-        .beam_saber => &.{
-            .{ .at = .{ 0, 0, -0.02 }, .size = .{ 0.06, 0.06, 0.26 }, .color = gunmetal },
-            .{ .at = .{ 0, 0, 0.13 }, .size = .{ 0.09, 0.09, 0.04 }, .color = plate },
-            .{ .at = .{ 0.12, 0, 0.17 }, .size = .{ 0.24, 0.035, 0.045 }, .color = plate },
-            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.07, 0.07, 1.35 }, .color = accent, .glow = hum, .shape = .spike },
-            .{ .at = .{ 0, 0, 0.15 + 0.675 }, .size = .{ 0.028, 0.028, 1.3 }, .color = .{ 0.92, 0.98, 1 }, .glow = 1.2 },
-            .{ .at = .{ 0.035 * @sin(t * 43), 0.035 * @cos(t * 37), 0.2 + @mod(t * 2.4, 1.25) }, .size = .{ 0.055, 0.055, 0.19 }, .color = accent, .glow = 1 },
-            .{ .at = .{ -0.035 * @cos(t * 39), 0.03 * @sin(t * 47), 0.2 + @mod(t * 2.4 + 0.62, 1.25) }, .size = .{ 0.05, 0.05, 0.14 }, .color = .{ 0.85, 0.96, 1 }, .glow = hum },
-        },
+        .beam_saber => unreachable,
         .blaster => &.{
             .{ .at = .{ 0, 0.03, 0.05 }, .size = .{ 0.08, 0.13, 0.32 }, .color = plate },
             .{ .at = .{ 0, 0.05, 0.28 }, .size = .{ 0.045, 0.045, 0.2 }, .color = gunmetal },
@@ -1588,6 +1620,12 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         .giant_blast => &.{
             .{ .at = .{ 0, 0, 0.25 }, .size = .{ 0.18, 0.18, 0.18 }, .color = .{ 1, 0.85, 0.35 }, .glow = 0.4 + 0.6 * heat },
         },
+        .energy_net => &.{
+            .{ .at = .{ 0, 0.02, 0.08 }, .size = .{ 0.2, 0.22, 0.42 }, .color = gunmetal },
+            .{ .at = .{ 0, 0.04, 0.4 }, .size = .{ 0.24, 0.24, 0.32 }, .color = plate, .shape = .spike },
+            .{ .at = .{ 0, 0.04, 0.57 }, .size = .{ 0.17, 0.17, 0.12 }, .color = .{ 0.2, 0.95, 0.9 }, .glow = 1.2, .shape = .gem },
+            .{ .at = .{ 0, 0.04, 0.68 }, .size = .{ 0.08, 0.08, 0.2 }, .color = .{ 0.64, 1, 0.95 }, .glow = 1.5 },
+        },
     };
     // The weapon frame: +Z along `dir`, kept upright about it.
     const z = R.normalize(grip.dir);
@@ -1607,6 +1645,32 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         out[i] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = quat(shape_rotation) };
     }
     return parts.len;
+}
+
+/// A luminous capture lattice flies perpendicular to its direction, making the wide hit area
+/// legible in the sky and readable against foliage.
+fn energyNet(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, at: V, velocity: V) usize {
+    const forward = R.normalize(velocity);
+    const side = if (@abs(forward[1]) > 0.95) R.normalize(R.cross(forward, .{ 0, 0, 1 })) else R.normalize(R.cross(forward, .{ 0, 1, 0 }));
+    const up = R.normalize(R.cross(side, forward));
+    const radius: f32 = 4.5;
+    const glow = Material.emissive(.{ 0.12, 0.95, 0.84, 1 }, 1.45);
+    var count: usize = 0;
+    for (0..5) |i| {
+        const offset = -radius + @as(f32, @floatFromInt(i)) * (radius * 0.5);
+        out[count] = .{ .mesh = block, .transform = .{ .position = R.add(at, R.scale(side, offset)) }, .tint = glow, .size = .{ 0.045, 0.045, radius * 2 }, .rotation = facing(up) };
+        count += 1;
+        out[count] = .{ .mesh = block, .transform = .{ .position = R.add(at, R.scale(up, offset)) }, .tint = glow, .size = .{ 0.045, 0.045, radius * 2 }, .rotation = facing(side) };
+        count += 1;
+    }
+    for ([_]f32{ -1, 1 }) |edge| {
+        const rail = Material.emissive(.{ 0.36, 1, 0.94, 1 }, 1.7);
+        out[count] = .{ .mesh = block, .transform = .{ .position = R.add(at, R.scale(side, edge * radius)) }, .tint = rail, .size = .{ 0.09, 0.09, radius * 2 }, .rotation = facing(up) };
+        count += 1;
+        out[count] = .{ .mesh = block, .transform = .{ .position = R.add(at, R.scale(up, edge * radius)) }, .tint = rail, .size = .{ 0.09, 0.09, radius * 2 }, .rotation = facing(side) };
+        count += 1;
+    }
+    return count;
 }
 
 /// A curved energy slash built from short overlapping facets: the outer ribbon follows the

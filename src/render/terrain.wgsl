@@ -56,5 +56,18 @@
     let toward = smoothstep(0.55, 0.9, dot(mirror, frame.light_direction.xyz));
     let glint = step(0.975, hash2(cell)) * toward * snow * near * light;
     shaded = shaded + frame.light_color.rgb * glint * 0.9;
+
+    // Sparse ground spores appear as small mint pools around grassy, level ground. The 0.5
+    // cells-per-metre grid tiles exactly across wrap()'s 1024 m period, preventing seams.
+    let bio_grid = wrap(w.xz) * 0.5;
+    let bio_cell = floor(bio_grid);
+    let bio_local = fract(bio_grid);
+    let bio_center = vec2<f32>(hash2(bio_cell + vec2<f32>(31.0, 7.0)), hash2(bio_cell + vec2<f32>(83.0, 19.0)));
+    let bio_sparse = step(0.79, hash2(bio_cell + vec2<f32>(127.0, 43.0)));
+    let bio_spot = 1.0 - smoothstep(0.025, 0.095, length(bio_local - bio_center));
+    let green_cover = smoothstep(0.025, 0.16, base.g - base.r);
+    let bio_ground = bio_spot * bio_sparse * green_cover * (1.0 - steep) * (1.0 - snow) * near * frame.horizon.a;
+    let bio_pulse = 0.82 + 0.18 * sin(frame.params.x * 1.1 + hash2(bio_cell) * 6.28);
+    shaded = shaded + vec3<f32>(0.10, 0.72, 0.48) * bio_ground * bio_pulse * 0.75;
     return vec4<f32>(hazed(shaded, w, 0.0), 1.0);
 }

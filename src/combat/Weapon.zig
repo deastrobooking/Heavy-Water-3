@@ -34,11 +34,12 @@ pub const WeaponKind = enum(u8) {
     machine_gun,
     heavy_rifle,
     energy_bazooka,
+    energy_net,
 };
 
 /// Base damage by `WeaponKind` tag order. Keep weapon power edits in this table.
 pub const tuning = .{
-    .base_damage = [_]f32{ 45, 22, 65, 80, 0, 180, 140, 9, 55, 160 },
+    .base_damage = [_]f32{ 45, 22, 65, 80, 0, 180, 140, 9, 55, 160, 38 },
     .damage_per_level = 0.25,
     .plasma_edge_multiplier = 1.5,
     .quantum_warp_multiplier = 1.3,

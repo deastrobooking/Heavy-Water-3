@@ -16,6 +16,7 @@ pub const ProjectileKind = enum(u8) {
     heavy_bolt,
     bazooka_orb,
     saber_wave,
+    energy_net,
 };
 
 pub const Projectile = struct {
@@ -89,6 +90,7 @@ pub const ProjectilePool = struct {
                         .heavy_bolt => 0.35,
                         .bazooka_orb => 0.7,
                         .saber_wave => 1.3,
+                        .energy_net => 2.4,
                         else => 0.2,
                     },
                     .homing_target = target,

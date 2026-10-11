@@ -42,6 +42,7 @@ pub const recipes = [_]Recipe{
     .{ .tab = .weapons, .output = .{ .weapon = .heavy_rifle }, .cost = .{ .lumen = 8, .alloy = 10 }, .about = "Heavy bolts that pierce two. Hold the alternate to charge one through four." },
     .{ .tab = .weapons, .output = .{ .weapon = .sniper_rifle }, .cost = .{ .lumen = 12, .rotor = 1, .alloy = 8 }, .about = "Instant beam that pierces one. The alternate scopes; a steady scope hits harder." },
     .{ .tab = .weapons, .output = .{ .weapon = .energy_bazooka }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 12 }, .about = "Arcing plasma orb that bursts, stuns and throws. The alternate detonates it." },
+    .{ .tab = .weapons, .output = .{ .weapon = .energy_net }, .cost = .{ .lumen = 8, .rotor = 2, .alloy = 5 }, .about = "Fast, wide energy net briefly snares and damages multiple Hive flyers." },
     .{ .tab = .weapons, .output = .{ .weapon = .giant_blast }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 16 }, .about = "Charge a beam that cuts through anything." },
     .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .beam_saber, .tier = 2 } }, .cost = .{ .lumen = 8, .alloy = 3, .scrap = 35 }, .about = "Mk II: wider plasma edge and a finisher shockwave." },
     .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .beam_saber, .tier = 3 } }, .cost = .{ .lumen = 14, .rotor = 1, .alloy = 8, .scrap = 75 }, .about = "Mk III: heavier combo finishers and a stronger saber wave." },

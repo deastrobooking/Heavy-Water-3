@@ -565,6 +565,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
             .beam_saber => "BEAM SABER  CLICK COMBO  HOLD AFTER CUT FOR WAVE  RMB GUARD / PARRY",
             .blaster => "BUSTER  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
             .giant_blast => "GIANT BLAST  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
+            .energy_net => "ENERGY NET  CLICK TO SNARE FLYERS IN A WIDE SHOT  TAB SWITCH",
             else => std.fmt.bufPrint(buffer, "{s}  CLICK FIRE  RMB ALTERNATE  TAB SWITCH", .{@tagName(w)}) catch buffer,
         } else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
