@@ -101,6 +101,9 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
         .build => std.fmt.bufPrint(buffer, "{d:.0}%", .{p.build * 100}) catch buffer,
         .skin => std.fmt.bufPrint(buffer, "TONE {d} OF {d}", .{ p.skin + 1, Profile.skin_tones.len }) catch buffer,
         .hair_style => @tagName(p.hair_style),
+        .hair_spike => std.fmt.bufPrint(buffer, "SPIKES {d:.0}%", .{Profile.hairFactor(p.hair_spike) * 100}) catch buffer,
+        .hair_volume => std.fmt.bufPrint(buffer, "VOLUME {d:.0}%", .{Profile.hairFactor(p.hair_volume) * 100}) catch buffer,
+        .hair_length => std.fmt.bufPrint(buffer, "LENGTH {d:.0}%", .{Profile.hairFactor(p.hair_length) * 100}) catch buffer,
         .hair_color => std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.hair_color + 1, Profile.hair_colors.len }) catch buffer,
         .hair_highlight => if (p.hair_highlight == 0) (if (p.class == .synthetic) "AUTO LUMEN" else "OFF") else std.fmt.bufPrint(buffer, "COLOR {d}", .{p.hair_highlight}) catch buffer,
         .outfit => std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.outfit + 1, Profile.outfit_colors.len }) catch buffer,
@@ -143,8 +146,8 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     while (c.draft.name_len > 0) _ = c.key(.backspace);
     try std.testing.expect(c.key(.enter) == .editing);
     for ("Mira-7") |ch| _ = c.key(.{ .char = ch });
-    // Name, class, species, presentation, height.
-    for (0..4) |_| _ = c.key(.down);
+    // Name, class, species, presentation, face style, height.
+    for (0..5) |_| _ = c.key(.down);
     _ = c.key(.right);
     c.field = .accent;
     try std.testing.expectEqual(Profile.Field.accent, c.field);

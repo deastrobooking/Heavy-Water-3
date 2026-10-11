@@ -19,6 +19,8 @@ pub const body = @import("body.zig");
 pub const clothing = @import("clothing.zig");
 pub const armor = @import("armor.zig");
 pub const hair = @import("hair.zig");
+pub const hair_style = @import("hair_style.zig");
+pub const hair_library = @import("hair_library.zig");
 pub const ik = @import("ik.zig");
 pub const spring = @import("spring.zig");
 pub const toon = @import("toon.zig");
@@ -53,6 +55,8 @@ test {
     _ = clothing;
     _ = armor;
     _ = hair;
+    _ = hair_style;
+    _ = hair_library;
     _ = ik;
     _ = spring;
     _ = toon;

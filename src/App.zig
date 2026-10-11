@@ -181,7 +181,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.profile.helmet = if (options.character_showcase == 2) .sealed else .open;
         if (options.character_showcase >= 6) {
-            const looks = [_]Profile.HairStyle{ .short, .ponytail, .long, .crest, .hood, .bob, .twin_tails, .bun, .braids, .curly, .undercut, .short_curly, .curly_fade, .curly_coils, .afro, .long_curls, .textured_crop, .locs, .swept_back, .layered_shag, .nova_spike, .alien_crown, .crew_cut, .side_part };
+            const looks = [_]Profile.HairStyle{ .short, .ponytail, .long, .crest, .hood, .bob, .twin_tails, .bun, .braids, .curly, .undercut, .short_curly, .curly_fade, .curly_coils, .afro, .long_curls, .textured_crop, .locs, .swept_back, .layered_shag, .nova_spike, .alien_crown, .crew_cut, .side_part, .spiky_hero, .widow_flame, .fringe_spikes, .super_flare, .flip_bob, .pilot_sweep, .big_fringe, .topknot, .spike_tail };
             const i = @min(@as(usize, options.character_showcase - 6), looks.len - 1);
             self.sandbox.profile.hair_style = looks[i];
         }
