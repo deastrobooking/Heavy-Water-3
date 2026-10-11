@@ -73,6 +73,8 @@ The 3D fleet uses a clear visual hierarchy: Ember Wyrm interceptors in crimson a
 
 The first mesh pass for all five ships is in `vehicle/ScalariMeshes.zig`; catalog registration provides their shell and glow assets. Flight simulation, collision profiles, combat damage zones and world spawning remain future implementation work.
 
+The user's next ocean direction extends the Brood carrier fight from the sky to the open sea. At Stormwake, players will surf powered wave lines, dive under a low-flying carrier, and attack its bays and exposed subsystems while a Kestrel pilot draws off Scalari escorts. This is an arena concept, not implemented carrier gameplay; movement and objectives are specified in the [ocean-cities plan](plans/ocean-cities.md).
+
 ### Synthetic allies and chimeras
 
 - **Synthetic Humanoids:** Cybernetic warriors (arm cannons, thrusters, visor helmets). Freeing them from their override collars recruits them as customized NPC battle allies.

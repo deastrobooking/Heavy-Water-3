@@ -9,7 +9,7 @@ The systems now in place:
 - fabrication;
 - procedural audio.
 
-The new content priority is a four-player planetary campaign across the Arbor Frontier, the Hive/Scalari Homeworld, and Gaia. Each has five city regions and a capital. Five Scalari dragon-armor ships now have procedural 3D shell/glow assets; they still need piloting and combat systems. Campaign design and catalog detail are in [Planetary frontier](planetary-frontier.md); no new world or city is playable yet.
+The current user-directed content priority is an underwater Frontier region: human pressure-dome and fully submerged cetacean cities, a playable orca-form Tideborn champion, swim traversal, and underwater Hive/Scalari encounters. Pelaglass and Sonorous Reef now have stable catalog records, but no ocean terrain, movement, or city is playable. See [Ocean cities](ocean-cities.md). The broader planetary campaign spans the Arbor Frontier, Hive/Scalari Homeworld, and Gaia; five Scalari dragon-armor ships have procedural 3D shell/glow assets, but still need piloting and combat. See [Planetary frontier](planetary-frontier.md).
 
 This plan orders the work. The [roadmap](../roadmap.md) stays the record of what is implemented.
 
@@ -26,7 +26,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 | Wildkin and arena | 26 collectible heroes with 78 powers, the Heroes menu, and the Starbowl co-op arena. Untuned by hand. |
 | Fighting | Timed saber combos with guard and parry, four energy firearms, Ranger and Synthetic classes with three specials each. Untuned by hand. |
 | Audio | Synthesized sounds and loops, positional cues, four volume buses. Nobody has listened to it yet. |
-| Planetary campaign | Three world descriptors, fifteen city regions, three capitals, eight arena concepts and five Scalari ship assets are authored; world generation, flight/combat integration, ship-blueprint progression, RTS construction and world saves are not integrated. |
+| Planetary campaign | Three world descriptors, seventeen city-region concepts (including two ocean cities), three capitals, nine arena concepts and five Scalari ship assets are authored; world generation, flight/combat integration, ship-blueprint progression, RTS construction and world saves are not integrated. |
 | Engine phases | 1–13 done; 14 (skeletal animation), 15 (scenes), 16 (networking) planned. |
 
 ## Known gaps from review

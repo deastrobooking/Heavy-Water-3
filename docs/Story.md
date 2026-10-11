@@ -8,4 +8,6 @@ Earth in that time has become a thriving Eco Tropolis. Scientists armed with the
 
 Towering Trees built residential neighoods 6 Stories high supported by their trunks and branches. Massive Sky Scrapers Connected Even more residents above via giant glass and metal suspension bridges. Small Shops and Restaurants and Entertainment abounded on the bridges around Planet Earths Cities. 
 
-Others Used the Power of Electrolysis to produce unlimted fresh water and energy and live in giant domed underwater shallow biomes. Modifiying their own DNA to gain the powers of whales and dolpins. 
+Others used electrolysis to produce fresh water and energy in domed shallow-shelf cities. Some modified their own DNA to live and travel underwater with traits inspired by whales and dolphins. They founded the human pressure-dome city Pelaglass and, alongside cetacean-adapted people, the fully submerged city Sonorous Reef. These people are ocean citizens and allies, not Wildkin or animals.
+
+In the ocean campaign, Hive brood spreads through the reef canyons while Scalari teams target the electrolysis plants and sonar network. The orca-form Tideborn champion Neri Tidebreak (working name) helps defend both cities with sonar, a water-driven charge, and a brief resonance guard. The paired cities can share an underwater district and story arc while keeping distinct homes, movement routes, and local characters. See [the ocean-cities plan](plans/ocean-cities.md).

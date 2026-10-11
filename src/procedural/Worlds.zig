@@ -10,7 +10,7 @@ pub const mile_m: f32 = 1609.344;
 
 pub const Id = enum(u8) { arbor_frontier = 0, hive_homeworld = 1, gaia = 2 };
 pub const Form = enum { regional_frontier, planetary_surface, artificial_globe };
-pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds };
+pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds, ocean_shelf };
 pub const Faction = enum { arbor_colony, hive_brood, scalari, gaia_colony };
 pub const CityId = enum(u16) {
     arboris_reach = 0x0101,
@@ -18,6 +18,8 @@ pub const CityId = enum(u16) {
     crownfall = 0x0103,
     bridgewell = 0x0104,
     solace_basin = 0x0105,
+    pelaglass = 0x0106,
+    sonorous_reef = 0x0107,
     varkhoss = 0x0201,
     nacre_spindle = 0x0202,
     sable_crucible = 0x0203,
@@ -29,7 +31,7 @@ pub const CityId = enum(u16) {
     equator_garden = 0x0304,
     jovian_gate = 0x0305,
 };
-pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port };
+pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, human_ocean_habitat, cetacean_reef, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port };
 pub const City = struct {
     id: CityId,
     world: Id,
@@ -48,6 +50,7 @@ pub const Capital = struct {
 pub const ArenaId = enum(u16) {
     rootdeep_shrine = 0x0101,
     spire_basin = 0x0102,
+    stormwake_carrier_siege = 0x0103,
     outer_husk = 0x0201,
     brood_heart = 0x0202,
     sulfur_rift = 0x0203,
@@ -55,7 +58,7 @@ pub const ArenaId = enum(u16) {
     agri_ring = 0x0302,
     geodesic_spine = 0x0303,
 };
-pub const Encounter = enum { shrine_recovery, spire_assault, salvage_run, nest_break, brood_siege, colony_defense, terraforming, shell_repair };
+pub const Encounter = enum { shrine_recovery, spire_assault, ocean_carrier_siege, salvage_run, nest_break, brood_siege, colony_defense, terraforming, shell_repair };
 pub const Reward = struct {
     lumen: u16 = 0,
     rotor_cores: u8 = 0,
@@ -99,14 +102,17 @@ pub const worlds = [_]World{
     .{ .id = .gaia, .name = "Gaia", .form = .artificial_globe, .home_biome = .gaia_habitat, .arena_diameter_m = 1800, .planet_radius_m = earth_radius_m, .sky_clearance_m = mile_m, .rotation_hours = 24, .geodesic_shell = true, .resident_faction = .gaia_colony },
 };
 
-/// Five major explorable city regions per destination. These are campaign content descriptors,
-/// not a claim that city geometry or world travel is already playable.
+/// Stable city-region content descriptors; they do not claim that city geometry or world travel
+/// is already playable. The Arbor Frontier has two ocean-region concepts in addition to its five
+/// original canopy and river regions.
 pub const cities = [_]City{
     .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Arboris Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Canopy markets, transit bridges, and the first shipyard route." },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },
     .{ .id = .solace_basin, .world = .arbor_frontier, .name = "Solace Basin", .role = .riverworks, .biome = .canopy_rootdeep, .exploration_hook = "River locks, waterworks, and a frontier landing zone." },
+    .{ .id = .pelaglass, .world = .arbor_frontier, .name = "Pelaglass", .role = .human_ocean_habitat, .biome = .ocean_shelf, .exploration_hook = "Human pressure-dome neighborhoods powered by electrolysis and linked to the shelf by pressure locks." },
+    .{ .id = .sonorous_reef, .world = .arbor_frontier, .name = "Sonorous Reef", .role = .cetacean_reef, .biome = .ocean_shelf, .exploration_hook = "A fully submerged city of cetacean-adapted people, grown reef halls, current lanes, and sonar wayfinding." },
     .{ .id = .varkhoss, .world = .hive_homeworld, .name = "Varkhoss", .role = .scalari_ruins, .biome = .hive_chitin, .exploration_hook = "Scalari ruins expose the earliest records of the engineered Hive." },
     .{ .id = .nacre_spindle, .world = .hive_homeworld, .name = "Nacre Spindle", .role = .brood_industry, .biome = .hive_chitin, .exploration_hook = "Vertical resin mills and living production towers." },
     .{ .id = .sable_crucible, .world = .hive_homeworld, .name = "Sable Crucible", .role = .forge, .biome = .hive_chitin, .exploration_hook = "A volcanic armor forge guarded by Scalari dragon-wing squadrons." },
@@ -119,7 +125,7 @@ pub const cities = [_]City{
     .{ .id = .jovian_gate, .world = .gaia, .name = "Jovian Gate", .role = .orbital_port, .biome = .gaia_habitat, .exploration_hook = "The cargo port and orbital approach linking Gaia to Jupiter space." },
 };
 
-/// A capital is a distinct campaign destination/site in addition to the five city regions.
+/// A capital is a distinct campaign destination/site in addition to its city regions.
 /// The Scalari capital on the Hive Homeworld hosts the campaign's final boss encounter.
 pub const capitals = [_]Capital{
     .{ .world = .arbor_frontier, .name = "Crown Harbor", .identity = "The Arbor colony's shipyard and campaign home base." },
@@ -130,6 +136,7 @@ pub const capitals = [_]Capital{
 pub const arenas = [_]Arena{
     .{ .id = .rootdeep_shrine, .world = .arbor_frontier, .name = "Rootdeep Shrine Basin", .biome = .canopy_rootdeep, .encounter = .shrine_recovery, .radius_m = 650, .poi_count = 5, .build_sites = 4, .reward = .{ .lumen = 24, .rotor_cores = 1, .fabrication_data = 1 } },
     .{ .id = .spire_basin, .world = .arbor_frontier, .name = "Spirefall Basin", .biome = .canopy_rootdeep, .encounter = .spire_assault, .radius_m = 700, .poi_count = 6, .build_sites = 3, .reward = .{ .lumen = 18, .hive_alloy = 8, .fabrication_data = 1 } },
+    .{ .id = .stormwake_carrier_siege, .world = .arbor_frontier, .name = "Stormwake Carrier Siege", .biome = .ocean_shelf, .encounter = .ocean_carrier_siege, .radius_m = 800, .poi_count = 7, .build_sites = 2, .reward = .{ .hive_alloy = 28, .rotor_cores = 2, .fabrication_data = 2 } },
     .{ .id = .outer_husk, .world = .hive_homeworld, .name = "The Outer Husk", .biome = .hive_chitin, .encounter = .salvage_run, .radius_m = 750, .poi_count = 5, .build_sites = 3, .reward = .{ .hive_alloy = 30, .brood_enzymes = 8, .fabrication_data = 1 } },
     .{ .id = .brood_heart, .world = .hive_homeworld, .name = "Brood Heart", .biome = .hive_chitin, .encounter = .nest_break, .radius_m = 850, .poi_count = 7, .build_sites = 2, .reward = .{ .hive_alloy = 42, .brood_enzymes = 18, .rotor_cores = 2, .fabrication_data = 2 } },
     .{ .id = .sulfur_rift, .world = .hive_homeworld, .name = "Sulfur Rift", .biome = .hive_chitin, .encounter = .brood_siege, .radius_m = 800, .poi_count = 6, .build_sites = 4, .reward = .{ .hive_alloy = 24, .brood_enzymes = 12, .fabrication_data = 1 } },
@@ -174,7 +181,8 @@ pub fn validate() bool {
         city_count[@intFromEnum(entry.world)] += 1;
         for (cities[i + 1 ..]) |other| if (entry.id == other.id) return false;
     }
-    for (city_count) |count| if (count != 5) return false;
+    const expected_city_count = [_]u8{ 7, 5, 5 };
+    for (city_count, expected_city_count) |count, expected| if (count != expected) return false;
     if (capitals.len != worlds.len) return false;
     var capital_count: [worlds.len]u8 = @splat(0);
     var final_boss_sites: u8 = 0;
@@ -212,7 +220,14 @@ test "campaign world catalog is bounded, four-player ready, and deterministicall
     try std.testing.expect(worldSeed(4, .hive_homeworld) != worldSeed(4, .gaia));
     try std.testing.expect(arena(.habitat_ruins).reward.geodesic_alloy > 0);
     try std.testing.expect(arena(.brood_heart).reward.brood_enzymes > 0);
-    try std.testing.expectEqual(@as(usize, 15), cities.len);
+    try std.testing.expectEqual(@as(usize, 17), cities.len);
+    try std.testing.expectEqual(@as(u8, 7), blk: {
+        var count: u8 = 0;
+        for (cities) |entry| if (entry.world == .arbor_frontier) {
+            count += 1;
+        };
+        break :blk count;
+    });
     try std.testing.expectEqual(@as(u8, 5), blk: {
         var count: u8 = 0;
         for (cities) |entry| if (entry.world == .gaia) {

@@ -11,6 +11,12 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - Generated Arbor foliage now uses larger irregular eight-facet clusters, and the canopy course palette shifts toward warm grown decking, green structural rails, and lumen grappling markers. This changes render geometry and color only; the Metal art-review capture and hands-on route check have not been run.
 - Build, tests, and smoke were not run for this pass, as requested; compile and runtime integration remain unverified.
 
+## Ocean city catalog and feature plan — 2026-10-11
+
+- Added stable Frontier city IDs for Pelaglass (human pressure-dome habitat) and Sonorous Reef (fully submerged cetacean city), an `ocean_shelf` biome descriptor, and distinct city roles. Frontier's expected catalog count is now seven; Hive Homeworld and Gaia remain five each. The campaign-wide data test was updated to expect 17 city records.
+- Added the Stormwake Carrier Siege arena descriptor and encounter kind for open-ocean combat, plus [the ocean-cities design](plans/ocean-cities.md) covering wave surfing, underwater movement, carrier subsystem assaults, the paired-city liberation loop, original orca-form Tideborn champion Neri Tidebreak (working name), and separate Hive and Scalari roles.
+- This is catalog and design groundwork only. No build, tests, smoke, ocean renderer, underwater movement, city geometry, or carrier encounter implementation was run or verified.
+
 ## Scalari campaign foundation — 2026-10-05
 
 - The campaign catalog now has three destinations, five stable city-region IDs and one capital per destination. Validation enforces the city count, unique IDs/capitals and the single final-boss site at the Scalari Obsidian Coil; the Hive Homeworld records the Scalarians as its ancient founders.

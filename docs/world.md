@@ -6,6 +6,8 @@ This document sets the creative direction and the systems that express it. The [
 
 Generations ago, engineers gave the forest a job. They rewrote a family of giant trees, the **Arbors**, to pull groundwater up half a kilometer of living wood and concentrate the deuterium in it. Their sap is heavy water, the fuel of the city's fusion cells. People followed the fuel up the trunks. Today a city grows *with* the trees: districts carved into bark, glass towers grafted between trunks and braced by branches, and broad bridge roads strung across the gaps. Traffic, pedestrians, and market stalls cross hundreds of meters of open air.
 
+Earth's settlements also reach beneath the waves. Human neighborhoods cluster in pressure domes powered by electrolysis, tidal currents, and geothermal vents. Cetacean-adapted people have their own fully submerged cities among shelf reefs and canyon gardens. The two cultures trade, build shared routes, and defend their homes together.
+
 Below lies the **Rootdeep**, the wild forest floor where the first engineers' seed vaults and machine shrines still sleep. Above is the **Crown**, the sunlit canopy where the Arbors breathe.
 
 Tone: *The Legend of Zelda* meets science-fiction anime. Wonder before menace, curiosity rewarded, ancient technology that feels alive. Nature and machine are partners, not enemies: every machine in the city runs on something a tree makes.
@@ -103,6 +105,12 @@ That is about 14 m of deck. Grades stay at 6% or less so vehicles and pedestrian
 
 Districts differ in purpose and mood: markets, workshops, gardens, residences, docks. Traffic follows lane graphs on the bridge roads, pedestrians follow walkway graphs, and both respond to what the player builds or breaks.
 
+## The ocean cities
+
+**Pelaglass** is a human city made of several small pressure domes connected by locks, tubes, work platforms, and kelp gardens. Its oxygen and hydrogen systems, water treatment, and tidal power are public infrastructure that players can explore and repair. **Sonorous Reef** is a separate, fully submerged city for cetacean-adapted people. Grown reef arches, resonator panels, current lanes, and lumen gardens shape public spaces for three-dimensional movement and sonar communication.
+
+The Tideborn are humans who chose marine adaptations; orca- and dolphin-influenced bodies describe a range of people, not separate animal species. The first playable champion is Neri Tidebreak (working name), an orca-form rescue diver with a route-revealing sonar pulse, a steerable water charge, and a short-lived resonance guard. Hive brood occupies the outer reefs while Scalari pressure-suit teams target the cities' electrolysis and sonar networks. See the [ocean-cities plan](plans/ocean-cities.md) for the proposed movement, enemy roles, interaction modules, and first liberation slice.
+
 ## Mountains and caves
 
 Beyond the hub's valley and its ridged highlands, four great ranges rise 1.3–1.7 km out. Their summits carry snow, and rivers have cut passes through them. The ranges are hollow. Cave dungeons open in their lower flanks: a mouth in the mountainside, then chambers and tunnels that branch and descend under the rock. Lumen crystals light the chambers, dead ends hold caches, and the deepest chamber is a heart where the Hive has grown a nest. Breaking a heart clears the cave.
@@ -158,6 +166,6 @@ The target is grounded, hopeful science fantasy: painterly cel shading and panor
 
 The Arbor Frontier remains the party's home shipyard. The campaign spans three destinations: the Arbor Frontier, the Hive Homeworld (also the Scalari homeworld), and Gaia, an Earth-radius artificial planet with a rotating surface and a geodesic enclosure about a mile above nominal sea level. Gaia is the terraformed human colony beyond Jupiter. Four local players enter a region together, fight or explore, gather world-stable materials, and extract to fabricate custom ships or establish a planetary outpost.
 
-Each destination is planned around five named city regions plus a capital base. The Hive/Scalari capital, the Obsidian Coil, hosts the final boss battle against the Scalari Sovereign. The other capital sites serve as the Frontier home base and Gaia's colony command center. Scalari fleet visuals now have a first procedural 3D mesh pass: three dragon-armored fighters and two motherships in red/black, purple/green and orange-accented palettes.
+Hive Homeworld and Gaia begin with five named city regions each; the Arbor Frontier adds the underwater pair Pelaglass and Sonorous Reef to its five canopy and river regions. Each destination also has a capital base. The Hive/Scalari capital, the Obsidian Coil, hosts the final boss battle against the Scalari Sovereign. The other capital sites serve as the Frontier home base and Gaia's colony command center. Scalari fleet visuals now have a first procedural 3D mesh pass: three dragon-armored fighters and two motherships in red/black, purple/green and orange-accented palettes.
 
 These are mission-sized open regions rather than complete planet surfaces generated at once. The first release loop should prove one four-player arena, a small custom ship design bay, and a command hub with resource extraction and defense. Cooperative PvE is the default; competitive rules and seamless globe-scale travel can follow later. See [Planetary frontier](plans/planetary-frontier.md) for city identities, Scalari ships, region sizes, the ship module grammar, Gaia's shell, the real-time strategy loop, save boundaries, and delivery gates. The city and world records in `src/procedural/Worlds.zig` are deterministic metadata, and the ship meshes are registered assets; destinations, city interiors, and new ships are not yet playable campaign content.
