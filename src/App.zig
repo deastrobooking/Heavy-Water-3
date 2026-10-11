@@ -830,8 +830,13 @@ fn loadMods(self: *App) void {
                 return files.dir.readFileAlloc(files.io, path, allocator, .limited(@import("mod/Mod.zig").max_file_bytes));
             }
         };
-        var pkg = @import("mod/Mod.zig").load(self.allocator, entry.name, Files{ .dir = sub, .io = self.io }) catch |err| {
+        var problems: @import("game/CharacterContent.zig").Report = .{};
+        var pkg = @import("mod/Mod.zig").loadReported(self.allocator, entry.name, Files{ .dir = sub, .io = self.io }, &problems) catch |err| {
             std.log.warn("mod {s} rejected: {s}", .{ entry.name, @errorName(err) });
+            for (problems.slice()) |*d| {
+                var line: [320]u8 = undefined;
+                std.log.warn("mod {s}: {s}", .{ entry.name, d.format(&line) });
+            }
             continue;
         };
         defer pkg.deinit();
@@ -840,7 +845,7 @@ fn loadMods(self: *App) void {
             continue;
         };
         if (self.reload != null and !options.reload_smoke) self.watchMod(&pkg, entry.name) catch |err| std.log.warn("mod watch {s}: {s}", .{ entry.name, @errorName(err) });
-        std.log.info("Mod {s} {d}.{d}.{d}: {d} blueprints, {d} scripts", .{ pkg.name(), pkg.version.major, pkg.version.minor, pkg.version.patch, pkg.blueprint_count, pkg.export_count });
+        std.log.info("Mod {s} {d}.{d}.{d}: {d} blueprints, {d} scripts, {d} character entries", .{ pkg.name(), pkg.version.major, pkg.version.minor, pkg.version.patch, pkg.blueprint_count, pkg.export_count, pkg.characterCount() });
     }
 }
 

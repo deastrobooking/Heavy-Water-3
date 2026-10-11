@@ -21,6 +21,7 @@ test {
     _ = @import("script/Wasm.zig");
     _ = @import("script/Host.zig");
     _ = @import("mod/Mod.zig");
+    _ = @import("game/CharacterContent.zig");
     _ = @import("render/Field.zig");
     _ = @import("engine/Memory.zig");
     _ = @import("procedural/Bridges.zig");

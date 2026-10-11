@@ -2,6 +2,7 @@
 //! direction in docs/world.md, so every combination reads well and saves stay small.
 const std = @import("std");
 const enum_compat = @import("enum_compat");
+const CharacterContent = @import("CharacterContent.zig");
 const Profile = @This();
 
 pub const name_capacity = 20;
@@ -89,7 +90,7 @@ pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, 
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed };
-pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut };
+pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, cel_style };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -121,6 +122,9 @@ armor: Armor = .scout,
 helmet: Helmet = .visor,
 gemstone: Gemstone = .lumen,
 gem_cut: GemCut = .brilliant,
+/// Mod content chosen in the creator, by namespaced id. Each slot overrides the matching built-in
+/// choice above while its mod is installed; the built-in is the fallback when it is not.
+mod: CharacterContent.Selection = .{},
 
 pub fn name(self: *const Profile) []const u8 {
     return self.name_buffer[0..self.name_len];
@@ -179,6 +183,8 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
         .gemstone => self.gemstone = @enumFromInt(cycle(@intFromEnum(self.gemstone), delta, enum_compat.fields(Gemstone).len)),
         .gem_cut => self.gem_cut = @enumFromInt(cycle(@intFromEnum(self.gem_cut), delta, enum_compat.fields(GemCut).len)),
+        // Cel styles come only from mods (the Creator cycles them); there is no built-in to step.
+        .cel_style => {},
     }
 }
 
@@ -217,10 +223,12 @@ pub const Doc = struct {
     helmet: Helmet = .visor,
     gemstone: Gemstone = .lumen,
     gem_cut: GemCut = .brilliant,
+    /// Namespaced ids of chosen mod content; absent in saves from before character mods.
+    mod: CharacterContent.Selection.Doc = .{},
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut };
+    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .mod = self.mod.toDoc() };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -252,6 +260,8 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.helmet = doc.helmet;
     result.gemstone = doc.gemstone;
     result.gem_cut = doc.gem_cut;
+    // Ill-formed ids are corrupt; ids of mods that are not installed are kept and fall back later.
+    result.mod = CharacterContent.Selection.fromDoc(doc.mod) catch return error.InvalidProfile;
     return result;
 }
 
@@ -344,4 +354,21 @@ test "every armor set round-trips through a save document by name, and old saves
     // A save written before the mecha sets existed names an old tag and still loads unchanged.
     const old = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0,\"armor\":\"deep_prism\"}", .{});
     try std.testing.expectEqual(Armor.deep_prism, (try fromDoc(old.value)).armor);
+}
+
+test "mod content ids round-trip through JSON, old saves decode without them, malformed ids are rejected" {
+    var p: Profile = .{};
+    p.mod.set(.hair_style, CharacterContent.Id.parse("emberwear.flame_crest").?);
+    p.mod.set(.cel_style, CharacterContent.Id.parse("gone.ink").?);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const json = try std.json.Stringify.valueAlloc(arena.allocator(), p.toDoc(), .{});
+    const doc = try std.json.parseFromSliceLeaky(Doc, arena.allocator(), json, .{});
+    try std.testing.expectEqualDeep(p, try fromDoc(doc));
+    // A save from before character mods has no "mod" key and keeps every built-in.
+    const legacy = try std.json.parseFromSliceLeaky(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0}", .{});
+    try std.testing.expect((try fromDoc(legacy)).mod.get(.hair_style) == null);
+    var bad = p.toDoc();
+    bad.mod.armor_set = "Not A Valid Id";
+    try std.testing.expectError(error.InvalidProfile, fromDoc(bad));
 }

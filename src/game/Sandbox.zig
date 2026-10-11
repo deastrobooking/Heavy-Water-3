@@ -36,6 +36,7 @@ const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
 const Host = @import("../script/Host.zig");
 const Mod = @import("../mod/Mod.zig");
+const CharacterContent = @import("CharacterContent.zig");
 const Life = @import("../city/Life.zig");
 const Market = @import("../city/Market.zig");
 const Routes = @import("../city/Routes.zig");
@@ -306,6 +307,9 @@ shrines: [shrine_count]PlacedShrine = undefined,
 /// Mod scripts for `script` devices, and the installed mods (recorded in saves).
 scripts: Host,
 mods: [max_mods]ModRef = undefined,
+/// Hairstyles, armor and other character content from installed mods; created by the first mod
+/// that has any. The creator lists its entries after the built-in choices.
+characters: ?*CharacterContent.Registry = null,
 mod_count: usize = 0,
 /// Mods the last loaded save used that are missing or at another version.
 mod_warnings: usize = 0,
@@ -444,10 +448,29 @@ pub fn installMod(self: *Sandbox, pkg: *const Mod.Package) !void {
         } else added += 1;
     }
     if (self.prefab_count + added > max_prefabs) return error.TooManyPrefabs;
+    // Everything that can fail is checked before anything changes, character content included.
+    if (pkg.character) |batch| {
+        if (self.characters == null) {
+            const registry = try self.allocator.create(CharacterContent.Registry);
+            errdefer self.allocator.destroy(registry);
+            registry.* = try CharacterContent.Registry.init(self.allocator, CharacterContent.max_registry_entries);
+            self.characters = registry;
+            self.creator.registry = registry;
+        }
+        var report: CharacterContent.Report = .{};
+        self.characters.?.canInstall(batch, &report) catch {
+            for (report.slice()) |*d| {
+                var line: [320]u8 = undefined;
+                std.log.warn("mod {s}: {s}", .{ pkg.name(), d.format(&line) });
+            }
+            return error.CharacterContentConflict;
+        };
+    }
     if (pkg.wasm) |wasm| {
         var names: [Mod.max_exports][]const u8 = undefined;
         try self.scripts.add(pkg.name(), wasm, pkg.exports(&names), pkg.fuel, pkg.memory_pages);
     }
+    if (pkg.character) |batch| _ = self.characters.?.install(batch);
     // `addPrefab` keeps an existing same-named (identical) design.
     for (pkg.blueprints[0..pkg.blueprint_count]) |bp| _ = self.addPrefab(bp) catch unreachable;
     var ref: ModRef = .{ .version = pkg.version, .name_length = pkg.name().len };
@@ -613,6 +636,10 @@ pub fn deinit(self: *Sandbox) void {
     self.scripts.deinit();
     for (&self.rigs) |*slot| if (slot.*) |*r| r.deinit(self.allocator);
     self.physics.deinit();
+    if (self.characters) |registry| {
+        registry.deinit();
+        self.allocator.destroy(registry);
+    }
 }
 
 /// Applies the maximum feature loadout for an isolated test session. The baseline is held only

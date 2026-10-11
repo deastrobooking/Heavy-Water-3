@@ -9,11 +9,17 @@
 const std = @import("std");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Host = @import("../script/Host.zig");
+const CharacterContent = @import("../game/CharacterContent.zig");
 const Mod = @This();
+
+comptime {
+    std.debug.assert(CharacterContent.mod_name_len == Host.name_len);
+}
 
 pub const format_version: u32 = 1;
 pub const max_blueprints = 8;
 pub const max_exports = 8;
+pub const max_character_files = 8;
 pub const max_file_bytes = 1 << 20;
 pub const name_len = Host.name_len;
 
@@ -41,6 +47,8 @@ const Manifest = struct {
     api: u32,
     description: []const u8 = "",
     blueprints: []const []const u8 = &.{},
+    /// Character content files (hairstyles, armor, palettes, cel styles); see docs/mods.md.
+    character: []const []const u8 = &.{},
     scripts: ?ScriptsDoc = null,
 };
 
@@ -59,6 +67,9 @@ pub const Error = error{
     ForeignScript,
     UndeclaredScript,
     InvalidBlueprint,
+    TooManyCharacterFiles,
+    /// Details are in the `CharacterContent.Report` passed to `loadReported`.
+    InvalidCharacterContent,
     MissingFile,
     OutOfMemory,
 };
@@ -78,6 +89,8 @@ pub const Package = struct {
     export_count: usize = 0,
     fuel: u64 = 0,
     memory_pages: u32 = 0,
+    /// Validated character content, if the manifest lists any. Owned.
+    character: ?*CharacterContent.Batch = null,
 
     pub fn name(self: *const Package) []const u8 {
         return self.name_buffer[0..self.name_length];
@@ -91,6 +104,11 @@ pub const Package = struct {
         self.wasm = null;
         if (self.script_path) |path| self.allocator.free(path);
         self.script_path = null;
+        if (self.character) |b| b.destroy();
+        self.character = null;
+    }
+    pub fn characterCount(self: *const Package) usize {
+        return if (self.character) |b| b.count else 0;
     }
 };
 
@@ -111,6 +129,12 @@ fn safePath(path: []const u8) bool {
 /// Loads mod directory `dir_name` through `files.read(allocator, path) ![]u8` (paths are
 /// package-relative; the caller frees nothing returned here except via `Package.deinit`).
 pub fn load(allocator: std.mem.Allocator, dir_name: []const u8, files: anytype) Error!Package {
+    var discarded: CharacterContent.Report = .{};
+    return loadReported(allocator, dir_name, files, &discarded);
+}
+
+/// Like `load`; when character content is rejected, `report` says which file, key and why.
+pub fn loadReported(allocator: std.mem.Allocator, dir_name: []const u8, files: anytype, report: *CharacterContent.Report) Error!Package {
     const manifest_bytes = files.read(allocator, "mod.json") catch return error.MissingFile;
     defer allocator.free(manifest_bytes);
     const parsed = std.json.parseFromSlice(Manifest, allocator, manifest_bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidManifest;
@@ -158,6 +182,18 @@ pub fn load(allocator: std.mem.Allocator, dir_name: []const u8, files: anytype) 
         }
         pkg.blueprints[pkg.blueprint_count] = bp;
         pkg.blueprint_count += 1;
+    }
+    if (m.character.len > max_character_files) return error.TooManyCharacterFiles;
+    if (m.character.len > 0) {
+        const batch = try CharacterContent.Batch.create(allocator, m.name);
+        pkg.character = batch;
+        for (m.character) |path| {
+            if (!safePath(path)) return error.UnsafePath;
+            const bytes = files.read(allocator, path) catch return error.MissingFile;
+            defer allocator.free(bytes);
+            try batch.addFile(path, bytes, report);
+        }
+        batch.finish(report) catch return error.InvalidCharacterContent;
     }
     return pkg;
 }
@@ -220,4 +256,90 @@ test "invalid packages are rejected with a reason" {
     try std.testing.expectError(error.ForeignScript, load(a, "glowworks", files));
     try std.testing.expectError(error.MissingFile, load(a, "glowworks", MemoryFiles{ .paths = &.{"mod.json"}, .contents = .{ base, "", "", "" } }));
     try std.testing.expect(Version.parse("1.2.3x") == error.InvalidVersion);
+}
+
+/// In-memory package files of any number, for tests and tools.
+pub const FileList = struct {
+    pub const Item = struct { path: []const u8, bytes: []const u8 };
+    items: []const Item,
+    pub fn read(self: FileList, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+        for (self.items) |item| if (std.mem.eql(u8, item.path, path)) return allocator.dupe(u8, item.bytes);
+        return error.FileNotFound;
+    }
+};
+
+const ember_manifest = @embedFile("emberwear.mod");
+const ember_hair = @embedFile("emberwear.hair");
+const ember_armor = @embedFile("emberwear.armor");
+const ember_style = @embedFile("emberwear.style");
+
+fn emberFiles(items: *[4]FileList.Item, manifest: []const u8, hair: []const u8, armor: []const u8) FileList {
+    items.* = .{
+        .{ .path = "mod.json", .bytes = manifest },
+        .{ .path = "character/hair.json", .bytes = hair },
+        .{ .path = "character/armor.json", .bytes = armor },
+        .{ .path = "character/style.json", .bytes = ember_style },
+    };
+    return .{ .items = items };
+}
+
+test "the example character mod loads, installs, and lists in stable order" {
+    var items: [4]FileList.Item = undefined;
+    var report: CharacterContent.Report = .{};
+    var pkg = try loadReported(std.testing.allocator, "emberwear", emberFiles(&items, ember_manifest, ember_hair, ember_armor), &report);
+    defer pkg.deinit();
+    try std.testing.expect(report.ok());
+    try std.testing.expectEqual(@as(usize, 9), pkg.characterCount());
+    var registry = try CharacterContent.Registry.init(std.testing.allocator, 32);
+    defer registry.deinit();
+    try registry.canInstall(pkg.character.?, &report);
+    try std.testing.expectEqual(CharacterContent.InstallOutcome.installed, registry.install(pkg.character.?));
+    const hair = registry.list(.hair_style);
+    try std.testing.expectEqual(@as(usize, 2), hair.len);
+    try std.testing.expectEqualStrings("Flame Crest", registry.get(hair[0]).name());
+    const phoenix = registry.get(registry.find(.armor_set, &CharacterContent.Id.parse("emberwear.phoenix").?).?);
+    try std.testing.expectEqual(@as(usize, 3), phoenix.refCount("pieces"));
+    try std.testing.expectEqualStrings("Slit Visor", registry.get(phoenix.refAt("pieces", 1).?).name());
+    // Mods without character files, like glowworks, carry no batch.
+    var glow = try load(std.testing.allocator, "glowworks", glowworksFiles(@embedFile("glowworks.mod")));
+    defer glow.deinit();
+    try std.testing.expect(glow.character == null);
+}
+
+test "bad character content rejects the whole mod with file, key and reason; nothing leaks" {
+    const a = std.testing.allocator;
+    const Case = struct { file: enum { manifest, hair, armor }, from: []const u8, to: []const u8, err: Error, key: []const u8 = "", code: CharacterContent.Code = .invalid_json };
+    const cases = [_]Case{
+        .{ .file = .hair, .from = "\"spike\"", .to = "\"spikes\"", .err = error.InvalidCharacterContent, .key = "hair_styles[0].spikes", .code = .unknown_key },
+        .{ .file = .hair, .from = "\"cards\": 32", .to = "\"cards\": 500", .err = error.InvalidCharacterContent, .key = "hair_styles[0].cards", .code = .out_of_range },
+        .{ .file = .armor, .from = "\"slit_visor\", \"ash_greave\"", .to = "\"visor_x\", \"ash_greave\"", .err = error.InvalidCharacterContent, .key = "armor_sets[0].pieces[1]", .code = .unknown_ref },
+        .{ .file = .armor, .from = "\"silhouette\": \"fin\"", .to = "\"silhouette\": \"spiral\"", .err = error.InvalidCharacterContent, .key = "armor_pieces[0].silhouette", .code = .bad_choice },
+        .{ .file = .manifest, .from = "character/hair.json", .to = "../hair.json", .err = error.UnsafePath },
+        .{ .file = .manifest, .from = "character/hair.json", .to = "character/nope.json", .err = error.MissingFile },
+    };
+    for (cases) |c| {
+        const target = switch (c.file) {
+            .manifest => ember_manifest,
+            .hair => ember_hair,
+            .armor => ember_armor,
+        };
+        const changed = try std.mem.replaceOwned(u8, a, target, c.from, c.to);
+        defer a.free(changed);
+        try std.testing.expect(!std.mem.eql(u8, changed, target));
+        var items: [4]FileList.Item = undefined;
+        const files = switch (c.file) {
+            .manifest => emberFiles(&items, changed, ember_hair, ember_armor),
+            .hair => emberFiles(&items, ember_manifest, changed, ember_armor),
+            .armor => emberFiles(&items, ember_manifest, ember_hair, changed),
+        };
+        var report: CharacterContent.Report = .{};
+        try std.testing.expectError(c.err, loadReported(a, "emberwear", files, &report));
+        if (c.err == error.InvalidCharacterContent) {
+            try std.testing.expect(report.count >= 1);
+            const d = report.items[0];
+            try std.testing.expectEqualStrings(c.key, d.keyPath());
+            try std.testing.expectEqual(c.code, d.code);
+            try std.testing.expect(std.mem.startsWith(u8, d.fileName(), "character/"));
+        }
+    }
 }
