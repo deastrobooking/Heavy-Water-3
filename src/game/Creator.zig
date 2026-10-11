@@ -3,6 +3,7 @@
 const std = @import("std");
 const enum_compat = @import("enum_compat");
 const Profile = @import("Profile.zig");
+const CharacterContent = @import("CharacterContent.zig");
 const Creator = @This();
 
 pub const Key = union(enum) { up, down, left, right, enter, escape, backspace, char: u8 };
@@ -28,9 +29,11 @@ owned_armor: u8 = 0xff,
 /// Forms unlocked, one bit per `Profile.Species` (human always; a Wildkin form once its hero
 /// has joined the roster).
 owned_species: u32 = 1,
+/// Installed mod content; its entries follow the built-in choices of the matching fields.
+registry: ?*const CharacterContent.Registry = null,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1 };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
@@ -62,6 +65,7 @@ pub fn key(self: *Creator, k: Key) Result {
 
 /// Changes the selected field; clothing skips types not yet owned.
 pub fn adjust(self: *Creator, delta: i32) void {
+    if (self.adjustWithMods(delta)) return;
     self.draft.adjust(self.field, delta);
     if (self.field == .species) {
         for (0..Profile.species_count) |_| {
@@ -84,9 +88,77 @@ pub fn adjust(self: *Creator, delta: i32) void {
     }
 }
 
+/// The mod content slot a field offers, if any: mod entries are extra options after the built-ins.
+fn modSlot(field: Profile.Field) ?CharacterContent.Slot {
+    return switch (field) {
+        .hair_style => .hair_style,
+        .face_style => .face_preset,
+        .armor => .armor_set,
+        .outfit => .palette,
+        .cel_style => .cel_style,
+        else => null,
+    };
+}
+
+/// How many built-in choices a field has before the mod entries start (cel styles have one:
+/// "default", meaning the game's own look).
+fn builtinCount(field: Profile.Field) usize {
+    return switch (field) {
+        .hair_style => enum_compat.fields(Profile.HairStyle).len,
+        .face_style => enum_compat.fields(Profile.FaceStyle).len,
+        .armor => enum_compat.fields(Profile.Armor).len,
+        .outfit => Profile.outfit_colors.len,
+        else => 1,
+    };
+}
+
+fn builtinIndex(draft: *const Profile, field: Profile.Field) usize {
+    return switch (field) {
+        .hair_style => @intFromEnum(draft.hair_style),
+        .face_style => @intFromEnum(draft.face_style),
+        .armor => @intFromEnum(draft.armor),
+        .outfit => draft.outfit,
+        else => 0,
+    };
+}
+
+/// The selected mod entry for a field, if its mod is installed.
+pub fn selectedMod(self: *const Creator, field: Profile.Field) ?CharacterContent.Handle {
+    const slot = modSlot(field) orelse return null;
+    return self.draft.mod.resolve(slot, self.registry);
+}
+
+/// Cycles a field through its built-in choices and then the registry's entries. Returns false
+/// when the field has no mod entries, leaving the built-in logic (and its ownership rules).
+fn adjustWithMods(self: *Creator, delta: i32) bool {
+    const slot = modSlot(self.field) orelse return false;
+    const registry = self.registry orelse return false;
+    const entries = registry.list(slot.kind());
+    if (entries.len == 0) return false;
+    const builtin = builtinCount(self.field);
+    const total: i32 = @intCast(builtin + entries.len);
+    var at: i32 = @intCast(if (self.selectedMod(self.field)) |h| builtin + (registry.position(slot.kind(), h) orelse 0) else builtinIndex(&self.draft, self.field));
+    for (0..@intCast(total)) |_| {
+        at = @mod(at + delta, total);
+        const choice: usize = @intCast(at);
+        if (choice >= builtin) {
+            self.draft.mod.set(slot, registry.get(entries[choice - builtin]).id());
+            return true;
+        }
+        // Built-in choice: respect what the player owns.
+        if (self.field == .armor and self.owned_armor & (@as(u8, 1) << @intCast(choice)) == 0) continue;
+        self.draft.mod.clear(slot);
+        if (self.field != .cel_style) self.draft.adjust(self.field, @as(i32, @intCast(choice)) - @as(i32, @intCast(builtinIndex(&self.draft, self.field))));
+        return true;
+    }
+    return true;
+}
+
 pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u8 {
     const p = self.draft;
+    if (self.selectedMod(field)) |h| return self.registry.?.get(h).name();
     return switch (field) {
+        .cel_style => if (p.mod.get(.cel_style) != null) "default (mod missing)" else "default",
         .name => std.fmt.bufPrint(buffer, "{s}_", .{p.name()}) catch buffer,
         .class => switch (p.class) {
             .ranger => "ranger: tech",
@@ -160,10 +232,10 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     c.begin(result.confirmed);
     _ = c.key(.right);
     try std.testing.expect(c.key(.escape) == .canceled);
-    var panel: [24]Line = undefined;
+    var panel: [25]Line = undefined;
     c.begin(result.confirmed);
     const count = c.lines(&panel);
-    try std.testing.expectEqual(@as(usize, 24), count);
+    try std.testing.expectEqual(@as(usize, 25), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
 }
 
@@ -192,4 +264,97 @@ test "clothing cycles only through owned types" {
     _ = c.key(.left);
     try std.testing.expectEqual(Profile.Clothing.field_jacket, c.draft.clothing);
     try std.testing.expectEqual(@as(u8, 0b00011), c.owned);
+}
+
+fn testRegistry(allocator: std.mem.Allocator) !CharacterContent.Registry {
+    const json =
+        \\{ "format": 1,
+        \\  "hair_styles": [ { "id": "flame", "name": "Flame Crest", "base": "crest" }, { "id": "wisp", "name": "Wisp", "base": "bob" } ],
+        \\  "palettes": [ { "id": "ember", "name": "Ember", "role": "outfit", "colors": ["#ff0000"] } ],
+        \\  "cel_styles": [ { "id": "ink", "name": "Ink Wash" } ] }
+    ;
+    var report: CharacterContent.Report = .{};
+    const batch = try CharacterContent.Batch.create(allocator, "testmod");
+    defer batch.destroy();
+    try batch.addFile("t.json", json, &report);
+    try batch.finish(&report);
+    var registry = try CharacterContent.Registry.init(allocator, 8);
+    _ = registry.install(batch);
+    return registry;
+}
+
+test "mod entries follow the built-ins in the creator, and leaving them restores the built-in" {
+    var registry = try testRegistry(std.testing.allocator);
+    defer registry.deinit();
+    var c: Creator = .{ .registry = &registry };
+    c.begin(.{ .hair_style = .side_part });
+    c.field = .hair_style;
+    var buffer: [40]u8 = undefined;
+    // side_part is the last built-in; the next option is the first mod entry.
+    _ = c.key(.right);
+    try std.testing.expectEqualStrings("testmod.flame", c.draft.mod.get(.hair_style).?.slice());
+    try std.testing.expectEqualStrings("Flame Crest", c.value(.hair_style, &buffer));
+    // The built-in stays as the fallback underneath.
+    try std.testing.expectEqual(Profile.HairStyle.side_part, c.draft.hair_style);
+    _ = c.key(.right);
+    try std.testing.expectEqualStrings("Wisp", c.value(.hair_style, &buffer));
+    _ = c.key(.right);
+    try std.testing.expect(c.draft.mod.get(.hair_style) == null);
+    try std.testing.expectEqual(Profile.HairStyle.short, c.draft.hair_style);
+    _ = c.key(.left);
+    try std.testing.expectEqualStrings("Wisp", c.value(.hair_style, &buffer));
+    // Palettes extend the outfit colors; cel styles start at "default".
+    c.field = .outfit;
+    _ = c.key(.left);
+    try std.testing.expectEqualStrings("Ember", c.value(.outfit, &buffer));
+    c.field = .cel_style;
+    try std.testing.expectEqualStrings("default", c.value(.cel_style, &buffer));
+    _ = c.key(.right);
+    try std.testing.expectEqualStrings("Ink Wash", c.value(.cel_style, &buffer));
+    _ = c.key(.right);
+    try std.testing.expectEqualStrings("default", c.value(.cel_style, &buffer));
+    // Fields with no mod entries behave exactly as before.
+    c.field = .face_style;
+    _ = c.key(.right);
+    try std.testing.expectEqual(Profile.FaceStyle.soft, c.draft.face_style);
+    // Confirming keeps the mod choice in the profile.
+    c.field = .hair_style;
+    const before = c.draft.mod.get(.hair_style).?.slice();
+    try std.testing.expect(std.mem.startsWith(u8, before, "testmod."));
+    const result = c.key(.enter);
+    try std.testing.expectEqualStrings(before, result.confirmed.mod.get(.hair_style).?.slice());
+}
+
+test "a profile that names a missing mod falls back to the built-in and keeps the id" {
+    var registry = try testRegistry(std.testing.allocator);
+    defer registry.deinit();
+    var p: Profile = .{ .hair_style = .bun };
+    p.mod.set(.hair_style, CharacterContent.Id.parse("removed.curls").?);
+    p.mod.set(.cel_style, CharacterContent.Id.parse("removed.ink").?);
+    try std.testing.expect(p.mod.resolve(.hair_style, &registry) == null);
+    var c: Creator = .{ .registry = &registry };
+    c.begin(p);
+    var buffer: [40]u8 = undefined;
+    try std.testing.expectEqualStrings("bun", c.value(.hair_style, &buffer));
+    try std.testing.expectEqualStrings("default (mod missing)", c.value(.cel_style, &buffer));
+    // Without any registry the creator is the built-in creator.
+    var plain: Creator = .{};
+    plain.begin(p);
+    plain.field = .hair_style;
+    _ = plain.key(.right);
+    try std.testing.expectEqual(Profile.HairStyle.braids, plain.draft.hair_style);
+    // The id survives a save round trip even though nothing resolves it.
+    const back = try Profile.fromDoc(p.toDoc());
+    try std.testing.expectEqualStrings("removed.curls", back.mod.get(.hair_style).?.slice());
+}
+
+test "schema base choices name real Profile enum tags" {
+    const checks = [_]struct { names: []const []const u8, T: type }{
+        .{ .names = &CharacterContent.base_hair, .T = Profile.HairStyle },
+        .{ .names = &CharacterContent.base_face, .T = Profile.FaceStyle },
+        .{ .names = &CharacterContent.base_armor, .T = Profile.Armor },
+    };
+    inline for (checks) |check| {
+        for (check.names) |name| try std.testing.expect(std.meta.stringToEnum(check.T, name) != null);
+    }
 }

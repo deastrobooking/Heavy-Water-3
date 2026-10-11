@@ -90,6 +90,20 @@ pub fn build(b: *std.Build) void {
     mods.addCopyFileToSource(glowworks.getEmittedBin(), "mods/glowworks/glowworks.wasm");
     b.step("mods", "Build the example mod's scripts into mods/").dependOn(&mods.step);
 
+    // `zig build validate-mods` loads every mod under mods/ (or `-- <dir>`) exactly as the game does
+    // and prints problems as `file: key: reason`; it exits non-zero if any mod is rejected.
+    const validator = b.addExecutable(.{ .name = "mod-validate", .root_module = b.createModule(.{ .root_source_file = b.path("src/mod_validate.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
+    validator.root_module.addImport("enum_compat", enum_compat);
+    const validate = b.addRunArtifact(validator);
+    validate.step.dependOn(&mods.step);
+    validate.has_side_effects = true;
+    if (builtin.zig_version.minor >= 17) {
+        validate.addPassthruArgs();
+    } else if (b.args) |args| {
+        validate.addArgs(args);
+    }
+    b.step("validate-mods", "Validate every mod under mods/ (or the directory given after --)").dependOn(&validate.step);
+
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
     app.addImport("enum_compat", enum_compat);
@@ -128,6 +142,10 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addAnonymousImport("glowworks.wasm", .{ .root_source_file = glowworks.getEmittedBin() });
     tests.root_module.addAnonymousImport("glowworks.mod", .{ .root_source_file = b.path("mods/glowworks/mod.json") });
     tests.root_module.addAnonymousImport("glowworks.lamp", .{ .root_source_file = b.path("mods/glowworks/blueprints/breathing_lamp.json") });
+    tests.root_module.addAnonymousImport("emberwear.mod", .{ .root_source_file = b.path("mods/emberwear/mod.json") });
+    tests.root_module.addAnonymousImport("emberwear.hair", .{ .root_source_file = b.path("mods/emberwear/character/hair.json") });
+    tests.root_module.addAnonymousImport("emberwear.armor", .{ .root_source_file = b.path("mods/emberwear/character/armor.json") });
+    tests.root_module.addAnonymousImport("emberwear.style", .{ .root_source_file = b.path("mods/emberwear/character/style.json") });
     b.step("test", "Run deterministic engine tests (no window)").dependOn(&b.addRunArtifact(tests).step);
     b.step("check", "Compile the application").dependOn(&exe.step);
 }

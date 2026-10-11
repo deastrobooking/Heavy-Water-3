@@ -24,7 +24,7 @@ const Kit = @import("Kit.zig");
 /// v14 adds per-ranger combat experience to each kit.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 14;
+pub const format_version: u32 = 15;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -100,7 +100,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     const parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format != format_version and doc.format != format_version - 1 and doc.format != format_version - 2) return error.UnsupportedSaveFormat;
+    if (doc.format > format_version or doc.format + 3 < format_version) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) return error.GeneratorMismatch;
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
@@ -249,6 +249,33 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const migrated = try decode(allocator, v12, doc.seed, 4, 8);
     defer migrated.deinit();
     try std.testing.expectEqual(@as(u32, 55), migrated.value.wallet.scrap);
+    // Format 15 profiles may name mod content; a format 14 save has no such ids and still loads.
+    var modded = doc;
+    var modded_profile = Profile{};
+    modded_profile.mod.set(.hair_style, @import("CharacterContent.zig").Id.parse("emberwear.flame_crest").?);
+    modded.profile = modded_profile.toDoc();
+    const modded_bytes = try encode(allocator, modded);
+    defer allocator.free(modded_bytes);
+    const modded_back = try decode(allocator, modded_bytes, doc.seed, 4, 8);
+    defer modded_back.deinit();
+    try std.testing.expectEqualDeep(modded_profile, try Profile.fromDoc(modded_back.value.profile));
+    var v14_doc = doc;
+    v14_doc.format = 14;
+    const v14 = try encode(allocator, v14_doc);
+    defer allocator.free(v14);
+    const v14_back = try decode(allocator, v14, doc.seed, 4, 8);
+    defer v14_back.deinit();
+    try std.testing.expect((try Profile.fromDoc(v14_back.value.profile)).mod.get(.hair_style) == null);
+    var v11_doc = doc;
+    v11_doc.format = 11;
+    const v11 = try encode(allocator, v11_doc);
+    defer allocator.free(v11);
+    try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, v11, doc.seed, 4, 8));
+    var future_doc = doc;
+    future_doc.format = format_version + 1;
+    const future = try encode(allocator, future_doc);
+    defer allocator.free(future);
+    try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, future, doc.seed, 4, 8));
     var twice = doc;
     twice.members = &.{ .{ .slot = 1, .profile = (Profile{}).toDoc(), .kit = .{} }, .{ .slot = 1, .profile = (Profile{}).toDoc(), .kit = .{} } };
     const dup = try encode(allocator, twice);
@@ -261,7 +288,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 5", "\"generator\": 2");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 13", "\"format\": 11");
+    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 15", "\"format\": 11");
     defer allocator.free(old_format);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, old_format, doc.seed, 4, 8));
 }

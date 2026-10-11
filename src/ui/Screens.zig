@@ -731,6 +731,8 @@ const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "HAIR", .first = .hair_style },
     .{ .title = "GEAR", .first = .outfit },
     .{ .title = "BOOTS", .first = .boot_style },
+    // Cel styles exist only as mod content, so this row cycles "default" plus installed mods.
+    .{ .title = "RENDER STYLE", .first = .cel_style },
 };
 
 fn swatch(field: Profile.Field, p: Profile) ?Color {
