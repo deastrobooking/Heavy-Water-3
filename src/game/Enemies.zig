@@ -322,7 +322,9 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
     if (self.training_enabled and nearAny(players, self.nests[training_nest].position, 160)) {
         self.training_timer = @max(0, self.training_timer - dt);
         var practice_count: usize = 0;
-        for (self.units) |slot| if (slot) |u| practice_count += @intFromBool(u.nest == training_nest);
+        for (self.units) |slot| {
+            if (slot) |u| practice_count += @intFromBool(u.nest == training_nest);
+        }
         if (practice_count < 3 and self.training_timer == 0) {
             const center = self.nests[training_nest].position;
             const offset: V = if (practice_count == 1) .{ 3, 0, 0 } else if (practice_count == 2) .{ -3, 0, 0 } else .{ 0, 0, 3 };

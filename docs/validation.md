@@ -34,7 +34,8 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 
 - Sprint-jump now launches a long-jump motion with forward carry. An airborne stomp sets a short landing pulse; combat turns it into a 92-damage radial energy kick with push/stun and colored impact effects.
 - Hands-tool attacks with no world target chain two energy punches into a roundhouse. The alternate input guards and briefly parries. The Ranger gets strike/kick poses; punch, kick and landing effects use the profile accent. Existing four-step chained dash remains available to set up an airborne finisher.
-- This was a code and documentation pass only. No build, tests, Metal capture, or hands-on combat run was made, so compilation, enemy hit feel, control conflicts and animation quality remain unverified.
+- The first pinned Debug check exposed a missing armor enum value plus syntax/name errors in the Scalari practice-patrol count and drone render local; these were corrected. `python3 tools/zig.py build check` and the ReleaseFast build both passed, rebuilding `zig-out/bin/heavy-water`.
+- Headless tests, Metal capture, and hands-on combat were not run. Enemy hit feel, control conflicts and animation quality remain unverified.
 
 ## City modules and enemy damage audit — 2026-10-11
 

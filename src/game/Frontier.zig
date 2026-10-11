@@ -1295,9 +1295,9 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .scalari_scout and room(out, n, 2)) {
         const p = R.add(u.position, .{ 0, 0.48, 0 });
         const body_tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else .{ 0.26, 0.92, 1.18, 1 };
-        const facing = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, u.yaw));
-        out[n] = .{ .mesh = c.drone, .transform = .{ .position = p }, .tint = body_tint, .size = .{ 0.82, 0.48, 1.08 }, .rotation = facing };
-        out[n + 1] = .{ .mesh = c.drone_glow, .transform = .{ .position = p }, .tint = Material.emissive(.{ 0.12, 0.95, 1, 1 }, if (u.state == .hunt) @as(f32, 0.95) else 0.3), .size = .{ 0.82, 0.48, 1.08 }, .rotation = facing };
+        const orientation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, u.yaw));
+        out[n] = .{ .mesh = c.drone, .transform = .{ .position = p }, .tint = body_tint, .size = .{ 0.82, 0.48, 1.08 }, .rotation = orientation };
+        out[n + 1] = .{ .mesh = c.drone_glow, .transform = .{ .position = p }, .tint = Material.emissive(.{ 0.12, 0.95, 1, 1 }, if (u.state == .hunt) @as(f32, 0.95) else 0.3), .size = .{ 0.82, 0.48, 1.08 }, .rotation = orientation };
         n += 2;
     };
     for (sb.enemies.units) |slot| if (slot) |u| {
@@ -1754,7 +1754,7 @@ const trooper_profile: @import("Profile.zig") = .{ .outfit = 3, .clothing = .van
 const skirmisher_profile: @import("Profile.zig") = .{ .outfit = 7, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 3, .skin = 7, .build = 0.92, .height = 0.96 };
 const bulwark_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 1, .skin = 7, .build = 1.18, .height = 1.15 };
 const scalari_scout_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 4, .skin = 5, .build = 0.7, .height = 0.78 };
-const scalari_stinger_profile: @import("Profile.zig") = .{ .outfit = 4, .clothing = .hardsuit, .armor = .vanguard, .helmet = .sealed, .accent = 5, .skin = 6, .build = 0.95, .height = 1.05 };
+const scalari_stinger_profile: @import("Profile.zig") = .{ .outfit = 4, .clothing = .hardsuit, .armor = .sentinel, .helmet = .sealed, .accent = 5, .skin = 6, .build = 0.95, .height = 1.05 };
 const scalari_titan_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 5, .skin = 4, .build = 2.7, .height = 4.8 };
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {
