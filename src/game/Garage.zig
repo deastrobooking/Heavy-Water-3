@@ -135,6 +135,28 @@ pub fn pick(self: *const Garage, eye: Physics.Vec3, dir: Physics.Vec3, reach: f3
     return best;
 }
 
+/// Nearest parked car beside the player. This provides a forgiving boarding target even when
+/// the camera ray misses the body or terrain briefly wins the aimed-target query.
+pub fn nearby(self: *const Garage, feet: Physics.Vec3, reach: f32) ?u8 {
+    const reach_sq = reach * reach;
+    var best: ?u8 = null;
+    var best_sq = reach_sq;
+    for (self.cars, 0..) |slot, i| {
+        const c = slot orelse continue;
+        if (self.piloting == @as(?u8, @intCast(i))) continue;
+        const p = c.flyer.body.pos;
+        const dx = p.x - feet[0];
+        const dy = p.y - (feet[1] + 0.9);
+        const dz = p.z - feet[2];
+        const distance_sq = dx * dx + dy * dy + dz * dz;
+        if (distance_sq < best_sq) {
+            best = @intCast(i);
+            best_sq = distance_sq;
+        }
+    }
+    return best;
+}
+
 pub fn board(self: *Garage, i: u8, camera: *Camera) void {
     const c = &(self.cars[i] orelse return);
     self.piloting = i;

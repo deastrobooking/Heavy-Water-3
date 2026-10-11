@@ -1191,6 +1191,9 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (hands and self.target == .none) {
         const f = aim.forward();
         if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |t| self.target = t;
+        if (self.target == .none) {
+            if (self.garage.nearby(self.player.feet, 5.0)) |car| self.target = .{ .car = car };
+        }
     }
     if (actions.channel_down or actions.channel_up) Build.adjustChannel(self, if (actions.channel_up) 1 else -1);
     switch (self.tools.tool) {

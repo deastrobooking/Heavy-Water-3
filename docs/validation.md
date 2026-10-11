@@ -46,6 +46,12 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - Updated the portable preset example to match the real factory mapping and documented the button roles.
 - `python3 tools/zig.py build check` passed on the default Zig/Mach channel. Headless tests, smoke, other compiler channels and cross-compiles were not run.
 
+## Vehicle boarding prompt and keyboard interaction — 2026-10-11
+
+- Parked garage cars now remain interactable within five meters if the aim ray misses their chassis or is occluded by terrain. This also keeps the boarding prompt visible while standing beside a car.
+- The existing `I` investigate key now performs contextual interaction; it still toggles the inspection panel when aimed at a structure. Vehicle prompts list `I`, controller `X`, and mouse click.
+- The default Zig/Mach `build check` and installed `build` passed. `git diff --check` passed. Headless tests, smoke, Metal visual review, and other compiler/platform checks were not run.
+
 ## Ranger hairstyles — 2026-10-11
 
 - Expanded the character creator from five hair entries to eleven: short, ponytail, long, crest, hood, bob, twin tails, bun, braids, curls and undercut. Ponytail, paired braid, bun, curly, cropped and mohawk silhouettes now have separate procedural generation paths. New enum tags are appended so existing profile JSON names remain valid.

@@ -897,7 +897,10 @@ pub fn update(self: *App, core: *mach.Core) void {
             .capture_prefab => self.actions.capture = true,
             .channel_down => self.actions.channel_down = true,
             .channel_up => self.actions.channel_up = true,
-            .inspect => self.inspecting = !self.inspecting,
+            .inspect => {
+                self.actions.interact = true;
+                if (self.sandbox.target == .structure) self.inspecting = !self.inspecting;
+            },
             .jump => self.engine.input.jump_pressed = true,
             .roll => self.engine.input.dodge = true,
             .stomp => self.engine.input.stomp = true,
@@ -2505,7 +2508,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
         .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  X / CLICK", .{Screens.keeperName(sandbox, i)}),
         .walker => renderer.hud_lines[1].set("CANOPY LOCAL  X / CLICK TALK", .{}),
-        .car => |i| renderer.hud_lines[1].set("{s}  X / CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
+        .car => |i| renderer.hud_lines[1].set("{s}  I / X / CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
         .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  X / CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
@@ -2534,7 +2537,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
                     renderer.hud_lines[1].set("{s} BUTTON  X / CLICK PRESS", .{def.name()}),
                 .script => renderer.hud_lines[1].set("{s} SCRIPT {s}  OUT {d:.2}{s}", .{ def.name(), def.scriptName(), machine.outputs[ref.device][4], if (sandbox.scripts.find(def.scriptName()) == null) "  MISSING" else "" }),
                 .plate => renderer.hud_lines[1].set("WEIGHT PLATE {s}  {s}", .{ def.name(), if (machine.outputs[ref.device][0] > 0.5) "PRESSED" else "NEEDS A CRATE" }),
-                .seat => renderer.hud_lines[1].set("{s}  X / CLICK ENTER", .{machine.blueprint.name()}),
+                .seat => renderer.hud_lines[1].set("{s}  I / X / CLICK ENTER", .{machine.blueprint.name()}),
                 .transmitter, .receiver => renderer.hud_lines[1].set("{s} {s} CHANNEL {d}  [ ] CHANGE", .{ def.name(), @tagName(def.kind), def.channel }),
                 .root_sender, .root_listener => if (machine.root_group[ref.device]) |g|
                     renderer.hud_lines[1].set("{s} ROOTSONG CHANNEL {d}  ROOT GROUP {d}  [ ] CHANGE", .{ def.name(), def.channel, g })
