@@ -35,7 +35,7 @@ The fork carries compatibility paths for newer compilers. `HEAVYWATER_ZIG_CHANNE
 | --- | --- |
 | Debug (default) | Development builds; the slowest, with all safety checks. |
 | `-Doptimize=ReleaseSafe` | Smoke runs and validation: fast, with safety checks (overflow and bounds panics). |
-| `-Doptimize=ReleaseFast` | Playing, benchmarks and captures. |
+| `-Doptimize=ReleaseFast` | Performance benchmarks and selected captures; runtime safety checks are disabled, so this is not the automatic beta/release choice. |
 
 Debug builds use far more stack, which hides size bugs from Release runs. Mach keeps every module's state on the main thread's 8 MB stack and copies it during startup, so a large inline array in `App`, `World` or `Renderer` overflows Debug first. Run at least one Debug launch after changing module state. The test "module states stay small" guards the sizes it can see.
 
@@ -85,7 +85,7 @@ Options are compiled in, so changing one rebuilds.
 python3 tools/zig.py build test --summary all
 ```
 
-- **Scope:** the suite (340 tests at the last count) is deterministic and headless. It covers the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
+- **Scope:** the suite had 373 tests at the latest recorded full run. It is deterministic and headless, covering the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
 - **Time:** expect about 3.5 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
 - **Release mode:** `-Doptimize=ReleaseSafe` runs the same suite optimized.
 
@@ -131,6 +131,7 @@ MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Dreload-smoke=true -Dsmoke-fra
 | `python3 tools/benchmark.py --canopy [--arbor 1\|2]` | An Arbor up close, at 1 km and back: both LODs and the render CPU budget. |
 | `python3 tools/benchmark.py --scale 10000\|100000\|1000000` | The scale workload (see [Scale Tests](scale.md)). |
 | `python3 tools/benchmark.py --pack 64` | Streaming an 80 MiB pack of 64 meshes during measurement. |
+| `python3 tools/benchmark.py --frontier` | Four-player ground and air combat: simulation stages, character preparation/skinning, render CPU, presentation intervals, and audio callbacks. |
 
 Shared flags:
 - `--frames N` (120–4096, default 600)
@@ -145,7 +146,7 @@ Reports cover:
 - chunk residency, uploads and evictions;
 - pool counts.
 
-They do not measure GPU execution time; Mach has no timestamp queries yet. A frontier benchmark (wasps, carriers, troopers, four players) is planned; see [next steps](plans/next-steps.md).
+They do not measure GPU execution time; the pinned Mach path has no timestamp queries yet. Presentation intervals are not GPU timings. The frontier benchmark is available, with its latest recorded results and follow-up in [next steps](plans/next-steps.md) and [validation](validation.md).
 
 ## Showcases and captures
 

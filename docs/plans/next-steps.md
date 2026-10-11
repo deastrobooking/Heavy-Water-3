@@ -9,9 +9,9 @@ The systems now in place:
 - fabrication;
 - procedural audio.
 
-The current user-directed campaign expansion is the Solar frontier and voluntary Galactic Democratic Compact, anchored by a transforming, winged Kestrel. `procedural/SolarSystem.zig` now records all eight planet destinations, twelve moons, and Scalari mining fronts. The planned travel loop is fast travel between bodies plus local flight and stations; no transition or transforming form is playable yet. See [Solar democracy](solar-democracy.md). The underwater Frontier region remains a linked content priority: human pressure-dome and fully submerged cetacean cities, a playable orca-form Tideborn champion, swim traversal, and underwater Hive/Scalari encounters. Pelaglass and Sonorous Reef have stable catalog records, but no ocean terrain, movement, or city is playable. See [Ocean cities](ocean-cities.md). The existing campaign foundations for the Arbor Frontier, Hive/Scalari Homeworld, and Gaia are in [Planetary frontier](planetary-frontier.md).
+The later-campaign direction includes the Solar frontier and voluntary Galactic Democratic Compact, anchored by a transforming, winged Kestrel. `procedural/SolarSystem.zig` now records all eight planet destinations, twelve moons, and Scalari mining fronts. The planned travel loop is fast travel between bodies plus local flight and stations; no transition or transforming form is playable yet. See [Solar democracy](solar-democracy.md). The underwater Frontier region is also planned: human pressure-dome and fully submerged cetacean cities, a playable orca-form Tideborn champion, swim traversal, and underwater Hive/Scalari encounters. Pelaglass and Sonorous Reef have stable catalog records, but no ocean terrain, movement, or city is playable. See [Ocean cities](ocean-cities.md). The existing campaign foundations for the Arbor Frontier, Hive/Scalari Homeworld, and Gaia are in [Planetary frontier](planetary-frontier.md).
 
-This plan orders the work. The [roadmap](../roadmap.md) stays the record of what is implemented.
+This plan orders the work. The [roadmap](../roadmap.md) is the canonical feature plan and records what is implemented. Solar, ocean and planetary campaign material below remains a later-content direction; its catalogs and design documents do not move it ahead of the first Earth liberation loop.
 
 ## Where things stand
 
@@ -34,7 +34,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 
 - **Missile lock on a reused slot:** fixed by giving each spawned ground Hive unit a generation number and checking `(slot, generation)` when resolving missile and HUD targets.
 - **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
-- **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. After GPU skinning and adaptive terrain ray marching (2026-10-10), simulation p95/p99 is 3.57 / 3.99 ms against the 4 ms target and skinning p99 is 0.15 ms. Physics and Hive AI are the largest remaining stages.
+- **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. The latest recorded M3 Pro run (2026-10-10) reports simulation p95/p99 of 3.57 / 3.99 ms against the 4 ms target and skinning p99 of 0.15 ms. Physics and Hive AI are the largest remaining stages. This is a baseline, not a claim that later content has been profiled.
 - **Guests:** they can't pilot, talk, or open the fabricator.
 - **Save versioning:** saves are at format v14, which persists per-player loadouts (v13) and combat XP (v14). Formats 12 and 13 migrate with default XP. When a field changes meaning, bump the format and record it in the migration notes.
 
@@ -44,7 +44,7 @@ This plan orders the work. The [roadmap](../roadmap.md) stays the record of what
 
 The game has had no hands-on pass since vehicles and the Hive arrived. Everything after this depends on what that reveals.
 
-1. **Frontier benchmark:** `tools/benchmark.py --frontier` flies a scripted Kestrel run past a carrier with wasps up, a ground fight at a nest, and four players.
+1. **Frontier benchmark — baseline recorded:** `tools/benchmark.py --frontier` flies a scripted Kestrel run past a carrier with wasps up, a ground fight at a nest, and four players. Re-run after material changes to simulation, rendering, audio, or content density; do not treat the 2026-10-10 result as a fresh measurement.
    - **Reports:** frontier route reports simulation stages, character skinning, audio callbacks, render CPU and presentation P50/P95/P99, and active combat counts.
    - **Budgets:** simulation P99 under 4 ms and character skinning P99 under 3 ms in ReleaseFast; renderer under 16.667 ms; audio callback below its real-time budget.
 2. **Hand-play checklist (yours):**
@@ -65,7 +65,18 @@ The game has had no hands-on pass since vehicles and the Hive arrived. Everythin
 
 Acceptance: the benchmark meets its budgets on the M3 Pro; the playtest checklist is complete with every issue fixed or filed; no known correctness bugs remain open.
 
-### B. Air war depth
+### B. Finish the first Earth city liberation loop (MVP gate)
+
+The combat campaign foundation is playable and has an end state, but the world premise requires two connected halves: clear the Hive from the wilds and expose its human allies inside a sanctuary city. Complete that loop in the existing Frontier before making the other planet and ocean catalogs playable.
+
+1. Trace the current save, quest, dialogue, evidence/investigation, nest, carrier, and city interaction paths against the liberation loop. Write down only the concrete missing links before implementation.
+2. Connect the city investigation outcome to persistent shared story progress. Keep personal loot, currency, gear, XP, and pet growth in each player's `Kit`.
+3. Make the city and wilds objectives discoverable from the in-game quest UI, and make the liberation state survive save/load.
+4. Add deterministic coverage for the complete state transition and save round trip, plus a real-game smoke stage that completes or reaches the final gate.
+
+Acceptance: a new save can follow the intended city/wilds objectives, expose the alliance, defeat the local Hive force, and reach a clear liberation outcome; shared story state and personal rewards retain their ownership rules. Record any remaining hands-on-only checks in validation.
+
+### C. Air war depth
 
 1. **Collisions — complete:** the Kestrel collides with wasps and carrier hull spheres; ramming damages both sides and resolves aircraft penetration. Wasps steer apart at close range. Regression tests and a Metal smoke are recorded in validation.
 2. **Carrier assault — complete:**
@@ -77,7 +88,7 @@ Acceptance: the benchmark meets its budgets on the M3 Pro; the playtest checklis
 
 Acceptance: tests for collisions and assault stages; a bomber raid can be won and lost; upgrades change the flight model measurably in tests.
 
-### C. The Hive as a campaign
+### D. The Hive as a campaign
 
 1. **Corruption — complete:** living surface nests stain a bounded area that expands each market day; destroyed nests stop spreading. Up to three combat spires seed at the advancing edge on later market days. Their parent links and destruction state survive saves, and a saved first-spread beat announces the campaign.
 2. **Story beats and quest log — complete:**
@@ -89,7 +100,7 @@ Acceptance: tests for collisions and assault stages; a bomber raid can be won an
 
 Acceptance: a new save plays from first conversation to the last carrier, with the story flags driving every step and the quest log always showing the next goal.
 
-### D. Co-op completeness
+### E. Co-op completeness
 
 1. **Guests in vehicles:** a second seat in hover cars (gunner with the arsenal) and guests flying their own Kestrel (one per fabricated fighter; fabricate more).
 2. **Guests elsewhere:** they can talk with keepers and use the fabricator from their split view (panels sized for quadrants).
@@ -97,13 +108,13 @@ Acceptance: a new save plays from first conversation to the last carrier, with t
 
 Acceptance: a four-player run can fabricate, fly and fight with every player active; split-screen panel layouts pass the screen-bounds test at quadrant size.
 
-### E. Engine phases (resume)
+### F. Engine phases (resume)
 
 1. **Mach `main` evaluation**, then **phase 14, skeletal animation** ([plan](skeletal-animation.md)). It replaces the procedural gait with clips: rangers, keepers, pedestrians and troopers, plus wing-beat and leg clips for the insect ships.
 2. **Phase 15, scenes** ([plan](scenes.md)): author nests, carrier circuits, raids and shrines as JSON scenes, so content no longer lives in code.
 3. **Phase 16, networking** ([plan](networking.md)): online co-op over the same player and arsenal model as split screen.
 
-### F. Content and polish (continuous)
+### G. Content and polish (continuous)
 
 - **Audio assets:** an `audio` asset kind and streamed music, keeping the synthesized set as the fallback.
 - **Art direction:** the first human face, neck, restrained body cues, fitted field-jacket harness, and head-fitted helmet changes are in the [character and environment visual pass](visual-direction.md). The exo rig, hardsuit, and vanguard now use distinct coverage spans, plate profiles, and muted material palettes. Review their closer lineup capture and add front, side, and three-quarter character views; then improve Frontier terrain materials, foliage, roads, and city composition. Broaden to vehicles, Wildkin, Hive units, and Scalari after the anchors pass.
@@ -111,7 +122,7 @@ Acceptance: a four-player run can fabricate, fly and fight with every player act
 - **Onboarding:** a guided first ten minutes (meet Maro, salvage, fabricate a blaster, first drone).
 - **Accessibility:** subtitles for all audio cues, and colorblind-safe pickup and threat colors.
 
-### G. Planetary arena campaign (new content track)
+### H. Planetary arena campaign (later content track)
 
 The destination, city, capital and arena catalog is seeded and tested, and the Scalari ship meshes are registered. Build the playable campaign in this order:
 
@@ -127,20 +138,38 @@ Use local tangent coordinates for each surface arena and stable geodesic face/ce
 
 Acceptance: a four-local-player session completes combat → loot → extraction → ship fabrication → outpost defense and save/reload on the same arena, with a deterministic Debug test and a ReleaseSafe smoke.
 
+## Review of external performance suggestions — 2026-10-11
+
+The pasted search results are prompts to investigate, not project requirements. Apply them against measurements and the existing architecture:
+
+| Suggestion | Project decision |
+| --- | --- |
+| Add Tracy / `ztracy` immediately | Defer. The current deterministic benchmark reports CPU stage percentiles, presentation intervals, callback cost, and memory/pool counters. First repeat the frontier baseline and use its stage profile to identify an unresolved question. Add a profiler only if the existing data cannot isolate it. GPU execution timing remains unavailable until the pinned Mach path gains timestamp queries. |
+| Make `ReleaseFast` the default or production mode | Keep Debug as the default and ReleaseSafe for smoke/validation. ReleaseFast is the measured benchmark mode. Zig documents that Fast disables runtime safety checks; a beta packaging profile should be selected after release testing, not inferred from a performance tip. |
+| Put all per-frame data in an arena | Do not generalize this. Hot paths already use fixed-capacity storage; the repository requires explicit allocators and no hidden frame allocations. Keep arenas for bounded request lifetimes where ownership is clear. Audit allocation behavior only when a measured frame path or memory report calls for it. |
+| Replace game systems with Mach's ECS/archetypes | No built-in Mach ECS is present in this fork or game architecture. Keep the existing fixed arrays and focused Zig systems; evaluate a data-layout change only against an actual entity iteration bottleneck. |
+| Use `extern struct` and alignment for components | Use ABI layout only at an actual C/GPU/file boundary. Native simulation structs should keep normal Zig layout; GPU records already have explicit, reviewed layouts. |
+| GPU-cull every scene above a fixed visible-object count | The renderer already groups instanced draws, culls cells on CPU, and has conservative shader-side per-instance frustum culling; 10K/100K/1M scale workloads already exist. The proposed threshold is unsupported. Measure a representative gameplay scene first; consider compute culling only if CPU submission or GPU work is shown to be the limiting stage. |
+| Preallocate vertex pools broadly | Existing terrain and instance pools are bounded and instrumented. Keep mesh uploads budgeted; add or resize pools only for a measured residency/upload issue. |
+| Move tables to `comptime` for speed | Use compile-time data where it clarifies fixed configuration. Do not treat it as a runtime optimization without evidence. |
+
+Next performance review: refresh the fixed-seed frontier report on a visible, unlocked M3 Pro session, compare CPU stage P95/P99 and presentation intervals, and keep GPU time explicitly marked unavailable. Linux and Windows runtime performance is unmeasured; their existing checks are compile-only.
+
 ## Order and sizing
 
 | Order | Milestone | Rough size | Why now |
 | --- | --- | --- | --- |
-| 1 | A. Play, measure, tune | Small | Everything else depends on what playing reveals; frame budgets guard the rest. |
-| 2 | G. Planetary arena campaign | Large | Connects local co-op, existing combat/loot, procedural ship design and planetary building into a replayable progression loop. |
-| 3 | D. Co-op completeness | Medium | Broader vehicle, fabrication and conversation support makes the full party useful. |
-| 4 | E. Mach evaluation, then phase 14 | Large | Troopers and ships need animation; it is the next engine unlock. |
-| 5 | E. Phases 15–16 | Large | Content authoring and online play build on all of the above. |
-| — | F. Content and polish | Continuous | Alongside every milestone. |
+| 1 | A. Play, measure, tune | Small | Refresh the baseline and close hands-on correctness and tuning gaps. |
+| 2 | B. First Earth city liberation loop | Medium | Completes the game's stated two-part MVP loop using the existing Frontier. |
+| 3 | E. Co-op completeness | Medium | Broader vehicle, fabrication and conversation support makes the full party useful. |
+| 4 | G. Content and polish | Continuous | Apply after playtest findings and alongside the MVP work. |
+| Later | H. Planetary arena campaign | Large | Builds on the proven combat, rewards, persistence and city loop. |
+| Deferred | F. Mach evaluation, then phase 14 | Large | Engine work follows an MVP need or a measured animation requirement. |
+| Deferred | F. Phases 15–16 | Large | Scene authoring and networking are outside the current local MVP gate. |
 
 ## Risks
 
 - **Frame cost.** CPU skinning (24 characters), many probes, and wasps all scale with content. Mitigation: milestone A's benchmark budgets; GPU skinning (done) removed most of the skinning cost.
 - **Tuning without play.** Values are set from tests and captures, not feel. Mitigation: hand-play in milestone A before adding depth.
-- **Monolithic modules.** `Sandbox.zig` (about 3,300 lines) and `App.zig` (about 1,400) keep growing. Mitigation: continue the `Frontier`, `Garage`, `Hangar` and `Skies` pattern, and move showcase and smoke code out of `App.zig` into `game/Showcase.zig` in milestone A.
+- **Monolithic modules.** `Sandbox.zig` and `App.zig` keep growing. Mitigation: keep new behavior in focused modules following the existing `Frontier`, `Garage`, `Hangar` and `Skies` pattern. Split older code only when a feature change gives a clear boundary and the move can stay behavior-preserving.
 - **Test time.** The catalog allocation-failure test grows with every generated mesh (the suite takes about 2 minutes). Mitigation: cache generated vehicle meshes across that test's iterations, or sample failure points.

@@ -536,9 +536,9 @@ Vehicle blueprints get a rigid chassis and a `Vehicle` instead of static bodies.
 
 ## Rendering growth path
 
-Preserve the CPU world / presentation boundary. Introduce mesh/material handles, a dense GPU scene table, compute frustum culling, and indirect instance counts before adding HZB and projected-size LOD. Add a pass graph when shadow/HDR/postprocessing resource dependencies exist. Replace fixed capacities with explicit, budgeted persistent buffers and per-frame staging only when the workload requires it.
+The current renderer already uses typed mesh/material handles, bounded instance storage, budgeted uploads, CPU cell culling, shader-side per-instance frustum culling, and ranged instanced draws. Preserve the CPU world / presentation boundary. Do not add a compute-culling or indirect-count pipeline based on an object-count rule of thumb; first show that representative gameplay is limited by CPU submission or GPU visibility work. HZB and projected-size LOD likewise need a measured scene and a concrete acceptance target. Add a pass graph when shadow/HDR/postprocessing resource dependencies exist. Keep fixed capacities explicit and budgeted; replace them only when a workload demonstrates the need.
 
-Performance work should record CPU/GPU timing separately, allocation counts, and P50/P95/P99 across fixed-seed scenes. The current HUD is diagnostic instrumentation, not the 10K/100K/1M-object benchmark planned in roadmap phase 8.
+Performance work should record CPU and GPU timing separately, allocation counts, and P50/P95/P99 across fixed-seed scenes. Existing streaming, canopy, scale, pack and frontier benchmark routes cover repeatable CPU/render submission and presentation workloads. They do not report GPU execution time because the pinned Mach path has no timestamp queries. The HUD remains live diagnostic instrumentation, not a substitute for those benchmark reports.
 
 
 ## Genome Arbors and shared sap
