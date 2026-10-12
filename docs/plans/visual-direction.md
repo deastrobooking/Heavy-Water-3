@@ -24,6 +24,8 @@ These findings are visual-review observations, not claims that the underlying wo
 
 ## Art direction to hold
 
+**Not voxel (2026-10-11).** The style is fantasy anime sci-fi realism (see [world](../world.md#visual-direction)). Replace remaining block-built and faceted placeholders as each system is touched: block-assembled weapons, pets made from orb/block/spike props, faceted boulders and leaf crystals, and the checker. New gear and objects get smooth tessellated forms, bevels, seams and tapered construction; existing armor, helmets and hair move toward credible, serious construction rather than toy-like ellipsoid stacks.
+
 Build a grounded, hopeful science-fantasy look: panoramic natural forms, deliberate contour drawing, broad readable color shapes, and engineered details that make physical sense. Keep the three-dimensional forms and painterly cel lighting. Use quiet expanses to sell scale, then concentrate detail at faces, machinery, and landmarks. Avoid literal imitation of any one artist.
 
 - **Humans:** anime action proportions (about 6 heads, large eyes, short neck, big hands and feet; superseded the 7.5-head baseline on 2026-10-11); make faces readable and masculine/feminine variation restrained; fit practical field clothing and armor to the body.
