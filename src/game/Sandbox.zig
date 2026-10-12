@@ -2089,7 +2089,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and (self.player.mode == .walk or self.player.mode == .fly) and n < out.len) {
-        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
+        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);
@@ -2216,14 +2216,29 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog.content.block, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog, out, n);
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);
 }
 
-fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8, block: Catalog.MeshHandle, out: []World.Prop, start: usize) usize {
-    const end = start + Avatar.build(profile, stance.apply(pose), block, out[start..]);
+fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8, catalog: *const Catalog, out: []World.Prop, start: usize) usize {
+    if (profile.body_style == .captain_test) if (catalog.mesh(catalog.content.captain_test)) |entry| {
+        if (entry.ready and start < out.len) {
+            const model_height = @max(entry.model.bounds_max[1] - entry.model.bounds_min[1], 0.01);
+            const scale = 1.8 * profile.height / model_height;
+            out[start] = .{
+                .mesh = catalog.content.captain_test,
+                .transform = .{ .position = .{ pose.feet[0], pose.feet[1] - entry.model.bounds_min[1] * scale, pose.feet[2] }, .scale = scale },
+                .tint = .{ 1, 1, 1, 1 },
+                .size = .{ profile.build, 1, profile.build },
+                .rotation = .{ 0, @sin(pose.yaw * 0.5), 0, @cos(pose.yaw * 0.5) },
+                .owner = owner,
+            };
+            return start + 1;
+        }
+    };
+    const end = start + Avatar.build(profile, stance.apply(pose), catalog.content.block, out[start..]);
     for (out[start..end]) |*part| {
         part.owner = owner;
         part.character.?.id = owner - 1;

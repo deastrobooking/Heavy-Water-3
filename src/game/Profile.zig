@@ -81,6 +81,9 @@ pub const Presentation = enum { masculine, feminine };
 /// Synthetics are engineered humans with powers (phase dash, kinetic slam, lumen lance): a
 /// porcelain sheen, eyes and seams lit in the accent colour, more health, harder cuts.
 pub const Class = enum { ranger, synthetic };
+/// `captain_test` selects the bundled, modifier-baked GLB in the character preview and game.
+/// It is a static pose until runtime skeletal animation is implemented.
+pub const BodyStyle = enum { procedural, captain_test };
 /// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
 /// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
@@ -90,11 +93,12 @@ pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, 
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed, pilot, recon };
-pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, cel_style };
+pub const Field = enum { name, class, body_style, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, cel_style };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
 class: Class = .ranger,
+body_style: BodyStyle = .procedural,
 species: Species = .human,
 /// Wildkin main and marking colours (`coat_colors`); unused for humans.
 coat: u8 = 0,
@@ -161,6 +165,7 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
     switch (field) {
         .name => {},
         .class => self.class = @enumFromInt(cycle(@intFromEnum(self.class), delta, enum_compat.fields(Class).len)),
+        .body_style => self.body_style = @enumFromInt(cycle(@intFromEnum(self.body_style), delta, enum_compat.fields(BodyStyle).len)),
         .species => self.species = @enumFromInt(cycle(@intFromEnum(self.species), delta, species_count)),
         .coat => self.coat = cycle(self.coat, delta, coat_colors.len),
         .marking => self.marking = cycle(self.marking, delta, coat_colors.len),
@@ -201,6 +206,7 @@ fn cycle(value: anytype, delta: i32, count: usize) @TypeOf(value) {
 pub const Doc = struct {
     name: []const u8,
     class: Class = .ranger,
+    body_style: BodyStyle = .procedural,
     species: Species = .human,
     coat: u8 = 0,
     marking: u8 = 2,
@@ -228,7 +234,7 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .mod = self.mod.toDoc() };
+    return .{ .name = self.name(), .class = self.class, .body_style = self.body_style, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .mod = self.mod.toDoc() };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -240,6 +246,7 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.height = doc.height;
     result.build = doc.build;
     result.class = doc.class;
+    result.body_style = doc.body_style;
     result.species = doc.species;
     result.coat = doc.coat;
     result.marking = doc.marking;

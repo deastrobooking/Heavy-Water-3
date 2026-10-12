@@ -72,9 +72,16 @@ pub const tuning = .{
 /// Three nests on the surface, then one in the heart of each cave system.
 pub const surface_nests = tuning.surface_nests;
 pub const max_seeded_nests = 3;
-/// Surface, seeded and cave nests, plus stable slots for Scalari practice and arena bots.
+/// Surface, seeded and cave nests, plus stable Scalari practice/patrol and arena slots.
 pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems + 2;
-/// Stable private slot for the renewable early-game Scalari practice patrol.
+/// The renewable Scalari practice slot is reused for roaming Wilds patrols.
+pub const field_patrol_count = 1;
+pub const field_patrol_start: u8 = max_nests - 2;
+pub const regular_nest_limit: usize = field_patrol_start;
+pub fn fieldPatrolNest(_: usize) u8 {
+    return field_patrol_start;
+}
+/// Stable private slot for the renewable Scalari patrol, near spawn or roaming in the Wilds.
 pub const training_nest: u8 = max_nests - 2;
 comptime {
     // Blades and dashes remember nests cut per swing in a u16.
@@ -186,6 +193,9 @@ bolts: [max_bolts]?Bolt = @splat(null),
 grenades: [16]?Grenade = @splat(null),
 training_timer: f32 = 2,
 training_enabled: bool = false,
+field_patrol_timer: [field_patrol_count]f32 = @splat(12),
+field_patrol_abandon_timer: [field_patrol_count]f32 = @splat(0),
+training_position: V = @splat(0),
 rng: std.Random.DefaultPrng = .init(0),
 
 /// Picks nest sites on the terrain at least `clear` metres from every point in `avoid`
@@ -211,13 +221,14 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
     }
     const practice_x = spawn[0] + 42;
     const practice_z = spawn[2] + 16;
-    self.nests[training_nest] = .{ .position = .{ practice_x, Terrain.surface(seed, practice_x, practice_z).height, practice_z }, .alive = false, .health = 0, .spawn_timer = 2 };
+    self.training_position = .{ practice_x, Terrain.surface(seed, practice_x, practice_z).height, practice_z };
+    self.nests[training_nest] = .{ .position = self.training_position, .alive = false, .health = 0, .spawn_timer = 2 };
     return self;
 }
 
 /// A nest in a cave's heart chamber, standing on its floor.
 pub fn addCaveNest(self: *Enemies, floor: V) void {
-    if (self.nest_count >= arena_nest) return;
+    if (self.nest_count >= regular_nest_limit) return;
     self.nests[self.nest_count] = .{ .position = floor, .cave = true, .health = nest_health * 0.7 };
     self.nest_count += 1;
 }
@@ -225,7 +236,7 @@ pub fn addCaveNest(self: *Enemies, floor: V) void {
 /// A campaign spore site is stable across loads: it is a fixed distance and angle from its
 /// recorded parent and samples the same seeded terrain height.
 pub fn addSeededNest(self: *Enemies, parent: u8, serial: u8, spread_day: u64) ?u8 {
-    if (serial >= max_seeded_nests or self.nest_count >= arena_nest or parent >= self.nest_count) return null;
+    if (serial >= max_seeded_nests or self.nest_count >= regular_nest_limit or parent >= self.nest_count) return null;
     const source = self.nests[parent];
     if (source.cave) return null;
     const hash = Seed.mix(self.seed ^ 0x53504f5245534954 ^ (@as(u64, serial) *% 0x9e3779b97f4a7c15) ^ @as(u64, parent));
@@ -328,8 +339,8 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
     }.f;
     const random = self.rng.random();
 
-    // Renewable low-threat ground practice patrol, kept separate from the Hive nest quota.
-    if (self.training_enabled and nearAny(players, self.nests[training_nest].position, 100)) {
+    // Renewable low-threat practice patrol, independent of the campaign Hive nest quota.
+    if (self.training_enabled and horizontal(R.sub(self.nests[training_nest].position, self.training_position)) < 1 and nearAny(players, self.training_position, 100)) {
         self.training_timer = @max(0, self.training_timer - dt);
         var practice_count: usize = 0;
         for (self.units) |slot| {
@@ -345,6 +356,64 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
             };
             _ = self.spawnAt(kind, training_nest, R.add(center, offset), 1);
             self.training_timer = 10;
+        }
+    }
+
+    // Small Scalari search pairs keep the open Wilds active between fixed Hive sites. The
+    // practice slot doubles as their reusable anchor; pairs are easy to notice, but not endless spawns
+    // on top of an existing nest fight. Ground-height checks keep them out of caves and flight.
+    const patrol_index = 0;
+    const patrol_nest = fieldPatrolNest(0);
+    if (self.unitCount(patrol_nest) > 0) {
+        if (nearAny(players, self.nests[patrol_nest].position, wake_distance + 40)) {
+            self.field_patrol_abandon_timer[patrol_index] = 0;
+        } else {
+            self.field_patrol_abandon_timer[patrol_index] += dt;
+            if (self.field_patrol_abandon_timer[patrol_index] >= 14) {
+                for (&self.units) |*slot| if (slot.*) |u| {
+                    if (u.nest == patrol_nest) slot.* = null;
+                };
+                self.field_patrol_abandon_timer[patrol_index] = 0;
+            }
+        }
+    } else {
+        self.field_patrol_abandon_timer[patrol_index] = 0;
+        // Let the first eligible player draw one shared patrol for a nearby co-op group.
+        for (players, 0..) |player, p| {
+            if (!player.alive or horizontal(R.sub(player.chest, self.training_position)) < 235) continue;
+            const ground = Terrain.surface(self.seed, player.chest[0], player.chest[2]);
+            if (@abs(player.chest[1] - ground.height - 1.3) > 5) continue;
+            var shadowed = false;
+            for (players[0..p]) |other| if (other.alive and horizontal(R.sub(other.chest, player.chest)) < 90) {
+                shadowed = true;
+                break;
+            };
+            if (shadowed) continue;
+
+            var near_site = false;
+            for (self.nests[0..self.nest_count]) |site| {
+                if (!site.alive or site.cave) continue;
+                if (horizontal(R.sub(site.position, player.chest)) < 145) {
+                    near_site = true;
+                    break;
+                }
+            }
+            if (near_site) continue;
+
+            self.field_patrol_timer[patrol_index] = @max(0, self.field_patrol_timer[patrol_index] - dt);
+            if (self.field_patrol_timer[patrol_index] > 0 or self.unitCount(null) >= max_units - 1) break;
+
+            const angle = self.rng.random().float(f32) * (2 * std.math.pi);
+            const x = player.chest[0] + @sin(angle) * 28;
+            const z = player.chest[2] + @cos(angle) * 28;
+            const center: V = .{ x, Terrain.surface(self.seed, x, z).height, z };
+            self.nests[patrol_nest] = .{ .position = center, .alive = false, .health = 0 };
+            const first: V = .{ x + @sin(angle + 1.1) * 3, center[1] + 0.5, z + @cos(angle + 1.1) * 3 };
+            const second: V = .{ x + @sin(angle - 1.1) * 3, center[1] + 0.5, z + @cos(angle - 1.1) * 3 };
+            _ = self.spawnAt(.scalari_miner, patrol_nest, first, 1);
+            _ = self.spawnAt(.scalari_scout, patrol_nest, second, 1);
+            self.field_patrol_timer[patrol_index] = 42;
+            break;
         }
     }
 

@@ -1,6 +1,8 @@
 # Heavy Water
 
-**A native Zig exploration, engineering, and world-building game for a wild, technological future Earth.** Built on Mach, Heavy Water brings together procedural Arbors, a living canopy city, hands-on machine building, and traversal across a vast vertical landscape.
+**A native Zig exploration, engineering, and world-building game for a wild, technological future Earth.** Zig Native Game Engine Built on top of Mach. 
+- Heavy Water 3 is the 3rd game and Engine in the Heavy Water Series. It is a 4 play local Action/Exploration/Building & Strategy Open World RPG. Find a projector or the biggest screen you can grab some friends and get lost in the world of Heavy Water. 
+
 
 ## Build and run
 

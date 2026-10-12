@@ -26,6 +26,8 @@ const Modifiers = @import("asset/Modifiers.zig");
 ///       create a source-linked, auto-labeled Captain modifier document for editing
 ///   asset-compiler preview-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.png> [bind|run]
 ///       apply palette, label and per-part shape edits, then render a review PNG
+///   asset-compiler compile-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.hwmesh> [bind|run]
+///       compile a source-hash-validated, modifier-baked static model for the game
 ///   asset-compiler manifest <output> (<source.meta> <name> <output-name>)...
 ///       write the asset manifest the runtime registry loads
 ///   asset-compiler import <directory>
@@ -44,11 +46,12 @@ pub fn main(init: std.process.Init) !void {
     if ((args.len == 5 or args.len == 6) and std.mem.eql(u8, args[1], "preview-bind")) return previewBind(init.gpa, io, args[2], args[3], args[4], if (args.len == 6) args[5] else "bind");
     if (args.len == 5 and std.mem.eql(u8, args[1], "modifiers")) return createModifiers(init.gpa, io, args[2], args[3], args[4]);
     if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "preview-modified")) return previewModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
+    if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "compile-modified")) return compileModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
     if (args.len >= 3 and std.mem.eql(u8, args[1], "manifest") and (args.len - 3) % 3 == 0) return manifest(init.gpa, io, args[2], args[3..]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "import")) return import(init.gpa, io, args[2]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "sounds")) return writeSounds(init.gpa, io, args[2]);
     if (args.len == 4 or args.len == 8) if (std.mem.eql(u8, args[1], "heightmap")) return compileHeightmap(init.gpa, io, args[2], args[3], args[4..]);
-    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source> <meta> <output.json> | split <source> <meta> <output-dir> | preview-bind <source> <meta> <output.png> [bind|run] | modifiers <source> <meta> <output.json> | preview-modified <source> <meta> <modifiers.json> <output.png> [bind|run] | manifest ... | import <dir> | heightmap ...", .{});
+    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source> <meta> <output.json> | split <source> <meta> <output-dir> | preview-bind <source> <meta> <output.png> [bind|run] | modifiers <source> <meta> <output.json> | preview-modified <source> <meta> <modifiers.json> <output.png> [bind|run] | compile-modified <source> <meta> <modifiers.json> <output.hwmesh> [bind|run] | manifest ... | import <dir> | heightmap ...", .{});
     return error.InvalidArguments;
 }
 
@@ -266,6 +269,36 @@ fn previewModified(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, 
     try image.writePng(gpa, &png);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = png.items });
     std.log.info("modified preview: {s}, {d} editable mesh islands, {d} vertices -> {s}", .{ @tagName(parsed.value.character_type), parsed.value.parts.len, model.mesh.vertices.len, output_path });
+}
+
+fn compileModified(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, modifiers_path: []const u8, output_path: []const u8, pose_name: []const u8) !void {
+    const source = try readFile(gpa, io, source_path);
+    defer gpa.free(source);
+    const meta_bytes = try readFile(gpa, io, meta_path);
+    defer gpa.free(meta_bytes);
+    const modifier_bytes = try readFile(gpa, io, modifiers_path);
+    defer gpa.free(modifier_bytes);
+    const meta = try Meta.check(gpa, meta_bytes, source_path, source);
+    if (meta.kind != .model) return error.UnsupportedKind;
+    const parsed = try std.json.parseFromSlice(Modifiers.Document, gpa, modifier_bytes, .{});
+    defer parsed.deinit();
+    var context: Context = .{ .io = io, .dir = std.fs.path.dirname(source_path) orelse "." };
+    const pose: Gltf.PreviewPose = if (std.mem.eql(u8, pose_name, "bind")) .bind else if (std.mem.eql(u8, pose_name, "run")) .run else return error.InvalidPreviewPose;
+    var model = try Gltf.compilePosePreview(gpa, source, .{ .context = &context, .load = Context.load }, pose);
+    defer model.deinit(gpa);
+    if (meta.model.scale != 1) for (model.mesh.vertices) |*vertex| {
+        for (&vertex.position) |*axis| axis.* *= meta.model.scale;
+    };
+    model.computeBounds();
+    const source_hash = Meta.hashSource(source);
+    const analysis = try Modifiers.apply(gpa, &model, parsed.value, &source_hash);
+    defer gpa.free(analysis.vertex_parts);
+    defer gpa.free(analysis.components);
+    const encoded = try model.encode(gpa);
+    defer gpa.free(encoded);
+    if (std.fs.path.dirname(output_path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = encoded });
+    std.log.info("compiled modified {s} mesh: {d} editable islands, {d} vertices -> {s}", .{ @tagName(parsed.value.character_type), parsed.value.parts.len, model.mesh.vertices.len, output_path });
 }
 
 const BindPoseShader = struct {

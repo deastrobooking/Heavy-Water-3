@@ -24,6 +24,7 @@ const Encounters = @import("../game/Encounters.zig");
 const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
 const District = @import("../procedural/District.zig");
+const Enemies = @import("../game/Enemies.zig");
 pub const Rect = Canvas.Rect;
 const Color = Canvas.Color;
 
@@ -738,6 +739,7 @@ fn drawInspect(c: *Canvas, hud: Hud) void {
 
 const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "IDENTITY", .first = .name },
+    .{ .title = "CHARACTER MODEL", .first = .body_style },
     .{ .title = "FACE", .first = .face_style },
     .{ .title = "BODY", .first = .height },
     .{ .title = "HAIR", .first = .hair_style },
@@ -1313,15 +1315,27 @@ fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: 
     c.text(tag.x + 3, tag.y + 2, text, 0.8, color);
 }
 
+/// Compact, unlabeled point of interest. The legend explains its single-letter marker.
+fn mapPoi(c: *Canvas, map: Rect, fx: f32, fy: f32, mark: []const u8, color: Color, selected: bool) void {
+    if (fx < 0.02 or fx > 0.98 or fy < 0.15 or fy > 0.98) return;
+    const x = map.x + map.w * fx;
+    const y = map.y + map.h * fy;
+    const icon: Rect = .{ .x = x - 7, .y = y - 7, .w = 14, .h = 14 };
+    c.rect(icon, .{ 0.012, 0.026, 0.034, 0.96 });
+    c.frame(icon, 1, if (selected) gold else color);
+    c.text(icon.x + 4, icon.y + 3, mark, 0.9, color);
+    if (selected) c.focus(icon);
+}
+
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const r = menuRect(c, @min(720, c.width - 30), @min(690, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
     const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 390 };
     c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
     const span: f32 = switch (menu.map_zoom) {
-        0 => 350,
-        1 => 700,
-        else => 1400,
+        0 => 1400,
+        1 => 2800,
+        else => 5600,
     };
     const depth = span * map.h / map.w;
     const player_position = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
@@ -1345,17 +1359,55 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     }
     c.print(map.x + 8, map.y + 8, 1, ink, "{s} / ARBOR REACH", .{District.city_name});
     c.print(map.x + 8, map.y + 23, 0.8, dim, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
+    const legend_y = map.y + 39;
+    c.text(map.x + 8, legend_y, "N", 0.9, bad);
+    c.text(map.x + 18, legend_y, "NEST", 0.7, dim);
+    c.text(map.x + 58, legend_y, "C", 0.9, accent);
+    c.text(map.x + 68, legend_y, "CAVE", 0.7, dim);
+    c.text(map.x + 111, legend_y, "H", 0.9, .{ 0.82, 0.63, 1, 1 });
+    c.text(map.x + 121, legend_y, "WILDKIN", 0.7, dim);
+    c.text(map.x + 184, legend_y, "A", 0.9, good);
+    c.text(map.x + 194, legend_y, "WILDLIFE", 0.7, dim);
+    c.text(map.x + 261, legend_y, "!", 0.9, gold);
+    c.text(map.x + 271, legend_y, "ENCOUNTER", 0.7, dim);
+    c.text(map.x + 337, legend_y, "T", 0.9, gold);
+    c.text(map.x + 347, legend_y, "TRAVEL", 0.7, dim);
     var occupied: [12]Rect = undefined;
     var marker_count: usize = 0;
     for (0..Sandbox.travel_count) |i| {
         const point = sb.travelPoint(i);
-        mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, Sandbox.travel_labels[i], gold, destination == i, &occupied, &marker_count);
+        mapPoi(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, "T", gold, destination == i);
     }
     for (0..4) |i| {
         if (i > 0 and !sb.guests[i - 1].active) continue;
         const point = if (i == 0) sb.player.feet else sb.guests[i - 1].player.feet;
         var label: [8]u8 = undefined;
         mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, std.fmt.bufPrint(&label, "P{d}", .{i + 1}) catch "?", accent, menu.hero_player == i, &occupied, &marker_count);
+    }
+    for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| if (nest.alive and !nest.cave) {
+        mapPoi(c, map, 0.5 + (nest.position[0] - focus[0]) / span, 0.5 + (nest.position[2] - focus[2]) / depth, "N", bad, false);
+    };
+    for (sb.caves.systems[0..sb.caves.count]) |cave| {
+        mapPoi(c, map, 0.5 + (cave.entrance[0] - focus[0]) / span, 0.5 + (cave.entrance[2] - focus[2]) / depth, "C", accent, false);
+    }
+    for (sb.encounters) |maybe| if (maybe) |spot| {
+        if (Heroes.roster[spot.hero].home == .wilds and !sb.progress.hasHero(spot.hero)) {
+            mapPoi(c, map, 0.5 + (spot.position[0] - focus[0]) / span, 0.5 + (spot.position[2] - focus[2]) / depth, "H", .{ 0.82, 0.63, 1, 1 }, false);
+        }
+    };
+    for (sb.pets.spots, 0..) |spot, species_index| {
+        if (sb.pets.wild_health[species_index] <= 0) continue;
+        const species: Pets.Species = @enumFromInt(species_index);
+        var wanted = false;
+        for (0..Sandbox.max_players) |p| if (sb.present(p) and !sb.kits[p].hasPet(species)) {
+            wanted = true;
+        };
+        if (wanted) mapPoi(c, map, 0.5 + (spot.position[0] - focus[0]) / span, 0.5 + (spot.position[2] - focus[2]) / depth, "A", good, false);
+    }
+    for (0..Enemies.max_nests) |nest_index| {
+        if (sb.enemies.unitCount(@intCast(nest_index)) == 0) continue;
+        const nest = sb.enemies.nests[nest_index];
+        mapPoi(c, map, 0.5 + (nest.position[0] - focus[0]) / span, 0.5 + (nest.position[2] - focus[2]) / depth, "!", gold, false);
     }
     c.print(r.x + 22, map.y + map.h + 15, 1, ink, "P{d} / GOLD: DESTINATION / {s} VIEW", .{ menu.hero_player + 1, if (menu.map_frame_destination) "DESTINATION" else "PLAYER" });
     for (Menu.map_items, 0..) |item, i| {

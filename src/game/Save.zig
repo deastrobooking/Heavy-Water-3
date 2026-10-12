@@ -29,10 +29,11 @@ const District = @import("../procedural/District.zig");
 /// v21 adds steampunk root galleries without changing plaza or bridge identities; v22 adds small
 /// pine scatter and Detroit's Gothic/industrial skyline; v23 widens Detroit River, adds Belle
 /// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities;
-/// v24 corrects Rootway gallery geometry while retaining district and bridge identities.
+/// v24 corrects Rootway gallery geometry while retaining district and bridge identities;
+/// v25 adds the selectable Captain test-mesh body style to saved player profiles.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 24;
+pub const format_version: u32 = 25;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 

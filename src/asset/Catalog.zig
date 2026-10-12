@@ -63,6 +63,8 @@ pub const Content = struct {
     test_arbor: MeshHandle,
     /// Coarse distance proxy for the test Arbor; see `World.Prop.effectiveMesh`.
     test_arbor_lod: MeshHandle,
+    /// Modifier-baked static bind-pose preview of the bundled Test+Chroma Captain GLB.
+    captain_test: MeshHandle,
     powered_door: *const Blueprint,
     elevator: *const Blueprint,
     rover: *const Blueprint,
@@ -134,7 +136,7 @@ blueprint_count: usize = 0,
 arbors: [arbor_count]ArborAsset = undefined,
 district: District.Layout = undefined,
 /// Meshes reserved by `loadSeededDeferred`, to be built by the asset loader and installed.
-pending: [arbor_count * 2 + 1]Pending = undefined,
+pending: [arbor_count * 2 + 2]Pending = undefined,
 pending_count: usize = 0,
 /// The world's caves (`procedural/Caves.zig`), and their meshes plus the mountain ranges' far
 /// panorama: reserved at load and built only by the application's asset loader (`landscape`),
@@ -187,6 +189,9 @@ const Build = struct {
         const layout: *const District.Layout = @ptrCast(@alignCast(context));
         const city = try District.geometry(layout);
         return Model.fromMesh(allocator, try District.mesh(allocator, city.slice(), false), .named("canopy district", .{ 1, 1, 1, 1 }));
+    }
+    fn captainTest(_: *const anyopaque, allocator: std.mem.Allocator) anyerror!Model {
+        return Model.decode(allocator, @embedFile("captain.hwmesh"));
     }
 };
 
@@ -254,6 +259,9 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.content.saber_wave_core = try self.register(allocator, try Model.fromMesh(allocator, try CombatGeometry.wave(allocator, true), .named("saber crescent core", .{ 1, 1, 1, 1 })));
     self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
     self.content.test_arbor_lod = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").lodMesh(allocator), .named("test arbor lod", .{ 1, 1, 1, 1 })));
+    self.content.captain_test = try self.reserve();
+    self.pending[self.pending_count] = .{ .handle = self.content.captain_test, .generator = .{ .context = @ptrCast(&self.content.captain_test), .build = Build.captainTest } };
+    self.pending_count += 1;
     self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
     for (&self.arbors, 0..) |*asset, i| {
         const genome: Arbor.Genome = if (i == 0)

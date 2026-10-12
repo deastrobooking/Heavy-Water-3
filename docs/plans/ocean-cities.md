@@ -4,7 +4,7 @@
 
 Extend the Arbor Frontier toward the continental shelf without opening a new planet or changing the campaign's co-op loop. The first ocean region pairs two neighboring cities: **Pelaglass**, a human pressure-dome settlement, and **Sonorous Reef**, a fully submerged city inhabited by cetacean-adapted people. They share the same sea, energy grid, trade routes, and defense problem while keeping distinct architecture and ways of moving through space.
 
-Keep the fiction hopeful and legible: bioengineering is a human choice made to live with the ocean, and the cetacean forms are people with names, work, homes, politics, and agency. Orcas and dolphins are not pets or enemy wildlife. Human and cetacean residents are partners; neither city's liberation is conditional on the other city's help.
+
 
 ## The paired cities
 

@@ -164,6 +164,10 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
             .ranger => "ranger: tech",
             .synthetic => "synthetic: powers",
         },
+        .body_style => switch (p.body_style) {
+            .procedural => "procedural ranger",
+            .captain_test => "CAPTAIN GLB (STATIC POSE)",
+        },
         .species => if (p.species == .human) "human" else std.fmt.bufPrint(buffer, "{s} form", .{@tagName(p.species)}) catch buffer,
         .coat => std.fmt.bufPrint(buffer, "COAT {d} OF {d}", .{ p.coat + 1, Profile.coat_colors.len }) catch buffer,
         .marking => std.fmt.bufPrint(buffer, "MARKING {d} OF {d}", .{ p.marking + 1, Profile.coat_colors.len }) catch buffer,

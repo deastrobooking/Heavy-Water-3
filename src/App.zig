@@ -229,6 +229,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.presentation = if (options.character_showcase == 44) .masculine else .feminine;
             self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
         }
+        if (options.character_showcase == 46) self.sandbox.profile.body_style = .captain_test;
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -1289,7 +1290,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1560,6 +1561,10 @@ fn guiShowcase(self: *App, v: u32) void {
         25 => {
             self.menu.open(.pause);
             self.menu.open(.settings);
+        },
+        68 => {
+            self.menu.open(.pause);
+            self.menu.open(.world_map);
         },
         29 => {
             sb.progress.vehicles = 0b111;

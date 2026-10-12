@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
-    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-38 hairstyle, 44-45 new Solar Mantle helmet and hair previews") orelse 0);
+    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-38 hairstyle, 44-45 Solar Mantle, 46 Captain GLB preview") orelse 0);
     options.addOption(u8, "character_view", b.option(u8, "character-view", "Character review camera: 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up") orelse 0);
     options.addOption(u8, "character_pose", b.option(u8, "character-pose", "Character review pose: 0 rest, 1 aim, 2 overhead swing, 3 cast, 4 guard") orelse 0);
     options.addOption(u8, "character_tweak", b.option(u8, "character-tweak", "Character review variations, bits: 1 feminine, 2 height 0.9, 4 height 1.1, 8 open helmet, 16 sealed helmet, 32 visor helmet") orelse 0);
@@ -68,10 +68,18 @@ pub fn build(b: *std.Build) void {
     compile_crate.addFileArg(b.path("assets/source/crate.gltf"));
     compile_crate.addFileArg(b.path("assets/source/crate.gltf.meta"));
     const crate = compile_crate.addOutputFileArg("crate.hwmesh");
+    const compile_captain = b.addRunArtifact(compiler);
+    compile_captain.addArg("compile-modified");
+    compile_captain.addFileArg(b.path("assets/Characters/Test+Chroma (1).glb"));
+    compile_captain.addFileArg(b.path("assets/Characters/Test+Chroma (1).glb.meta"));
+    compile_captain.addFileArg(b.path("tools/captain/Captain.modifiers.json"));
+    const captain_mesh = compile_captain.addOutputFileArg("captain.hwmesh");
+    compile_captain.addArg("bind");
     manifest.addFileArg(b.path("assets/source/crate.gltf.meta"));
     manifest.addArgs(&.{ "crate", "crate.hwmesh" });
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
+    assets.dependOn(&b.addInstallFileWithDir(captain_mesh, .{ .custom = "assets" }, "captain.hwmesh").step);
     // Blueprints are validated by the same tool; an invalid machine fails the build.
     const blueprint_names = [_][]const u8{ "powered_door", "elevator", "rover", "sap_beacon", "proximity_gate", "street_lamp", "signal_relay", "rootsong_hearth", "rootsong_call" };
     var blueprints: [blueprint_names.len]std.Build.LazyPath = undefined;
@@ -116,6 +124,7 @@ pub fn build(b: *std.Build) void {
     app.addImport("enum_compat", enum_compat);
     app.addOptions("options", options);
     app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
+    app.addAnonymousImport("captain.hwmesh", .{ .root_source_file = captain_mesh });
     app.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });
     for (blueprint_names, blueprints) |name, output| app.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     const exe = @import("mach").addExecutable(mach.builder, .{ .name = "heavy-water", .app = app, .target = target, .optimize = optimize });
@@ -144,6 +153,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("enum_compat", enum_compat);
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
     tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
+    tests.root_module.addAnonymousImport("captain.hwmesh", .{ .root_source_file = captain_mesh });
     tests.root_module.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });
     for (blueprint_names, blueprints) |name, output| tests.root_module.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
     tests.root_module.addAnonymousImport("glowworks.wasm", .{ .root_source_file = glowworks.getEmittedBin() });
