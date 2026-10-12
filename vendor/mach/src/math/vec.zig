@@ -10,7 +10,9 @@ const quat = @import("quat.zig");
 pub const VecComponent = enum { x, y, z, w };
 
 pub fn Vec2(comptime Scalar: type) type {
-    return extern struct {
+    // Zig 0.17 no longer permits @Vector fields in extern structs. This is an
+    // engine math value, not a C ABI declaration; GPU values have explicit layout types.
+    return struct {
         v: Vector,
 
         /// The vector dimension size, e.g. Vec3.n == 3

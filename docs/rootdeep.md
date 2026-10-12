@@ -1,10 +1,10 @@
 # Rootdeep shrines
 
-The Rootdeep is the forest floor under the canopy city. Two ancient science temples stand there, built around seed vaults in the remains of the first engineers' weapons labs. Their stepped sandstone bases, monumental corner piers, luminous crowns, and turquoise or gold inlays draw from South American rock temples, pagodas, and Indian palace silhouettes. Each world seeds their locations and puzzle layouts; a solver proves each vault can be reached before it is placed.
+The Rootdeep is the forest floor under the canopy city. Two ancient seed vaults stand there, built where the first engineers' weapons labs were woven into the roots. Their current presentation uses dark stone thresholds, flared rootwork arches, warm bronze or cool teal circuits, and large suspended crystal crowns. Each world seeds their locations and puzzle layouts; a solver proves each vault can be reached before it is placed.
 
 ## Play a shrine
 
-1. Look for two bright, stepped temples on the forest floor, 110–260 m from spawn. One carries a sunstone pyramid crown; the other uses pale stone and turquoise tiers. The smoke log and `Sandbox.shrines` give their exact positions for a seed. Walk in through the open doorway.
+1. Look for two crystal-crowned root portals on the forest floor, 110–260 m from spawn. One glows ember-red and bronze; the other glows teal. The smoke log and `Sandbox.shrines` give their exact positions for a seed. Walk in through the open doorway.
 2. Each hall is a chain of rooms, three or four of them. A sliding door between rooms opens when its logic is satisfied. Each door reads one or two conditions:
    - **Latches**, toggled by red buttons on the left walls. Pressing again toggles back.
    - **Weight plates** on the right side, pressed only by a **crate** resting on them. Standing on a plate does nothing.
@@ -17,7 +17,7 @@ Shrines belong to the world. The build tool cannot remove or capture them or pla
 
 ## Generation and verification
 
-`procedural/Shrine.zig` generates the verified puzzle and hall interior. `game/Frontier.zig` adds the exterior temple architecture as presentation geometry, leaving the puzzle collision and solver unchanged.
+`procedural/Shrine.zig` generates the verified puzzle and hall interior. `game/Frontier.zig` adds the exterior root-portal architecture as presentation geometry, leaving the puzzle collision and solver unchanged. The same module publishes a pulsing sky beacon for the current campaign destination when it is 34–1,250 m from the player; it points to the active keeper, nest, fabricator, or carrier.
 
 Shrine generator v1:
 
@@ -30,7 +30,7 @@ Measured over 300 seeds, every shrine is solvable and its plan replays legally. 
 
 Compilation turns the puzzle into an ordinary blueprint, validated by `Blueprint.fromDoc`:
 
-- **Structure:** floor, roof, side and back walls, and doorway walls as structure parts. The live world adds stepped stone terraces, entry stairs, monumental piers, inlaid light bands, and a bright stepped crown around the hall.
+- **Structure:** floor, roof, side and back walls, and doorway walls as structure parts. The live world adds a low stone threshold, four flared root ribs, inset luminous channels, bronze/teal cross-ribs, and a suspended crystal crown. The open center keeps the hall entrance readable.
 - **Doors:** a generator powers the doors and the seed lamp. Each door is an actuator driven by one logic device: a term is `input > 0.5`, an inverted term `0.5 > input`, and two terms multiply.
 - **Latches and plates:** buttons drive latches, and plates are the new `plate` device kind. A plate reports pressed while a crate centre is over its footprint and up to 1.2 m above it; people do not count.
 - **Vault:** the vault button toggles a `sealed` latch that lights the seed lamp. The world marks the shrine complete when `sealed` is set.
@@ -50,4 +50,4 @@ Save format 9 tags shrine machines. Their doors, latches, and sealed vault persi
 
 ## Limits
 
-There are two shrines per world, in a fixed Rootdeep with no streaming or Rootdeep-specific terrain. Rooms form a straight chain with no branching or vertical puzzles. Plates weigh crates only. There are no genome-fragment rewards yet; rewards are blueprints. There is no in-game map marker, and guests can press buttons but cannot carry crates.
+There are two shrines per world, in a fixed Rootdeep with no streaming or Rootdeep-specific terrain. Rooms form a straight chain with no branching or vertical puzzles. Plates weigh crates only. There are no genome-fragment rewards yet; rewards are blueprints. There is no dedicated shrine route marker, and guests can press buttons but cannot carry crates. The campaign sky beacon is separate from shrine discovery.

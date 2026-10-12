@@ -124,6 +124,16 @@ pub fn setMode(self: *Player, mode: Mode, camera: Camera) void {
     self.mode = mode;
     self.feet = .{ camera.position.x(), camera.position.y() - eye_height, camera.position.z() };
 }
+/// Leaves powered flight at the current character position, including from a chase camera.
+pub fn exitFlight(self: *Player, camera: *Camera) void {
+    self.mode = .walk;
+    self.velocity = @splat(0);
+    self.grounded = false;
+    self.support = .none;
+    self.flight_engaged = false;
+    self.motion = .fall;
+    camera.position = self.eye();
+}
 fn approach(current: V, target: V, amount: f32) V {
     const delta = R.sub(target, current);
     const length = R.length(delta);
@@ -181,16 +191,27 @@ pub fn step(self: *Player, physics: *Physics, camera: *Camera, input: Input, dt:
 pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, env: Environment, dt: f32) void {
     if (dt <= 0) return;
     if (self.mode == .fly) {
-        // Free flight changes the requested destination, but still uses the same collision
-        // world as walking. The old direct camera move skipped floors, buildings and props.
-        const start: V = .{ camera.position.x(), camera.position.y() - eye_height, camera.position.z() };
-        var desired = camera.*;
-        desired.move(input, dt);
-        const target: V = .{ desired.position.x(), desired.position.y() - eye_height, desired.position.z() };
-        const result = physics.moveCharacter(self.shape, start, R.sub(target, start), false);
-        self.feet = result.feet;
-        self.grounded = result.grounded;
-        self.support = result.support;
+        // The traversal button doubles as a reliable landing control while this mode is active.
+        // Keyboard WALK/FLY also exits through Sandbox.Actions.toggle_mode.
+        if (input.cycle_mode) {
+            self.exitFlight(camera);
+            return;
+        }
+        // Powered flight keeps the ranger visible and collision-aware. The camera aim pitches
+        // the whole flight vector so forward flight reads like a superhero dive, not a hover.
+        const look = camera.forward();
+        const forward: V = .{ look.x(), look.y(), look.z() };
+        const right: V = .{ @cos(camera.yaw), 0, -@sin(camera.yaw) };
+        const vertical = std.math.clamp(input.up + @as(f32, @floatFromInt(@intFromBool(input.jump))) - @as(f32, @floatFromInt(@intFromBool(input.dodge_held))), -1, 1);
+        const raw = R.add(R.add(R.scale(forward, input.forward), R.scale(right, input.right)), .{ 0, vertical, 0 });
+        const magnitude = R.length(raw);
+        const direction = if (magnitude > 0.05) R.scale(raw, 1 / magnitude) else R.scale(forward, 0.72);
+        const speed: f32 = if (input.fast) 55 else 28;
+        self.velocity = approach(self.velocity, R.scale(direction, speed), (if (input.fast) @as(f32, 56) else 38) * dt);
+        self.grounded = false;
+        self.support = .none;
+        self.motion = .jet;
+        self.move(physics, dt);
         camera.position = self.eye();
         self.previous_jump = input.jump;
         return;
@@ -227,7 +248,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const strength = @min(1, R.length(raw));
     const wish = R.normalize(raw);
     var flight_started = false;
-    if (input.dodge and input.forward >= 0.65 and !self.flight_engaged) {
+    if (input.dodge and input.forward >= 0.65 and !pressed and !self.flight_engaged) {
         self.flight_tap_count = if (self.flight_tap_window > 0) self.flight_tap_count + 1 else 1;
         self.flight_tap_window = 0.92;
         if (self.flight_tap_count >= 3) {
@@ -384,21 +405,30 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     }
     if (!controlled and self.motion != .hang and self.motion != .climb) {
         if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) self.wallJump() else if (self.jump_buffer > 0 and self.coyote > 0) {
-            const backflip = self.grounded and input.forward < -0.35 and strength > 0.35 and !board;
-            const long_jump = self.grounded and input.fast and input.forward > 0.35 and strength > 0.7 and !board;
+            const backflip = self.grounded and input.forward < -0.35 and !board;
+            const long_jump = self.grounded and input.forward > 0.35 and strength > 0.35 and (input.fast or input.dodge or input.dodge_held) and !board;
             self.jump(jump_speed * (if (backflip) @as(f32, 1.1) else if (long_jump) @as(f32, 1.12) else if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
             if (backflip) {
-                self.velocity[0] = wish[0] * 5;
-                self.velocity[2] = wish[2] * 5;
+                const flip_speed: f32 = if (input.dodge or input.dodge_held) 9 else 5;
+                self.velocity[0] = wish[0] * flip_speed;
+                self.velocity[2] = wish[2] * flip_speed;
                 self.motion = .backflip;
                 self.backflip_timer = 0.72;
             }
             if (long_jump) {
                 const launch = if (strength > 0.1) wish else forward;
-                self.velocity[0] = launch[0] * 17;
-                self.velocity[2] = launch[2] * 17;
+                const launch_speed: f32 = if (input.dodge or input.dodge_held) 23 else 17;
+                self.velocity[0] = launch[0] * launch_speed;
+                self.velocity[2] = launch[2] * launch_speed;
                 self.motion = .long_jump;
                 self.long_jump_timer = 0.68;
+            }
+            // Dash+jump in the same beat becomes one committed launch, rather than a ground
+            // roll that overwrites the jump pose. The dash burst preserves the flip/leap motion.
+            if (input.dodge and (backflip or long_jump)) {
+                self.dash_direction = if (strength > 0.1) wish else forward;
+                self.dash_timer = @max(self.dash_timer, 0.14);
+                dash_started = true;
             }
         }
         h = horizontal(self.velocity);
@@ -420,6 +450,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         if (input.stomp and !self.grounded) {
             self.motion = .stomp;
             self.velocity[1] = -22;
+            self.flight_engaged = false;
             self.releaseGrapple();
         }
         const skate_speed: f32 = if (sprinting) 23 else 16;
@@ -498,7 +529,8 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             if (self.fuel <= 0) {
                 self.flight_engaged = false;
             } else {
-                const flight_forward = forward;
+                const view = camera.forward();
+                const flight_forward: V = .{ view.x(), view.y(), view.z() };
                 const flight_right = right;
                 const vertical = std.math.clamp(input.up + @as(f32, @floatFromInt(@intFromBool(input.jump))), -1, 1);
                 const flight_raw = R.add(R.add(R.scale(flight_forward, input.forward), R.scale(flight_right, input.right)), .{ 0, vertical, 0 });
@@ -516,9 +548,9 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         }
         if (dash_burst_started and self.flight_engaged) self.fuel = @max(0, self.fuel - 18 * self.suit.burn);
         if (self.dash_timer > 0) {
-            const dash_speed: f32 = if (self.traversal == .flight and self.flight_engaged) 76 else 42;
+            const dash_speed: f32 = if (self.long_jump_timer > 0) 25 else if (self.backflip_timer > 0) 9 else if (self.traversal == .flight and self.flight_engaged) 76 else 42;
             self.velocity = R.add(R.scale(self.dash_direction, dash_speed), .{ 0, self.velocity[1], 0 });
-            self.motion = .dash;
+            if (self.long_jump_timer <= 0 and self.backflip_timer <= 0) self.motion = .dash;
         }
         if (board and self.velocity[1] < 0) if (physics.castRay(R.add(self.feet, .{ 0, 0.2, 0 }), .{ 0, -1, 0 }, 3, .none)) |hit| {
             self.velocity[1] = @max(self.velocity[1], -@max(2, hit.distance * 4));

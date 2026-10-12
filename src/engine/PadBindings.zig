@@ -70,7 +70,7 @@ pub fn actionName(action: Action) []const u8 {
         .dodge => "DODGE / DOUBLE TAP DASH",
         .interact => "LEFT FACE / X: INTERACT / BOARD",
         .grapple => "GRAPPLE",
-        .traversal => "CYCLE TRAVERSAL",
+        .traversal => "CYCLE TRAVERSAL / EXIT SUPER FLIGHT",
         .view => "CAMERA VIEW",
         .sprint => "SPRINT / BOOST",
         .fire => "FIRE",

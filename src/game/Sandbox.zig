@@ -965,7 +965,7 @@ fn aimCamera(self: *const Sandbox, camera: Camera) Camera {
 
 /// The avatar is drawn in third person, the creator, conversations and the wardrobe, on foot only.
 pub fn bodyShown(self: *const Sandbox) bool {
-    return self.seated == null and self.garage.piloting == null and !self.hangar.piloting and self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen());
+    return self.seated == null and self.garage.piloting == null and !self.hangar.piloting and ((self.player.mode == .fly and self.view == .third) or (self.player.mode == .walk and (self.view == .third or self.creator.open or self.talk != null or self.wardrobeOpen())));
 }
 
 /// The wardrobe shows the character from the front, like the creator.
@@ -1152,7 +1152,18 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     self.creator_zoom += (zoom_target - self.creator_zoom) * @min(1, dt * 6);
     if (actions.reset) self.resetPlayer(camera);
     const riding = self.seated != null or self.garage.piloting != null or self.hangar.piloting;
-    if (actions.toggle_mode and !riding) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
+    if (actions.toggle_mode and !riding) {
+        if (self.player.mode == .fly) {
+            self.player.exitFlight(camera);
+        } else if (self.view == .third) {
+            self.player.mode = .fly;
+            self.player.velocity = @splat(0);
+            self.player.grounded = false;
+            self.player.support = .none;
+            self.player.motion = .jet;
+            camera.position = self.player.eye();
+        } else self.player.setMode(.fly, camera.*);
+    }
     if (actions.select_tool != 0 and !riding) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
     var primary = actions.interact;
     if (self.seated != null) {
@@ -1338,6 +1349,10 @@ pub fn creatorFrame(zoom: f32, height: f32) CreatorFrame {
 /// Creator: face the character from the front. Third person: behind and above the eyes,
 /// kept above the terrain. First person: at the eyes (set by the player step).
 fn placeCamera(self: *const Sandbox, camera: *Camera) void {
+    if (self.player.mode == .fly) {
+        if (self.view == .third) self.chase(self.player.eye(), camera) else camera.position = self.player.eye();
+        return;
+    }
     if (self.player.mode != .walk) return;
     const eye = self.player.eye();
     // In conversation the camera frames the partner over the player's right shoulder.
@@ -1369,13 +1384,22 @@ fn placeCamera(self: *const Sandbox, camera: *Camera) void {
 fn chase(self: *const Sandbox, eye: math.Vec3, camera: *Camera) void {
     const f = camera.forward();
     var p = math.vec3(eye.x() - f.x() * third_person_distance, eye.y() + 0.3 - f.y() * third_person_distance, eye.z() - f.z() * third_person_distance);
+    const from: Physics.Vec3 = .{ eye.x() - f.x() * 0.45, eye.y() + 0.3 - f.y() * 0.45, eye.z() - f.z() * 0.45 };
+    const to: Physics.Vec3 = .{ p.x(), p.y(), p.z() };
+    const delta = R.sub(to, from);
+    const back = R.normalize(delta);
+    const span = @sqrt(R.dot(delta, delta));
     if (Caves.hollow(&self.caves, .{ eye.x(), eye.y(), eye.z() })) {
         // Underground: stop short of the cave walls behind.
-        const from: Physics.Vec3 = .{ eye.x(), eye.y() + 0.3, eye.z() };
-        const back = R.normalize(.{ p.x() - from[0], p.y() - from[1], p.z() - from[2] });
-        const room = if (self.physics.castRay(from, back, third_person_distance, .none)) |hit| @max(0.3, hit.distance - 0.4) else third_person_distance;
+        const room = if (self.physics.castRay(from, back, span, .none)) |hit| @max(0.3, hit.distance - 0.35) else span;
         camera.position = math.vec3(from[0] + back[0] * room, from[1] + back[1] * room, from[2] + back[2] * room);
         return;
+    }
+    // Keep the camera on the player side of buildings, trunks, and mountain colliders. Begin
+    // just outside the player capsule so the ray does not hit the body it is attached to.
+    if (self.physics.castRay(from, back, span, .none)) |hit| {
+        const safe = @max(0.25, hit.distance - 0.35);
+        p = math.vec3(from[0] + back[0] * safe, from[1] + back[1] * safe, from[2] + back[2] * safe);
     }
     const ground = Terrain.surface(self.seed, p.x(), p.z()).height + 0.4;
     if (p.y() < ground) p = math.vec3(p.x(), ground, p.z());
@@ -2047,7 +2071,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         }
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
-    if (self.seated == null and self.player.mode == .walk and n < out.len) {
+    if (self.seated == null and (self.player.mode == .walk or self.player.mode == .fly) and n < out.len) {
         n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
@@ -2464,6 +2488,25 @@ pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void 
 fn run(sandbox: *Sandbox, camera: *Camera, input: Input, actions: Actions, steps: usize) !void {
     try sandbox.step(camera, input, actions, 1.0 / 60.0);
     for (1..steps) |_| try sandbox.step(camera, input, .{}, 1.0 / 60.0);
+}
+
+test "third person camera stays in front of building and mountain colliders" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+
+    const eye = sb.player.eye();
+    const behind = camera.forward();
+    const toward_camera: Physics.Vec3 = .{ behind.x(), behind.y(), behind.z() };
+    const wall_center: Physics.Vec3 = .{ eye.x() - behind.x() * 2, eye.y() + 0.3 - behind.y() * 2, eye.z() - behind.z() * 2 };
+    _ = try sb.physics.createBox(std.testing.allocator, wall_center, .{ 2, 2, 0.2 }, R.identity, world_flag);
+    sb.chase(eye, &camera);
+    const toward_wall = R.sub(wall_center, .{ camera.position.x(), camera.position.y(), camera.position.z() });
+    try std.testing.expect(R.dot(toward_wall, toward_camera) < 0);
+    try std.testing.expect(R.dot(toward_wall, toward_wall) > 0.25);
 }
 
 test "a player walks in through a cave mouth and stays underground on the cave floor" {

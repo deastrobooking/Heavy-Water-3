@@ -420,6 +420,15 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
         p.rotateLocal(sk.Joint.upper_arm_r.idx(), Q.fromAxisAngle(V.unit_x, -0.55));
         p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, -0.45));
         p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, -0.45));
+    } else if (state.motion == .jet or state.motion == .glide) {
+        // Full-body Superman line: chest and hips point into travel, arms spear forward,
+        // straight legs trail behind. The camera pitch supplies the matching flight vector.
+        p.rotateLocal(sk.Joint.hips.idx(), Q.fromAxisAngle(V.unit_x, 1.28));
+        p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, 0.08));
+        inline for ([_]sk.Joint{ .upper_arm_l, .upper_arm_r }, [_]sk.Joint{ .lower_arm_l, .lower_arm_r }, [_]sk.Joint{ .hand_l, .hand_r }, .{ @as(f32, 1), @as(f32, -1) }) |arm, forearm, hand, side| {
+            pointBone(p, skel, arm, forearm, V.init(side * 0.10, -0.04, 1));
+            pointBone(p, skel, forearm, hand, V.init(side * 0.08, -0.02, 1));
+        }
     } else if (state.motion == .roll) {
         p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.72));
         p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, 0.85));

@@ -475,7 +475,7 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
     else
         "ENTER REBIND  LEFT RIGHT COLUMN  SAVED WHEN YOU LEAVE";
     c.text(r.x + 24, r.y + r.h - 90, message, 1, if (menu.swapped != null and !menu.capturing) gold else dim);
-    c.text(r.x + 24, r.y + r.h - 68, "GESTURES: W+SHIFT+SPACE LONG JUMP  S+SPACE BACKFLIP  DOUBLE TAP CTRL / B TO DASH", 0.9, dim);
+    c.text(r.x + 24, r.y + r.h - 68, "GESTURES: FORWARD+SHIFT+JUMP LONG JUMP  DASH+JUMP BOOST  BACK+JUMP FLIP", 0.9, dim);
     const gamepad: Rect = .{ .x = r.x + 18, .y = r.y + r.h - 40, .w = 170, .h = 26 };
     button(c, gamepad, "GAMEPAD SETUP", hitId(.menu, Menu.controls_gamepad), menu.row == Menu.controls_gamepad);
     const reset: Rect = .{ .x = r.x + r.w - 290, .y = r.y + r.h - 40, .w = 150, .h = 26 };
@@ -624,7 +624,7 @@ fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profil
     c.rect(.{ .x = r.x, .y = r.y, .w = 3, .h = r.h }, Profile.accent_colors[profile.accent]);
     var name_buffer: [32]u8 = undefined;
     c.text(r.x + 14, r.y + 10, profile.name(), 1.2, ink);
-    const motion = if (p.mode == .fly) "FLY" else @tagName(p.motion);
+    const motion = if (p.mode == .fly or p.flight_engaged) "SUPER FLIGHT" else @tagName(p.motion);
     c.text(r.x + 14 + Canvas.textWidth(profile.name(), 1.2) + 12, r.y + 12, pretty(&name_buffer, motion), 1, dim);
     c.text(r.x + 14, r.y + 32, "HEALTH", 0.9, dim);
     bar(c, .{ .x = r.x + 66, .y = r.y + 32, .w = 166, .h = 8 }, health.health / health.max, .{ 0.95, 0.32, 0.32, 1 });
@@ -634,6 +634,7 @@ fn vitals(c: *Canvas, v: Rect, p: @import("../game/Player.zig"), profile: Profil
     bar(c, .{ .x = r.x + 66, .y = r.y + 50, .w = 166, .h = 8 }, p.fuel / p.suit.fuel_max, accent);
     c.text(r.x + 14, r.y + 68, "STAMINA", 0.9, dim);
     bar(c, .{ .x = r.x + 66, .y = r.y + 68, .w = 166, .h = 8 }, p.stamina / 100, good);
+    if (p.mode == .fly or p.flight_engaged) c.text(r.x + 14, r.y + 78, "TRAVERSAL OR V: LAND", 0.8, accent);
 }
 
 /// Energy and the class's three specials (key, name, cooldown), beside the vitals.

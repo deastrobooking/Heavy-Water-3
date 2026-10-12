@@ -34,6 +34,7 @@ const Encounters = @import("Encounters.zig");
 const Pets = @import("Pets.zig");
 const DroidCompanion = @import("DroidCompanion.zig");
 const Arena = @import("Arena.zig");
+const QuestLog = @import("QuestLog.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
 pub const hero_first_id: u8 = 24;
@@ -1321,6 +1322,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishPets(sb, out, n, t);
     n = publishArena(sb, out, n, t);
     n = publishShrines(sb, out, n, t);
+    n = publishObjectiveBeacon(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);
     if (room(out, n, 3)) {
@@ -1617,59 +1619,125 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     return n;
 }
 
-/// The Rootdeep seed vaults sit inside bright, stepped science temples. These exterior pieces
-/// are presentation geometry; the verified puzzle rooms and their collision stay in the blueprint.
+/// The campaign beacon only appears once the active destination is within the local horizon.
+/// This restores the old bright sky cue without leaving a permanent marker over distant content.
+fn objectiveTarget(sb: *const Sandbox) ?V {
+    const p = &sb.progress;
+    if (!p.hasFlag("met_tavi")) return sb.keeperPosition(2);
+    if (!p.hasFlag("tavi_scouted")) return sb.keeperPosition(2);
+    if (!firstSurfaceNestDown(p)) return nearestLiveNest(sb, true);
+    if (!p.hasFlag("ines_sap_warned")) return sb.keeperPosition(1);
+    if (!p.hasFlag("carrier_seen")) return nearestCarrier(sb);
+    if (!p.hasFlag("kestrel_blueprint") and !p.fighter) return sb.keeperPosition(0);
+    if (!p.fighter) return kioskPosition(sb);
+    if (QuestLog.remainingNests(&sb.enemies) > 0) return nearestLiveNest(sb, false);
+    if (QuestLog.remainingCarriers(&sb.skies) > 0) return nearestCarrier(sb);
+    return null;
+}
+
+fn firstSurfaceNestDown(progress: *const Progress) bool {
+    if (progress.hasFlag("first_spire_broken")) return true;
+    for (0..Enemies.surface_nests) |i| {
+        var flag: [16]u8 = undefined;
+        if (progress.hasFlag(std.fmt.bufPrint(&flag, "nest_{d}_down", .{i}) catch unreachable)) return true;
+    }
+    return false;
+}
+
+fn nearestLiveNest(sb: *const Sandbox, surface_only: bool) ?V {
+    var chosen: ?V = null;
+    var best = std.math.inf(f32);
+    for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| {
+        if (!nest.alive or (surface_only and nest.cave)) continue;
+        const d = R.length(R.sub(nest.position, sb.player.feet));
+        if (d < best) { best = d; chosen = nest.position; }
+    }
+    return chosen;
+}
+
+fn nearestCarrier(sb: *const Sandbox) ?V {
+    var chosen: ?V = null;
+    var best = std.math.inf(f32);
+    for (sb.skies.carriers) |carrier| {
+        if (!carrier.alive) continue;
+        const point = carrier.position();
+        const d = R.length(R.sub(point, sb.player.feet));
+        if (d < best) { best = d; chosen = point; }
+    }
+    return chosen;
+}
+
+fn publishObjectiveBeacon(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const target = objectiveTarget(sb) orelse return start;
+    const distance = R.length(R.sub(target, sb.player.feet));
+    if (distance < 34 or distance > 1250 or start + 3 > out.len) return start;
+
+    const surface_y = Terrain.surface(sb.seed, target[0], target[2]).height;
+    const base = .{ target[0], surface_y, target[2] };
+    const pulse = 0.78 + 0.22 * @sin(t * 2.8);
+    const core = Material.emissive(.{ 0.72, 0.94, 1, 1 }, 1.5 * pulse);
+    const ground = Material.emissive(.{ 0.15, 0.68, 0.9, 1 }, 0.9 * pulse);
+    const height: f32 = 175;
+    out[start] = .{ .mesh = sb.catalog.content.block, .transform = .{ .position = R.add(base, .{ 0, height * 0.5, 0 }) }, .size = .{ 0.32, height, 0.32 }, .tint = core };
+    out[start + 1] = .{ .mesh = sb.catalog.content.block, .transform = .{ .position = R.add(base, .{ 0, 0.12, 0 }) }, .size = .{ 4.2, 0.2, 4.2 }, .tint = ground };
+    out[start + 2] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = R.add(base, .{ 0, height + 4 + @sin(t * 1.8) * 1.2, 0 }) }, .size = @splat(5.5), .rotation = yawQuat(t * 0.24), .tint = Material.emissive(.{ 0.42, 0.9, 1, 1 }, 1.8 * pulse) };
+    return start + 3;
+}
+
+/// Rootdeep vaults grow as a fusion of living rootwork and old machine craft. These exterior
+/// pieces are presentation geometry; puzzle rooms and collision stay in the verified blueprint.
 fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
     const c = &sb.catalog.content;
     var n = start;
     const Add = struct {
-        fn block(props: []World.Prop, count: *usize, mesh: @TypeOf(c.block), at: V, size: V, tint: [4]f32) bool {
+        fn piece(props: []World.Prop, count: *usize, mesh: @TypeOf(c.block), at: V, size: V, tint: [4]f32, rotation: [4]f32) bool {
             if (count.* == props.len) return false;
-            props[count.*] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = tint, .size = size };
+            props[count.*] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = tint, .size = size, .rotation = rotation };
             count.* += 1;
             return true;
+        }
+        fn block(props: []World.Prop, count: *usize, mesh: @TypeOf(c.block), at: V, size: V, tint: [4]f32) bool {
+            return piece(props, count, mesh, at, size, tint, .{ 0, 0, 0, 1 });
         }
     };
     for (sb.shrines, 0..) |shrine, k| {
         const o = shrine.origin;
         const l = @import("../procedural/Shrine.zig").length(shrine.generated.puzzle);
-        const sandstone: [4]f32 = if (k == 0) .{ 0.78, 0.62, 0.38, 1 } else .{ 0.76, 0.72, 0.58, 1 };
-        const trim: [4]f32 = if (k == 0) .{ 0.8, 0.51, 0.19, 1 } else .{ 0.2, 0.52, 0.57, 1 };
-        const glow_color: [4]f32 = if (k == 0) .{ 1, 0.67, 0.2, 1 } else .{ 0.22, 0.94, 0.88, 1 };
+        const stone: [4]f32 = if (k == 0) .{ 0.24, 0.3, 0.34, 1 } else .{ 0.2, 0.32, 0.36, 1 };
+        const rootwood: [4]f32 = if (k == 0) .{ 0.42, 0.25, 0.13, 1 } else .{ 0.28, 0.28, 0.2, 1 };
+        const metal: [4]f32 = if (k == 0) .{ 0.7, 0.4, 0.16, 1 } else .{ 0.22, 0.55, 0.58, 1 };
+        const glow_color: [4]f32 = if (k == 0) .{ 1, 0.31, 0.12, 1 } else .{ 0.2, 0.95, 0.8, 1 };
 
-        // Broad terraces rise toward the hall, giving the seed vault a ziggurat foundation.
-        for ([_]f32{ -1, 1 }) |side| {
-            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 8.5, -0.8, l / 2 }), .{ 6, 0.9, l + 14 }, sandstone)) return n;
-            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 7.5, -0.05, l / 2 }), .{ 4, 0.65, l + 10 }, trim)) return n;
-            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 6.5, 0.48, l / 2 }), .{ 2, 0.45, l + 6 }, sandstone)) return n;
-        }
-        // Three broad, low steps keep the original doorway clear and make the entrance read at a distance.
-        for (0..3) |step_index| {
-            const s: f32 = @floatFromInt(step_index);
-            const w = 14 - s * 2;
-            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, -0.75 + s * 0.27, -3.3 + s * 0.8 }), .{ w, 0.5, 1.25 }, if (step_index == 2) trim else sandstone)) return n;
-        }
-        // Monumental piers frame the processional hall and carry the lit roofline.
-        for ([_]f32{ -1, 1 }) |side| for ([_]f32{ 4, l / 2, l - 4 }) |z| {
-            const at = R.add(o, .{ side * 6.8, 4, z });
-            if (!Add.block(out, &n, c.block, at, .{ 1.35, 8, 1.35 }, sandstone)) return n;
-            if (!Add.block(out, &n, c.block, R.add(at, .{ 0, 4.15, 0 }), .{ 1.8, 0.42, 1.8 }, trim)) return n;
+        // A narrow basalt-and-bronze threshold leads into the still-clear puzzle doorway.
+        if (!Add.block(out, &n, c.block, R.add(o, .{ 0, -0.38, -2.1 }), .{ 12, 0.55, 7 }, stone)) return n;
+        if (!Add.block(out, &n, c.block, R.add(o, .{ 0, -0.05, -3.0 }), .{ 9, 0.15, 0.45 }, Material.emissive(glow_color, 0.75 + 0.2 * @sin(t * 2)))) return n;
+
+        // Four flared living ribs form a tall open portal instead of a stepped block pyramid.
+        for ([_]f32{ -1, 1 }) |side| for ([_]f32{ 1.5, l - 2.5 }) |z| {
+            const angle = side * 0.23;
+            const rib = c.tree_trunks[(k + 2) % c.tree_trunks.len];
+            const lower = R.add(o, .{ side * 7, 0, z });
+            const upper = R.add(o, .{ side * 5.1, 7.6, z });
+            if (!Add.piece(out, &n, rib, lower, .{ 16, 8.2, 16 }, rootwood, quat(m.Quat.fromAxisAngle(m.Vec3.unit_z, angle)))) return n;
+            if (!Add.piece(out, &n, rib, upper, .{ 13, 7.4, 13 }, stone, quat(m.Quat.fromAxisAngle(m.Vec3.unit_z, angle * 0.72)))) return n;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ side * 5.9, 6.3, z }), .{ 0.2, 4.4, 0.22 }, Material.emissive(glow_color, 0.75 + 0.25 * @sin(t * 2.1 + z)))) return n;
         };
-
-        // A luminous stepped pyramid or pagoda crown marks the weapon-vault at the rear.
-        const crown_z = l - 4.5;
-        for (0..3) |tier| {
-            const f: f32 = @floatFromInt(tier);
-            const width: f32 = if (k == 0) 16.4 - f * 2.8 else if (tier == 0) 11.5 else if (tier == 1) 13 else 9.5;
-            const height: f32 = if (k == 0) 1.25 else 0.85;
-            const y = 5.5 + f * (height + 0.2);
-            const tint = if (tier == 0) sandstone else trim;
-            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, y, crown_z }), .{ width, height, width }, tint)) return n;
-            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, y + height / 2, crown_z }), .{ width + 0.45, 0.2, width + 0.45 }, Material.emissive(glow_color, 0.7 + 0.2 * @sin(t * 2 + f)))) return n;
+        // Short cross-ribs and jewel sockets read as grafted machinery woven into the roots.
+        for ([_]f32{ 3.7, l - 4.2 }) |z| {
+            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, 10, z }), .{ 8.2, 0.72, 1.0 }, rootwood)) return n;
+            if (!Add.block(out, &n, c.block, R.add(o, .{ 0, 10.42, z }), .{ 7.6, 0.12, 0.2 }, Material.emissive(glow_color, 1.0 + 0.2 * @sin(t * 2.4 + z)))) return n;
+        }
+        const crown_z = l - 4.2;
+        for ([_]f32{ -1, 1 }) |side| {
+            if (n == out.len) return n;
+            out[n] = .{ .mesh = c.gem, .transform = .{ .position = R.add(o, .{ side * 5.8, 5.3, crown_z }) }, .size = .{ 1.7, 2.8, 1.7 }, .rotation = yawQuat(side * 0.45), .tint = Material.emissive(glow_color, 0.9 + 0.2 * @sin(t * 1.9 + side)) };
+            n += 1;
         }
         if (n == out.len) return n;
-        out[n] = .{ .mesh = c.gem, .transform = .{ .position = R.add(o, .{ 0, 10.3, crown_z }) }, .tint = Material.emissive(glow_color, 1.4 + 0.3 * @sin(t * 2.4)), .size = @splat(1.5), .rotation = yawQuat(t * 0.35) };
+        out[n] = .{ .mesh = c.gem, .transform = .{ .position = R.add(o, .{ 0, 11.1, crown_z }) }, .tint = Material.emissive(glow_color, 1.5 + 0.35 * @sin(t * 2.2)), .size = .{ 2.4, 4.2, 2.4 }, .rotation = yawQuat(t * 0.22) };
         n += 1;
+        // A low circuit ring binds the architecture to the Rootdeep's powered seed vault.
+        if (!Add.block(out, &n, c.block, R.add(o, .{ 0, 0.16, l - 3 }), .{ 13, 0.16, 0.2 }, Material.emissive(metal, 0.7))) return n;
     }
     return n;
 }

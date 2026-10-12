@@ -2573,10 +2573,10 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     }
     if (options.showcase == 63) {
         // A repeatable pose reel for checking locomotion silhouettes in the Metal renderer.
-        // The capture frame selects sprint, roll, dash, long jump or backflip in that order.
+        // The capture frame selects sprint, roll, dash, long jump, backflip or flight.
         const phase = renderer.frames % 90;
         const progress = @as(f32, @floatFromInt(phase)) / 90;
-        const stage = @min(renderer.frames / 90, 4);
+        const stage = @min(renderer.frames / 90, 5);
         const player = &self.sandbox.player;
         player.velocity = @splat(0);
         player.grounded = stage < 3;
@@ -2598,10 +2598,11 @@ pub fn publish(self: *App, renderer: *Renderer) void {
                 player.long_jump_timer = 0.68 * (1 - progress);
                 break :blk .long_jump;
             },
-            else => blk: {
+            4 => blk: {
                 player.backflip_timer = 0.72 * (1 - progress);
                 break :blk .backflip;
             },
+            else => .jet,
         };
         self.sandbox.walk_phase = @as(f32, @floatFromInt(renderer.frames)) * 0.11;
         self.sandbox.walk_amount = 1;
@@ -2641,7 +2642,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk);
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
     renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
@@ -2658,7 +2659,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.view_count += 1;
     };
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
-    const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "FLY" else @tagName(sandbox.player.motion);
+    const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "SUPER FLIGHT" else @tagName(sandbox.player.motion);
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.kits[0].wallet.scrap, sandbox.kits[0].wallet.parts });
     if (sandbox.hangar.piloting) {
         const f = &sandbox.hangar.fighter.?;

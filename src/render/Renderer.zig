@@ -9,6 +9,7 @@ const Seed = @import("../procedural/Seed.zig");
 const FrameStats = @import("../engine/FrameStats.zig");
 const Flythrough = @import("../engine/Flythrough.zig");
 const Overlay = @import("Overlay.zig");
+const FontAtlas = @import("FontAtlas.zig");
 const Canvas = @import("../ui/Canvas.zig");
 const Modifications = @import("../world/Modifications.zig");
 const options = @import("options");
@@ -105,6 +106,11 @@ skin_layout: ?*gpu.BindGroupLayout = null,
 skin_palette: ?*gpu.Buffer = null,
 skin_group: ?*gpu.BindGroup = null,
 overlay_pipeline: ?*gpu.RenderPipeline = null,
+overlay_layout: ?*gpu.BindGroupLayout = null,
+overlay_bind_group: ?*gpu.BindGroup = null,
+overlay_texture: ?*gpu.Texture = null,
+overlay_texture_view: ?*gpu.TextureView = null,
+overlay_sampler: ?*gpu.Sampler = null,
 scene_layout: ?*gpu.BindGroupLayout = null,
 uniforms: [max_views]?*gpu.Buffer = @splat(null),
 instance_buffers: [max_views]?*gpu.Buffer = @splat(null),
@@ -262,14 +268,34 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
 
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
     defer hud_shader.release();
+    const atlas = try FontAtlas.rasterize(self.allocator);
+    defer self.allocator.free(atlas.pixels);
+    self.overlay.font_glyphs = atlas.glyphs;
+    self.overlay.font_ascent = atlas.ascent;
+    self.overlay_texture = device.createTexture(&.{ .label = "Fira Sans UI atlas", .size = .{ .width = FontAtlas.width, .height = FontAtlas.height }, .format = .rgba8_unorm, .usage = .{ .texture_binding = true, .copy_dst = true } });
+    self.overlay_texture_view = self.overlay_texture.?.createView(&.{});
+    self.overlay_sampler = device.createSampler(&.{ .mag_filter = .linear, .min_filter = .linear });
+    window.queue.writeTexture(&.{ .texture = self.overlay_texture.? }, &.{ .bytes_per_row = FontAtlas.width * 4, .rows_per_image = FontAtlas.height }, &.{ .width = FontAtlas.width, .height = FontAtlas.height }, atlas.pixels);
+    self.overlay_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
+        gpu.BindGroupLayout.Entry.initTexture(0, .{ .fragment = true }, .float, .dimension_2d, false),
+        gpu.BindGroupLayout.Entry.initSampler(1, .{ .fragment = true }, .filtering),
+    } }));
+    self.overlay_bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.overlay_layout.?, .entries = &.{
+        gpu.BindGroup.Entry.initTextureView(0, self.overlay_texture_view.?),
+        gpu.BindGroup.Entry.initSampler(1, self.overlay_sampler.?),
+    } }));
+    const hud_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{self.overlay_layout.?} }));
+    defer hud_layout.release();
     // Menus use translucent panels over the scene.
     const hud_fragment = gpu.FragmentState.init(.{ .module = hud_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format, .blend = &blend }} });
     self.overlay_pipeline = device.createRenderPipeline(&.{
         .vertex = gpu.VertexState.init(.{ .module = hud_shader, .entry_point = "vertex_main", .buffers = &.{gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Overlay.Vertex), .attributes = &.{
             .{ .format = .float32x2, .offset = 0, .shader_location = 0 },
             .{ .format = .float32x4, .offset = 8, .shader_location = 1 },
+            .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
         } })} }),
         .fragment = &hud_fragment,
+        .layout = hud_layout,
     });
     errdefer {
         self.overlay_pipeline.?.release();
@@ -621,6 +647,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         const hud = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .load, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 } }} }));
         defer hud.release();
         hud.setPipeline(self.overlay_pipeline.?);
+        hud.setBindGroup(0, self.overlay_bind_group.?, &.{});
         hud.setVertexBuffer(0, self.overlay_buffer.?, 0, self.overlay.len * @sizeOf(Overlay.Vertex));
         hud.draw(@intCast(self.overlay.len), 1, 0, 0);
         hud.end();
@@ -751,12 +778,12 @@ fn buildOverlay(self: *Renderer, count: u32, width: u32, height: u32, views: usi
 }
 
 /// Replays the application's GUI canvas, scaled from canvas units to pixels. Positions and
-/// glyph cells snap to whole pixels so text stays crisp.
+/// the font atlas uses linear filtering for smooth, high-DPI text.
 fn drawUi(self: *Renderer) void {
     const s = self.overlay.height / @max(self.ui.height, 1);
     for (self.ui.commands[0..self.ui.len]) |cmd| switch (cmd.kind) {
         .rect => self.overlay.rect(@round(cmd.x * s), @round(cmd.y * s), @max(1, @round(cmd.w * s)), @max(1, @round(cmd.h * s)), cmd.color),
-        .text => self.overlay.textScaled(@round(cmd.x * s), @round(cmd.y * s), cmd.text[0..cmd.len], cmd.color, @max(1, @round(cmd.cell * s))),
+        .text => self.overlay.textScaled(cmd.x * s, cmd.y * s, cmd.text[0..cmd.len], cmd.color, @max(1, cmd.cell * s)),
     };
 }
 
@@ -841,6 +868,11 @@ pub fn deinit(self: *Renderer) void {
     if (self.outline_bind_group) |p| p.release();
     if (self.outline_layout) |p| p.release();
     if (self.outline_pipeline) |p| p.release();
+    if (self.overlay_bind_group) |p| p.release();
+    if (self.overlay_layout) |p| p.release();
+    if (self.overlay_texture_view) |p| p.release();
+    if (self.overlay_texture) |p| p.release();
+    if (self.overlay_sampler) |p| p.release();
     if (self.depth_view) |p| p.release();
     if (self.depth) |p| p.release();
     for (0..max_views) |i| self.releaseViewResources(i);

@@ -2,6 +2,13 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Rootdeep shrine presentation and campaign beacon — 2026-10-12
+
+- Replaced the stepped exterior shrine crowns and monumental piers with open rootwork arches, dark stone thresholds, inset lumen channels, and suspended ember/teal crystal crowns. Puzzle interiors, collision, solver, rewards, and saves are unchanged.
+- Restored an outdoor sky beacon for the active campaign destination. It appears within 1,250 m and hides at close approach (34 m), and advances through Tavi, the first surface spire, Ines, a Brood carrier, Maro/the fabricator, remaining nests, and remaining carriers.
+- **Checked:** `git diff --check` only.
+- **Not checked:** build, tests, Metal capture or visual inspection, hands-on objective progression, benchmark, Zig 0.17, Linux/Windows compilation or runtime. The beacon and shrine silhouette need review in-game.
+
 ## Steampunk Arbor Rootways — 2026-10-12
 
 - Added a reusable covered approach at each of the two outer Arbor ring plazas. Riveted bronze ribs and portal frames enclose the pedestrian/road path, paired metro rails pass through the crown, and five inset colored gems per side are published with night-responsive emission.
@@ -1012,3 +1019,19 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** `python3 tools/zig.py build check` passed; `python3 tools/zig.py build` passed and installed the executable; the full headless target ran **407/420 passing, 13 failing**, with one reported allocation leak. The new modifier regression test passed (it is absent from the failing-test list).
 - Existing suite failures observed in that run: Ranger sprint-to-run expectation; Catalog allocation-failure cleanup; Save character-content decoding; Sandbox salvage, canopy walk, bridge walk, city traffic, and Rootdeep interaction; Build circuit, bus-channel, and rover placement; Profile hairstyle wrap; Player grapple/flight fuel; Pets meadow spacing. Representative output: `expected .run, found .sprint`; several traversal assertions exceeded their step bounds; Save decode recursed through `CharacterContent.loadOne` until `InvalidCharacterContent`. These failures were not compared against a clean base revision, so their pre-existing status is unknown.
 - **Not checked:** in-game Captain selection, runtime imported-rig rendering/animation, Metal validation, or mod installation. The mesh has one base-color material and no textures/UVs or semantic part names, so auto labels and eye/skin assignments need author review. Captain is available to the modifier authoring profile, not yet the playable Creator type picker.
+
+## Third-person camera collision — 2026-10-12
+
+- Third-person camera placement now raycasts from just outside the player capsule toward its desired position and shortens the arm before solid world geometry. This covers building, tree and cave colliders; terrain height still clamps the final camera position above open ground.
+- Added a regression test with a wall collider in the camera path. `python3 tools/zig.py build check` passed; `python3 tools/zig.py build test --summary all` reported **408/421 passed, 13 failed**, one allocation leak. The new camera test passes; the same 13 failures listed above remain.
+- `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=300` passed on Apple M3 Pro / Metal with 300 frames and 395 simulation ticks. ReleaseFast executable was rebuilt. Metal validation ran, but no dedicated visual capture was inspected for the camera transition.
+- The Captain modifier tool is still offline and is not visible in the playable Creator. The source GLB has no animation clips and its runtime skin import is unsupported, so exposing it as a playable option would show an unanimated/incomplete character. This remains a separate runtime importer and Creator integration task.
+
+## Powered flight, jump combos, and modern UI type — 2026-10-12
+
+- Free-flight mode now drives the visible ranger with a fast, camera-pitched flight vector through character collision. The traversal button exits to walking; keyboard toggle also lands at the current character position. The animation pitches the body from the hips and points both arms into flight. Sprint flight reaches 55 m/s; hands-off powered flight cruises forward at 28 m/s.
+- Jump input now combines with dodge: forward + jump + dash launches a longer leap, back + jump performs a backflip, and the dash burst no longer replaces the jump animation. Triple forward dodges during a jump press do not accidentally enter sustained flight. Control labels state these combinations and identify the flight exit button.
+- Replaced the 3×5 bitmap overlay glyphs with Mach's bundled Fira Sans, rasterized once into an alpha atlas. Text now retains lowercase, uses smooth linear sampling, and scales fractionally with the UI.
+- **Checked:** `python3 tools/zig.py build check` and `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` passed. ReleaseSafe captures for `-Dshowcase=63 -Dcapture-frame=450` (flight pose) and `-Dshowcase=25 -Dcapture-frame=120` (settings text) ran with `MTL_DEBUG_LAYER=1` and were inspected; no Metal validation messages appeared. The text capture is crisp and readable at 2560×1600.
+- The final `python3 tools/zig.py build -Doptimize=ReleaseFast` reinstall passed. The control screen's gesture hint names forward+shift+jump for long jump, dash+jump for the boost leap, and back+jump for the flip.
+- **Not checked:** controller handling by hand, gameplay feel for dash-jump timing, the complete smoke stages, or headless tests. The flight capture is a pose review, not a control simulation.
