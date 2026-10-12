@@ -241,7 +241,7 @@ pub const Ref = union(enum) {
 };
 
 /// The jet as the Hive sees it.
-pub const Jet = struct { position: V, velocity: V, forward: V, airborne: bool };
+pub const Jet = struct { position: V, velocity: V, forward: V, airborne: bool, evasive: bool = false };
 
 pub const Event = union(enum) {
     sound: struct { kind: ShotKind, position: V },
@@ -629,14 +629,14 @@ fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet
         } else if (s.kind == .flak) {
             // Proximity fuse near the jet, or at the end of its flight.
             if (jet) |j| if (dist(s.position, j.position) < tuning.flak_fuse_distance or s.life <= 0) {
-                if (dist(s.position, j.position) < tuning.flak_hit_distance) push(out, &n, .{ .jet_hit = s.damage });
+                if (!j.evasive and dist(s.position, j.position) < tuning.flak_hit_distance) push(out, &n, .{ .jet_hit = s.damage });
                 push(out, &n, .{ .burst = s.position });
                 consumed = true;
             };
         } else {
             // Stingers hit the jet (a 4 m sphere) or rangers' chests.
             if (jet) |j| if (Enemies.segmentSphere(s.position, dir, length, j.position, 4) != null) {
-                push(out, &n, .{ .jet_hit = s.damage });
+                if (!j.evasive) push(out, &n, .{ .jet_hit = s.damage });
                 consumed = true;
             };
             if (!consumed) for (players, 0..) |p, pi| if (p.alive) {
@@ -702,7 +702,7 @@ fn collideJet(self: *Skies, jet: Jet, dt: f32, out: []Event, n: *usize) void {
     };
 
     const hit = best orelse return;
-    const jet_damage = if (self.ram_cooldown == 0) @max(0, hit.relative_speed - tuning.ram_damage_speed) * tuning.ram_jet_damage_per_speed else 0;
+    const jet_damage = if (self.ram_cooldown == 0 and !jet.evasive) @max(0, hit.relative_speed - tuning.ram_damage_speed) * tuning.ram_jet_damage_per_speed else 0;
     const target_damage = if (self.ram_cooldown == 0) @max(0, hit.relative_speed - tuning.ram_damage_speed) * tuning.ram_target_damage_per_speed else 0;
     push(out, n, .{ .jet_collision = .{ .normal = hit.normal, .penetration = hit.penetration, .other_velocity = hit.other_velocity, .damage = jet_damage } });
     if (self.ram_cooldown == 0 and target_damage > 0) {

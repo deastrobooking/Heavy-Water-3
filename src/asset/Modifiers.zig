@@ -28,7 +28,16 @@ pub const Document = struct {
     eye_color: [3]f32 = .{ 0.16, 0.78, 0.96 },
     armor_color: [3]f32 = .{ 0.22, 0.54, 0.68 },
     energy_color: [3]f32 = .{ 0.25, 0.9, 1 },
-    parts: []const Part,
+    parts: []Part,
+};
+pub const Palette = enum { skin, eyes, armor, energy };
+pub const Edit = union(enum) {
+    label: struct { id: u32, value: []const u8 },
+    surface: struct { id: u32, value: Surface },
+    color: struct { id: u32, value: ?[3]f32 },
+    scale: struct { id: u32, value: [3]f32 },
+    offset: struct { id: u32, value: [3]f32 },
+    palette: struct { slot: Palette, value: [3]f32 },
 };
 pub const Component = struct { id: u32, count: u32, center: [3]f32, min: [3]f32, max: [3]f32 };
 pub const Analysis = struct {
@@ -37,6 +46,53 @@ pub const Analysis = struct {
     components: []Component,
 };
 pub const Error = error{ InvalidModifiers, SourceChanged, ComponentSetChanged, InvalidPartTransform, InvalidPartColor, OutOfMemory };
+
+/// Apply one authoring command only after validating it, so a rejected edit leaves the document
+/// untouched. Part IDs are stable source vertex IDs, not list positions.
+pub fn edit(allocator: std.mem.Allocator, doc: *Document, command: Edit) !void {
+    switch (command) {
+        .palette => |change| {
+            if (!validColor(change.value)) return error.InvalidPartColor;
+            switch (change.slot) {
+                .skin => doc.skin_color = change.value,
+                .eyes => doc.eye_color = change.value,
+                .armor => doc.armor_color = change.value,
+                .energy => doc.energy_color = change.value,
+            }
+        },
+        .label => |change| {
+            const index = partIndex(doc.parts, change.id) orelse return error.ComponentSetChanged;
+            if (change.value.len == 0 or change.value.len > 80) return error.InvalidModifiers;
+            for (change.value) |character| if (character < 0x20) return error.InvalidModifiers;
+            const label = try allocator.dupe(u8, change.value);
+            doc.parts[index].label = label;
+        },
+        .surface => |change| {
+            const index = partIndex(doc.parts, change.id) orelse return error.ComponentSetChanged;
+            doc.parts[index].surface = change.value;
+        },
+        .color => |change| {
+            const index = partIndex(doc.parts, change.id) orelse return error.ComponentSetChanged;
+            if (change.value) |color| if (!validColor(color)) return error.InvalidPartColor;
+            doc.parts[index].color = change.value;
+        },
+        .scale => |change| {
+            const index = partIndex(doc.parts, change.id) orelse return error.ComponentSetChanged;
+            if (!validScale(change.value)) return error.InvalidPartTransform;
+            doc.parts[index].scale = change.value;
+        },
+        .offset => |change| {
+            const index = partIndex(doc.parts, change.id) orelse return error.ComponentSetChanged;
+            if (!validOffset(change.value)) return error.InvalidPartTransform;
+            doc.parts[index].offset = change.value;
+        },
+    }
+}
+
+fn partIndex(parts: []const Part, id: u32) ?usize {
+    for (parts, 0..) |part, index| if (part.id == id) return index;
+    return null;
+}
 
 pub fn analyze(allocator: std.mem.Allocator, model: Model) !Analysis {
     const count = model.mesh.vertices.len;

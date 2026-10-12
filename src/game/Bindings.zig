@@ -44,7 +44,7 @@ pub fn label(a: Action) []const u8 {
         .right => "MOVE RIGHT",
         .jump => "JUMP / LONG JUMP / BACKFLIP",
         .sprint => "SPRINT / BOOST",
-        .roll => "DODGE / DOUBLE TAP DASH",
+        .roll => "DODGE / DOUBLE TAP DASH / KESTREL BARREL ROLL",
         .stomp => "DIVE KICK",
         .grapple => "GRAPPLE",
         .traversal => "CYCLE TRAVERSAL / EXIT FLIGHT",

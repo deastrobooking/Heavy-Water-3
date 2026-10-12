@@ -2721,7 +2721,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     if (sandbox.hangar.piloting) {
         const f = &sandbox.hangar.fighter.?;
         const g = &sandbox.skies.guns;
-        renderer.hud_lines[1].set("KESTREL  {d:.0} M/S  THR {d:.0}%{s}  HULL {d:.0}/{d:.0}  MSL {d}/{d}  GUNS {s}  CLICK FIRE  RMB LOCK  F OUT", .{ f.airspeed(), f.throttle * 100, if (self.engine.input.fast) " BURN" else "", @max(0, f.hull), f.hull_max, g.missile_ammo, g.missile_capacity, if (g.overheated) "HOT" else "OK" });
+        renderer.hud_lines[1].set("KESTREL {d:.0}M/S BOOST {d:.0}%{s} HULL {d:.0}/{d:.0} MSL {d}/{d} GUN {s} / CLICK FIRE / RMB LOCK / F OUT", .{ f.airspeed(), f.boost_charge / @max(f.cfg.boost_capacity, 0.01) * 100, if (f.barrel_roll_timer > 0) " ROLL" else if (self.engine.input.fast and f.boost_charge > 0) " BURN" else "", @max(0, f.hull), f.hull_max, g.missile_ammo, g.missile_capacity, if (g.overheated) "HOT" else "OK" });
     } else if (sandbox.garage.piloting) |i| {
         const car = &sandbox.garage.cars[i].?.flyer;
         const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, car.body.pos.x, car.body.pos.z).height;

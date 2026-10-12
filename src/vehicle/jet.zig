@@ -32,6 +32,9 @@ pub const Config = struct {
     side_area: f32 = 9,
     thrust: f32 = 58_000,
     afterburner: f32 = 95_000,
+    /// Arcade boost is stored as seconds of afterburner; it regenerates while coasting.
+    boost_capacity: f32 = 2.6,
+    boost_recharge: f32 = 0.55,
     /// Lift jets: the most they can hold, as a multiple of the weight.
     vtol: f32 = 1.25,
     /// Below `vtol_full` m/s the lift jets carry the whole weight; above `vtol_off` none.
@@ -54,6 +57,9 @@ pub const Input = struct {
     throttle: f32 = 0,
     /// Manual roll (+ rolls right) added to the fly-by-wire.
     roll: f32 = 0,
+    brake: bool = false,
+    /// Tap dodge in flight to start one evasive barrel roll.
+    barrel_roll: bool = false,
     /// Hover climb demand (-1..1) while the lift jets are working.
     climb: f32 = 0,
     afterburner: bool = false,
@@ -71,6 +77,9 @@ pub const Fighter = struct {
     hull_max: f32 = 300,
     /// Engine nozzle glow (0–1), for effects.
     burn: f32 = 0,
+    boost_charge: f32 = 2.6,
+    barrel_roll_timer: f32 = 0,
+    barrel_roll_side: f32 = 1,
     /// The largest impact this step (m/s), for effects and damage.
     impact: f32 = 0,
 
@@ -90,7 +99,7 @@ pub const Fighter = struct {
         var body = dyn.RigidBody.init(props);
         body.pos = position;
         body.rot = Quat.fromAxisAngle(Vec3.unit_y, yaw);
-        return .{ .body = body, .cfg = cfg, .hull = cfg.hull_max, .hull_max = cfg.hull_max };
+        return .{ .body = body, .cfg = cfg, .hull = cfg.hull_max, .hull_max = cfg.hull_max, .boost_charge = cfg.boost_capacity };
     }
 
     pub fn forward(self: *const Fighter) Vec3 {
@@ -122,9 +131,23 @@ pub const Fighter = struct {
 
         // ---- engine
         self.throttle = std.math.clamp(self.throttle + input.throttle * 0.7 * dt, 0, 1);
-        const thrust = if (input.afterburner) cfg.afterburner else cfg.thrust * self.throttle;
-        self.burn += ((if (input.afterburner) @as(f32, 1) else self.throttle * 0.6) - self.burn) * @min(1, dt * 6);
+        if (input.brake) self.throttle = @max(0, self.throttle - 1.8 * dt);
+        const boosting = input.afterburner and !input.brake and self.boost_charge > 0;
+        if (boosting) {
+            self.boost_charge = @max(0, self.boost_charge - dt);
+        } else if (!input.afterburner and !input.brake) {
+            self.boost_charge = @min(cfg.boost_capacity, self.boost_charge + cfg.boost_recharge * dt);
+        }
+        const thrust = if (input.afterburner) (if (boosting) cfg.afterburner else cfg.thrust * 1.12) else cfg.thrust * self.throttle;
+        self.burn += ((if (boosting) @as(f32, 1) else if (input.afterburner) @as(f32, 0.68) else self.throttle * 0.6) - self.burn) * @min(1, dt * 6);
         b.addForce(self.forward().scale(thrust));
+        if (input.brake) b.addForce(b.vel.scale(-b.mass * 1.35));
+
+        if (input.barrel_roll and !self.grounded and self.barrel_roll_timer <= 0) {
+            self.barrel_roll_timer = 0.85;
+            self.barrel_roll_side = if (input.roll < 0) -1 else 1;
+        }
+        self.barrel_roll_timer = @max(0, self.barrel_roll_timer - dt);
 
         // ---- aerodynamics (only meaningful with airflow)
         if (speed > 1) {
@@ -179,10 +202,15 @@ pub const Fighter = struct {
         } else {
             rate.z = -std.math.atan2(local_up.x, local_up.y) * 2.5;
         }
-        rate.z += input.roll * cfg.max_roll;
+        if (self.barrel_roll_timer > 0) {
+            rate.z = self.barrel_roll_side * 9.0;
+        } else {
+            rate.z += input.roll * cfg.max_roll;
+        }
         rate.x = std.math.clamp(rate.x, -cfg.max_pitch, cfg.max_pitch);
         rate.y = std.math.clamp(rate.y, -cfg.max_yaw, cfg.max_yaw);
-        rate.z = std.math.clamp(rate.z, -cfg.max_roll, cfg.max_roll);
+        const roll_limit = if (self.barrel_roll_timer > 0) @as(f32, 9) else cfg.max_roll;
+        rate.z = std.math.clamp(rate.z, -roll_limit, roll_limit);
         if (self.grounded) {
             // On the gear: no rolling or pitching into the ground, only taxi turns.
             rate.x = @min(rate.x, 0) * 0.3;

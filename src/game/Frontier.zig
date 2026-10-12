@@ -1063,7 +1063,7 @@ fn specialEvents(sb: *Sandbox, events: []const Specials.Event, camera: *Camera) 
 fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sandbox.BenchmarkTiming) void {
     var jet: ?Skies.Jet = null;
     if (sb.hangar.fighter) |f| if (sb.hangar.piloting) {
-        jet = .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .velocity = .{ f.body.vel.x, f.body.vel.y, f.body.vel.z }, .forward = .{ f.forward().x, f.forward().y, f.forward().z }, .airborne = !f.grounded };
+        jet = .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .velocity = .{ f.body.vel.x, f.body.vel.y, f.body.vel.z }, .forward = .{ f.forward().x, f.forward().y, f.forward().z }, .airborne = !f.grounded, .evasive = f.barrel_roll_timer > 0 };
     };
     var on_foot: [Sandbox.max_players]Enemies.Target = undefined;
     on_foot[0] = .{ .chest = R.add(sb.player.feet, .{ 0, 1.3, 0 }), .velocity = sb.player.velocity, .alive = !sb.hangar.piloting and !sb.specials.hidden(0) };
@@ -1276,7 +1276,7 @@ pub fn board(sb: *Sandbox, car: u8, camera: *Camera) void {
 pub fn boardJet(sb: *Sandbox, camera: *Camera) void {
     sb.release();
     sb.hangar.board(camera);
-    sb.say("kestrel: mouse aims, W/S throttle, A/D roll, space lifts, shift burns, F climbs out", .{});
+    sb.say("kestrel: mouse aim, W accelerate, S brake, A/D bank-steer, Q/E pitch, space lift, shift boost, CTRL barrel roll, click fire, RMB lock/release missile, F exit", .{});
 }
 
 pub fn leaveJet(sb: *Sandbox, camera: *Camera) void {

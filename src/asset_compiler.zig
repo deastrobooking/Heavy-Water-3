@@ -28,6 +28,11 @@ const Modifiers = @import("asset/Modifiers.zig");
 ///       apply palette, label and per-part shape edits, then render a review PNG
 ///   asset-compiler compile-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.hwmesh> [bind|run]
 ///       compile a source-hash-validated, modifier-baked static model for the game
+///   asset-compiler modifier-list <modifiers.json>
+///       list editable connected mesh islands by stable source vertex ID
+///   asset-compiler modifier-edit <input.json> <output.json> part <id> <property> <values...>
+///       author one source-linked label/surface/color/scale/offset edit without replacing input
+///       or: modifier-edit <input.json> <output.json> palette <skin|eyes|armor|energy> <r> <g> <b>
 ///   asset-compiler manifest <output> (<source.meta> <name> <output-name>)...
 ///       write the asset manifest the runtime registry loads
 ///   asset-compiler import <directory>
@@ -45,14 +50,94 @@ pub fn main(init: std.process.Init) !void {
     if (args.len == 5 and std.mem.eql(u8, args[1], "split")) return split(init.gpa, io, args[2], args[3], args[4]);
     if ((args.len == 5 or args.len == 6) and std.mem.eql(u8, args[1], "preview-bind")) return previewBind(init.gpa, io, args[2], args[3], args[4], if (args.len == 6) args[5] else "bind");
     if (args.len == 5 and std.mem.eql(u8, args[1], "modifiers")) return createModifiers(init.gpa, io, args[2], args[3], args[4]);
+    if (args.len == 3 and std.mem.eql(u8, args[1], "modifier-list")) return listModifiers(init.gpa, io, args[2]);
+    if (args.len >= 8 and std.mem.eql(u8, args[1], "modifier-edit")) return editModifiers(init.gpa, io, args[2..]);
     if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "preview-modified")) return previewModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
     if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "compile-modified")) return compileModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
     if (args.len >= 3 and std.mem.eql(u8, args[1], "manifest") and (args.len - 3) % 3 == 0) return manifest(init.gpa, io, args[2], args[3..]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "import")) return import(init.gpa, io, args[2]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "sounds")) return writeSounds(init.gpa, io, args[2]);
     if (args.len == 4 or args.len == 8) if (std.mem.eql(u8, args[1], "heightmap")) return compileHeightmap(init.gpa, io, args[2], args[3], args[4..]);
-    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source> <meta> <output.json> | split <source> <meta> <output-dir> | preview-bind <source> <meta> <output.png> [bind|run] | modifiers <source> <meta> <output.json> | preview-modified <source> <meta> <modifiers.json> <output.png> [bind|run] | compile-modified <source> <meta> <modifiers.json> <output.hwmesh> [bind|run] | manifest ... | import <dir> | heightmap ...", .{});
+    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source> <meta> <output.json> | split <source> <meta> <output-dir> | preview-bind <source> <meta> <output.png> [bind|run] | modifiers <source> <meta> <output.json> | modifier-list <modifiers.json> | modifier-edit <input.json> <output.json> part <id> <property> <values...> | modifier-edit <input.json> <output.json> palette <slot> <r> <g> <b> | preview-modified <source> <meta> <modifiers.json> <output.png> [bind|run] | compile-modified <source> <meta> <modifiers.json> <output.hwmesh> [bind|run] | manifest ... | import <dir> | heightmap ...", .{});
     return error.InvalidArguments;
+}
+
+fn listModifiers(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    const bytes = try readFile(gpa, io, path);
+    defer gpa.free(bytes);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const doc = try std.json.parseFromSliceLeaky(Modifiers.Document, arena.allocator(), bytes, .{});
+    std.log.info("{s}: {d} editable islands; color values are RGB 0..1", .{ path, doc.parts.len });
+    for (doc.parts) |part| std.log.info("id {d:>5} | {s:<24} | {s:<7} | {d:>5} verts | center {d:.3}, {d:.3}, {d:.3}", .{
+        part.id, part.label, @tagName(part.surface), part.vertex_count, part.center[0], part.center[1], part.center[2],
+    });
+}
+
+fn editModifiers(gpa: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
+    if (args.len < 5) return error.InvalidModifierEdit;
+    if (std.mem.eql(u8, args[0], args[1])) return error.ModifierInputIsOutput;
+    const input_bytes = try readFile(gpa, io, args[0]);
+    defer gpa.free(input_bytes);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var doc = try std.json.parseFromSliceLeaky(Modifiers.Document, allocator, input_bytes, .{});
+
+    if (std.mem.eql(u8, args[2], "palette")) {
+        if (args.len != 7) return error.InvalidModifierEdit;
+        const slot = std.meta.stringToEnum(Modifiers.Palette, args[3]) orelse return error.InvalidModifierEdit;
+        try Modifiers.edit(allocator, &doc, .{ .palette = .{ .slot = slot, .value = try parseColor(args[4..7]) } });
+    } else if (std.mem.eql(u8, args[2], "part")) {
+        const id = std.fmt.parseInt(u32, args[3], 10) catch return error.InvalidModifierEdit;
+        const property = args[4];
+        if (std.mem.eql(u8, property, "label")) {
+            if (args.len != 6) return error.InvalidModifierEdit;
+            try Modifiers.edit(allocator, &doc, .{ .label = .{ .id = id, .value = args[5] } });
+        } else if (std.mem.eql(u8, property, "surface")) {
+            if (args.len != 6) return error.InvalidModifierEdit;
+            const surface = std.meta.stringToEnum(Modifiers.Surface, args[5]) orelse return error.InvalidModifierEdit;
+            try Modifiers.edit(allocator, &doc, .{ .surface = .{ .id = id, .value = surface } });
+        } else if (std.mem.eql(u8, property, "color")) {
+            if (args.len == 6 and std.mem.eql(u8, args[5], "clear")) {
+                try Modifiers.edit(allocator, &doc, .{ .color = .{ .id = id, .value = null } });
+            } else {
+                if (args.len != 8) return error.InvalidModifierEdit;
+                try Modifiers.edit(allocator, &doc, .{ .color = .{ .id = id, .value = try parseColor(args[5..8]) } });
+            }
+        } else if (std.mem.eql(u8, property, "scale") or std.mem.eql(u8, property, "offset")) {
+            if (args.len != 8) return error.InvalidModifierEdit;
+            const vector = try parseColor(args[5..8]);
+            if (std.mem.eql(u8, property, "scale")) {
+                try Modifiers.edit(allocator, &doc, .{ .scale = .{ .id = id, .value = vector } });
+            } else {
+                try Modifiers.edit(allocator, &doc, .{ .offset = .{ .id = id, .value = vector } });
+            }
+        } else return error.InvalidModifierEdit;
+    } else return error.InvalidModifierEdit;
+
+    const json = try std.json.Stringify.valueAlloc(gpa, doc, .{ .whitespace = .indent_2 });
+    defer gpa.free(json);
+    if (std.fs.path.dirname(args[1])) |parent| {
+        if (std.fs.path.isAbsolute(parent)) {
+            var directory = try std.Io.Dir.openDirAbsolute(io, parent, .{});
+            defer directory.close(io);
+            try directory.writeFile(io, .{ .sub_path = std.fs.path.basename(args[1]), .data = json });
+        } else {
+            try std.Io.Dir.cwd().createDirPath(io, parent);
+            try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = args[1], .data = json });
+        }
+    } else {
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = args[1], .data = json });
+    }
+    std.log.info("modifier edit written to {s}; preview it with `asset-compiler preview-modified`", .{args[1]});
+}
+
+fn parseColor(values: []const []const u8) ![3]f32 {
+    if (values.len != 3) return error.InvalidModifierEdit;
+    var result: [3]f32 = undefined;
+    for (values, 0..) |value, i| result[i] = std.fmt.parseFloat(f32, value) catch return error.InvalidModifierEdit;
+    return result;
 }
 
 fn writeSounds(gpa: std.mem.Allocator, io: std.Io, directory: []const u8) !void {

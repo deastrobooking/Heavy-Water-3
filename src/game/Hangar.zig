@@ -83,12 +83,20 @@ fn probe(physics: *const Physics, from: m.Vec3, dir: m.Vec3, reach: f32) ?jet.Hi
 
 pub fn controls(input: Input, camera: Camera) jet.Input {
     const f = camera.forward();
+    const forward = m.Vec3.init(f.x(), f.y(), f.z());
+    const right = m.Vec3.init(@cos(camera.yaw), 0, -@sin(camera.yaw));
+    const up = forward.cross(right);
+    // A/D and Q/E steer the flight computer as well as banking/climbing. Mouse look can make
+    // finer corrections, while keyboard-only flight no longer needs a perfect camera aim.
+    const aim = forward.add(right.scale(input.right * 0.62)).add(up.scale(-input.up * 0.48)).normalizeOr(forward);
     return .{
-        .aim = m.Vec3.init(f.x(), f.y(), f.z()),
+        .aim = aim,
         .throttle = input.forward,
         .roll = input.right,
         .climb = std.math.clamp(input.up + @as(f32, if (input.jump) 1 else 0), -1, 1),
         .afterburner = input.fast,
+        .brake = input.forward < -0.1,
+        .barrel_roll = input.dodge,
     };
 }
 
