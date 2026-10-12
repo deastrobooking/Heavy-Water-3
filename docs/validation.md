@@ -35,6 +35,13 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 - **Checked:** default `python3 tools/zig.py build check`, ReleaseSafe Metal capture `MTL_DEBUG_LAYER=1 ... build run -Dshowcase=64 -Dcapture-frame=120`, and `git diff --check` passed. `zig-out/rootway-review.png` was inspected; the rail and amber ceiling lights read through the gallery and the three gem hues are visible along both walls. Metal API Validation reported no errors.
 - **Not checked:** headless tests, hands-on gallery traversal, Zig 0.17, Linux/Windows builds or runtime.
 
+## Rootway gallery clearance cleanup — 2026-10-12
+
+- Corrected gallery rib dimensions: the cross-section rotation follows each arch segment's local Y axis, so its length now belongs on Y. Previously the corridor-length Z dimension made each arch segment span the full gallery and stack across neighboring ribs, cluttering the walkable road. Opened the portal arch to 16.8 m wide and 11 m high, above the road and elevated rail clearance.
+- The fixed geometry feeds both the resident city render mesh and static collider. Bumped the district generator to v8 and save format to 24; district-generator-3 through -7 saves migrate without changing bridge anchors or removals.
+- **Checked:** `python3 tools/zig.py build check`, ReleaseSafe Metal capture `MTL_DEBUG_LAYER=1 ... build run -Dshowcase=64 -Dcapture-frame=120 -Daudio=false`, and `git diff --check` passed on Apple M3 Pro. The new `zig-out/rootway-v8-review.png` capture was inspected: the route stays clear and ribs now read as separate arches rather than stacked slabs. Metal API Validation reported no errors.
+- **Not checked:** headless tests, hands-on traversal and Linux/Windows runtime.
+
 ## Canopy metro first slice — 2026-10-12
 
 - Added `procedural/Metro.zig`: paired elevated guide rails and ties over the six plaza roads, outboard supports, and boarding platforms at the three market towers. These reuse the district's render/collision piece pipeline; station decks are walkable.
@@ -1053,3 +1060,11 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** `python3 tools/zig.py build check` and `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` passed. ReleaseSafe captures for `-Dshowcase=63 -Dcapture-frame=450` (flight pose) and `-Dshowcase=25 -Dcapture-frame=120` (settings text) ran with `MTL_DEBUG_LAYER=1` and were inspected; no Metal validation messages appeared. The text capture is crisp and readable at 2560×1600.
 - The final `python3 tools/zig.py build -Doptimize=ReleaseFast` reinstall passed. The control screen's gesture hint names forward+shift+jump for long jump, dash+jump for the boost leap, and back+jump for the flip.
 - **Not checked:** controller handling by hand, gameplay feel for dash-jump timing, the complete smoke stages, or headless tests. The flight capture is a pose review, not a control simulation.
+
+## Detroit road and Rootway clearance review — 2026-10-12
+
+- Tall procedural trees now keep 26 m clear of the district road decks and plazas, without changing stable scatter candidate IDs. Spawn clearings also exclude large salvage props and trees that covered the opening workshop.
+- Corrected Rootway rib orientation and widened/raised its arch so repeated cross-section ribs frame the road instead of filling the gallery. Matching collision bounds leave the passage open. Metro stop canopies no longer use plaza-level columns across traffic approaches. Salvage footprints that overlap shrine rooms are omitted from the nearby scene so they cannot cover controls.
+- Bumped the district generator to 8 and save format to 24; district generators 3–7 migrate with plaza and player-bridge IDs preserved. Extended the supported save window to format 12 so the documented wallet migration remains available.
+- **Checked:** `python3 tools/zig.py build check` passed; all **423 headless tests** passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=64 -Dcapture-frame=120` captured and visually inspected the Rootway gallery on Apple M3 Pro / Metal. The road is clear through the ribs, and Metal API validation reported no errors. The 300-frame Metal smoke completed all nine stages, including city traffic and save round-trip; traffic and shrine-interaction regression tests passed.
+- **Not checked:** Linux/Windows runtime, cross-compilation, performance benchmarks, or the 0.17 channel in this review.

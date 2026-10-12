@@ -28,10 +28,11 @@ const District = @import("../procedural/District.zig");
 /// v19 migrates generator-7 saves to harvestable young trees; v20 adds metro district geometry;
 /// v21 adds steampunk root galleries without changing plaza or bridge identities; v22 adds small
 /// pine scatter and Detroit's Gothic/industrial skyline; v23 widens Detroit River, adds Belle
-/// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities.
+/// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities;
+/// v24 corrects Rootway gallery geometry while retaining district and bridge identities.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 23;
+pub const format_version: u32 = 24;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -107,7 +108,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     var parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format > format_version or doc.format + 7 < format_version) return error.UnsupportedSaveFormat;
+    if (doc.format > format_version or doc.format < format_version - 12) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) {
         if ((doc.generator == 5 or doc.generator == 6 or doc.generator == 7 or doc.generator == 8) and doc.format < format_version) {
@@ -117,7 +118,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
         } else return error.GeneratorMismatch;
     }
     if (doc.district_generator != District.generator_version) {
-        if ((doc.district_generator == 3 or doc.district_generator == 4 or doc.district_generator == 5 or doc.district_generator == 6) and doc.format < format_version) {
+        if ((doc.district_generator == 3 or doc.district_generator == 4 or doc.district_generator == 5 or doc.district_generator == 6 or doc.district_generator == 7) and doc.format < format_version) {
             // Plaza and player-built bridge identities stay stable; Detroit terrain and structures regenerate.
             parsed.value.district_generator = District.generator_version;
             parsed.value.format = format_version;
@@ -304,10 +305,10 @@ test "save documents round-trip and reject mismatched or malformed input" {
     try std.testing.expectError(error.SeedMismatch, decode(allocator, bytes, 1, 4, 8));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes, doc.seed, 1, 8));
     try std.testing.expectError(error.InvalidSave, decode(allocator, bytes[0 .. bytes.len / 2], doc.seed, 4, 8));
-    const old = try std.mem.replaceOwned(u8, allocator, bytes, "\"generator\": 5", "\"generator\": 2");
+    const old = try std.mem.replaceOwned(u8, allocator, bytes, std.fmt.comptimePrint("\"generator\": {d}", .{Seed.generator_version}), "\"generator\": 2");
     defer allocator.free(old);
     try std.testing.expectError(error.GeneratorMismatch, decode(allocator, old, doc.seed, 4, 8));
-    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, "\"format\": 15", "\"format\": 11");
+    const old_format = try std.mem.replaceOwned(u8, allocator, bytes, std.fmt.comptimePrint("\"format\": {d}", .{format_version}), "\"format\": 11");
     defer allocator.free(old_format);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, old_format, doc.seed, 4, 8));
 }

@@ -11,6 +11,21 @@ pub const boulder_candidates = 40;
 pub const capacity = candidates + boulder_candidates;
 pub const Kind = enum { relic, vegetation, boulder };
 const Vegetation = @import("Vegetation.zig");
+const District = @import("District.zig");
+/// Tall trees stay this far (beyond half the deck width) from district roads and plazas, so no
+/// trunk or crown pokes through a deck. Skipped candidates keep their IDs, so saves are unaffected.
+const road_clearance: f32 = 26;
+/// Nothing is placed on top of the spawn point (the same point as `Sandbox.spawn`; scatter cannot
+/// import the game layer): relics reach 18 m across and would block the first workshop. Relics
+/// just beyond the clearing stay as the early salvage; trees need a wider berth.
+const spawn_xz: [2]f32 = .{ 0, -58 };
+const spawn_clearing: f32 = 24;
+const spawn_relic_clearing: f32 = 12;
+fn nearSpawn(x: f32, z: f32, radius: f32) bool {
+    const dx = x - spawn_xz[0];
+    const dz = z - spawn_xz[1];
+    return dx * dx + dz * dz < radius * radius;
+}
 /// Stable identity is (world seed, generator version, chunk key, local candidate ID).
 pub const Object = struct { local_id: u16, kind: Kind, variant: u8 = 0, transform: Transform, tint: [4]f32 };
 
@@ -30,6 +45,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const x = @as(f32, @floatFromInt(key.x)) * Key.extent + Seed.unit(h) * 124 - 62;
         const z = @as(f32, @floatFromInt(key.z)) * Key.extent + Seed.unit(Seed.mix(h)) * 124 - 62;
         const kind: Kind = if (i % 7 == 0) .relic else .vegetation;
+        if (kind == .relic and nearSpawn(x, z, spawn_relic_clearing)) continue;
         const biome = Biome.sample(seed, x, z);
         const nx = Noise.height(seed, x - 0.5, z) - Noise.height(seed, x + 0.5, z);
         const nz = Noise.height(seed, x, z - 0.5) - Noise.height(seed, x, z + 0.5);
@@ -41,6 +57,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const choice = Seed.unit(Seed.mix(h +% 3));
         if (frost > 0.25 and choice <= 0.82 and Seed.unit(Seed.mix(h +% 5)) < frost) continue;
         const variant: u8 = if (kind == .relic) 0 else if (choice > 0.985) Vegetation.tree_variants[@intCast(Seed.mix(h +% 4) % Vegetation.tree_count)] else if (choice > 0.96 and biome.arid < 0.58) 14 else if (choice > 0.84) 2 else if (choice > 0.75) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.67) 7 else if (choice > 0.42) 1 else 0;
+        if (Vegetation.isTree(variant) and (nearSpawn(x, z, spawn_clearing) or District.nearRoad(seed, x, z, road_clearance))) continue;
         const color = biome.color();
         const shade = 0.84 + 0.28 * Seed.unit(Seed.mix(h +% 5));
         const tint: [4]f32 = if (variant < 6) .{ color[0] * 0.8 / Vegetation.colors[variant][0], color[1] * 1.3 / Vegetation.colors[variant][1], color[2] * 0.9 / Vegetation.colors[variant][2], 1 } else if (variant == 6) .{ shade, shade * 0.48, shade * 0.55, 1 } else .{ shade * (0.8 + 0.2 * color[0]), shade * (0.85 + 0.15 * color[1]), shade * (0.8 + 0.2 * color[2]), 1 };
@@ -146,4 +163,23 @@ test "boulders gather on high, steep and dry ground, after every older candidate
     };
     try std.testing.expect(boulders > 50);
     for (kinds) |k| try std.testing.expect(k);
+}
+
+test "tall trees keep clear of district roads and plazas but still grow beside them" {
+    const seed: u64 = 7;
+    try std.testing.expect(District.nearRoad(seed, 140, -80, 0));
+    var trees: usize = 0;
+    var output: [capacity]Object = undefined;
+    var x: i32 = -3;
+    while (x <= 4) : (x += 1) {
+        var z: i32 = -2;
+        while (z <= 4) : (z += 1) {
+            for (output[0..generate(seed, .{ .x = x, .z = z }, &output)]) |o| {
+                if (o.kind != .vegetation or !Vegetation.isTree(o.variant)) continue;
+                trees += 1;
+                try std.testing.expect(!District.nearRoad(seed, o.transform.position[0], o.transform.position[2], road_clearance));
+            }
+        }
+    }
+    try std.testing.expect(trees > 0);
 }

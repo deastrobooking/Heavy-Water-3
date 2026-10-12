@@ -12,8 +12,8 @@ const Metro = @import("Metro.zig");
 const Rootway = @import("Rootway.zig");
 const DetroitRiverfront = @import("DetroitRiverfront.zig");
 const V = R.Vec3;
-/// v7: Detroit's broad river, Belle Isle crossings, and Windsor bridges join the skyline.
-pub const generator_version: u32 = 7;
+/// v8: Rootway arches are cross-section ribs with open road clearance, not corridor-length slabs.
+pub const generator_version: u32 = 8;
 pub const city_name = "Detroit, Michigan";
 pub const district_name = "Detroit Arbor Reach";
 const Bridges = @import("Bridges.zig");
@@ -80,22 +80,42 @@ pub fn testOrigin(seed: u64) V {
     const p = TestArbor.rampPoint(0);
     return .{ 60, Terrain.surface(seed, 60 + p[0], 22 + p[2]).height, 22 };
 }
-pub fn generate(seed: u64) !Layout {
+fn baseNodes(seed: u64) [node_count]Node {
     const origin = testOrigin(seed);
     const tower = TestArbor.boxes()[2];
     const entry = R.add(origin, .{ tower.center[0], TestArbor.tower_top, tower.center[2] });
     const jitter = (Seed.unit(Seed.mix(seed ^ 0x43495459)) - 0.5) * 12;
     const level = entry[1];
+    return .{
+        .{ .position = entry, .kind = .arbor, .tree = 0 },
+        .{ .position = .{ 140 + jitter, level + 2, -80 }, .kind = .tower },
+        .{ .position = .{ 240, level + 4, 90 }, .kind = .arbor, .tree = 1 },
+        .{ .position = .{ jitter, level + 6, 340 }, .kind = .tower },
+        .{ .position = .{ -250, level + 3, 300 }, .kind = .arbor, .tree = 2 },
+        .{ .position = .{ -240, level + 1, 80 + jitter }, .kind = .tower },
+    };
+}
+
+/// Whether ground point (`x`, `z`) lies within `margin` of a generated road deck or plaza.
+/// Only the six base roads count: player bridges are validated against trees when placed.
+/// Cheap enough for scatter generation, which uses it to keep tall trees off the roads.
+pub fn nearRoad(seed: u64, x: f32, z: f32, margin: f32) bool {
+    const nodes = baseNodes(seed);
+    const p: V = .{ x, 0, z };
+    for (nodes) |node| if (planarDistance(p, node.position, node.position) < plaza_radius + margin) return true;
+    for (0..base_edge_count) |i| {
+        const a = nodes[i].position;
+        const b = nodes[(i + 1) % node_count].position;
+        if (planarDistance(p, a, b) < width / 2 + margin) return true;
+    }
+    return false;
+}
+
+pub fn generate(seed: u64) !Layout {
+    const origin = testOrigin(seed);
     const layout: Layout = .{
         .seed = seed,
-        .nodes = .{
-            .{ .position = entry, .kind = .arbor, .tree = 0 },
-            .{ .position = .{ 140 + jitter, level + 2, -80 }, .kind = .tower },
-            .{ .position = .{ 240, level + 4, 90 }, .kind = .arbor, .tree = 1 },
-            .{ .position = .{ jitter, level + 6, 340 }, .kind = .tower },
-            .{ .position = .{ -250, level + 3, 300 }, .kind = .arbor, .tree = 2 },
-            .{ .position = .{ -240, level + 1, 80 + jitter }, .kind = .tower },
-        },
+        .nodes = baseNodes(seed),
         .edges = .{ .{ .a = 0, .b = 1 }, .{ .a = 1, .b = 2 }, .{ .a = 2, .b = 3 }, .{ .a = 3, .b = 4 }, .{ .a = 4, .b = 5 }, .{ .a = 5, .b = 0 } },
         .trees = .{
             .{ .position = origin, .radius = TestArbor.base_radius },

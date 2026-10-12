@@ -727,7 +727,7 @@ test "grapple zips toward a static anchor and releases on arrival; flight glides
     runFor(&glider, &physics, &camera, .{ .jump = true }, 60);
     try std.testing.expectEqual(Motion.glide, glider.motion);
     try std.testing.expect(glider.velocity[1] >= -3.5);
-    try std.testing.expect(glider.fuel < 100);
+    try std.testing.expect(glider.fuel < glider.suit.fuel_max);
 }
 
 test "free flight stays above terrain and lands on rigid bodies" {

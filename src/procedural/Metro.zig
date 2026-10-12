@@ -68,20 +68,20 @@ fn track(layout: anytype, edge: anytype, out: anytype) !void {
 fn station(layout: anytype, node_id: u8, stop: u8, out: anytype) !void {
     const node = layout.nodes[node_id];
     const p = node.position;
-    const deck: V = .{ 22, 0.55, 8 };
+    // The plaza is the walkable boarding floor. This thin non-colliding inset marks the platform
+    // without putting a solid slab across the car routes that converge at its centre.
+    const deck: V = .{ 22, 0.02, 8 };
     const roof_y = track_height - 0.3;
     const charcoal: V = .{ 0.12, 0.18, 0.22 };
-    const glass: V = .{ 0.16, 0.56, 0.62 };
     const light: V = .{ 0.16, 0.84, 0.91 };
-    const platform: V = .{ p[0], p[1] + 0.4, p[2] };
+    const platform: V = .{ p[0], p[1] + 0.01, p[2] };
 
     // Boarding deck sits just over the plaza, with a clear running lane through its centre.
-    try out.add(.{ .center = platform, .size = deck, .color = charcoal });
-    for ([_]f32{ -9, 9 }) |x| {
-        for ([_]f32{ -2.9, 2.9 }) |z| try out.add(.{ .center = .{ p[0] + x, p[1] + roof_y / 2, p[2] + z }, .size = .{ 0.42, roof_y, 0.42 }, .color = glass });
-        try out.add(.{ .center = .{ p[0] + x, p[1] + roof_y, p[2] }, .size = .{ 0.5, 0.28, 7 }, .color = light, .solid = false });
-    }
+    try out.add(.{ .center = platform, .size = deck, .color = charcoal, .solid = false });
+    // The canopy hangs from the elevated line: plaza-level columns would block the two road
+    // approaches that meet beneath every station.
     try out.add(.{ .center = .{ p[0], p[1] + roof_y, p[2] }, .size = .{ 19, 0.45, 6.4 }, .color = charcoal });
+    for ([_]f32{ -9, 9 }) |x| try out.add(.{ .center = .{ p[0] + x, p[1] + roof_y, p[2] }, .size = .{ 0.5, 0.28, 7 }, .color = light, .solid = false });
     // Luminous station wayfinding bars sit above the platform canopy.
     try out.add(.{ .center = .{ p[0], p[1] + roof_y + 0.42, p[2] }, .size = .{ 8, 0.18, 0.18 }, .color = light, .solid = false });
     _ = stop; // The menu and map use the same ordered stop_names table.

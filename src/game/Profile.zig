@@ -287,7 +287,7 @@ test "names are validated, typed, and uppercased; fields wrap and clamp; documen
     p.adjust(.skin, -3);
     try std.testing.expectEqual(@as(u8, 7), p.skin);
     p.adjust(.hair_style, -1);
-    try std.testing.expectEqual(HairStyle.spike_tail, p.hair_style);
+    try std.testing.expectEqual(HairStyle.tempest_sweep, p.hair_style);
     p.adjust(.presentation, 1);
     try std.testing.expectEqual(Presentation.feminine, p.presentation);
     for (0..20) |_| p.adjust(.height, 1);

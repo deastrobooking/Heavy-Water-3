@@ -1934,6 +1934,23 @@ fn refreshNearby(self: *Sandbox, eye: math.Vec3) void {
     for (&self.nearby, 0..) |*chunk, i| {
         chunk.key = .{ .x = center.x + @as(i32, @intCast(i % 3)) - 1, .z = center.z + @as(i32, @intCast(i / 3)) - 1 };
         chunk.count = if (chunk.key.valid()) Scatter.generate(self.seed, chunk.key, &chunk.objects) else 0;
+        // Salvage can be a large procedural prop. Keep its visual and interaction footprint out
+        // of the shrine rooms so it cannot overlap their wall controls or puzzle props.
+        var kept: usize = 0;
+        for (chunk.objects[0..chunk.count]) |object| {
+            var overlaps_shrine = false;
+            if (object.kind == .relic) for (self.shrines) |shrine| {
+                const p = object.transform.position;
+                const local = R.sub(p, shrine.origin);
+                const dx = @max(@abs(local[0]) - Shrine.width / 2, 0);
+                const dz = @max(@max(-local[2], local[2] - Shrine.length(shrine.generated.puzzle)), 0);
+                if (@sqrt(dx * dx + dz * dz) < object.transform.scale * 0.5) overlaps_shrine = true;
+            };
+            if (overlaps_shrine) continue;
+            chunk.objects[kept] = object;
+            kept += 1;
+        }
+        chunk.count = kept;
     }
 }
 
@@ -2485,6 +2502,41 @@ pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void 
     try sandbox.init(std.testing.allocator, 310399555161, catalog, camera);
 }
 
+const FoundRelic = struct { key: Key, object: Scatter.Object };
+
+/// A relic in the 3×3 chunks around `center` with no other relic near enough to block a ray aimed
+/// at it from behind: relics are up to 18 m across, so "the first one" may sit behind a neighbour.
+fn isolatedRelic(seed: u64, center: Key) ?FoundRelic {
+    var all: [9][Scatter.capacity]Scatter.Object = undefined;
+    var counts: [9]usize = undefined;
+    var keys: [9]Key = undefined;
+    for (0..9) |i| {
+        keys[i] = .{ .x = center.x + @as(i32, @intCast(i % 3)) - 1, .z = center.z + @as(i32, @intCast(i / 3)) - 1 };
+        counts[i] = Scatter.generate(seed, keys[i], &all[i]);
+    }
+    for (0..9) |home| {
+        for (all[home][0..counts[home]]) |o| {
+            if (o.kind != .relic) continue;
+            const margin = 2 * o.transform.scale + 2;
+            var clear = true;
+            for (0..9) |i| for (all[i][0..counts[i]]) |other| {
+                if (other.kind != .relic or (i == home and other.local_id == o.local_id)) continue;
+                const dx = other.transform.position[0] - o.transform.position[0];
+                const dz = other.transform.position[2] - o.transform.position[2];
+                if (@sqrt(dx * dx + dz * dz) < margin + other.transform.scale) clear = false;
+            };
+            // The viewer stands just outside the relic's south face at 0.3 scale up: no hillside may rise into the ray.
+            const eye_y = o.transform.position[1] + o.transform.scale * 0.3 + 1.6;
+            var z = o.transform.position[2] - 1.5 - 0.42 * o.transform.scale;
+            while (z < o.transform.position[2]) : (z += 1) {
+                if (Terrain.surface(seed, o.transform.position[0], z).height > eye_y - 0.5) clear = false;
+            }
+            if (clear) return .{ .key = keys[home], .object = o };
+        }
+    }
+    return null;
+}
+
 fn run(sandbox: *Sandbox, camera: *Camera, input: Input, actions: Actions, steps: usize) !void {
     try sandbox.step(camera, input, actions, 1.0 / 60.0);
     for (1..steps) |_| try sandbox.step(camera, input, .{}, 1.0 / 60.0);
@@ -2615,14 +2667,15 @@ test "salvage removes a relic by stable ID, survives regeneration, and round-tri
     sandbox.player.mode = .fly;
 
     // Find a relic in the spawn chunk and aim at it from two meters away.
+    const found = isolatedRelic(sandbox.seed, Key.fromPosition(spawn[0], spawn[2])) orelse return error.SkipZigTest;
+    const key = found.key;
+    const relic = found.object;
     var objects: [Scatter.capacity]Scatter.Object = undefined;
-    const key = Key.fromPosition(spawn[0], spawn[2]);
     const count = Scatter.generate(sandbox.seed, key, &objects);
-    const relic = for (objects[0..count]) |o| {
-        if (o.kind == .relic) break o;
-    } else return error.SkipZigTest;
     const p = relic.transform.position;
-    camera.position = math.vec3(p[0], p[1] + relic.transform.scale, p[2] - 2 - relic.transform.scale);
+    // Flying players are the camera, so stand the player (not just the camera) at the relic.
+    sandbox.player.feet = .{ p[0], p[1] + relic.transform.scale * 0.3, p[2] - 1.5 - 0.42 * relic.transform.scale };
+    camera.position = sandbox.player.eye();
     camera.yaw = 0;
     camera.pitch = 0;
     try run(&sandbox, &camera, .{}, .{}, 1);
@@ -3284,13 +3337,10 @@ test "markets buy salvaged parts, sell kits that place and refund, sell out, per
 
     // Salvaging a relic yields one part.
     sb.player.mode = .fly;
-    var objects: [Scatter.capacity]Scatter.Object = undefined;
-    const key = Key.fromPosition(spawn[0], spawn[2]);
-    const relic = for (objects[0..Scatter.generate(sb.seed, key, &objects)]) |o| {
-        if (o.kind == .relic) break o;
-    } else return error.SkipZigTest;
+    const relic = (isolatedRelic(sb.seed, Key.fromPosition(spawn[0], spawn[2])) orelse return error.SkipZigTest).object;
     const rp = relic.transform.position;
-    camera.position = math.vec3(rp[0], rp[1] + relic.transform.scale, rp[2] - 2 - relic.transform.scale);
+    sb.player.feet = .{ rp[0], rp[1] + relic.transform.scale * 0.3, rp[2] - 1.5 - 0.42 * relic.transform.scale };
+    camera.position = sb.player.eye();
     camera.yaw = 0;
     camera.pitch = 0;
     try run(&sb, &camera, .{}, .{}, 1);
@@ -3622,7 +3672,8 @@ fn playShrine(sb: *Sandbox, camera: *Camera, k: usize) !void {
         switch (action) {
             .press => |l| {
                 const b = Shrine.buttonPosition(p, l);
-                try shrineWalk(sb, camera, k, .{ -Shrine.width / 2 + 1.65, 0, b[2] });
+                // Keep the interaction ray in the open aisle, clear of oversized outdoor salvage.
+                try shrineWalk(sb, camera, k, .{ 0, 0, b[2] });
                 aimAt(camera, sb.shrinePoint(k, b));
                 try run(sb, camera, .{}, .{}, 1);
                 try std.testing.expect(sb.target == .device and sb.target.device.machine == m);

@@ -1065,7 +1065,7 @@ test "locomotion controller maps run sprint climb and airborne states" {
     try std.testing.expectEqual(Animation.ClipId.idle, clipFor(.idle, 0));
     try std.testing.expectEqual(Animation.ClipId.walk, clipFor(.run, 0.5));
     try std.testing.expectEqual(Animation.ClipId.run, clipFor(.run, 0.9));
-    try std.testing.expectEqual(Animation.ClipId.run, clipFor(.sprint, 1));
+    try std.testing.expectEqual(Animation.ClipId.sprint, clipFor(.sprint, 1));
     try std.testing.expectEqual(Animation.ClipId.climb, clipFor(.climb, 0));
     try std.testing.expectEqual(Animation.ClipId.climb, clipFor(.hang, 0));
     try std.testing.expectEqual(Animation.ClipId.air, clipFor(.fall, 0));

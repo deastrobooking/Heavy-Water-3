@@ -959,8 +959,11 @@ test "sap beacon palette placement requires nearby wood and produces a powered i
     const x = origin[0] + sb.tree(1).genome.base_radius + 2;
     const z = origin[2];
     const y = Terrain.surface(sb.seed, x, z).height;
+    // Terrain collision streams in around the player, so stand beside the tree first.
+    sb.player.feet = .{ x, y + 5, z - 8 };
     camera.position = @import("mach").math.vec3(x, y + 5, z - 8);
     aim(&camera, .{ x, y, z });
+    try tick(&sb, &camera, .{});
     try tick(&sb, &camera, .{});
     try std.testing.expect(sb.tools.preview != null and sb.tools.preview.?.valid);
     const before = sb.machineCount();
@@ -996,10 +999,12 @@ test "place a rover on an elevated plaza and reject unsupported placement at its
     defer sb.deinit();
     const plaza = catalog.district.nodes[1].position;
     sb.player.mode = .fly;
-    camera.position = @import("mach").math.vec3(plaza[0], plaza[1] + 9, plaza[2] - 4);
+    // Plaza 1 is a Metro stop: its roof covers the centre, so build on open deck beside it.
+    const spot = R.add(plaza, .{ 0, 0, 12 });
+    camera.position = @import("mach").math.vec3(spot[0], spot[1] + 9, spot[2] - 4);
     selectTool(&sb, .build);
     sb.tools.slot = @intFromEnum(Item.rover);
-    aim(&camera, plaza);
+    aim(&camera, spot);
     const p = preview(&sb, camera).?;
     try std.testing.expect(p.valid);
     try std.testing.expect(p.origin[1] > plaza[1] + 1);

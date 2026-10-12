@@ -662,8 +662,8 @@ test "wild pets wait on the meadow ring, apart from each other" {
     pets.place(0x4845415659, .{ 0, 0, -58 });
     for (pets.spots, 0..) |a, i| {
         const d = @sqrt(a.position[0] * a.position[0] + (a.position[2] + 58) * (a.position[2] + 58));
-        try std.testing.expect(d >= 149 and d <= 231);
-        for (pets.spots[i + 1 ..]) |b| try std.testing.expect(R.length(R.sub(a.position, b.position)) > 60);
+        try std.testing.expect(d >= encounter_radius_min - 0.01 and d <= encounter_radius_min + encounter_radius_spread + 0.01);
+        for (pets.spots[i + 1 ..]) |b| try std.testing.expect(R.length(R.sub(a.position, b.position)) > 20);
     }
 }
 

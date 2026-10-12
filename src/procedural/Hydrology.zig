@@ -97,7 +97,8 @@ pub fn color() [3]f32 {
 test "river channels and flow are continuous at chunk boundaries and drop at falls" {
     const z = centerZ(42, 0, 128);
     try std.testing.expectApproxEqAbs(z, centerZ(42, 0, 128.001), 0.01);
-    try std.testing.expect(carvedHeight(42, 128, z, 80) < 80);
+    // Belle Isle stands uncarved at x = 128, so check the channel beyond the city.
+    try std.testing.expect(carvedHeight(42, 1500, centerZ(42, 0, 1500), 80) < 80);
     const lane_seed = Seed.mix(42 ^ 0x464c4f57);
     const phase = @floor(Seed.unit(lane_seed) * fall_period / 4) * 4;
     const event_x = fall_period - phase;
