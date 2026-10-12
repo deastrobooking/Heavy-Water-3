@@ -32,6 +32,7 @@ const Specials = @import("Specials.zig");
 const Heroes = @import("Heroes.zig");
 const Encounters = @import("Encounters.zig");
 const Pets = @import("Pets.zig");
+const DroidCompanion = @import("DroidCompanion.zig");
 const Arena = @import("Arena.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
@@ -72,6 +73,7 @@ pub fn init(sb: *Sandbox) void {
         const nest = sb.enemies.nests[0].position;
         _ = sb.enemies.spawnAt(.scalari_titan, 0, R.add(nest, .{ 18, 0, 14 }), 1);
         _ = sb.enemies.spawnAt(.scalari_miner, 0, R.add(nest, .{ -15, 0, -16 }), 1);
+        _ = sb.enemies.spawnAt(.scalari_hybrid, 0, R.add(nest, .{ 22, 0, -12 }), 1);
     }
     const surface = sb.enemies.nest_count;
     var nest_sites: [Enemies.max_nests]V = undefined;
@@ -214,9 +216,12 @@ pub fn recruit(sb: *Sandbox, hero: u8) void {
     sb.progress.setFlag("met_wildkin");
 }
 
-/// Player `p` breaks a wild pet's Hive collar: the pet is theirs and comes out at once. The wild
-/// one stays for teammates who have not freed their own.
+/// Player `p` catches a weakened, snared wild animal. Each teammate keeps their own catch record.
 pub fn freePet(sb: *Sandbox, p: usize, species: Pets.Species) void {
+    if (!sb.pets.canCaptureWild(species)) {
+        sb.say("Weaken {s} with the energy net, then get close to catch it", .{Pets.info(species).name});
+        return;
+    }
     if (!sb.kits[p].freePet(species)) return;
     const spot = sb.pets.spots[@intFromEnum(species)];
     sb.pets.summon(p, species, spot.position, sb.kits[p].petLevel(species));
@@ -313,14 +318,27 @@ fn petLearns(sb: *Sandbox, at: V) void {
     }
 }
 
+/// A field droid learns from local takedowns and keeps its levels with its owner.
+fn robotLearns(sb: *Sandbox, at: V) void {
+    for (sb.droid_companions.out, 0..) |maybe, owner| {
+        const droid = maybe orelse continue;
+        if (!sb.kits[owner].robot_built or R.length(R.sub(droid.position, at)) > DroidCompanion.share_radius) continue;
+        if (sb.kits[owner].awardRobotXP(DroidCompanion.xp_per_unit)) {
+            const level = sb.kits[owner].robotLevel();
+            sb.say("P{d}'s field droid upgraded to level {d}!", .{ owner + 1, level });
+            if (sb.droid_companions.out[owner]) |*robot| robot.max_health = DroidCompanion.maxHealth(level);
+        }
+    }
+}
+
 /// Whether some present player has yet to free `species` (so its wild one still waits).
 fn petWaiting(sb: *const Sandbox, species: Pets.Species) bool {
     for (0..Sandbox.max_players) |p| if (sb.present(p) and !sb.kits[p].hasPet(species)) return true;
     return false;
 }
 
-/// Wild pets near P1 (collared, idling at their spots, with a beam to find them by) while a
-/// present player has yet to free them, and every player's pet in their accent, as puppets.
+/// Wild pets near P1 (collared at their spots, with a beam to find them by) while a present
+/// player has yet to catch them, and every player's pet in their accent, as puppets.
 fn publishPets(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
     var n = start;
     const c = &sb.catalog.content;
@@ -337,7 +355,8 @@ fn publishPets(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usiz
         const d = R.length(R.sub(spot.position, sb.player.feet));
         if (d > 400) continue;
         if (n < out.len and !sb.pets.showcase_free) {
-            out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(spot.position, .{ 0, 18, 0 }) }, .tint = Material.emissive(.{ 1.0, 0.25, 0.4, 1 }, 0.45 + 0.2 * @sin(t * 3)), .size = .{ 0.14, 32, 0.14 } };
+            const beam: [4]f32 = if (sb.pets.canCaptureWild(sp)) .{ 0.25, 0.9, 1, 1 } else .{ 1.0, 0.25, 0.4, 1 };
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(spot.position, .{ 0, 18, 0 }) }, .tint = Material.emissive(beam, 0.45 + 0.2 * @sin(t * 3)), .size = .{ 0.14, 32, 0.14 } };
             n += 1;
         }
         if (d > 90) continue;
@@ -347,6 +366,23 @@ fn publishPets(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usiz
     };
     for (sb.pets.out, 0..) |maybe, owner| if (maybe) |pet| {
         n = Pets.draw(pet.species, .{ .position = pet.position, .yaw = pet.yaw, .gait = pet.gait, .stride = pet.stride, .action = pet.action, .trick = pet.trick, .engaged = pet.engaged, .time = t + @as(f32, @floatFromInt(owner)) * 0.37, .collar = accentOf(sb.profileOf(owner).*) }, parts, out, n);
+    };
+    for (sb.droid_companions.out, 0..) |maybe, owner| if (maybe) |droid| {
+        if (out.len - n < 8) break;
+        const c0 = accentOf(sb.profileOf(owner).*);
+        const tint: [4]f32 = if (droid.flash > 0) .{ 1.5, 1.2, 1.2, 1 } else .{ 0.23, 0.29, 0.34, 1 };
+        const at = droid.position;
+        const body = R.add(at, .{ 0, 0.64, 0 });
+        const head = R.add(at, .{ 0, 1.16, 0.08 });
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = body }, .tint = tint, .size = .{ 0.72, 0.62, 0.62 }, .rotation = yawQuat(droid.yaw) };
+        out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = head }, .tint = .{ 0.31, 0.38, 0.43, 1 }, .size = .{ 0.48, 0.37, 0.44 }, .rotation = yawQuat(droid.yaw) };
+        out[n + 2] = .{ .mesh = c.gem, .transform = .{ .position = R.add(head, .{ 0, 0, 0.24 }) }, .tint = Material.emissive(.{ c0[0], c0[1], c0[2], 1 }, if (droid.engaged) @as(f32, 1.25) else 0.75), .size = .{ 0.23, 0.14, 0.06 } };
+        out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ -0.47, 0.62, 0 }) }, .tint = tint, .size = .{ 0.22, 0.64, 0.25 }, .rotation = yawQuat(droid.yaw) };
+        out[n + 4] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0.47, 0.62, 0 }) }, .tint = tint, .size = .{ 0.22, 0.64, 0.25 }, .rotation = yawQuat(droid.yaw) };
+        out[n + 5] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ -0.22, 0.16, 0 }) }, .tint = .{ 0.15, 0.19, 0.22, 1 }, .size = .{ 0.18, 0.28, 0.2 } };
+        out[n + 6] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0.22, 0.16, 0 }) }, .tint = .{ 0.15, 0.19, 0.22, 1 }, .size = .{ 0.18, 0.28, 0.2 } };
+        out[n + 7] = .{ .mesh = c.gem, .transform = .{ .position = R.add(at, .{ 0, 0.66, -0.34 }) }, .tint = Material.emissive(.{ 1, 0.48, 0.12, 1 }, if (droid.health > 0) @as(f32, 0.9) else 0.15), .size = .{ 0.19, 0.19, 0.12 } };
+        n += 8;
     };
     return n;
 }
@@ -628,12 +664,13 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
         },
         .unit_down => |u| {
             const random = sb.enemies.rng.random();
-            const scalari = u.kind == .scalari_scout or u.kind == .scalari_stinger or u.kind == .scalari_titan or u.kind == .scalari_miner;
+            const scalari = Enemies.isScalari(u.kind);
             const xp: u32 = switch (u.kind) {
                 .scalari_scout => 30,
                 .scalari_stinger => 55,
                 .scalari_titan => 300,
                 .scalari_miner => 20,
+                .scalari_hybrid => 75,
                 .drone, .skirmisher => 40,
                 .trooper => 65,
                 .sentinel, .bulwark => 100,
@@ -656,10 +693,20 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                     .scalari_stinger => 6,
                     .scalari_titan => 40,
                     .scalari_miner => 2,
+                    .scalari_hybrid => 8,
+                    else => 0,
+                };
+                if (scalari) kit.wallet.parts +|= switch (u.kind) {
+                    .scalari_scout => 1,
+                    .scalari_stinger => 2,
+                    .scalari_titan => 8,
+                    .scalari_miner => 2,
+                    .scalari_hybrid => 2,
                     else => 0,
                 };
                 if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
             }
+            robotLearns(sb, u.position);
             if (!scalari) {
                 sb.collectibles.drop(.hive_alloy, u.position);
                 if (u.kind == .sentinel or u.kind == .bulwark) {
@@ -856,7 +903,29 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
     }
     stepSpecials(sb, camera, actions, frozen, dt);
     if (!frozen) stepPet(sb, camera, dt);
+    if (!frozen) stepDroidCompanions(sb, camera, dt);
+    if (!frozen) stepWildlife(sb, camera, dt);
     if (timing) |profile| profile.metrics.record(.arsenal, phase_timer.lap() * 1000);
+}
+
+fn stepDroidCompanions(sb: *Sandbox, camera: *Camera, dt: f32) void {
+    for (0..Sandbox.max_players) |owner| {
+        if (!sb.present(owner) or !sb.kits[owner].robot_built) {
+            sb.droid_companions.out[owner] = null;
+            continue;
+        }
+        const level = sb.kits[owner].robotLevel();
+        if (sb.droid_companions.out[owner] == null) sb.droid_companions.summonFor(owner, sb.feetOf(owner), sb.yawOf(owner), level, sb.seed);
+        var hive_events: [16]Enemies.Event = undefined;
+        var hn: usize = 0;
+        var events: [4]DroidCompanion.Event = undefined;
+        const n = sb.droid_companions.step(owner, .{ .owner = sb.feetOf(owner), .owner_yaw = sb.yawOf(owner), .level = level, .seed = sb.seed, .physics = &sb.physics }, &sb.enemies, dt, &hive_events, &hn, &events);
+        for (events[0..@min(n, events.len)]) |event| switch (event) {
+            .attack => |at| sb.cuePitch(.zap, at, 0.72),
+            .hurt => |at| sb.cuePitch(.impact, at, 0.8),
+        };
+        for (hive_events[0..@min(hn, hive_events.len)]) |event| hive(sb, event, camera);
+    }
 }
 
 fn rangerAirShots(sb: *Sandbox, origin: V, direction: V, events: []const Combat.Event) void {
@@ -866,9 +935,44 @@ fn rangerAirShots(sb: *Sandbox, origin: V, direction: V, events: []const Combat.
         .machine_gun => sb.skies.fireRanger(origin, direction, 9),
         .heavy_rifle => sb.skies.fireRanger(origin, direction, 55),
         .energy_bazooka => sb.skies.fireRanger(origin, direction, 90),
-        .energy_net => sb.skies.fireRangerNet(origin, direction, 38),
+        .energy_net => {
+            sb.skies.fireRangerNet(origin, direction, 38);
+            if (netWildHit(sb, origin, direction)) |species| sb.say("Net hit {s}: {d}% vitality", .{ Pets.info(species).name, @as(u32, @intFromFloat(sb.pets.wild_health[@intFromEnum(species)])) });
+        },
         else => {},
     };
+}
+
+fn netWildHit(sb: *Sandbox, origin: V, direction: V) ?Pets.Species {
+    var best = std.math.inf(f32);
+    var result: ?Pets.Species = null;
+    for (sb.pets.spots, 0..) |spot, k| {
+        const species: Pets.Species = @enumFromInt(k);
+        if (!petWaiting(sb, species) or sb.pets.wild_health[k] <= 0) continue;
+        const lift: f32 = if (Pets.info(species).flies) Pets.hover else 0.7;
+        if (Enemies.segmentSphere(origin, direction, @min(best, 120), R.add(spot.position, .{ 0, lift, 0 }), 1.15)) |distance| {
+            best = distance;
+            result = species;
+        }
+    }
+    if (result) |species| {
+        if (sb.physics.castRay(origin, direction, best, .none)) |blocker| if (blocker.distance < best) return null;
+        _ = sb.pets.netHitWild(species, 38);
+        return species;
+    }
+    return null;
+}
+
+fn stepWildlife(sb: *Sandbox, camera: *Camera, dt: f32) void {
+    var active: [Sandbox.max_players]bool = undefined;
+    var owners: [Sandbox.max_players]V = undefined;
+    for (0..Sandbox.max_players) |p| {
+        active[p] = sb.present(p);
+        owners[p] = sb.feetOf(p);
+    }
+    var events: [Pets.max_owners]Enemies.Event = undefined;
+    const n = sb.pets.stepWild(dt, active, owners, &events);
+    for (events[0..@min(n, events.len)]) |event| hive(sb, event, camera);
 }
 
 /// Class specials for every local player (P1 on foot, active guests), then grenades and
@@ -1286,12 +1390,14 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .scalari_scout => scalari_scout_profile,
             .scalari_stinger => scalari_stinger_profile,
             .scalari_titan => scalari_titan_profile,
+            .scalari_hybrid => scalari_hybrid_profile,
             else => trooper_profile,
         };
         const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else switch (u.kind) {
             .scalari_scout => .{ 0.38, 1.2, 1.35, 1 },
             .scalari_stinger => .{ 1.15, 0.72, 0.22, 1 },
             .scalari_titan => .{ 1.2, 0.4, 0.25, 1 },
+            .scalari_hybrid => .{ 0.72, 1.12, 0.28, 1 },
             else => .{ 1, 1, 1, 1 },
         };
         out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = tint, .character = .{
@@ -1843,6 +1949,7 @@ const bulwark_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .van
 const scalari_scout_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 4, .skin = 5, .build = 0.7, .height = 0.78 };
 const scalari_stinger_profile: @import("Profile.zig") = .{ .outfit = 4, .clothing = .hardsuit, .armor = .sentinel, .helmet = .sealed, .accent = 4, .skin = 6, .build = 0.95, .height = 1.05 };
 const scalari_titan_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 4, .skin = 4, .build = 2.7, .height = 4.8 };
+const scalari_hybrid_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing = .exo_rig, .armor = .sentinel, .helmet = .sealed, .accent = 3, .skin = 6, .build = 1.15, .height = 1.2 };
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {
     const color = Collectibles.tint(kind);

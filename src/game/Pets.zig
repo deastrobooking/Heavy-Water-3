@@ -1,9 +1,9 @@
 //! Bio-synth pets: wild animals the Hive fitted with cybernetic plates and a control collar.
-//! Each waits somewhere on the meadow ring around the spawn, collar glowing Hive red. Break the
-//! collar (walk up and click) and the pet joins the party: it follows its ranger, fights the
-//! Hive beside them, grows a level as the party downs bots near it, and does a happy trick when
-//! petted. Pets are each player's own: every player frees their own (from the same wild ones),
-//! has one out at a time, and petting it when they have freed more calls the next one.
+//! Each waits somewhere on the meadow ring around the spawn, collar glowing Hive red. Territorial
+//! animals retaliate when crowded; two energy-net hits weaken and snare them for a short time, so
+//! a ranger can approach and catch one alive. Caught pets follow their ranger, fight the Hive,
+//! gain levels from nearby takedowns, and do a happy trick when petted. Catch and progression
+//! records are per-player; each ranger can have one pet out at a time.
 //!
 //! - **Plasma hound (GARU):** trots at heel and pounces, a short-range bite that hits hard.
 //! - **Chitin falcon (SKYE):** circles overhead and dives with a lumen dart from range.
@@ -11,8 +11,8 @@
 //! - **Lumen moth (LUMI):** flutters at the shoulder, zaps from range and mends nearby rangers.
 //!
 //! Bodies are cel-shaded puppets of spheres, plates and spikes (`draw`), animated procedurally:
-//! a trotting gait, wing beats, a wagging tail, and attack and trick flourishes. Pets cannot be
-//! hurt; the game is for all ages, and a pet never needs rescuing.
+//! a trotting gait, wing beats, a wagging tail, and attack and trick flourishes. Wild encounter
+//! state is separate from the caught companion, so a net capture never uses lethal damage.
 const std = @import("std");
 const enum_compat = @import("enum_compat");
 const Physics = @import("../physics/Physics.zig");
@@ -136,6 +136,10 @@ pub const max_owners = 4;
 
 spots: [count]Spot = undefined,
 placed: bool = false,
+/// Shared wild encounters. Each ranger catches their own version of the animal.
+wild_health: [count]f32 = @splat(100),
+wild_attack_timer: [count]f32 = @splat(0),
+wild_snared: [count]f32 = @splat(0),
 /// Art review (`-Dshowcase=59`): draw the waiting pets as freed, in their ranger's colours.
 showcase_free: bool = false,
 /// The pet out with each player slot.
@@ -151,7 +155,47 @@ pub fn place(self: *Pets, seed: u64, spawn: V) void {
         const z = spawn[2] + @cos(angle) * r;
         spot.* = .{ .position = .{ x, Terrain.surface(seed, x, z).height, z }, .yaw = angle + std.math.pi };
     }
+    self.wild_health = @splat(100);
+    self.wild_attack_timer = @splat(0);
+    self.wild_snared = @splat(0);
     self.placed = true;
+}
+
+/// Nets weaken a wild animal. Two hits leave it at capture health and briefly snared.
+pub fn netHitWild(self: *Pets, species: Species, damage_amount: f32) bool {
+    const k = @intFromEnum(species);
+    if (self.wild_health[k] <= 0) return false;
+    self.wild_health[k] = @max(1, self.wild_health[k] - @max(0, damage_amount));
+    if (self.wild_health[k] <= 40) self.wild_snared[k] = 8;
+    return true;
+}
+
+pub fn canCaptureWild(self: *const Pets, species: Species) bool {
+    const k = @intFromEnum(species);
+    return self.wild_health[k] <= 40 and self.wild_snared[k] > 0;
+}
+
+/// Wild animals defend themselves when a ranger crowds them. The net capture state pauses
+/// attacks while the player closes in to interact.
+pub fn stepWild(self: *Pets, dt: f32, present: [max_owners]bool, owners: [max_owners]V, out: []Enemies.Event) usize {
+    var n: usize = 0;
+    if (!self.placed) return n;
+    for (0..count) |k| {
+        if (self.wild_health[k] <= 0) continue;
+        self.wild_snared[k] = @max(0, self.wild_snared[k] - dt);
+        self.wild_attack_timer[k] = @max(0, self.wild_attack_timer[k] - dt);
+        if (self.wild_snared[k] > 0 or self.wild_attack_timer[k] > 0) continue;
+        const spot = self.spots[k];
+        const animal = R.add(spot.position, .{ 0, 0.9, 0 });
+        for (present, 0..) |is_present, p| {
+            if (!is_present or R.length(R.sub(owners[p], spot.position)) > 2.7) continue;
+            if (n < out.len) out[n] = .{ .player_hit = .{ .player = @intCast(p), .damage = 8, .from = animal } };
+            n += 1;
+            self.wild_attack_timer[k] = 1.3;
+            break;
+        }
+    }
+    return n;
 }
 
 /// Brings `species` out for player `owner` beside `at` (replacing any pet already out).

@@ -43,7 +43,7 @@ pub const Content = struct {
     relic: MeshHandle,
     plant: MeshHandle,
     flora: [Vegetation.variant_count]MeshHandle,
-    tree_trunk: MeshHandle,
+    tree_trunks: [Vegetation.tree_count]MeshHandle,
     /// Puppet parts (pets): a unit sphere and a unit cone.
     orb: MeshHandle,
     spike: MeshHandle,
@@ -221,9 +221,9 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.* = .{};
     errdefer self.deinit(allocator);
     self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.cube(allocator), .named("relic", .{ 1, 1, 1, 1 })));
-    for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (i < Vegetation.tree_first) try Vegetation.plant(allocator, @intCast(i)) else try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)), .named(Vegetation.names[i], Vegetation.colors[i])));
+    for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (Vegetation.isTree(@intCast(i))) try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)) else try Vegetation.plant(allocator, @intCast(i)), .named(Vegetation.names[i], Vegetation.colors[i])));
     self.content.plant = self.content.flora[0];
-    self.content.tree_trunk = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator), .named("canopy trunk", .{ 0.24, 0.15, 0.09, 1 })));
+    for (&self.content.tree_trunks, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator, @intCast(i)), .named("canopy trunk", Vegetation.trunk_colors[i])));
     self.content.orb = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.orb(allocator), .named("orb", .{ 1, 1, 1, 1 })));
     self.content.spike = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.spike(allocator), .named("spike", .{ 1, 1, 1, 1 })));
     for (&self.content.boulders, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.boulder(allocator, @intCast(i)), .named(Vegetation.boulder_names[i], Vegetation.stone ++ [_]f32{1})));
@@ -307,7 +307,9 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "relic", .handle = self.content.relic },                                             .{ .name = "plant", .handle = self.content.plant },
         .{ .name = "fern", .handle = self.content.flora[1] },                                           .{ .name = "wildflower", .handle = self.content.flora[2] },
         .{ .name = "broadleaf", .handle = self.content.flora[3] },                                      .{ .name = "needleleaf", .handle = self.content.flora[4] },
-        .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "canopy_trunk", .handle = self.content.tree_trunk },
+        .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "redwood", .handle = self.content.flora[6] },
+        .{ .name = "manzanita", .handle = self.content.flora[7] },                                     .{ .name = "ember_blossom", .handle = self.content.flora[8] },
+        .{ .name = "moonbell", .handle = self.content.flora[9] },                                      .{ .name = "sunspear", .handle = self.content.flora[10] },
         .{ .name = "boulder_round", .handle = self.content.boulders[0] },                                .{ .name = "boulder_tall", .handle = self.content.boulders[1] },
         .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "orb", .handle = self.content.orb },
         .{ .name = "spike", .handle = self.content.spike },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },

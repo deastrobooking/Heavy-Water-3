@@ -13,7 +13,7 @@ pub const Clip = struct {
     looping: bool = true,
     tracks: []const Track,
 };
-pub const ClipId = enum { idle, walk, run, climb, air };
+pub const ClipId = enum { idle, walk, run, sprint, climb, air };
 pub const Blend = struct { from: ClipId, to: ClipId, alpha: f32 };
 
 /// Per-character motion transition state. Time is supplied by the fixed-step game clock, so the
@@ -169,6 +169,41 @@ pub const run_tracks = [_]Track{
 };
 pub const run = Clip{ .duration = 2 * std.math.pi, .tracks = &run_tracks };
 
+const sprint_arm_left = [_]Key{
+    .{ .time = 0, .value = axis(0.15) },              .{ .time = std.math.pi * 0.5, .value = axis(-1.05) },
+    .{ .time = std.math.pi, .value = axis(0.15) },     .{ .time = std.math.pi * 1.5, .value = axis(1.05) },
+};
+const sprint_arm_right = [_]Key{
+    .{ .time = 0, .value = axis(0.15) },              .{ .time = std.math.pi * 0.5, .value = axis(1.05) },
+    .{ .time = std.math.pi, .value = axis(0.15) },     .{ .time = std.math.pi * 1.5, .value = axis(-1.05) },
+};
+const sprint_thigh_left = [_]Key{
+    .{ .time = 0, .value = axis(-0.18) },             .{ .time = std.math.pi * 0.5, .value = axis(1.22) },
+    .{ .time = std.math.pi, .value = axis(-0.18) },   .{ .time = std.math.pi * 1.5, .value = axis(-1.22) },
+};
+const sprint_thigh_right = [_]Key{
+    .{ .time = 0, .value = axis(-0.18) },             .{ .time = std.math.pi * 0.5, .value = axis(-1.22) },
+    .{ .time = std.math.pi, .value = axis(-0.18) },   .{ .time = std.math.pi * 1.5, .value = axis(1.22) },
+};
+const sprint_shin_left = [_]Key{
+    .{ .time = 0, .value = axis(0.2) },               .{ .time = std.math.pi * 0.5, .value = axis(0.05) },
+    .{ .time = std.math.pi, .value = axis(0.2) },     .{ .time = std.math.pi * 1.5, .value = axis(1.3) },
+};
+const sprint_shin_right = [_]Key{
+    .{ .time = 0, .value = axis(0.2) },               .{ .time = std.math.pi * 0.5, .value = axis(1.3) },
+    .{ .time = std.math.pi, .value = axis(0.2) },     .{ .time = std.math.pi * 1.5, .value = axis(0.05) },
+};
+pub const sprint_tracks = [_]Track{
+    .{ .joint = @intFromEnum(Skeleton.Joint.upper_arm_l), .keys = &sprint_arm_left },
+    .{ .joint = @intFromEnum(Skeleton.Joint.upper_arm_r), .keys = &sprint_arm_right },
+    .{ .joint = @intFromEnum(Skeleton.Joint.thigh_l), .keys = &sprint_thigh_left },
+    .{ .joint = @intFromEnum(Skeleton.Joint.thigh_r), .keys = &sprint_thigh_right },
+    .{ .joint = @intFromEnum(Skeleton.Joint.shin_l), .keys = &sprint_shin_left },
+    .{ .joint = @intFromEnum(Skeleton.Joint.shin_r), .keys = &sprint_shin_right },
+    .{ .joint = @intFromEnum(Skeleton.Joint.chest), .keys = &torso },
+};
+pub const sprint = Clip{ .duration = 2 * std.math.pi, .tracks = &sprint_tracks };
+
 const climb_arm_left = [_]Key{
     .{ .time = 0, .value = axis(-0.55) },           .{ .time = std.math.pi * 0.5, .value = axis(0.32) },
     .{ .time = std.math.pi, .value = axis(-0.55) }, .{ .time = std.math.pi * 1.5, .value = axis(0.32) },
@@ -203,6 +238,7 @@ pub fn get(id: ClipId) Clip {
         .idle => idle,
         .walk => walk,
         .run => run,
+        .sprint => sprint,
         .climb => climb,
         .air => air,
     };

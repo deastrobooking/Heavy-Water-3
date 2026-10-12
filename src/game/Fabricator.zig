@@ -13,12 +13,12 @@ const Market = @import("../city/Market.zig");
 const Designs = @import("../vehicle/Designs.zig");
 const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 
-pub const Tab = enum { vehicles, suits, armor, weapons, aircraft };
+pub const Tab = enum { vehicles, suits, armor, weapons, companions, aircraft };
 pub const tab_count = enum_compat.fields(Tab).len;
 pub const WeaponUpgrade = struct { weapon: WeaponKind, tier: u8 };
-pub const Output = union(enum) { vehicle: Designs.Design, fighter, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
+pub const Output = union(enum) { vehicle: Designs.Design, fighter, robot_companion, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
-pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0 };
+pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0, parts: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
 pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, WeaponRequired, PreviousTierRequired, NoFighter, NoBlueprint };
 
@@ -51,6 +51,7 @@ pub const recipes = [_]Recipe{
     .{ .tab = .weapons, .output = .{ .weapon = .energy_bazooka }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 12 }, .about = "Arcing plasma orb that bursts, stuns and throws. The alternate detonates it." },
     .{ .tab = .weapons, .output = .{ .weapon = .energy_net }, .cost = .{ .lumen = 8, .rotor = 2, .alloy = 5 }, .about = "Fast, wide energy net briefly snares and damages multiple Hive flyers." },
     .{ .tab = .weapons, .output = .{ .weapon = .giant_blast }, .cost = .{ .lumen = 10, .rotor = 2, .alloy = 16 }, .about = "Charge a beam that cuts through anything." },
+    .{ .tab = .companions, .output = .robot_companion, .cost = .{ .rotor = 2, .alloy = 8, .parts = 8 }, .about = "Build a field droid. It fights beside your animal companion and grows stronger from combat." },
     .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .beam_saber, .tier = 2 } }, .cost = .{ .lumen = 8, .alloy = 3, .scrap = 35 }, .about = "Mk II: wider plasma edge and a finisher shockwave." },
     .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .beam_saber, .tier = 3 } }, .cost = .{ .lumen = 14, .rotor = 1, .alloy = 8, .scrap = 75 }, .about = "Mk III: heavier combo finishers and a stronger saber wave." },
     .{ .tab = .weapons, .output = .{ .weapon_upgrade = .{ .weapon = .blaster, .tier = 2 } }, .cost = .{ .lumen = 8, .alloy = 3, .scrap = 35 }, .about = "Mk II: larger charged plasma burst and faster charging." },
@@ -71,6 +72,7 @@ pub fn name(output: Output, buffer: []u8) []const u8 {
     const tag = switch (output) {
         .vehicle => |d| return Designs.name(d),
         .fighter => return "KESTREL FIGHTER",
+        .robot_companion => return "FIELD DROID",
         .suit => |c| @tagName(c),
         .armor => |a| @tagName(a),
         .weapon => |w| @tagName(w),
@@ -112,6 +114,7 @@ pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
     return switch (output) {
         .vehicle => |d| p.ownsVehicle(d),
         .fighter => p.fighter,
+        .robot_companion => k.robot_built,
         .suit => |c| k.owns(c),
         .armor => |a| k.ownsArmor(a),
         .weapon => |w| k.ownsWeapon(w),
@@ -124,6 +127,7 @@ pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
 pub fn status(p: *const Progress, k: *const Kit, output: Output) ?[]const u8 {
     return switch (output) {
         .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
+        .robot_companion => if (k.robot_built) "BUILT" else null,
         .weapon_upgrade => |u| if (!k.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (k.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (k.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
             .kestrel_upgrade => |u| if (p.kestrelLevel(u) >= Progress.max_level) "MAX LEVEL" else null,
@@ -147,6 +151,7 @@ pub fn affordable(k: *const Kit, c: Cost) ?Error {
     if (k.count(.rotor_core) < c.rotor) return error.NotEnoughRotors;
     if (k.count(.hive_alloy) < c.alloy) return error.NotEnoughAlloy;
     if (k.wallet.scrap < c.scrap) return error.NotEnoughScrap;
+    if (k.wallet.parts < c.parts) return error.NotEnoughParts;
     return null;
 }
 
@@ -197,9 +202,11 @@ pub fn make(p: *Progress, k: *Kit, index: usize) Error!Output {
     k.inventory[@intFromEnum(Collectibles.Kind.rotor_core)] -= r.cost.rotor;
     k.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] -= r.cost.alloy;
     wallet.scrap -= r.cost.scrap;
+    wallet.parts -= r.cost.parts;
     switch (r.output) {
         .vehicle => |d| p.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d)),
         .fighter => p.fighter = true,
+        .robot_companion => k.robot_built = true,
         .suit => |c| k.suits |= Kit.bit(c),
         .armor => |a| k.armors |= Kit.armorBit(a),
         .weapon => |w| k.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),

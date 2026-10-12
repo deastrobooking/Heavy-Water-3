@@ -1263,6 +1263,12 @@ fn toggleGuest(self: *App) void {
     };
 }
 
+/// The flora review runs in the open land east and south of the city hub.
+fn floraReviewOrigin() [3]f32 {
+    const spawn = @import("game/Sandbox.zig").spawn;
+    return .{ spawn[0] + 2500, 0, spawn[2] - 140 };
+}
+
 /// `-Dshowcase=N`: fixed city viewpoints and mesh lineups for screenshots and art review.
 fn showcase(self: *App) void {
     const District = @import("procedural/District.zig");
@@ -1366,6 +1372,28 @@ fn showcase(self: *App) void {
         const water = Hydrology.level(self.sandbox.seed, lane, fall_x + 0.02);
         target = .{ fall_x, water - 1.2, fall_z };
         eye = .{ fall_x + 130, water + 105, fall_z - 180 };
+    } else if (v == 62) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const stage = floraReviewOrigin();
+        const ground = Terrain.surface(self.sandbox.seed, stage[0], stage[2]).height;
+        self.sandbox.player.feet = .{ stage[0], ground, stage[2] };
+        self.sandbox.player.velocity = .{ 0, 0, 0 };
+        target = .{ stage[0], ground + 20, stage[2] };
+        eye = .{ stage[0], ground + 26, stage[2] + 260 };
+    } else if (v == 63) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const stage = floraReviewOrigin();
+        const x = stage[0];
+        const z = stage[2];
+        const ground = Terrain.surface(self.sandbox.seed, x, z).height;
+        self.sandbox.player.mode = .walk;
+        self.sandbox.player.feet = .{ x, ground, z };
+        self.sandbox.player.velocity = @splat(0);
+        self.sandbox.player.grounded = true;
+        self.sandbox.view = .third;
+        self.sandbox.body_yaw = 0;
+        target = .{ x, ground + 0.92, z };
+        eye = .{ x, ground + 1.5, z + 4.4 };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -1381,8 +1409,8 @@ fn showcase(self: *App) void {
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
-    const dusk = v == 8 or (v >= 10 and v <= 15);
-    self.sandbox.tick = if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
+    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62;
+    self.sandbox.tick = if (v == 62) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
     const dz = target[2] - eye[2];
@@ -2264,6 +2292,8 @@ fn smokePets(self: *App) void {
         const eye: [3]f32 = .{ spot.position[0], spot.position[1] + lift, spot.position[2] - 3 };
         const target = Frontier.pick(sb, eye, .{ 0, 0, 1 }, 8, 8);
         if (target != null and target.? == .wild_pet and target.?.wild_pet == sp) {
+            _ = sb.pets.netHitWild(sp, 38);
+            _ = sb.pets.netHitWild(sp, 38);
             Frontier.freePet(sb, 0, sp);
             freed = sp;
             sb.player.feet = spot.position;
@@ -2525,6 +2555,44 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.views[0].camera.yaw = std.math.pi + angle;
         renderer.views[0].camera.pitch = if (face) frame.pitch else -0.08;
     }
+    if (options.showcase == 63) {
+        // A repeatable pose reel for checking locomotion silhouettes in the Metal renderer.
+        // The capture frame selects sprint, roll, dash, long jump or backflip in that order.
+        const phase = renderer.frames % 90;
+        const progress = @as(f32, @floatFromInt(phase)) / 90;
+        const stage = @min(renderer.frames / 90, 4);
+        const player = &self.sandbox.player;
+        player.velocity = @splat(0);
+        player.grounded = stage < 3;
+        player.roll_timer = 0;
+        player.dash_timer = 0;
+        player.long_jump_timer = 0;
+        player.backflip_timer = 0;
+        player.motion = switch (stage) {
+            0 => .sprint,
+            1 => blk: {
+                player.roll_timer = 0.42 * (1 - progress);
+                break :blk .roll;
+            },
+            2 => blk: {
+                player.dash_timer = 0.2 * (1 - progress);
+                break :blk .dash;
+            },
+            3 => blk: {
+                player.long_jump_timer = 0.68 * (1 - progress);
+                break :blk .long_jump;
+            },
+            else => blk: {
+                player.backflip_timer = 0.72 * (1 - progress);
+                break :blk .backflip;
+            },
+        };
+        self.sandbox.walk_phase = @as(f32, @floatFromInt(renderer.frames)) * 0.11;
+        self.sandbox.walk_amount = 1;
+        renderer.views[0].camera.position = mach.math.vec3(player.feet[0], player.feet[1] + 1.4, player.feet[2] + 3.1);
+        renderer.views[0].camera.yaw = std.math.pi;
+        renderer.views[0].camera.pitch = -0.08;
+    }
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
     renderer.show_metrics = self.show_metrics;
@@ -2533,6 +2601,9 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
+    renderer.scene.flora_review = options.showcase == 62;
+    renderer.scene.flora_review_seed = self.sandbox.seed;
+    renderer.scene.flora_review_origin = floraReviewOrigin();
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
         const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
             .{ .mesh = self.sandbox.catalog.content.scalari_throne_serpent, .position = .{ -120, 480, 15 }, .scale = 1 },
@@ -2554,7 +2625,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk);
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk);
     renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
@@ -2600,7 +2671,10 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  X / CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
-        .wild_pet => |sp| renderer.hud_lines[1].set("BREAK {s}'S HIVE COLLAR  X / CLICK", .{Sandbox.Pets.info(sp).name}),
+        .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
+            renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
+        else
+            renderer.hud_lines[1].set("WILD {s}  WEAKEN WITH ENERGY NET  {d}%", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) }),
         .pet => |owner| if (sandbox.pets.out[owner]) |pet| {
             const kit = &sandbox.kits[owner];
             const next = kit.nextPet();
@@ -2677,6 +2751,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             }
         }
     }
+    if (options.showcase == 62 or options.showcase == 63) renderer.hud_lines = @splat(.{});
     self.publishGui(renderer, minutes);
 }
 
@@ -2688,7 +2763,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
     self.ui_height = 720 / self.menu.settings.ui_scale;
     renderer.ui.reset(self.ui_height * width / height, self.ui_height);
     self.hit_len = 0;
-    if ((options.showcase != 0 and options.showcase < 18) or options.showcase == 47) return;
+    if ((options.showcase != 0 and options.showcase < 18) or options.showcase == 47 or options.showcase == 62 or options.showcase == 63) return;
     const sandbox = &self.sandbox;
     var inspect: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
     var inspect_slices: [Renderer.panel_capacity][]const u8 = undefined;

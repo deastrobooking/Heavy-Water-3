@@ -6,6 +6,7 @@
 const std = @import("std");
 const enum_compat = @import("enum_compat");
 const Pets = @import("Pets.zig");
+const DroidCompanion = @import("DroidCompanion.zig");
 const Market = @import("../city/Market.zig");
 const Profile = @import("Profile.zig");
 const Player = @import("Player.zig");
@@ -52,6 +53,9 @@ weapon_upgrades: [enum_compat.fields(WeaponKind).len]u8 = @splat(0),
 pets: u8 = 0,
 pet_xp: [Pets.count]u32 = @splat(0),
 pet_active: ?Pets.Species = null,
+/// One independently built field droid and its per-ranger combat experience.
+robot_built: bool = false,
+robot_xp: u32 = 0,
 
 pub fn bit(c: Profile.Clothing) u8 {
     return @as(u8, 1) << @intCast(@intFromEnum(c));
@@ -190,6 +194,18 @@ pub fn petLevel(self: *const Kit, s: Pets.Species) u8 {
     return Pets.levelFor(self.pet_xp[@intFromEnum(s)]);
 }
 
+pub const max_robot_xp: u32 = 45 * (DroidCompanion.max_level - 1) * DroidCompanion.max_level / 2;
+
+pub fn robotLevel(self: *const Kit) u8 {
+    return DroidCompanion.levelFor(self.robot_xp);
+}
+
+pub fn awardRobotXP(self: *Kit, amount: u32) bool {
+    const before = self.robotLevel();
+    self.robot_xp = @min(max_robot_xp, self.robot_xp +| amount);
+    return self.robotLevel() > before;
+}
+
 /// JSON shape stored in saves and ranger files.
 pub const Doc = struct {
     wallet: Market.Wallet = .{},
@@ -205,6 +221,8 @@ pub const Doc = struct {
     /// Freed pets by name with their experience, and the active pet's name.
     pets: []const PetDoc = &.{},
     pet_active: ?[]const u8 = null,
+    robot_built: bool = false,
+    robot_xp: u32 = 0,
 };
 
 pub const PetDoc = struct { name: []const u8, xp: u32 = 0 };
@@ -229,6 +247,8 @@ pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
         .suits = suits.items,
         .pets = pets.items,
         .pet_active = if (self.pet_active) |a| Pets.info(a).name else null,
+        .robot_built = self.robot_built,
+        .robot_xp = self.robot_xp,
     };
 }
 
@@ -239,7 +259,8 @@ fn petNamed(name: []const u8) ?Pets.Species {
 
 pub fn fromDoc(doc: Doc) error{InvalidKit}!Kit {
     if (doc.combat_xp > (max_combat_level - 1) * 250) return error.InvalidKit;
-    var result: Kit = .{ .wallet = doc.wallet, .combat_xp = doc.combat_xp };
+    if (doc.robot_xp > max_robot_xp or (doc.robot_xp > 0 and !doc.robot_built)) return error.InvalidKit;
+    var result: Kit = .{ .wallet = doc.wallet, .combat_xp = doc.combat_xp, .robot_built = doc.robot_built, .robot_xp = doc.robot_xp };
     if (doc.levels.len > upgrade_count) return error.InvalidKit;
     for (doc.levels) |l| if (l > max_level) return error.InvalidKit;
     @memcpy(result.levels[0..doc.levels.len], doc.levels);

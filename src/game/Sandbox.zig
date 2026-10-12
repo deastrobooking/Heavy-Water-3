@@ -7,6 +7,7 @@ const Physics = @import("../physics/Physics.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const Biome = @import("../procedural/Biome.zig");
 pub const Pets = @import("Pets.zig");
+pub const DroidCompanion = @import("DroidCompanion.zig");
 pub const Kit = @import("Kit.zig");
 const Hydrology = @import("../procedural/Hydrology.zig");
 const Scatter = @import("../procedural/Scatter.zig");
@@ -296,6 +297,8 @@ own_profiles: [max_players]?Profile = @splat(null),
 encounters: [Heroes.count]?@import("Encounters.zig").Spot = @splat(null),
 /// Bio-synth pets: where the wild ones wait, and P1's companion.
 pets: Pets = .{},
+/// A fabricated helper that fights independently of the biological pet.
+droid_companions: DroidCompanion = .{},
 /// The caves in the mountain ranges (layout from the seed), and each system's collider, built
 /// when a player first comes near it.
 caves: Caves.Layout = undefined,
@@ -692,6 +695,8 @@ pub fn setMaxProgressionTest(self: *Sandbox, enabled: bool) void {
         kit.pets = (@as(u8, 1) << @intCast(Pets.count)) - 1;
         kit.pet_xp = @splat(20_000);
         kit.pet_active = .hound;
+        kit.robot_built = true;
+        kit.robot_xp = Kit.max_robot_xp;
         self.combat.arsenals[player_index].weapon_upgrades = kit.weapon_upgrades;
         self.combat.arsenals[player_index].active = WeaponKind.machine_gun;
         self.combat.arsenals[player_index].ranged = WeaponKind.machine_gun;
@@ -985,6 +990,8 @@ pub fn joinGuest(self: *Sandbox, index: usize) void {
 
 pub fn leaveGuest(self: *Sandbox, index: usize) void {
     self.guests[index].active = false;
+    self.pets.out[index + 1] = null;
+    self.droid_companions.out[index + 1] = null;
 }
 
 /// Whether player slot `p` is in play (P1 always; guests once joined).
@@ -1027,6 +1034,7 @@ pub fn takeRanger(self: *Sandbox, p: usize, ranger: Save.Ranger) void {
     self.own_profiles[p] = null;
     self.known[p] = true;
     self.pets.out[p] = null;
+    self.droid_companions.out[p] = null;
     self.combat.setPlayerMax(p, ranger.kit.maxHealth() + Specials.loadout(ranger.profile).health);
 }
 
@@ -1051,8 +1059,17 @@ pub fn respawnGuest(self: *Sandbox, index: usize) void {
 
 fn stride(player: Player, phase: *f32, amount: *f32, dt: f32) void {
     const ground_speed = @sqrt(player.velocity[0] * player.velocity[0] + player.velocity[2] * player.velocity[2]);
-    phase.* = @mod(phase.* + ground_speed * dt * 2.4, 2 * std.math.pi);
+    phase.* = @mod(phase.* + ground_speed * dt * 1.4, 2 * std.math.pi);
     amount.* = if (player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
+}
+
+fn motionProgress(player: Player) f32 {
+    return switch (player.motion) {
+        .backflip => 1 - player.backflip_timer / 0.72,
+        .long_jump => 1 - player.long_jump_timer / 0.68,
+        .dash => 1 - player.dash_timer / 0.2,
+        else => 0,
+    };
 }
 
 /// `slot` is the guest's player slot (1–3).
@@ -1695,6 +1712,7 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
                         self.hangar.place(self.seed, spawn, null, 0);
                         self.say("the Kestrel stands on its pad beyond the garage", .{});
                     },
+                    .robot_companion => self.say("field droid built: your robot helper deploys with your pet", .{}),
                     .suit => |c| {
                         self.profile.clothing = c;
                         self.say("fabricated and wearing the {s}", .{name});
@@ -2003,7 +2021,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and self.player.mode == .walk and n < out.len) {
-        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
+        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog.content.block, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);
@@ -2065,7 +2083,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog.content.block, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog.content.block, out, n);
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);

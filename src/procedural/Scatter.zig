@@ -40,14 +40,16 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const frost = if (kind == .vegetation) Biome.cover(seed, x, z, Noise.height(seed, x, z), @sqrt(nx * nx + nz * nz)).snow else 0;
         const choice = Seed.unit(Seed.mix(h +% 3));
         if (frost > 0.25 and choice <= 0.82 and Seed.unit(Seed.mix(h +% 5)) < frost) continue;
-        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.82) Vegetation.tree_first + @as(u8, @intCast(Seed.mix(h +% 4) % 3)) else if (choice > 0.70) 2 else if (choice > 0.48) 1 else 0;
+        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.985) Vegetation.tree_first + @as(u8, @intCast(Seed.mix(h +% 4) % Vegetation.tree_count)) else if (choice > 0.84) 2 else if (choice > 0.75) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.67) 7 else if (choice > 0.42) 1 else 0;
         const color = biome.color();
+        const shade = 0.84 + 0.28 * Seed.unit(Seed.mix(h +% 5));
+        const tint: [4]f32 = if (variant < 6) .{ color[0] * 0.8 / Vegetation.colors[variant][0], color[1] * 1.3 / Vegetation.colors[variant][1], color[2] * 0.9 / Vegetation.colors[variant][2], 1 } else if (variant == 6) .{ shade, shade * 0.48, shade * 0.55, 1 } else .{ shade * (0.8 + 0.2 * color[0]), shade * (0.85 + 0.15 * color[1]), shade * (0.8 + 0.2 * color[2]), 1 };
         output[count] = .{
             .local_id = @intCast(i),
             .kind = kind,
             .variant = variant,
-            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (variant >= Vegetation.tree_first) 10 + Seed.unit(Seed.mix(h +% 1)) * 9 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
-            .tint = if (kind == .relic) .{ 0.40, 0.72, 0.81, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(.{ color[0] * 0.8, color[1] * 1.3, color[2] * 0.9, 1 }, frost, Vegetation.colors[variant]),
+            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (variant == 6) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .tint = if (kind == .relic) .{ 0.40, 0.72, 0.81, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
         };
         count += 1;
     }
@@ -111,10 +113,10 @@ test "scatter is stable, locally unique, bounded and slope aware" {
     try std.testing.expect(allowed(1, .vegetation));
 }
 
-test "seeded scatter distributes all plant forms and three tree species reproducibly" {
+test "seeded scatter distributes all native flora and four canopy species reproducibly" {
     var first: [capacity]Object = undefined;
     var second: [capacity]Object = undefined;
-    var species_mask: u8 = 0;
+    var species_mask: u16 = 0;
     for (0..10) |z| for (0..10) |x| {
         const key: Key = .{ .x = @as(i32, @intCast(x)) - 5, .z = @as(i32, @intCast(z)) - 5 };
         const count = generate(987654321, key, &first);
@@ -122,10 +124,10 @@ test "seeded scatter distributes all plant forms and three tree species reproduc
         try std.testing.expectEqualSlices(Object, first[0..count], second[0..count]);
         for (first[0..count]) |object| if (object.kind == .vegetation) {
             try std.testing.expect(object.variant < @import("Vegetation.zig").variant_count);
-            species_mask |= @as(u8, 1) << @intCast(object.variant);
+            species_mask |= @as(u16, 1) << @intCast(object.variant);
         };
     };
-    try std.testing.expectEqual(@as(u8, 0x3f), species_mask);
+    try std.testing.expectEqual((@as(u16, 1) << Vegetation.variant_count) - 1, species_mask);
 }
 
 test "boulders gather on high, steep and dry ground, after every older candidate" {

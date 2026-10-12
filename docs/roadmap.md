@@ -144,13 +144,28 @@ Next:
 - per-pet voice chirps;
 - a Pets page in the pause menu.
 
+## Frontier wildlife, Scalari machines and a robot companion — first slice started
+
+The wilds gain a catch-and-companion loop alongside the existing starter animal pet. The initial implementation reuses four existing animal species at seeded Frontier encounters: a close ranger draws their attention, two energy-net hits leave the animal weakened and snared, and interaction catches it alive. Scalari machine enemies drop personal salvage components; a fabricator uses them to build a second, robotic helper that fights beside the animal companion and levels from combat. Health, capture state, and helper rewards need a real playthrough and tuning before this slice is complete.
+
+The Scalari are synthetic AI overlords in transforming combat frames. They created the Hive's insect castes as slave workers and warriors. Combat should mix distinct machine drone roles with engineered insects and machine-insect hybrids, while Hive relay spires provide the local command and reinforcement source. Keep species, drone chassis, loot, capture rules, and companion behavior in small data-driven game modules rather than adding per-creature special cases to `Sandbox`.
+
+First playable slice, contained in the existing Frontier:
+1. **Started:** energy-net weakening/capture gates and close-range animal retaliation are in `game/Pets.zig` and `game/Frontier.zig`. Still validate escaping, co-op ownership, and the real encounter flow.
+2. **Started:** existing Scalari scout, miner, stinger, titan roles now have a hybrid melee class with personal parts and XP. Add broader drone/insect behaviors and tune field encounters.
+3. **Started:** a fabricator recipe, following/combat behavior, health, combat XP levels, and per-player Kit/save fields exist for one field droid. Add a player-facing upgrade interface and review balance.
+4. **Open:** run and inspect a Frontier smoke route that catches an animal, loots Scalari parts, builds the droid, and uses both helpers; add migration and round-trip coverage.
+
+Defer a broad biome roster, multiple robot chassis, robot programming, and colony-scale production until this first field loop is playable and tuned.
+
 ## Nature: ground, water, foliage and footing — implemented
 
 The terrain, rivers and plants get their own shading stages over the cel shader, and the ground now matters underfoot.
 - **Ground:** world-space grass drift and tufts, stone strata on steep faces (and on the mountain panorama and cave walls), snow on the flats with blue shadows and sun glints. No textures, no chunk seams.
 - **Water:** rivers ripple downstream, mirror the sky, glint, and foam along the banks; waterfalls streak white. Blended, drawn last.
-- **Foliage:** grass, flowers and trees sway in a slowly turning wind with gusts.
-- **Scatter:** faceted boulders on high, steep and dry ground; snow thins the flora and frosts trees and stones. Older scatter IDs (and saves) are unchanged.
+- **Foliage:** grass, native shrubs and three luminous wildflowers join grassland ferns; broadleaf, needleleaf, willow and engineered redwood silhouettes sway in gusting wind. Redwood tops reach 152.4 m (500 ft), and the other fantasy tree forms rise roughly 96–150 m.
+- **Night flora:** leaf flecks retain each species' pigment as they emit light: crimson redwood, red ember blossom, blue moonbell, gold sunspear and the existing green/cyan plants.
+- **Scatter:** faceted boulders on high, steep and dry ground; snow thins the flora and frosts trees and stones. Towering tree forms are deliberately rare beside low native ground cover. Candidate IDs remain stable; scatter generator version 6 records the new distribution and rejects old generator versions rather than silently changing their world.
 - **Footing:** rivers can be waded and swum; snow is slow and slides, marsh and sand drag, the hoverboard is quicker on snow. Footsteps crunch on snow and splash in water; falling in splashes.
 
 Acceptance: tests for ground cover and footing, the river surface, boulder meshes and placement, runner speed and stopping on each ground, the wade-to-swim transition, and ground-voiced footsteps; a clean Metal-validated smoke; captures `-Dshowcase=36` (river and waterfall), `41` (a range from the foothills) and `48` (meadow).

@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const generator_version: u32 = 5;
+pub const generator_version: u32 = 6;
 
 /// SplitMix64 finalizer, explicitly wrapping and independent of std.Random versions.
 pub fn mix(value: u64) u64 {

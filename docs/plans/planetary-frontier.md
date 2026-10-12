@@ -4,7 +4,7 @@
 
 Grow the current Arbor frontier into a three-destination campaign. Each destination contains several bounded, open arena regions sized for four local players, plus distinct encounter and construction sites. Players fight Hive forces, recover materials and design custom ships, then use the recovered supplies to establish and defend planetary outposts through a real-time strategy layer.
 
-The two destinations added by this plan are the Hive Homeworld and **Gaia**, an artificial planet housing a human colony beyond Jupiter. The existing Arbor Frontier remains the party's shipyard, tutorial space and first source of parts. The Hive Homeworld is also the Scalari homeworld: the Scalarians are an ancient reptilian people who left Earth and engineered ancient insects into the first Hive lineages. This is one destination and one connected history, not a separate Scalari planet.
+The two destinations added by this plan are the Hive Homeworld and **Gaia**, an artificial planet housing a human colony beyond Jupiter. The existing Arbor Frontier remains the party's shipyard, tutorial space and first source of parts. The Hive Homeworld is also the Scalari homeworld: the Scalarians are an ancient synthetic AI civilization that left Earth and engineered insects into the first Hive castes. This is one destination and one connected history, not a separate Scalari planet.
 
 The initial catalog lives in `src/procedural/Worlds.zig`. It names the destinations, city regions, each world's capital, and arena concepts; it sets local arena bounds and reward targets and derives stable seeds from a campaign seed. The Arbor Frontier catalog now has seven city concepts: its five canopy/river regions plus Pelaglass and Sonorous Reef. The underwater paired-city design is in [the ocean-cities plan](ocean-cities.md). The Scalari ship meshes live in `src/vehicle/ScalariMeshes.zig` and are registered in the asset catalog. This is authored content groundwork: city geometry, ship spawning, travel, missions, and saves are not connected yet.
 
@@ -42,7 +42,7 @@ Each world also has a distinct capital-base site. Crown Harbor is the Arbor part
 
 ## Scalari fleet design
 
-The Scalarians should read as an ancient reptilian civilization whose hard-surface engineering echoes a dragon: horned prow armor, layered scale plates, long neck-like fuselages, swept blade wings, segmented tails and bright eye/reactor slits. Their silhouettes stay mechanically plausible as 3D aircraft and capital ships, with lift/drive hardware visible under the armor. Use restrained cel-shaded materials so shape reads before glow.
+The Scalarians should read as an ancient synthetic civilization whose hard-surface engineering echoes a dragon: horned prow armor, layered scale-like plates, transformable wing frames, segmented mechanical tails and bright sensor/reactor slits. Their silhouettes stay mechanically plausible as 3D aircraft and capital ships, with joints, lift/drive hardware and weapon mounts visible under the armor. Use restrained cel-shaded materials so shape reads before glow.
 
 | Ship | Role | Palette and signature |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ The Scalarians should read as an ancient reptilian civilization whose hard-surfa
 
 These five complete 3D shell-and-glow meshes are currently generated and registered as assets. The next vehicle slice should give each chassis a typed flight profile, colliders, damage zones, weapons and deployment rules; do not make a render-only ship look playable before it can be piloted or fought.
 
-The Hive remains a distinct modified-insect civilization and combat force. Existing wasps and Brood carriers express its insect-derived forms; Scalari craft use plated dragon silhouettes. Some Hive forms can share Scalari fabrication technology, but their bodies, behavior and story identity stay visibly different.
+The Hive is an insect-derived civilization engineered as the Scalarians' labor force and warrior caste. The Scalarians are synthetic AI overlords in modular, transforming frames with plated dragon silhouettes. Existing wasps and Brood carriers express the Hive's insect-derived forms; hybrid soldiers can combine insect bodies with Scalari control and weapon systems while remaining distinct from fully synthetic Scalari units.
 
 ## Planet feature packs
 

@@ -34,6 +34,7 @@ pub const Pose = struct {
     walk_phase: f32 = 0,
     walk_amount: f32 = 0,
     motion: Player.Motion = .idle,
+    motion_t: f32 = 0,
     time: f32 = 0,
     action: Action = .none,
     action_t: f32 = 0,
@@ -366,9 +367,9 @@ fn clipFor(motion: Player.Motion, amount: f32) Animation.ClipId {
     return switch (motion) {
         .idle => if (amount >= 0.08) .walk else .idle,
         .run => if (amount < 0.08) .idle else if (amount >= 0.78) .run else .walk,
-        .sprint => if (amount < 0.08) .idle else .run,
+        .sprint => if (amount < 0.08) .idle else .sprint,
         .climb, .hang, .mantle => .climb,
-        .jump, .long_jump, .fall, .roll, .stomp, .wall_slide, .jet, .hover, .glide, .dash, .board, .grapple_zip, .grapple_swing, .swim => .air,
+        .jump, .long_jump, .backflip, .fall, .roll, .stomp, .wall_slide, .jet, .hover, .glide, .dash, .board, .grapple_zip, .grapple_swing, .swim => .air,
         .skate => if (amount < 0.08) .idle else .run,
     };
 }
@@ -392,7 +393,7 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
     p.reset(skel);
     const amount = std.math.clamp(state.walk_amount, 0, 1);
     const airborne = switch (state.motion) {
-        .jump, .long_jump, .fall, .jet, .hover, .glide, .grapple_zip, .grapple_swing => true,
+        .jump, .long_jump, .backflip, .fall, .jet, .hover, .glide, .grapple_zip, .grapple_swing => true,
         else => false,
     };
     const climbing = state.motion == .climb or state.motion == .hang or state.motion == .wall_slide or state.motion == .mantle;
@@ -408,6 +409,35 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
     }
     p.local[sk.Joint.hips.idx()].translation.y += @sin(state.time * 2) * 0.003 * (1 - amount);
     if (state.motion == .roll or state.motion == .dash or state.motion == .board or state.motion == .skate) p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.35));
+    if (state.motion == .sprint) p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -0.16));
+    if (state.motion == .dash) {
+        p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -0.62));
+        p.rotateLocal(sk.Joint.upper_arm_l.idx(), Q.fromAxisAngle(V.unit_x, -0.55));
+        p.rotateLocal(sk.Joint.upper_arm_r.idx(), Q.fromAxisAngle(V.unit_x, -0.55));
+        p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, -0.45));
+        p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, -0.45));
+    } else if (state.motion == .roll) {
+        p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.72));
+        p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, 0.85));
+        p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, 0.85));
+        p.rotateLocal(sk.Joint.shin_l.idx(), Q.fromAxisAngle(V.unit_x, -1.1));
+        p.rotateLocal(sk.Joint.shin_r.idx(), Q.fromAxisAngle(V.unit_x, -1.1));
+    } else if (state.motion == .long_jump) {
+        p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -0.34));
+        p.rotateLocal(sk.Joint.upper_arm_l.idx(), Q.fromAxisAngle(V.unit_x, -0.7));
+        p.rotateLocal(sk.Joint.upper_arm_r.idx(), Q.fromAxisAngle(V.unit_x, -0.7));
+        p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, -0.38));
+        p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, -0.38));
+    } else if (state.motion == .backflip) {
+        const progress = std.math.clamp(state.motion_t, 0, 1);
+        p.rotateLocal(sk.Joint.hips.idx(), Q.fromAxisAngle(V.unit_x, 2 * std.math.pi * progress));
+        p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, 0.55));
+        p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, 0.55));
+        p.rotateLocal(sk.Joint.shin_l.idx(), Q.fromAxisAngle(V.unit_x, -0.72));
+        p.rotateLocal(sk.Joint.shin_r.idx(), Q.fromAxisAngle(V.unit_x, -0.72));
+        p.rotateLocal(sk.Joint.upper_arm_l.idx(), Q.fromAxisAngle(V.unit_z, 0.5));
+        p.rotateLocal(sk.Joint.upper_arm_r.idx(), Q.fromAxisAngle(V.unit_z, -0.5));
+    }
     const t = std.math.clamp(state.action_t, 0, 1);
     switch (state.action) {
         .none => {},

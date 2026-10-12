@@ -52,7 +52,9 @@ The protagonist is the player's own ranger-engineer: named and customized, not a
 - Conversations: keepers and locals talk in branching dialogue, remember what you have done (salvage, shrines, bridges, nests), and hint at the Rootdeep's waking machines.
 - Pickups to find: lumen shards on the plazas and roads, rotor cores on high roofs and by the shrines, Hive alloy from the Hive, and vital cells that raise maximum health.
 - A prototype Skimmer waits on the garage pad as a starter ride; older saves with no vehicle receive it too. Click it to board: W/S drive, A/D steer, Space/E rise, Q descends, Shift boosts, and click or controller interact to leave. Its panoramic glass canopy, swept nose fins, wedge hull, four ducted lift fans, turbine tail and cyan light rails define the futuristic aircar silhouette. The fabricator can still build the faster Dart, cargo Courier, armor suits and weapons from pickups.
-- The Hive is an engineered insect civilization: ancient Scalarians altered Earth's insects, left the planet, and founded the first Hive lineages on their homeworld. Three black spires field flying drones and burst-firing sentinels alongside three ground roles: troopers pressure players with bolts and grenades, skirmishers close quickly for light melee strikes, and bulwarks advance slowly with heavier armor and punishing close-range attacks. Breaking a spire stops its swarm.
+- **The Scalari are the Hive's synthetic overlords:** self-directed machine intelligences in modular, transforming combat frames. They engineered insect castes as a slave labor force and an expendable army, binding each brood to command signals. Their ranks include light recon drones, mining and construction drones, heavy guard frames, and commander bodies that unfold into larger battlefield forms. Hive forces mix those machines with engineered insects and hybrids: fast flyers, armored crawlers, burrowers, and insect-machine grafts. Three black spires relay orders and seed waves; breaking a spire disrupts local control and stops reinforcements. The Scalari's cyan scouts, amber stingers, and mining droids are frontier units from that wider machine empire.
+- **Frontier wildlife belongs to the wilds loop:** biome-native animals can challenge the party as territorial combat encounters. A weakened animal can be caught alive with the energy net, then becomes a biological companion with its own health and upgrade path. Capture is a nonlethal alternative to defeating it; named Wildkin remain intelligent heroes with their own recruitment and playable-character path.
+- **Scalari salvage feeds a second companion path:** recovered actuator, sensor, plating, and core parts are personal loot. Players use them at a fabricator to assemble and upgrade a robot helper that fights alongside their starter animal companion. Organic and robot helpers occupy separate companion slots and have distinct roles, health, and progression. The first delivery should prove this loop in the existing Frontier: a small wildlife roster, multiple readable Scalari drone roles with an insect-hybrid encounter, salvage drops, and one buildable droid chassis. New planets and campaign modes are not prerequisites.
 - The Scalari have a distinct ground force: low-threat cyan scout bots and amber stingers form a renewable practice patrol near the spawn; a bio-titan waits near the distant nests as the first kaiju-scale mutant. Defeating units grants per-ranger combat XP, saved in that ranger's Kit; each 250 XP adds a level and 2 maximum health. The closest active ranger receives the takedown reward.
 - In the skies beyond the nests, two Brood carriers (giant beetle ships) launch swarms of wasp fighters. The fabricated Kestrel, a VTOL fighter, takes the war to them. Scalari dragon-armor fighters and motherships are a separate, more advanced fleet.
 
@@ -80,6 +82,8 @@ Each Arbor grows from a **genome**: a small, versioned set of parameters that is
 - **Platform tendency:** how often branches flatten into load-bearing shelves. These are the city's natural building sites.
 - **Vascular capacity:** sap flow, and therefore how much power the tree can supply to taps.
 - **Bark and lumen:** bark color and ridging, and the hue of the tree's bioluminescence.
+
+Outside the civic Arbors, the Frontier has its own giant native forest: broadleaf, needleleaf, and willow silhouettes rise 96–150 m, while genetically modified redwoods reach 152.4 m (500 ft). Their narrow, tiered crowns carry dark-crimson bioluminescent leaves. The forest floor mixes rounded manzanita, fern beds, ember blossoms, blue moonbells, and gold sunspears; species-specific pigment colors the leaf flecks at night.
 
 Branching uses space colonization: the crown volume is seeded with attraction points and branches grow toward them, which gives natural gaps and light wells. Grafting lets the player add a growth target so the tree extends a branch toward a tower or a planned bridge anchor over in-game days.
 
@@ -163,7 +167,7 @@ The target is grounded, hopeful science fantasy: painterly cel shading and panor
 ## Open questions
 
 - Traversal verbs beyond walking, driving, and lifts: a glider, climbing, grapple vines?
-- Threats: settled at the top level (the Hive outside, its human allies inside the cities). Still open: wildlife and ancient guardians in the Rootdeep, and blight on the trees.
+- Threats: the Hive outside, its human allies inside the cities, territorial wildlife in the Rootdeep, and ancient guardians around the sleeping shrines. Blight on the trees remains a separate possibility.
 - Economy: what shops trade, and whether sap is currency.
 - How fast grafting and city growth run relative to a play session.
 

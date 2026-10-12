@@ -2,6 +2,21 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Running, dodge, dash and jump gestures — 2026-10-11
+
+- Ground dodge now starts a short low roll even from a standstill; the previous minimum-speed gate made it appear unresponsive. An air dodge gives a brief evade, and a second tap upgrades it to the powered dash. The double-tap window is 0.42 seconds, and paired taps can chain up to four boosts. Sprint plus forward and jump launches the extended long jump; backward movement plus jump launches the backflip. Added separate sprint, roll, dash, long-jump and backflip poses, including timed rotation through the backflip.
+- Documented keyboard and controller gestures and added showcase 63 to review each locomotion pose.
+- **Checked:** `python3 tools/zig.py build check` passed on the pinned default compiler. ReleaseSafe Metal captures `-Dshowcase=63 -Dcapture-frame=400` and `-Dshowcase=28 -Dcapture-frame=120` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. `zig-out/movement-review.png` and `zig-out/controls-movement-review.png` were inspected; the backflip reads clearly mid-rotation, and the gesture guide fits on the Controls screen.
+- **Not checked:** headless tests, full gameplay smoke, hands-on keyboard/controller timing, chain exhaustion and stamina behavior, Linux/Windows runtime, Zig 0.17, or benchmarks. The capture validates rendered poses, not live input feel or collision outcomes.
+
+## Frontier wildlife, Scalari hybrid and field droid — 2026-10-11
+
+- Added territorial retaliation for the four seeded wild companion species. The energy net deals nonlethal damage; two hits weaken and snare an animal at 24% vitality for eight seconds, and interaction catches it into that player's Kit. A close uncaught animal can swipe for 8 damage. The capture timer, co-op ownership and best encounter distances still need in-game tuning.
+- Added a Scalari machine-insect hybrid melee role with its own health, speed and attack values, a character profile, XP and personal salvage. Its first instance appears near the existing distant Scalari nest. Existing Scalari scout, stinger, titan and miner remain distinct.
+- Added a buildable field droid in the fabricator's Companions tab. It runs with the animal pet, follows, fires at nearby ground enemies, has independent health and combat-XP levels, and is saved per player. Scalari takedowns award the owner's parts. Save format 16 stores droid ownership and XP; formats 12–15 default those fields. Format 17 migrates generator-5 saves to the expanded flora while preserving candidate IDs.
+- **Checked:** `python3 tools/zig.py build check` passed on the default pinned compiler; `git diff --check` passed.
+- **Not checked:** tests, Metal smoke, performance, screenshots/art review, Zig 0.17, Linux, Windows, and the complete in-game capture-to-fabrication progression. This change has only had the macOS Debug compile check.
+
 ## Character ink hull cost and post-overhaul platform gate — 2026-10-11
 
 ReleaseFast, Apple M3 Pro, Metal, silent, default pair, 600 measured frames (`tools/benchmark.py`, new `--cel-debug 1` flag hides the ink hull, same as F8):
@@ -59,12 +74,12 @@ Platform gate results for the same commit are in [engine alignment](plans/alignm
 - `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=37 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. Capture `zig-out/energy-blade-review.png` was inspected. The blade reads at a dramatically larger scale; the showcase image shows the held silhouette more clearly than its active swing, so the swing's pose and feel still need hands-on review.
 - Headless tests, full smoke, Zig 0.17, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run. Flyer net damage and snare behavior were reviewed in code but were not separately exercised in a gameplay run.
 
-## Nighttime bioluminescent flora — 2026-10-11
+## Fantasy forest and species-colored bioluminescence — 2026-10-11
 
-- Foliage leaf surfaces receive sparse, softly pulsing mint-cyan emissive flecks, and grassy low-slope ground receives small scattered glow patches. Both are driven by the shared sky night factor; snow and steep rock are masked out of the ground treatment. No new textures, draw calls, or test fixtures were added.
-- `python3 tools/zig.py build check` passed on the default Zig 0.16/Mach pair.
-- `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 90 python3 tools/zig.py build run -Dshowcase=8 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. Capture: `zig-out/biolume-review.png`; inspected for glow intensity and night-scene readability.
-- Headless tests, full smoke, Zig 0.17, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run for this rendering increment.
+- Added procedural redwoods reaching 152.4 m (500 ft), with a dark-crimson crown and matching species trunk; broadleaf, needleleaf and willow forms scale to 96–150 m. These giant trees are sparse so native grass, ferns, manzanita and ember, moonbell and sunspear flowers remain the forest-floor layer. Scatter generator version 6 records the changed distribution and scale; prior generator versions are rejected rather than silently regenerated.
+- Leaf flecks preserve each plant's own pigment at night: crimson redwood, red ember blossom, blue moonbell, gold sunspear, and the existing green and cyan plants. Grassy low-slope ground keeps its scattered glow patches; snow and steep rock remain masked out.
+- `python3 tools/zig.py build check` passed on the default Zig 0.16/Mach pair. `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 120 python3 tools/zig.py build run -Dshowcase=62 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with Metal API Validation enabled and no validation messages. Capture `zig-out/flora-review.png` was visually inspected for tree silhouettes and night pigments.
+- Headless tests, full smoke, Zig 0.17, cross-compiles, benchmarks, and Linux/Windows runtime checks were not run for this flora pass.
 
 ## Controller interaction and D-pad routing — 2026-10-11
 

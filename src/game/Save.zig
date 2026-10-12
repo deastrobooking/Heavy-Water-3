@@ -9,8 +9,8 @@ const Market = @import("../city/Market.zig");
 const Kit = @import("Kit.zig");
 
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
-/// into a world with the same seed, generator version, and content version; old worlds must not
-/// silently regenerate with different rules.
+/// into a world with the same seed, generator version, and content version, unless an explicit
+/// migration preserves its stable references; old worlds must not silently regenerate.
 /// v2 added machine state; v3 vehicle bodies; v4 made the save describe the whole world:
 /// every placed machine as a full blueprint document (so rewiring persists) with its origin
 /// and quarter-turn yaw, and every crate; v5 added the captured prefab library; v6 the player's
@@ -21,10 +21,12 @@ const Kit = @import("Kit.zig");
 /// v11 records each player bridge's structural style; v12 records the sprint course's best lap;
 /// v13 saves every player on the team on their own (`members`: their character and their kit of
 /// upgrades, gear, pickups, pets and wallet), leaving only what the team shares in `progress`;
-/// v14 adds per-ranger combat experience to each kit.
+/// v14 adds per-ranger combat experience to each kit; v15 adds mod character ids to profiles;
+/// v16 adds each kit's fabricated field droid and its independent upgrade experience; v17
+/// migrates generator-5 saves to the new giant-flora scatter while preserving stable object IDs.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 15;
+pub const format_version: u32 = 17;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -97,12 +99,19 @@ pub const LoadError = error{ UnsupportedSaveFormat, SeedMismatch, GeneratorMisma
 /// Parses and validates the document's own structure (versions, ranges, finite values).
 /// Blueprints and machine state are validated by the caller before anything is applied.
 pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_count: usize, machine_slots: usize) !std.json.Parsed(Document) {
-    const parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
+    var parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format > format_version or doc.format + 3 < format_version) return error.UnsupportedSaveFormat;
+    if (doc.format > format_version or doc.format + 5 < format_version) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
-    if (doc.generator != Seed.generator_version) return error.GeneratorMismatch;
+    if (doc.generator != Seed.generator_version) {
+        if (doc.generator == 5 and doc.format < format_version) {
+            // Candidate IDs did not move, so collected-object references and saved removals
+            // remain valid when generator 5 worlds adopt the new flora distribution.
+            parsed.value.generator = Seed.generator_version;
+            parsed.value.format = format_version;
+        } else return error.GeneratorMismatch;
+    }
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
     if (doc.arbor_generator != @import("../procedural/Arbor.zig").generator_version) return error.GeneratorMismatch;
     if (doc.district_generator != @import("../procedural/District.zig").generator_version) return error.GeneratorMismatch;
@@ -249,7 +258,7 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const migrated = try decode(allocator, v12, doc.seed, 4, 8);
     defer migrated.deinit();
     try std.testing.expectEqual(@as(u32, 55), migrated.value.wallet.scrap);
-    // Format 15 profiles may name mod content; a format 14 save has no such ids and still loads.
+    // Format 16 adds droid progression; format 15 modded profiles still load unchanged.
     var modded = doc;
     var modded_profile = Profile{};
     modded_profile.mod.set(.hair_style, @import("CharacterContent.zig").Id.parse("emberwear.flame_crest").?);

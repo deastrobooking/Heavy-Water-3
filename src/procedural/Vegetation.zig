@@ -3,11 +3,23 @@ const std = @import("std");
 const Mesh = @import("../render/Mesh.zig");
 const GenMesh = @import("../character/mesh.zig").Mesh;
 const Seed = @import("Seed.zig");
-pub const variant_count = 6;
+pub const variant_count = 11;
 pub const tree_first = 3;
-pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow" };
+pub const tree_count = 4;
+pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow", "redwood", "manzanita", "ember_blossom", "moonbell", "sunspear" };
 /// Material base colours, by variant (scatter tints multiply them).
-pub const colors = [variant_count][4]f32{ .{ 0.30, 0.56, 0.22, 1 }, .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 }, .{ 0.18, 0.43, 0.20, 1 }, .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 } };
+pub const colors = [variant_count][4]f32{
+    .{ 0.30, 0.56, 0.22, 1 }, .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 },
+    .{ 0.18, 0.43, 0.20, 1 }, .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 },
+    .{ 0.34, 0.055, 0.09, 1 }, .{ 0.25, 0.43, 0.22, 1 }, .{ 0.82, 0.12, 0.21, 1 },
+    .{ 0.16, 0.42, 0.86, 1 }, .{ 0.92, 0.58, 0.12, 1 },
+};
+pub const trunk_colors = [tree_count][4]f32{
+    .{ 0.24, 0.15, 0.09, 1 }, .{ 0.21, 0.13, 0.08, 1 }, .{ 0.28, 0.19, 0.12, 1 }, .{ 0.76, 0.44, 0.48, 1 },
+};
+pub fn isTree(variant: u8) bool {
+    return variant >= tree_first and variant < tree_first + tree_count;
+}
 pub const stone = [3]f32{ 0.56, 0.57, 0.55 };
 fn vertex(a: std.mem.Allocator, out: *GenMesh, p: [3]f32, n: [3]f32) !u32 {
     return out.addVertex(a, .{ .pos = .init(p[0], p[1], p[2]), .normal = .init(n[0], n[1], n[2]) });
@@ -27,11 +39,11 @@ fn blade(a: std.mem.Allocator, out: *GenMesh, root: [3]f32, tip: [3]f32, width: 
     try out.addTri(a, l, t, r);
 }
 pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
-    if (variant >= tree_first) return error.InvalidPlant;
+    if (variant >= variant_count or isTree(variant)) return error.InvalidPlant;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else 48);
-    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else 72);
+    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant >= 8) 600 else 48);
+    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant >= 8) 2400 else 72);
     if (variant == 0) {
         for (0..9) |i| {
             const t = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
@@ -48,7 +60,7 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
                 try blade(a, &out, .{ @cos(t) * 0.03, h, @sin(t) * 0.03 }, .{ @cos(t) * 0.03 + side * 0.15, h + 0.06, @sin(t) * 0.03 + 0.06 }, 0.08, t);
             }
         }
-    } else {
+    } else if (variant == 2) {
         for (0..5) |i| {
             const t = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 5;
             try blade(a, &out, .{ 0, 0, 0 }, .{ @cos(t) * 0.08, 0.62, @sin(t) * 0.08 }, 0.025, t);
@@ -57,6 +69,26 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
             const r = try vertex(a, &out, .{ @cos(t) * 0.08 + 0.08, 0.72, @sin(t) * 0.08 }, .{ 0, 0.4, 1 });
             try out.addTri(a, l, m, r);
         }
+    } else if (variant == 7) {
+        // Low, rounded native shrub clusters with open gaps so the silhouette reads as foliage.
+        const centers = [9][3]f32{
+            .{ 0, 0.24, 0 }, .{ 0.25, 0.34, 0.02 }, .{ -0.23, 0.33, 0.08 },
+            .{ 0.04, 0.38, 0.25 }, .{ 0.0, 0.43, -0.24 }, .{ 0.35, 0.22, -0.18 },
+            .{ -0.34, 0.24, -0.16 }, .{ 0.31, 0.2, 0.23 }, .{ -0.28, 0.2, 0.27 },
+        };
+        for (centers, 0..) |center, i| {
+            const size = 0.16 + Seed.unit(Seed.mix(i + 7)) * 0.055;
+            try ellipsoid(a, &out, center, .{ size, size * 0.72, size }, 5, 8);
+        }
+    } else {
+        // Flowering natives have a thin stem and a distinct six-petal luminous crown.
+        try blade(a, &out, .{ 0, 0, 0 }, .{ 0, 0.62, 0 }, 0.035, 0);
+        for (0..6) |i| {
+            const angle = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 6;
+            const center = [3]f32{ @cos(angle) * 0.105, 0.68 + 0.025 * @sin(angle * 2), @sin(angle) * 0.105 };
+            try ellipsoid(a, &out, center, .{ 0.075, 0.045, 0.12 }, 5, 8);
+        }
+        try ellipsoid(a, &out, .{ 0, 0.69, 0 }, .{ 0.055, 0.06, 0.055 }, 5, 8);
     }
     const mesh = try finish(a, &out);
     out.deinit(a);
@@ -91,7 +123,7 @@ fn cone(a: std.mem.Allocator, out: *GenMesh, base: f32, height: f32, radius: f32
     }
 }
 pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
-    if (species >= 3) return error.InvalidTree;
+    if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
     try out.vertices.ensureTotalCapacity(a, 1200);
@@ -116,6 +148,24 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
                 try ellipsoid(a, &out, .{ x, 0.43, z }, .{ 0.09, 0.27, 0.09 }, 5, 8);
                 try ellipsoid(a, &out, .{ x * 1.18, 0.20, z * 1.18 }, .{ 0.07, 0.18, 0.07 }, 5, 8);
             }
+        },
+        3 => {
+            // A narrow crown above a long bare bole, built in irregular whorls like a redwood.
+            for (0..6) |tier| {
+                const y = 0.34 + @as(f32, @floatFromInt(tier)) * 0.105;
+                const spread = 0.21 * (1 - @as(f32, @floatFromInt(tier)) * 0.12);
+                const limbs: usize = if (tier < 2) 9 else 7;
+                for (0..limbs) |j| {
+                    const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(j)) + @as(f32, @floatFromInt(tier % 2)) * 0.42) / @as(f32, @floatFromInt(limbs));
+                    const wobble = 0.84 + Seed.unit(Seed.mix(tier * 17 + j)) * 0.28;
+                    const center = .{ @cos(angle) * spread * wobble, y + 0.012 * @sin(angle * 3), @sin(angle) * spread * wobble };
+                    const radius = 0.05 + spread * 0.4;
+                    try ellipsoid(a, &out, center, .{ radius, radius * 0.62, radius * 0.78 }, 5, 8);
+                }
+            }
+            // Close the whorls into the tall, continuous crown of a mature redwood.
+            try ellipsoid(a, &out, .{ 0, 0.68, 0 }, .{ 0.12, 0.31, 0.12 }, 8, 10);
+            try ellipsoid(a, &out, .{ 0, 0.91, 0 }, .{ 0.055, 0.13, 0.055 }, 6, 8);
         },
         else => unreachable,
     }
@@ -175,12 +225,14 @@ pub fn boulder(a: std.mem.Allocator, shape: u8) !Mesh {
     return .{ .vertices = vertices, .indices = indices };
 }
 
-pub fn trunk(a: std.mem.Allocator) !Mesh {
+pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
+    if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
     try out.vertices.ensureTotalCapacity(a, 24);
     try out.indices.ensureTotalCapacity(a, 48);
-    try cone(a, &out, 0, 1, 0.023);
+    const radius = ([_]f32{ 0.035, 0.05, 0.04, 0.058 })[species];
+    try cone(a, &out, 0, 1, radius);
     const mesh = try finish(a, &out);
     out.deinit(a);
     return mesh;
@@ -191,10 +243,10 @@ test "ground flora and canopy species have distinct geometry" {
     for (&flora, 0..) |*m, i| m.* = try plant(a, @intCast(i));
     defer for (flora) |m| m.deinit(a);
     try std.testing.expect(flora[0].vertices.len != flora[1].vertices.len);
-    var trees: [3]Mesh = undefined;
+    var trees: [tree_count]Mesh = undefined;
     for (&trees, 0..) |*m, i| m.* = try tree(a, @intCast(i));
     defer for (trees) |m| m.deinit(a);
-    try std.testing.expect(trees[0].vertices.len != trees[1].vertices.len and trees[1].vertices.len != trees[2].vertices.len);
+    try std.testing.expect(trees[0].vertices.len != trees[1].vertices.len and trees[1].vertices.len != trees[2].vertices.len and trees[2].vertices.len != trees[3].vertices.len);
 }
 
 test "boulders are closed faceted stones with outward flat normals, sunk into the ground" {

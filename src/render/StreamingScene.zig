@@ -13,6 +13,8 @@ const Catalog = @import("../asset/Catalog.zig");
 const Model = @import("../asset/Model.zig");
 const World = @import("../world/World.zig");
 const Modifications = @import("../world/Modifications.zig");
+const Vegetation = @import("../procedural/Vegetation.zig");
+const Noise = @import("../procedural/Noise.zig");
 const Scene = @This();
 /// Per-axis `stretch` (applied first) and a unit-quaternion `rotation`; the shader corrects
 /// normals for the stretch and rotates them.
@@ -63,6 +65,10 @@ peak_upload_bytes: usize = 0,
 total_upload_bytes: u64 = 0,
 center_changes: u64 = 0,
 last_center: ?Key = null,
+/// Deterministic art-review lineup for the giant flora and night pigment pass.
+flora_review: bool = false,
+flora_review_seed: u64 = 0,
+flora_review_origin: [3]f32 = .{ 0, 0, 0 },
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, seed: u64, catalog: *const Catalog) !Scene {
     const stream = try Streamer.create(allocator, io, seed);
@@ -220,6 +226,8 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
         const data = self.stream.payload(view).?;
         for (data.objects[0..data.object_count]) |object| {
             if (object.kind != kind) continue;
+            // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
+            if (self.flora_review and kind == .vegetation) continue;
             if (variant) |v| if (object.variant != v) continue;
             // Saved removals apply to regenerated content by stable (chunk, local_id) identity.
             if (removed.len > 0 and removed.contains(.of(view.key, object.local_id))) continue;
@@ -229,7 +237,34 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
             self.instance_count += 1;
         }
     }
+    if (kind == .vegetation and self.flora_review) if (variant) |v| {
+        if (self.instance_count < self.instances.len) {
+            const position = floraReviewPosition(self.flora_review_seed, self.flora_review_origin, v);
+            const scale: f32 = if (v == 6) 150 else if (Vegetation.isTree(v)) 132 else if (v == 7) 2.5 else 2.2;
+            self.instances[self.instance_count] = .{ .translation_scale = .{ position[0], position[1], position[2], scale }, .tint = multiply(.{ 1, 1, 1, 1 }, color) };
+            self.instance_count += 1;
+        }
+    };
     return self.instance_count - first;
+}
+
+fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
+    const xoff: f32 = switch (variant) {
+        3 => -120,
+        4 => -40,
+        5 => 40,
+        6 => 120,
+        7 => -18,
+        8 => -6,
+        9 => 6,
+        10 => 18,
+        else => 0,
+    };
+    // Pull the low flora toward the camera so its forms read beneath the distant giants.
+    const zoff: f32 = if (Vegetation.isTree(variant)) 0 else 215;
+    const x = origin[0] + xoff;
+    const z = origin[2] + zoff;
+    return .{ x, Noise.height(seed, x, z) - 0.03, z };
 }
 
 /// Groups props by catalog mesh, then emits one instanced draw per submesh with its material color.
@@ -287,8 +322,8 @@ pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
     for (self.flora_counts, 0..) |count, variant| {
         if (count == 0) continue;
         const handle = self.catalog.content.flora[variant];
-        if (variant >= @import("../procedural/Vegetation.zig").tree_first) {
-            if (self.gpuMesh(self.catalog.content.tree_trunk)) |trunk| trunk.draw(pass, count, next);
+        if (Vegetation.isTree(@intCast(variant))) {
+            if (self.gpuMesh(self.catalog.content.tree_trunks[variant - Vegetation.tree_first])) |trunk| trunk.draw(pass, count, next);
         }
         if (self.gpuMesh(handle)) |mesh| mesh.draw(pass, count, next);
         next += count;

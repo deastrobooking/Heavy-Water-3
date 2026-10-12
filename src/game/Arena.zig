@@ -151,7 +151,7 @@ fn spawnWave(self: *Arena, enemies: *Enemies, nest: u8, party: u8) void {
         k += 1;
         const r = half - 4;
         const lift: f32 = switch (kind) {
-            .trooper, .skirmisher, .bulwark, .scalari_scout, .scalari_stinger, .scalari_titan, .scalari_miner => 0.2,
+            .trooper, .skirmisher, .bulwark, .scalari_scout, .scalari_stinger, .scalari_titan, .scalari_miner, .scalari_hybrid => 0.2,
             .drone => 7,
             .sentinel => 10,
         };

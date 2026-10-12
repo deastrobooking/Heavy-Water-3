@@ -20,7 +20,7 @@ const R = Physics.Rotation;
 const V = Physics.Vec3;
 const Enemies = @This();
 
-pub const Kind = enum { drone, sentinel, trooper, skirmisher, bulwark, scalari_scout, scalari_stinger, scalari_titan, scalari_miner };
+pub const Kind = enum { drone, sentinel, trooper, skirmisher, bulwark, scalari_scout, scalari_stinger, scalari_titan, scalari_miner, scalari_hybrid };
 pub const Stats = struct {
     health: f32,
     speed: f32,
@@ -65,6 +65,7 @@ pub const tuning = .{
         .{ .health = 58, .speed = 9.5, .accel = 22, .radius = 0.55, .standoff = 9, .sight = 38, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 11, .guarded_melee_damage = 5, .melee_cooldown = 1.05, .height = 1.4 },
         .{ .health = 1850, .speed = 4.8, .accel = 8, .radius = 3.2, .standoff = 3, .sight = 54, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 42, .guarded_melee_damage = 28, .melee_cooldown = 2.2, .height = 8.5 },
         .{ .health = 45, .speed = 2.8, .accel = 8, .radius = 0.7, .standoff = 8, .sight = 30, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 2, .guarded_melee_damage = 1, .melee_cooldown = 2.4, .height = 1.5 },
+        .{ .health = 92, .speed = 6.8, .accel = 18, .radius = 0.72, .standoff = 9, .sight = 38, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 15, .guarded_melee_damage = 7, .melee_cooldown = 1.1, .height = 1.7 },
     },
 };
 
@@ -95,7 +96,11 @@ pub fn stats(k: Kind) Stats {
 }
 
 pub fn isGround(k: Kind) bool {
-    return k == .trooper or k == .skirmisher or k == .bulwark or k == .scalari_scout or k == .scalari_stinger or k == .scalari_titan or k == .scalari_miner;
+    return k == .trooper or k == .skirmisher or k == .bulwark or k == .scalari_scout or k == .scalari_stinger or k == .scalari_titan or k == .scalari_miner or k == .scalari_hybrid;
+}
+
+pub fn isScalari(k: Kind) bool {
+    return k == .scalari_scout or k == .scalari_stinger or k == .scalari_titan or k == .scalari_miner or k == .scalari_hybrid;
 }
 
 pub fn mass(k: Kind) f32 {
@@ -109,6 +114,7 @@ pub fn mass(k: Kind) f32 {
         .scalari_stinger => 0.8,
         .scalari_titan => 24,
         .scalari_miner => 1.2,
+        .scalari_hybrid => 1.1,
     };
 }
 

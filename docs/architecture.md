@@ -4,7 +4,7 @@
 
 `App.zig` is the composition root. Mach provides platform, input events, typed objects, math, graphics, and scheduling. `engine/` owns timing, input actions, and typed handles; `world/` owns camera, chunk keys, streaming, and procedural modifications; `asset/` owns glTF import, the runtime model format, and the catalog; `machine/` owns devices, blueprints, and machine simulation; `physics/` exposes the physics API; `render/` owns GPU resources and presentation; `game/` holds the player, the interactive `Sandbox` session, and saves. Procedural generation, asset compilation, physics, gameplay, saves, and machine graph evaluation all run without a window.
 
-The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game: the app publishes `World.Prop` values (catalog mesh handle, transform, tint), the `Modifications` removal set, and preformatted HUD lines. `render/StreamingScene.zig` draws terrain, relics and grouped instances of grass, ferns, wildflowers, broadleaf trees, needleleaf trees and willows.
+The game selects the seed. Static content comes from streamed chunk recipes, not the world collection. The renderer does not import the game: the app publishes `World.Prop` values (catalog mesh handle, transform, tint), the `Modifications` removal set, and preformatted HUD lines. `render/StreamingScene.zig` draws terrain, relics and grouped instances of grass, ferns, wildflowers, manzanita, luminous flowers, broadleaf trees, needleleaf trees, willows and redwoods.
 
 ## Test Arbor
 
@@ -58,7 +58,7 @@ The fixed-step clock limits catch-up to eight steps and accounts for discarded t
 - **Catalog:** `Catalog.reserve` hands out a valid handle whose entry is not ready, and `install` fills it. The application installs in `publish`, inside Core's render mutex, so the render thread never sees an entry change mid-frame.
 - **Renderer:** `StreamingScene.uploadMeshes` uploads ready entries without a current GPU copy, tracked by handle generation, within `-Dasset-upload-kib` per frame. `World.init` uses `loadSeededDeferred`, so the generated Arbor and district render meshes are built by the loader (the simulation's trees and layout load synchronously). Tests use `loadSeeded`, which builds everything at once.
 
-`asset/Catalog.zig` registers the built-in relic, six flora meshes, three canopy meshes, a shared tree trunk, and each compiled model, assigning one material handle per submesh, and exposes named content handles. Late installs and reloads mutate it only inside `App.publish` under Core's render mutex. The app thread owns simulation reads; renderer reads hold the same mutex. `StreamingScene` uploads each catalog mesh once and resolves handles per draw; props are drawn once per submesh with instance tint × material base color.
+`asset/Catalog.zig` registers the built-in relic, eleven flora meshes, a species-specific trunk for each of four giant trees, and each compiled model, assigning one material handle per submesh, and exposes named content handles. Late installs and reloads mutate it only inside `App.publish` under Core's render mutex. The app thread owns simulation reads; renderer reads hold the same mutex. `StreamingScene` uploads each catalog mesh once and resolves handles per draw; props are drawn once per submesh with instance tint × material base color.
 
 The sky district's seeded towers use setback tiers with inset glass bays and ribbed observatory crowns. `District.generator_version` covers both placement and architectural geometry; save documents reject district versions they cannot reproduce. The character profile carries a persisted masculine/feminine presentation choice. `Ranger` bakes the analytic eye, brow, and mouth decals into the denser face UV mesh and derives head/body proportions from that choice. Older profile documents default to masculine.
 
@@ -236,20 +236,23 @@ The avatar appears in your own view in third person (F2), the creator, conversat
 - **HUD:** the flight HUD shows speed, height, throttle and afterburner, hull and gun heat, a nose marker, and a lock reticle that closes as the lock builds. Both marks are projected from the camera.
 - **Sound:** a turbine (the engine loop pitched with throttle) and afterburner roar, cannon, missile, flak and stinger cues.
 
-## Bio-synth pets
+## Field wildlife and companions
 
-`game/Pets.zig` replaces the old test-only `Companion`. Four pets (hound GARU, falcon SKYE, golem MOSS, moth LUMI) wait in Hive collars at seeded spots on a 150–230 m ring around the spawn, one per sector, each under a Hive-red beam within 400 m. A ranger with no active companion receives GARU when starting a new game, joining locally, taking an empty ranger file, or loading an older empty save.
-- **Freeing:** aiming at a wild pet offers to break its collar (`Sandbox.Target.wild_pet`). Clicking frees it (`Progress.freePet`) and brings it out. Clicking the party's pet (`.pet`) makes it do a trick, or with more pets freed, sends it home and brings out the next.
+`game/Pets.zig` owns the field wildlife and bio-synth companions. Four catchable species (hound GARU, falcon SKYE, golem MOSS, moth LUMI) wait in Hive collars at seeded spots on a 150–230 m ring around the spawn, one per sector, each under a Hive-red beam within 400 m. Rangers can close on a wild animal to draw its attention; it swipes for 8 damage on a 1.3-second timer. Energy-net hits deal 38 damage. The animal cannot be killed: two hits leave it at 24% vitality and snare it for eight seconds, allowing interaction to catch it. Shooting it again refreshes the snare. Every player records their own catch and active companion. A ranger with no active companion receives GARU when starting a new game, joining locally, taking an empty ranger file, or loading an older empty save.
+- **Catching:** aiming at a wild animal reports its vitality and the energy-net requirement (`Sandbox.Target.wild_pet`). Interaction before it is weakened gives a hint; interaction while it is snared catches it for that player's kit and brings it out.
 - **Following and fighting:** each pet follows behind its ranger (fliers hover 2.3 m up, at the shoulder) over terrain and decks, and catches up at once if left 60 m behind. It picks the nearest Hive ground unit within 22 m or flyer within 28 m. Species attacks retain their ground moves; companions also make a focused lumen strike against flyers. The moth mends nearby rangers every 5 s.
 - **Health and growth:** pets have a species-based health pool and take damage from nearby hostile ground melee units. They recover 10 health/s when no enemy is threatening them. Each pet's saved experience levels both attack damage and maximum health (+12 per level, to level 20); level-ups add the increased health capacity. The active pet's level and health bar appear above the ranger vitals. Pet health restores when the pet is summoned again.
-- **Saves:** `Progress` keeps the freed set, each pet's experience and the active pet. The save document lists pets by name; older saves have none and receive the starter hound when restored.
-- **Saves:** `Progress` keeps the freed set, each pet's experience and the active pet. The save document lists pets by name; older saves have none.
+- **Saves:** each player's `Kit` keeps their caught species, pet experience, and active pet; the save document lists pets by name. A new ranger receives the starter hound if their save has no pet data.
 - **Looks:** each pet is a cel puppet of world props built from three catalog meshes (`orb`, a unit sphere; `block`; `spike`, a unit cone), with zero UVs so the props' checker never patterns them. They are animated procedurally from the pet's gait, stride, action and time:
   - the hound trots in diagonal pairs and wags a lit-tipped tail;
   - the falcon beats pitched feather slabs and tucks into a dive;
   - the golem sways and raises both fists to slam;
   - the moth flutters glowing wings.
 - **Collars and eyes:** a wild pet's collar and eyes glow Hive red (the hound's collar is spiked); a freed pet's collar glows in its ranger's accent.
+
+`game/DroidCompanion.zig` provides a second helper that can run beside the animal. Scalari units award personal parts and scrap; the fabricator's Companions tab spends rotor cores, Hive alloy and parts to build the field droid. It follows its owner, attacks nearby ground Hive units, can take melee damage, recovers out of combat, and gains max health and damage from its own saved combat XP. `Kit` stores ownership and XP per player; save format 16 adds these fields with defaults for earlier documents. The current chassis is a single prototype, and its levels come from combat rather than a separate upgrade menu.
+
+`Enemies.Kind.scalari_hybrid` adds a ground machine-insect role with its own melee tuning, silhouette profile, XP and salvage. Existing scout, stinger, miner and titan roles remain separate; broader drone families and insect behavior are still future work.
 
 ## Wildkin heroes and the Starbowl
 
@@ -424,7 +427,7 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 
 ## Saves
 
-`game/Save.zig` writes JSON format v14 (content version 7). It records:
+`game/Save.zig` writes JSON format v17 (content version 7). It records:
 - the format, seed, generator and content versions, and the tick;
 - the player's pose and mode, and their profile;
 - every crate by slot, and the removed relic IDs;
@@ -433,19 +436,21 @@ The Sandbox publishes the night lighting as emissive props each tick: window col
 - player bridge endpoint pairs (bridges already closing are left out);
 - every known player (`members`, by slot): the character they play, their own ranger if they are playing a Wildkin hero, and their kit;
 - each player's combat XP and derived level, as part of their kit;
+- each player's field-droid ownership and independent combat XP, as part of their kit;
 - each stall's stock with its market day;
 - the installed mods by name and version.
 - the best completed lap time on the seeded sprint circuit.
 
-Format 15 adds `mod`, the namespaced ids of any mod character content (hairstyle, face preset, armor set, palette, cel style) chosen in each profile; a missing mod falls back to the built-in choice and keeps the id. Formats 12 to 14 still load. Mod content is drawn: `game/CharacterContent.zig` parses mod JSON by reflection over `ArmorSetDef`, `StyleDef`, `FacePreset` and `CelStyle`, runs their real validators, and converts entries back to those structs; `Ranger.initContent` builds a player's face, hair and armor from them, and `render/Characters.zig` uploads that player's cel table (one per character id). See [Character content](mods.md#character-content).
+Format 15 adds `mod`, the namespaced ids of any mod character content (hairstyle, face preset, armor set, palette, cel style) chosen in each profile; a missing mod falls back to the built-in choice and keeps the id. Format 16 adds each Kit's field-droid ownership and XP. Format 17 migrates generator-5 saves to the giant-flora distribution; candidate IDs remain stable so saved removals still refer to the same objects. Formats 12 to 16 still load. Mod content is drawn: `game/CharacterContent.zig` parses mod JSON by reflection over `ArmorSetDef`, `StyleDef`, `FacePreset` and `CelStyle`, runs their real validators, and converts entries back to those structs; `Ranger.initContent` builds a player's face, hair and armor from them, and `render/Characters.zig` uploads that player's cel table (one per character id). See [Character content](mods.md#character-content).
 
-Optional fields in format 15 have defaults for documents that omit them:
+Optional fields in formats 15 and 16 have defaults for documents that omit them:
 - **progress:** what the team shares: story flags (including destroyed nests and carriers), the hero roster, collected pickup IDs, the cars, and the fighter with its upgrades and paint;
 - **cars:** each hover car's pose;
 - **fighter:** the Kestrel's pose.
 - **race_best:** the saved course best, or zero until a lap is completed.
+- **kit.robot_built / kit.robot_xp:** no droid is owned and its XP is zero.
 
-Format 12 saves migrate: their one wallet and the personal fields they kept in `progress` become P1's kit (`Progress.legacyKit`). Format 13 saves keep their four-player kits and default combat XP to zero. Formats before v12 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. Guests' positions and who is joined are not saved (controllers decide that), nor are city life, Hive/Scalari units, wasps and shots.
+Format 12 saves migrate: their one wallet and the personal fields they kept in `progress` become P1's kit (`Progress.legacyKit`). Format 13 saves keep their four-player kits and default combat XP to zero. Formats 12 to 15 default the droid fields; formats before v12 are rejected. Whether the player is seated or piloting is not saved: loading leaves the player standing. Guests' positions and who is joined are not saved (controllers decide that), nor are city life, Hive/Scalari units, wasps and shots.
 
 Writes go to a temporary file, then rename over `saves/quicksave.json`. Loading validates everything before tearing down and rebuilding the session:
 - versions, seed, slot ranges and duplicates;
@@ -466,7 +471,7 @@ GPU vertices contain packed position, normal, UV, and linear vertex color (44 by
 Every view draws in this order, all against one depth32 attachment and one bind group layout:
 
 - **Terrain** (`terrain.wgsl`): each visible chunk's terrain index range, then the mountain panorama and cave meshes. It paints world-space detail into the baked biome colour, with no textures and no chunk seams: grass drifts between warm and cool patches with close-up tufts; steep faces show wobbling stone strata with dark cracks; snow (read back from the bright, grey baked colour) lies only on the flats, turns blue in shadow and glints toward the eye. Fine detail fades out by about 110 m.
-- **Foliage** (`foliage.wgsl`): flora and trees, with tree crowns sharing a trunk draw. Its vertex stage bends each plant in the wind by the square of the height above its root (about 8 cm at a grass tip, 35 cm at a crown), with a per-plant phase and slow rolling gusts. A trunk and its crown bend alike.
+- **Foliage** (`foliage.wgsl`): flora and trees, with tree crowns sharing a species-colored trunk draw. Its vertex stage bends each plant in the wind by the square of the height above its root (about 8 cm at a grass tip, 35 cm at a crown), with a per-plant phase and slow rolling gusts. At night, leaf flecks emit each species' own pigment instead of sharing a single green glow. A trunk and its crown bend alike.
 - **Solids** (`scene.wgsl`): relics, boulders and props, then the characters.
 - **Water** (`water.wgsl`), last and blended without depth writes: the chunks' river and fall ranges. Two scrolling noise layers ripple the normal downstream. A Fresnel term mixes in the sky, the sun's glint is a hard toon highlight, and foam lines the banks (the ribbon's uv.y runs across it) and streaks down the falls.
 
@@ -509,9 +514,9 @@ Shutdown follows Mach's examples: signal Core exit, join the app thread, release
 
 ## Deterministic generation
 
-World generation uses an explicit wrapping SplitMix64 hash, signed lattice coordinates, smooth value noise, and two height octaves. Heights, normals, and biome weights sample global coordinates, including samples beyond chunk edges, so seams need no stitching. Adjacent chunk positions and normals are tested at negative coordinates. Chunk keys are clamped to ±4096 because terrain uses f32 world positions; floating origins come later. Generator version 3 changes deterministic scatter choices to include the new flora and tree species.
+World generation uses an explicit wrapping SplitMix64 hash, signed lattice coordinates, smooth value noise, and two height octaves. Heights, normals, and biome weights sample global coordinates, including samples beyond chunk edges, so seams need no stitching. Adjacent chunk positions and normals are tested at negative coordinates. Chunk keys are clamped to ±4096 because terrain uses f32 world positions; floating origins come later. Generator version 6 includes the 500 ft redwood, giant tree scale range, four native ground-plant types, and their seeded scatter distribution.
 
-Biome weights (arid, meadow, wetland) come from one continuous low-frequency moisture field with no per-chunk normalization. Scatter evaluates 192 relic and plant candidates per chunk from a chunk seed, then 40 boulder candidates with local IDs 192–231, so older IDs and saved removals are unchanged. A candidate's `local_id` is its candidate index, so rejected candidates leave gaps rather than shifting later IDs. Slope limits are 0.88 (relics), 0.94 (vegetation) and 0.55 (boulders) on the surface normal's Y component; arid regions thin vegetation. Snow thins flora to the trees and frosts what grows. Boulders (three faceted shapes, flat-shaded, 0.5–3.7 m) gather on high, steep and dry ground, tinted by the local earth and frosted in snow; like trees, they are scenery without colliders. Ground flora varies by biome, with sparse broadleaf, needleleaf and willow trees among grass, ferns and wildflowers. An object's stable identity is `(seed, generator version, chunk key, local_id)`, which is what saved modifications reference. Generator version 3 adds these scatter variants and canopy trees.
+Biome weights (arid, meadow, wetland) come from one continuous low-frequency moisture field with no per-chunk normalization. Scatter evaluates 192 relic and plant candidates per chunk from a chunk seed, then 40 boulder candidates with local IDs 192–231, so older IDs and saved removals are unchanged. A candidate's `local_id` is its candidate index, so rejected candidates leave gaps rather than shifting later IDs. Slope limits are 0.88 (relics), 0.94 (vegetation) and 0.55 (boulders) on the surface normal's Y component; arid regions thin vegetation. Snow thins flora to the trees and frosts what grows. Boulders (three faceted shapes, flat-shaded, 0.5–3.7 m) gather on high, steep and dry ground, tinted by the local earth and frosted in snow; like trees, they are scenery without colliders. Ground flora varies by biome and now includes grass, ferns, wildflower, manzanita shrub, ember blossom, moonbell, sunspear, broadleaf, needleleaf, willow and giant redwood. The four tree forms scale from 96 m to 152.4 m, with each species' leaves retaining a different pigment at night. An object's stable identity is `(seed, generator version, chunk key, local_id)`, which is what saved modifications reference. Generator version 6 changes the scatter distribution and art dimensions; saved worlds with earlier generator versions are rejected.
 
 The same seed/version/build reproduces this scene. Cross-architecture floating-point bit identity is not promised. Saves persist seed, generator version, content version, and modifications; old worlds never silently use a new generator.
 

@@ -475,7 +475,7 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
     else
         "ENTER REBIND  LEFT RIGHT COLUMN  SAVED WHEN YOU LEAVE";
     c.text(r.x + 24, r.y + r.h - 90, message, 1, if (menu.swapped != null and !menu.capturing) gold else dim);
-    c.text(r.x + 24, r.y + r.h - 68, "PAD: STICKS MOVE/LOOK  A JUMP  X USE  B ROLL/BACK  MENU PAUSES (P1) OR JOINS", 0.9, dim);
+    c.text(r.x + 24, r.y + r.h - 68, "GESTURES: W+SHIFT+SPACE LONG JUMP  S+SPACE BACKFLIP  DOUBLE TAP CTRL / B TO DASH", 0.9, dim);
     const gamepad: Rect = .{ .x = r.x + 18, .y = r.y + r.h - 40, .w = 170, .h = 26 };
     button(c, gamepad, "GAMEPAD SETUP", hitId(.menu, Menu.controls_gamepad), menu.row == Menu.controls_gamepad);
     const reset: Rect = .{ .x = r.x + r.w - 290, .y = r.y + r.h - 40, .w = 150, .h = 26 };
@@ -589,14 +589,24 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
 }
 
 fn petStatus(c: *Canvas, v: Rect, sb: *const Sandbox, owner: usize) void {
-    const pet = sb.pets.out[owner] orelse return;
-    const kit = &sb.kits[owner];
-    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 170, .w = 250, .h = 22 };
-    const lumen = Pets.info(pet.species).glow;
-    c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
-    c.text(r.x + 9, r.y + 4, Pets.info(pet.species).name, 0.9, .{ lumen[0], lumen[1], lumen[2], 1 });
-    c.print(r.x + 72, r.y + 4, 0.85, ink, "LV {d}  HP {d:.0}/{d:.0}", .{ kit.petLevel(pet.species), pet.health, pet.max_health });
-    bar(c, .{ .x = r.x + 9, .y = r.y + 17, .w = r.w - 18, .h = 2 }, pet.health / pet.max_health, .{ lumen[0], lumen[1], lumen[2], 1 });
+    if (sb.pets.out[owner]) |pet| {
+        const kit = &sb.kits[owner];
+        const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 170, .w = 250, .h = 22 };
+        const lumen = Pets.info(pet.species).glow;
+        c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+        c.text(r.x + 9, r.y + 4, Pets.info(pet.species).name, 0.9, .{ lumen[0], lumen[1], lumen[2], 1 });
+        c.print(r.x + 72, r.y + 4, 0.85, ink, "LV {d}  HP {d:.0}/{d:.0}", .{ kit.petLevel(pet.species), pet.health, pet.max_health });
+        bar(c, .{ .x = r.x + 9, .y = r.y + 17, .w = r.w - 18, .h = 2 }, pet.health / pet.max_health, .{ lumen[0], lumen[1], lumen[2], 1 });
+    }
+    if (sb.droid_companions.out[owner]) |droid| {
+        const kit = &sb.kits[owner];
+        const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 143, .w = 250, .h = 22 };
+        const cyan = [4]f32{ 0.34, 0.84, 1, 1 };
+        c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+        c.text(r.x + 9, r.y + 4, "FIELD DROID", 0.9, cyan);
+        c.print(r.x + 103, r.y + 4, 0.85, ink, "LV {d}  HP {d:.0}/{d:.0}", .{ kit.robotLevel(), droid.health, droid.max_health });
+        bar(c, .{ .x = r.x + 9, .y = r.y + 17, .w = r.w - 18, .h = 2 }, droid.health / droid.max_health, cyan);
+    }
 }
 
 /// Name, motion, fuel and stamina in the bottom-left corner of a view.
@@ -1054,6 +1064,11 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
                 c.text(cx, row.y + 10, label, 1, if (have >= p.amount) gold else bad);
                 cx += Canvas.textWidth(label, 1) + 14;
             };
+            if (recipe.cost.parts > 0) {
+                var text: [20]u8 = undefined;
+                const label = std.fmt.bufPrint(&text, "{d} PARTS", .{recipe.cost.parts}) catch "";
+                c.text(cx, row.y + 10, label, 1, if (sb.kits[0].wallet.parts >= recipe.cost.parts) gold else bad);
+            }
         }
         y += 34;
     }

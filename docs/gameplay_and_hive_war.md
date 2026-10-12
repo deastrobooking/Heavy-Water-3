@@ -66,11 +66,11 @@ The saber now takes its lumen color from the player's customizable armor accent,
 
 ### The ancient makers
 
-- **The Scalarians:** An ancient reptilian people who left Earth long ago. They modified ancient insects and established the first Hive lineages on their homeworld. Their armor, ships and capital architecture carry a dragon motif: horned profiles, layered scales, long prow forms and swept blade wings.
-- **The Hive:** A distinct civilization descended from the engineered insects. Its brood network now fields drones, troopers, wasps and Brood carriers. The Hive is biological at its core, with machinery and Scalari technology grafted into its structures; it is not simply an autonomous robot intelligence.
+- **The Scalarians:** An ancient synthetic AI civilization that left Earth long ago. Their embodied machine minds use modular, transforming frames with a dragon-like silhouette: horned profiles, layered armor, long prow forms and swept blade wings. They engineered insects into a slave labor force and an expendable warrior caste.
+- **The Hive:** A distinct, insect-derived civilization built by the Scalarians. Broods field drones, troopers, wasps and Brood carriers, while hybrid units graft Scalari weapons and control hardware onto insect bodies. Hive forces remain biologically distinct from the synthetic command caste even as both fight together.
 - **Scalari ground war:** cyan scout drones and fast amber stingers patrol a renewable practice pocket near the Frontier spawn; each has low health and melee-only attacks. A distant, 1,850-health bio-titan is the first kaiju-scale Scalari mutant. The starter patrol replenishes to three units at a slow pace so new players can learn movement and earn combat XP without fighting the titan.
 - **Ranger levels:** each local ranger's Kit stores combat XP. Every 250 XP advances one of 50 levels and adds 2 maximum health. A Scalari scout gives 30 XP, a stinger 55, and the titan 300; Hive roles give 40–100. The nearest active ranger to a takedown gets its XP and Scalari scrap bounty.
-- **The central mystery:** The Scalarians' original purpose for the Hive, and whether the Hive still obeys them, can drive the campaign's discoveries. Preserve room for players to learn this through city archives and brood sites instead of explaining it all in the opening.
+- **The central mystery:** The Scalarians made the Hive to serve as labor and soldiers. The story can reveal how the command network persists, where Hive autonomy begins, and whether broods can break Scalari control through city archives and brood sites rather than explaining every faction detail in the opening.
 
 ### Scalari fleet and campaign arc
 
