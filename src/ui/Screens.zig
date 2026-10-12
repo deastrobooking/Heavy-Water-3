@@ -777,19 +777,23 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     var first: usize = 0;
     var last: usize = fields.len;
     var step: f32 = row_height;
+    var visible_headers: f32 = headers;
     if (avail >= n * creator_min_step + headers * creator_header) {
         step = std.math.clamp((avail - headers * creator_header) / n, creator_min_step, row_height);
     } else {
         step = creator_min_step;
-        const room: usize = @intFromFloat(@max(3, (avail - 3 * creator_header) / step));
-        const at: usize = @intFromEnum(cr.field);
-        first = @min(at -| room / 2, fields.len -| room);
-        last = @min(fields.len, first + room);
-    }
-    var visible_headers: f32 = 0;
-    for (sections) |s| {
-        const at: usize = @intFromEnum(s.first);
-        if (at >= first and at < last) visible_headers += 1;
+        // Shrink the window until its rows and the section titles inside it fit.
+        var room: usize = fields.len;
+        while (room > 3) : (room -= 1) {
+            first = @min(@as(usize, @intFromEnum(cr.field)) -| room / 2, fields.len - room);
+            last = first + room;
+            visible_headers = 0;
+            for (sections) |s| {
+                const at: usize = @intFromEnum(s.first);
+                if (at >= first and at < last) visible_headers += 1;
+            }
+            if (@as(f32, @floatFromInt(room)) * step + visible_headers * creator_header <= avail) break;
+        }
     }
     const h = top + @as(f32, @floatFromInt(last - first)) * step + visible_headers * creator_header + bottom;
     const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(8, (v.h - h) / 2), .w = 460, .h = h };
@@ -1177,6 +1181,41 @@ test "every screen lays out inside the window and records hits" {
     draw(&c, &m, &sb, hud);
     try expectInside(&c);
     try std.testing.expect(c.hit_len >= enum_compat.fields(Profile.Field).len);
+    // The whole list fits at 720p and up, with the hint clear of the DONE button and the
+    // notice line above it.
+    for ([_][2]f32{ .{ 1280, 720 }, .{ 1920, 1080 }, .{ 2560, 1600 } }) |size| {
+        c.reset(size[0], size[1]);
+        draw(&c, &m, &sb, .{ .view = .{ .x = 0, .y = 0, .w = size[0], .h = size[1] }, .clock = "", .prompt = "", .toast = "" });
+        try expectInside(&c);
+        var rows: usize = 0;
+        for (c.hits[0..c.hit_len]) |h| if (hitArea(h.id) == .creator_field) {
+            rows += 1;
+        };
+        try std.testing.expectEqual(enum_compat.fields(Profile.Field).len, rows);
+    }
+    // A window too short for every row scrolls: the selected field stays on screen, the panel
+    // stays inside the window, and DONE is still reachable.
+    for ([_]Profile.Field{ .name, .helmet, .cel_style }) |field| {
+        sb.creator.field = field;
+        c.reset(640, 480);
+        draw(&c, &m, &sb, .{ .view = .{ .x = 0, .y = 0, .w = 640, .h = 480 }, .clock = "", .prompt = "", .toast = "" });
+        try expectInside(&c);
+        var selected = false;
+        var done = false;
+        var rows: usize = 0;
+        for (c.hits[0..c.hit_len]) |h| switch (hitArea(h.id)) {
+            .creator_field => {
+                rows += 1;
+                if ((h.id & 0xff) == @intFromEnum(field)) selected = true;
+                try std.testing.expect(h.rect.y >= 0 and h.rect.y + h.rect.h <= 480);
+            },
+            .creator_done => done = true,
+            else => {},
+        };
+        try std.testing.expect(selected and done);
+        try std.testing.expect(rows < enum_compat.fields(Profile.Field).len);
+    }
+    sb.creator.field = .name;
     sb.creator.open = false;
     for (sb.dialogue.parsed.value.conversations, 0..) |conv, ci| for (0..conv.nodes.len) |ni| {
         sb.talk = .{ .conversation = @intCast(ci), .node = @intCast(ni), .reveal = 999, .partner = .{ .keeper = 0 } };

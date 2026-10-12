@@ -823,6 +823,8 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile, def: *const armor
             const shell_radii = V.init(lm.head_half_width + 0.05 * lm.H, 0.55 * lm.H, 0.53 * lm.H);
             if (p.helmet == .sealed) {
                 try plateWithMaterial(a, ch, .head, shell_center, shell_radii, metal, .armor);
+                // The shell ellipsoid stops short of the jaw; a guard closes the lower face.
+                try plateWithMaterial(a, ch, .head, V.init(0, lm.chin_y + 0.27 * lm.H, -0.01 * lm.H), V.init(lm.head_half_width + 0.035 * lm.H, 0.32 * lm.H, 0.5 * lm.H), metal, .armor);
             } else {
                 try plate(a, ch, .head, shell_center, shell_radii, rgb(Profile.outfit_colors[p.outfit], 0.7));
             }

@@ -275,6 +275,9 @@ profile: Profile = .{},
 creator: Creator = .{},
 /// Character review captures hold the avatar in a fixed arm pose (`-Dcharacter-pose`).
 pose_override: ?Combat.Stance = null,
+/// 0 = the creator frames the whole body, 1 = the head; eases while the cursor is on a face or
+/// hair field so brows, mouth and hair read.
+creator_zoom: f32 = 0,
 view: View = .first,
 /// The body's facing; follows the camera except while the creator is open.
 body_yaw: f32 = 0,
@@ -1127,6 +1130,8 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     const input: Input = if (frozen) .{} else raw_input;
     const actions: Actions = if (frozen) .{} else raw_actions;
     if (self.creator.open) camera.yaw = self.body_yaw;
+    const zoom_target: f32 = if (self.creator.open and creatorFocusesHead(self.creator.field)) 1 else 0;
+    self.creator_zoom += (zoom_target - self.creator_zoom) * @min(1, dt * 6);
     if (actions.reset) self.resetPlayer(camera);
     const riding = self.seated != null or self.garage.piloting != null or self.hangar.piloting;
     if (actions.toggle_mode and !riding) self.player.setMode(if (self.player.mode == .walk) .fly else .walk, camera.*);
@@ -1265,6 +1270,27 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (timing) |profile| profile.metrics.record(.post_step, stage_timer.lap() * 1000);
 }
 
+/// Face and hair fields get a head close-up in the creator.
+pub fn creatorFocusesHead(field: Profile.Field) bool {
+    return switch (field) {
+        .face_style, .hair_style, .hair_spike, .hair_volume, .hair_length, .hair_color, .hair_highlight, .helmet => true,
+        else => false,
+    };
+}
+
+pub const CreatorFrame = struct { distance: f32, eye_y: f32, pitch: f32 };
+
+/// The creator camera in front of the character: `zoom` 0 shows the body, 1 the head (the
+/// character's height scales where the eyes are).
+pub fn creatorFrame(zoom: f32, height: f32) CreatorFrame {
+    const z = std.math.clamp(zoom, 0, 1);
+    return .{
+        .distance = std.math.lerp(2.8, 1.2, z),
+        .eye_y = std.math.lerp(1.35, 1.62 * height, z),
+        .pitch = std.math.lerp(-0.1, -0.03, z),
+    };
+}
+
 /// Creator: face the character from the front. Third person: behind and above the eyes,
 /// kept above the terrain. First person: at the eyes (set by the player step).
 fn placeCamera(self: *const Sandbox, camera: *Camera) void {
@@ -1284,10 +1310,11 @@ fn placeCamera(self: *const Sandbox, camera: *Camera) void {
         return;
     }
     if (self.creator.open or self.wardrobeOpen()) {
-        const front = R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 0, 0, 2.8 });
-        camera.position = math.vec3(self.player.feet[0] + front[0], self.player.feet[1] + 1.35, self.player.feet[2] + front[2]);
+        const frame = creatorFrame(self.creator_zoom, self.creator.draft.height);
+        const front = R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 0, 0, frame.distance });
+        camera.position = math.vec3(self.player.feet[0] + front[0], self.player.feet[1] + frame.eye_y, self.player.feet[2] + front[2]);
         camera.yaw = self.body_yaw + std.math.pi;
-        camera.pitch = -0.1;
+        camera.pitch = frame.pitch;
         return;
     }
     if (self.view == .first) return;
@@ -3913,6 +3940,7 @@ test "P1's controller: the right trigger fires the energy gun and the right bump
     try testSandbox(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
     defer sb.deinit();
+    sb.tools.tool = .weapon;
     var pads: Gamepads = .{};
     var samples: [4]Gamepads.Sample = @splat(.{});
     // Settle on the ground first.

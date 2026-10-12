@@ -44,7 +44,7 @@ This plan orders the work. The [roadmap](../roadmap.md) is the canonical feature
 
 The game has had no hands-on pass since vehicles and the Hive arrived. Everything after this depends on what that reveals.
 
-1. **Frontier benchmark — baseline recorded:** `tools/benchmark.py --frontier` flies a scripted Kestrel run past a carrier with wasps up, a ground fight at a nest, and four players. Re-run after material changes to simulation, rendering, audio, or content density; do not treat the 2026-10-10 result as a fresh measurement.
+1. **Frontier benchmark — refreshed 2026-10-11:** `tools/benchmark.py --frontier --frames 600` flies a scripted Kestrel run past a carrier with wasps up, a ground fight at a nest, and four players. This run passed all benchmark checks on the default pair. Simulation P99 was 3.967 ms against the 4 ms budget; character skinning P99 was 0.129 ms against 3 ms; render CPU P99 was 4.799 ms; audio callback P99 used 1.86% of its real-time budget. Re-run after material changes to simulation, rendering, audio, or content density.
    - **Reports:** frontier route reports simulation stages, character skinning, audio callbacks, render CPU and presentation P50/P95/P99, and active combat counts.
    - **Budgets:** simulation P99 under 4 ms and character skinning P99 under 3 ms in ReleaseFast; renderer under 16.667 ms; audio callback below its real-time budget.
 2. **Hand-play checklist (yours):**

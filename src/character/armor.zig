@@ -581,7 +581,7 @@ fn emitPiece(b: *Builder) !void {
             const q = Quat.fromAxisAngle(Vec3.unit_z, roll);
             try b.blob(C, R, .{ .exp = e, .rot = q, .color = p.color });
             const rim_r = 1.04 + 0.2 * sh.flare;
-            try b.part(C, q, Vec3.init(0, R.y * 0.55, 0), Vec3.init(R.x * rim_r, R.y * 0.2, R.z * rim_r), .{ .exp = 0.65, .color = .secondary });
+            try b.part(C, q, Vec3.init(0, R.y * 0.55, 0), Vec3.init(R.x * rim_r, R.y * 0.14, R.z * rim_r), .{ .exp = 0.65, .color = .secondary });
             switch (sh.silhouette) {
                 .finned => try b.part(C, q, Vec3.init(0.25 * R.x, -0.9 * R.y, -0.15 * R.z), Vec3.init(0.010, crest * 0.6, R.z * 0.55), .{ .exp = 0.7, .rot = eulerQ(0, 0, 0.5), .color = .trim }),
                 .angular => try b.part(C, q, Vec3.init(0.1 * R.x, -0.8 * R.y, 0), Vec3.init(0.012, crest * 0.5 + R.y * 0.35, R.z * 0.9), .{ .exp = 0.7, .color = .trim }),
@@ -863,36 +863,59 @@ fn headBlob(a: Allocator, ch: *Character, center: Vec3, radii: Vec3, color: Rgb)
     try ch.mesh.stitchRings(a, first, rows + 1, cols, true, false);
 }
 
-/// The face lens for a visor or sealed helmet, plus the cheek plates that frame it. `wrap` is the
-/// original ranger visor, kept bit for bit.
+/// Frontmost z of the head's own surface (skin and any shell already built, not hair) inside a
+/// band of heights and widths: the lens must sit outside it or the face shows through.
+fn headFront(ch: *const Character, y: f32, band: f32, x_lo: f32, x_hi: f32) ?f32 {
+    var best: ?f32 = null;
+    for (ch.mesh.vertices.items) |v| {
+        if (v.material == .hair or v.joints[0] != Joint.head.idx()) continue;
+        if (@abs(v.pos.y - y) > band or @abs(v.pos.x) < x_lo or @abs(v.pos.x) > x_hi) continue;
+        best = @max(best orelse v.pos.z, v.pos.z);
+    }
+    return best;
+}
+
+/// The face lens for a visor or sealed helmet, plus the cheek plates that frame it. The lens is
+/// placed from the head as built (`headFront`): its rim sits just outside the cheeks and its middle
+/// is bowed out past the nose and brow, so no face shows through at any head shape. A sealed
+/// helmet also gets a chin guard, since the shell ellipsoid does not reach the jaw.
 pub fn emitVisor(a: Allocator, ch: *Character, shape: VisorShape, metal: Rgb, dark: Rgb, glow: Rgb) !void {
     const lm = ch.landmarks;
-    const center = Vec3.init(0, lm.chin_y + 0.47 * lm.H, 0.41 * lm.H);
-    const hw = 0.65 * lm.head_half_width;
     const H = lm.H;
+    const hw = 0.65 * lm.head_half_width;
+    var center = Vec3.init(0, lm.chin_y + 0.445 * H, 0.41 * H);
+    var extra: f32 = 0;
+    if (shape != .none) {
+        const rim = headFront(ch, center.y, 0.05 * H, 0.7 * hw, 1.15 * hw);
+        const mid = headFront(ch, center.y, 0.05 * H, 0, 0.12 * hw);
+        if (rim != null and mid != null) {
+            center.z = @max(center.z, rim.? + 0.008 * H);
+            extra = @max(0, mid.? + 0.014 * H - (center.z + 0.04 * H));
+        }
+    }
     switch (shape) {
         .none => return,
         .wrap => {
-            try curvedPanel(a, ch, center, hw, 0.09 * H, 0.04 * H, 0, dark, 8, 24);
-            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.04 * H, 0.004 * H)), 0.72 * hw, 0.010 * H, 0.044 * H, 0, glow, 2, 20);
+            try curvedPanel(a, ch, center, hw, 0.09 * H, 0.04 * H + extra, 0, dark, 8, 24);
+            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.04 * H, 0.004 * H)), 0.72 * hw, 0.010 * H, 0.044 * H + extra, 0, glow, 2, 20);
         },
         .slit => {
-            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.01 * H, 0)), hw, 0.05 * H, 0.04 * H, 0, dark, 4, 24);
-            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.012 * H, 0.004 * H)), 0.8 * hw, 0.008 * H, 0.044 * H, 0, glow, 2, 20);
+            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.012 * H, 0)), hw, 0.068 * H, 0.04 * H + extra, 0, dark, 4, 24);
+            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.012 * H, 0.004 * H)), 0.8 * hw, 0.008 * H, 0.044 * H + extra, 0, glow, 2, 20);
         },
         .twin => for ([_]f32{ -1, 1 }) |s| {
             const c = center.add(Vec3.init(s * 0.5 * hw, 0.005 * H, 0));
-            try curvedPanel(a, ch, c, 0.46 * hw, 0.04 * H, 0.04 * H, -s * 0.22, dark, 3, 12);
-            try curvedPanel(a, ch, c.add(Vec3.init(0, 0, 0.004 * H)), 0.34 * hw, 0.011 * H, 0.043 * H, -s * 0.22, glow, 2, 10);
+            try curvedPanel(a, ch, c, 0.46 * hw, 0.04 * H, 0.04 * H + extra, -s * 0.22, dark, 3, 12);
+            try curvedPanel(a, ch, c.add(Vec3.init(0, 0, 0.004 * H)), 0.34 * hw, 0.011 * H, 0.043 * H + extra, -s * 0.22, glow, 2, 10);
         },
         .mono => {
-            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.01 * H, 0)), 0.42 * hw, 0.07 * H, 0.05 * H, 0, dark, 6, 12);
-            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.01 * H, 0.004 * H)), 0.2 * hw, 0.03 * H, 0.054 * H, 0, glow, 3, 8);
+            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.01 * H, 0)), 0.42 * hw, 0.07 * H, 0.05 * H + extra, 0, dark, 6, 12);
+            try curvedPanel(a, ch, center.add(Vec3.init(0, 0.01 * H, 0.004 * H)), 0.2 * hw, 0.03 * H, 0.054 * H + extra, 0, glow, 3, 8);
         },
         .scouter => {
             const c = center.add(Vec3.init(0.38 * hw, 0.01 * H, 0));
-            try curvedPanel(a, ch, c, 0.34 * hw, 0.06 * H, 0.05 * H, 0, glow, 5, 10);
-            try curvedPanel(a, ch, c.add(Vec3.init(0, 0, 0.004 * H)), 0.26 * hw, 0.04 * H, 0.052 * H, 0, dark, 4, 8);
+            try curvedPanel(a, ch, c, 0.34 * hw, 0.06 * H, 0.05 * H + extra, 0, glow, 5, 10);
+            try curvedPanel(a, ch, c.add(Vec3.init(0, 0, 0.004 * H)), 0.26 * hw, 0.04 * H, 0.052 * H + extra, 0, dark, 4, 8);
             // Arm from the lens back to the ear pod.
             try headBlob(a, ch, Vec3.init(lm.head_half_width + 0.004 * H, lm.chin_y + 0.47 * lm.H, 0.2 * H), Vec3.init(0.012 * H, 0.012 * H, 0.2 * H), metal);
         },
@@ -999,7 +1022,7 @@ const buster_pieces = [_]Piece{
     .{ .kind = .buster_arm, .anchor = .forearm, .sides = .left },
     .{ .kind = .fist_guard, .anchor = .hand, .sides = .right },
     .{ .kind = .dome_pauldron, .anchor = .upper_arm, .offset = .{ 0.035, -0.025, 0 }, .size = .{ 0.085, 0.07, 0.085 } },
-    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.035, 0 }, .size = .{ 0.13, 0.11, 0.06 } },
+    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.03, 0 }, .size = .{ 0.112, 0.088, 0.045 } },
     .{ .kind = .core, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.04, 0.015 }, .size = .{ 0.03, 0.03, 0.03 } },
     .{ .kind = .skirt_plate, .anchor = .hips, .offset = .{ 0.19, -0.08, 0 }, .size = .{ 0.025, 0.07, 0.07 }, .color = .secondary, .fit = false },
     .{ .kind = .finned_greave, .anchor = .shin, .shape = .{ .silhouette = .round, .roundness = 1 } },
@@ -1009,23 +1032,24 @@ const buster_pieces = [_]Piece{
 
 const iron_titan_shape: ShapeSpec = .{ .silhouette = .angular, .flare = 0.55, .crest = 0.07, .roundness = 0.2, .overlap = 0.3 };
 const iron_titan_pieces = [_]Piece{
-    .{ .kind = .dome_pauldron, .anchor = .upper_arm, .offset = .{ 0.045, -0.035, 0 }, .size = .{ 0.11, 0.09, 0.11 }, .shape = .{ .silhouette = .finned, .flare = 0.4, .crest = 0.09, .roundness = 0.25 } },
+    .{ .kind = .dome_pauldron, .anchor = .upper_arm, .offset = .{ 0.05, -0.03, 0 }, .size = .{ 0.088, 0.07, 0.085 }, .shape = .{ .silhouette = .finned, .flare = 0.15, .crest = 0.07, .roundness = 0.25 } },
     .{ .kind = .fist_guard, .anchor = .hand },
     .{ .kind = .finned_greave, .anchor = .shin, .shape = .{ .silhouette = .finned, .flare = 0.5, .crest = 0.075, .roundness = 0.2 } },
     .{ .kind = .thruster_calf, .anchor = .shin },
-    .{ .kind = .chest_dome, .anchor = .chest, .offset = .{ 0.075, 0.05, 0 }, .size = .{ 0.085, 0.085, 0.06 }, .color = .secondary },
-    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, -0.07, 0 }, .size = .{ 0.13, 0.07, 0.06 } },
+    // One broad chest plate with a blue lower band: a clean block, not a cluster of domes.
+    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.025, 0 }, .size = .{ 0.125, 0.085, 0.045 } },
+    .{ .kind = .core, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.03, 0.01 }, .size = .{ 0.026, 0.026, 0.026 } },
     .{ .kind = .skirt_plate, .anchor = .thigh, .offset = .{ 0.0, 0.08, 0.07 }, .size = .{ 0.08, 0.1, 0.02 } },
     .{ .kind = .collar, .anchor = .neck, .sides = .center, .color = .metal },
-    .{ .kind = .backpack, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.03, 0 }, .size = .{ 0.10, 0.12, 0.05 }, .shape = .{ .silhouette = .finned, .crest = 0.12, .roundness = 0.3 } },
+    .{ .kind = .backpack, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.03, 0 }, .size = .{ 0.085, 0.10, 0.04 }, .shape = .{ .silhouette = .finned, .crest = 0.09, .roundness = 0.3 } },
     .{ .kind = .antenna, .anchor = .head, .when = .sealed, .color = .metal, .offset = .{ 0.03, 0.01, -0.02 }, .shape = .{ .silhouette = .finned, .crest = 0.14 } },
     .{ .kind = .ear_fin, .anchor = .head, .when = .helmeted, .color = .trim },
 };
 
 const battle_plate_shape: ShapeSpec = .{ .silhouette = .wedge, .flare = 0.45, .crest = 0.06, .roundness = 0.55, .overlap = 0.2 };
 const battle_plate_pieces = [_]Piece{
-    .{ .kind = .dome_pauldron, .anchor = .upper_arm, .offset = .{ 0.05, -0.04, 0 }, .size = .{ 0.115, 0.07, 0.11 } },
-    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.03, 0 }, .size = .{ 0.17, 0.12, 0.05 } },
+    .{ .kind = .dome_pauldron, .anchor = .upper_arm, .offset = .{ 0.05, -0.035, 0 }, .size = .{ 0.098, 0.062, 0.092 } },
+    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.03, 0 }, .size = .{ 0.145, 0.10, 0.042 } },
     .{ .kind = .skirt_plate, .anchor = .hips, .sides = .center, .offset = .{ 0, -0.07, 0.16 }, .size = .{ 0.075, 0.09, 0.02 }, .fit = false },
     .{ .kind = .skirt_plate, .anchor = .hips, .sides = .center, .offset = .{ 0, -0.07, -0.16 }, .size = .{ 0.075, 0.09, 0.02 }, .fit = false },
     .{ .kind = .blob, .anchor = .forearm, .offset = .{ 0, 0.16, 0 }, .size = .{ 0.052, 0.03, 0.05 }, .exponent = 0.7, .color = .trim },

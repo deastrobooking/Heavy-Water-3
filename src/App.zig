@@ -2517,11 +2517,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             else => 0,
         };
         const face = options.character_view >= 4;
-        const dist: f32 = if (face) 0.95 else 2.8;
-        const eye_y: f32 = if (face) 1.58 * self.sandbox.profile.height else 1.12;
+        const frame = Sandbox.creatorFrame(if (face) 1 else 0, self.sandbox.profile.height);
+        // Whole-body reviews sit a little lower and wider than the in-game creator so feet show.
+        const dist: f32 = if (face) frame.distance else 2.8;
+        const eye_y: f32 = if (face) frame.eye_y else 1.12;
         renderer.views[0].camera.position = mach.math.vec3(feet[0] + dist * @sin(angle), feet[1] + eye_y, feet[2] + dist * @cos(angle));
         renderer.views[0].camera.yaw = std.math.pi + angle;
-        renderer.views[0].camera.pitch = if (face) -0.02 else -0.08;
+        renderer.views[0].camera.pitch = if (face) frame.pitch else -0.08;
     }
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);

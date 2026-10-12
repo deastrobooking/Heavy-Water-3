@@ -172,7 +172,11 @@ test "sidecars keep identity and settings, detect stale sources, and reject bad 
     }
     // Kind follows the source type, and old importers are stale.
     try std.testing.expectError(error.WrongKind, check(a, first, "door.json", "v1"));
-    const old = try std.mem.replaceOwned(u8, a, first, "\"version\": 1", "\"version\": 0");
+    const current_version = try std.fmt.allocPrint(a, "\"version\": {d}", .{importerFor(.model).version});
+    defer a.free(current_version);
+    const old_version = try std.fmt.allocPrint(a, "\"version\": {d}", .{0});
+    defer a.free(old_version);
+    const old = try std.mem.replaceOwned(u8, a, first, current_version, old_version);
     defer a.free(old);
     try std.testing.expectError(error.OldImporter, check(a, old, "crate.gltf", "v1"));
     try std.testing.expectError(error.UnknownSourceType, kindOf("notes.txt"));

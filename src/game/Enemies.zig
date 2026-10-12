@@ -955,6 +955,8 @@ test "nest sites avoid landmarks and sleep until a player comes near" {
     var physics = testPhysics();
     defer physics.deinit();
     var far = e;
+    // The practice patrol is intentionally near the spawn; isolate this check to Hive nests.
+    far.training_enabled = false;
     var events: [16]Event = undefined;
     for (0..600) |_| _ = far.step(&physics, &.{.{ .chest = .{ 0, 1.4, 0 }, .velocity = @splat(0) }}, 1.0 / 60.0, &events);
     try std.testing.expectEqual(@as(usize, 0), far.unitCount(null));

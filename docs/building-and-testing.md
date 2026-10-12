@@ -66,6 +66,10 @@ Options are compiled in, so changing one rebuilds.
 | `-Dcharacter-showcase=6..38` | 0 | Hairstyle review in the creator, in `Profile.HairStyle` order (6 = short, 30..38 = the anime cuts). |
 | `-Dcharacter-showcase=40..43` | 0 | The `emberwear` example mod in the creator: 40 hair, face and ink cel style; 41 phoenix armor over a hardsuit; 42 sealed helmet; 43 second hairstyle on the exo rig. |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
+| `-Dcharacter-view=0..5` | 0 | Character review camera around the avatar (with `-Dcharacter-showcase`): 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up. The close-ups use the same frame as the creator's head zoom. |
+| `-Dcharacter-pose=0..4` | 0 | Hold an arm pose for armor review: 1 aim, 2 overhead swing, 3 cast (arms raised), 4 guard. |
+| `-Dcharacter-tweak=bits` | 0 | Review variations: 1 feminine, 2 height 0.9, 4 height 1.1, 8 open helmet, 16 sealed, 32 visor. |
+| `-Dcharacter-face=N`, `-Dcharacter-hair-color=N` | 0 | Face style (1 = classic ... 6 = hero) and hair color (1-based); 0 keeps the default. |
 | `-Dcel-style=0..3`, `-Dcel-debug=bits` | 0, 0 | Character look-dev: starting cel style (Heavy Water, Watercolor, Comic ink, Flat) and debug views (1 hide ink, 2 ramp bands, 4 face shadow mask). In any running build, F3 cycles the style, F8 toggles ink and F10 cycles normal, ramp bands and face mask (it logs the state). |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |
 | `-Dcpu-skinning=true` | false | Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback). |
@@ -89,7 +93,7 @@ Options are compiled in, so changing one rebuilds.
 python3 tools/zig.py build test --summary all
 ```
 
-- **Scope:** the suite had 373 tests at the latest recorded full run. It is deterministic and headless, covering the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
+- **Scope:** the latest recorded full run (2026-10-11) passed 419 tests. The suite is deterministic and headless, covering the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
 - **Time:** expect about 3.5 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
 - **Release mode:** `-Doptimize=ReleaseSafe` runs the same suite optimized.
 
