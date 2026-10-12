@@ -27,7 +27,7 @@ pub const capacity = 32;
 /// a low cover posture. `action_t` advances timed actions from 0 to 1.
 pub const Action = enum { none, aim, swing, guard, cast, throw, strike, kick, cover };
 /// Saber arcs: forehand, backhand, overhead finisher, dash cut, aerial, charged wave.
-pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged };
+pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged, rising, downward };
 pub const Pose = struct {
     feet: [3]f32,
     yaw: f32,
@@ -353,6 +353,8 @@ pub fn swingDirection(arc: Arc, t: f32) V {
         .dash => heading(m.lerp(r(-70), r(65), e), r(-4)),
         .aerial => heading(m.lerp(r(-150), r(150), e), r(-28)),
         .charged => heading(m.lerp(r(-150), r(130), e), m.lerp(r(10), r(-5), e)),
+        .rising => heading(m.lerp(r(-72), r(52), e), m.lerp(r(-52), r(112), e)),
+        .downward => heading(m.lerp(r(-18), r(12), e), m.lerp(r(118), r(-100), e)),
     };
 }
 

@@ -2667,8 +2667,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
         .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  X / CLICK", .{Screens.keeperName(sandbox, i)}),
         .walker => renderer.hud_lines[1].set("CANOPY LOCAL  X / CLICK TALK", .{}),
-        .car => |i| renderer.hud_lines[1].set("{s}  I / X / CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
-        .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  X / CLICK BOARD", .{}),
+        .car => |i| renderer.hud_lines[1].set("{s}  I / X (LEFT FACE) / CLICK BOARD", .{@import("vehicle/Designs.zig").name(@enumFromInt(i))}),
+        .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  X (LEFT FACE) / CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))

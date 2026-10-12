@@ -90,6 +90,11 @@ pub const hover: f32 = 2.3;
 /// Experience the pet earns for each Hive unit downed near it.
 pub const xp_per_unit: u32 = 20;
 pub const share_radius: f32 = 35;
+/// First wild encounters are kept close enough to appear in the world around the starting meadow.
+pub const encounter_radius_min: f32 = 48;
+pub const encounter_radius_spread: f32 = 32;
+pub const flee_radius: f32 = 22;
+pub const flee_speed: f32 = 8.5;
 
 pub const Spot = struct { position: V, yaw: f32 };
 
@@ -135,6 +140,7 @@ pub const Context = struct {
 pub const max_owners = 4;
 
 spots: [count]Spot = undefined,
+seed: u64 = 0,
 placed: bool = false,
 /// Shared wild encounters. Each ranger catches their own version of the animal.
 wild_health: [count]f32 = @splat(100),
@@ -145,12 +151,13 @@ showcase_free: bool = false,
 /// The pet out with each player slot.
 out: [max_owners]?Pet = @splat(null),
 
-/// Seeded spots on the meadow ring, 150–230 m from the spawn, each in its own sector.
+/// Seeded spots on a meadow ring near the spawn, each in its own sector.
 pub fn place(self: *Pets, seed: u64, spawn: V) void {
+    self.seed = seed;
     for (&self.spots, 0..) |*spot, i| {
         const salt = Seed.mix(seed ^ 0x5045545330 ^ @as(u64, i));
         const angle = (@as(f32, @floatFromInt(i)) + 0.25 + 0.5 * Seed.unit(salt)) * 2 * std.math.pi / count + 0.9;
-        const r = 150 + 80 * Seed.unit(Seed.mix(salt +% 1));
+        const r = encounter_radius_min + encounter_radius_spread * Seed.unit(Seed.mix(salt +% 1));
         const x = spawn[0] + @sin(angle) * r;
         const z = spawn[2] + @cos(angle) * r;
         spot.* = .{ .position = .{ x, Terrain.surface(seed, x, z).height, z }, .yaw = angle + std.math.pi };
@@ -175,8 +182,8 @@ pub fn canCaptureWild(self: *const Pets, species: Species) bool {
     return self.wild_health[k] <= 40 and self.wild_snared[k] > 0;
 }
 
-/// Wild animals defend themselves when a ranger crowds them. The net capture state pauses
-/// attacks while the player closes in to interact.
+/// Wild animals flee when approached, then defend themselves if cornered. The net capture state
+/// pins them in place while the player closes in to interact.
 pub fn stepWild(self: *Pets, dt: f32, present: [max_owners]bool, owners: [max_owners]V, out: []Enemies.Event) usize {
     var n: usize = 0;
     if (!self.placed) return n;
@@ -184,15 +191,34 @@ pub fn stepWild(self: *Pets, dt: f32, present: [max_owners]bool, owners: [max_ow
         if (self.wild_health[k] <= 0) continue;
         self.wild_snared[k] = @max(0, self.wild_snared[k] - dt);
         self.wild_attack_timer[k] = @max(0, self.wild_attack_timer[k] - dt);
-        if (self.wild_snared[k] > 0 or self.wild_attack_timer[k] > 0) continue;
-        const spot = self.spots[k];
-        const animal = R.add(spot.position, .{ 0, 0.9, 0 });
+        var closest_player: ?usize = null;
+        var closest_distance = std.math.inf(f32);
         for (present, 0..) |is_present, p| {
-            if (!is_present or R.length(R.sub(owners[p], spot.position)) > 2.7) continue;
+            if (!is_present) continue;
+            const delta = R.sub(owners[p], self.spots[k].position);
+            const distance = @sqrt(delta[0] * delta[0] + delta[2] * delta[2]);
+            if (distance < closest_distance) {
+                closest_distance = distance;
+                closest_player = p;
+            }
+        }
+        if (self.wild_snared[k] > 0 or closest_player == null) continue;
+        if (closest_distance < 2.7 and self.wild_attack_timer[k] == 0) {
+            const animal = R.add(self.spots[k].position, .{ 0, 0.9, 0 });
+            const p = closest_player.?;
             if (n < out.len) out[n] = .{ .player_hit = .{ .player = @intCast(p), .damage = 8, .from = animal } };
             n += 1;
             self.wild_attack_timer[k] = 1.3;
-            break;
+        }
+        if (closest_distance < flee_radius) {
+            const ranger = owners[closest_player.?];
+            const delta = R.sub(self.spots[k].position, ranger);
+            var away = R.normalize(.{ delta[0], 0, delta[2] });
+            if (R.length(away) < 0.1) away = .{ @sin(self.spots[k].yaw), 0, @cos(self.spots[k].yaw) };
+            self.spots[k].position = R.add(self.spots[k].position, R.scale(away, flee_speed * dt));
+            self.spots[k].position[1] = Terrain.surface(self.seed, self.spots[k].position[0], self.spots[k].position[2]).height;
+            self.spots[k].yaw = std.math.atan2(-away[0], -away[2]);
+            continue;
         }
     }
     return n;

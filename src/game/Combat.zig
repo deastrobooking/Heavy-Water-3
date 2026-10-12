@@ -78,6 +78,11 @@ pub const Aim = struct {
     alt: bool = false,
     cycle: bool = false,
     saber: bool = false,
+    /// Attack plus dodge throws the saber on a returning arc.
+    throw_saber: bool = false,
+    /// A stomp or downward kick input steers an airborne saber cut down.
+    saber_down: bool = false,
+    vertical_speed: f32 = 0,
     /// Bare-hand attack and alternate guard while the player has the hands tool selected.
     martial_fire: bool = false,
     martial_guard: bool = false,
@@ -429,9 +434,9 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
                 s.projectiles.active_count -|= 1;
                 continue;
             }
-            if (p.pierce > 0) {
+            if (p.pierce > 0 or p.kind == .saber_boomerang) {
                 // Through it and on, still flying.
-                p.pierce -= 1;
+                if (p.kind != .saber_boomerang) p.pierce -= 1;
                 self.effect(.{ .kind = .spark, .position = at, .life = 0.25, .size = 0.7, .color = Weapon.Element.color(p.element)[0..3].* });
                 push(out, &n, .{ .cut = at });
                 continue;
@@ -503,7 +508,11 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
     const mel = &arsenal.melee;
     // The alternate raises the guard between cuts.
     mel.guard = if (aim.alt and mel.swing == null) (if (mel.guard) |g| g + dt else 0) else null;
-    if (pressed) {
+    if (pressed and aim.throw_saber) {
+        throwSaber(arsenal, aim, out, n);
+        mel.swing = null;
+        mel.queued = false;
+    } else if (pressed) {
         if (mel.swing) |sw| {
             if (sw.t > 0.3) mel.queued = true;
         } else self.cut(arsenal, enemies, aim, out, n, hive, hn);
@@ -548,7 +557,7 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
     const s = &arsenal.system;
     s.slots[0] = slotFor(arsenal, .beam_saber);
     const c = s.attackSaber(aim.dashing, aim.airborne);
-    const arc: Ranger.Arc = switch (c.combo) {
+    const base_arc: Ranger.Arc = switch (c.combo) {
         2 => .backhand,
         3 => .overhead,
         4 => .charged,
@@ -556,6 +565,7 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
         11 => .aerial,
         else => .forehand,
     };
+    const arc: Ranger.Arc = if (base_arc == .charged) .charged else if (aim.saber_down or (aim.airborne and aim.vertical_speed < -3)) .downward else if (aim.airborne and aim.vertical_speed > 2) .rising else base_arc;
     const heavy = arc == .overhead or arc == .charged or arc == .dash;
     arsenal.melee.swing = .{
         .arc = arc,
@@ -564,6 +574,7 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
             .overhead => 0.38,
             .dash => 0.22,
             .aerial, .charged => 0.34,
+            .rising, .downward => 0.34,
         },
         .damage = c.damage * arsenal.melee_scale,
         .knock = if (heavy) 14 else 6,
@@ -578,13 +589,17 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
         _ = enemies.shock(center, radius, 0.8, 9);
         self.effect(.{ .kind = .burst, .position = center, .life = 0.32, .size = radius, .color = .{ 0.25, 0.9, 1 } });
     }
-    if (arc == .charged) {
+    if (arc == .charged or c.combo == 3) {
         // A charged edge launches a broad, player-coloured crescent; each upgrade widens and
         // sustains the visual and lets the wave travel farther through the Hive.
         const tier = s.slots[0].level;
-        if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, if (tier >= 3) 48 else 40, c.damage * (if (tier >= 3) @as(f32, 0.85) else 0.6), s.slots[0].element, if (tier >= 3) 0.82 else 0.6, null)) |i| {
-            s.projectiles.items[i].pierce = if (tier >= 3) 12 else 8;
-            s.projectiles.items[i].radius = if (tier >= 3) 2.0 else 1.35;
+        const charged = arc == .charged;
+        const damage_scale: f32 = if (charged and tier >= 3) 0.85 else if (charged) 0.6 else 0.20;
+        const lifetime: f32 = if (charged and tier >= 3) 0.82 else if (charged) 0.6 else 0.42;
+        const speed: f32 = if (charged and tier >= 3) 48 else if (charged) 40 else 34;
+        if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, speed, c.damage * damage_scale, s.slots[0].element, lifetime, null)) |i| {
+            s.projectiles.items[i].pierce = if (charged and tier >= 3) 12 else if (charged) 8 else 2;
+            s.projectiles.items[i].radius = if (charged and tier >= 3) 2.0 else if (charged) 1.35 else 0.82;
             const element_color = Weapon.Element.color(s.slots[0].element);
             s.projectiles.items[i].visual_tint = .{
                 aim.weapon_accent[0] * 0.72 + element_color[0] * 0.28,
@@ -592,7 +607,7 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
                 aim.weapon_accent[2] * 0.72 + element_color[2] * 0.28,
             };
         }
-        push(out, n, .{ .fired = .beam_saber });
+        if (charged) push(out, n, .{ .fired = .beam_saber });
     }
     // A unit just ahead pulls the cut toward it.
     if (aim.airborne) return;
@@ -601,6 +616,20 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
     const h: V = .{ d[0], 0, d[2] };
     const dist = R.length(h);
     if (dist > 1.6 and dist < 7.5 and R.dot(R.scale(h, 1 / dist), fwd) > 0.5) push(out, n, .{ .lunge = R.scale(h, @min(16, (dist - 1.2) * 5) / dist) });
+}
+
+fn throwSaber(arsenal: *Arsenal, aim: Aim, out: []Event, n: *usize) void {
+    const system = &arsenal.system;
+    const direction = flat(aim);
+    const origin = R.add(aim.feet, R.add(R.scale(direction, 0.9), .{ 0, 1.25, 0 }));
+    if (system.projectiles.spawn(.saber_boomerang, origin, direction, 39, system.slots[0].baseDamage() * 0.8, system.slots[0].element, 2.2, null)) |i| {
+        const p = &system.projectiles.items[i];
+        p.return_origin = origin;
+        p.return_to = R.add(aim.feet, .{ 0, 1.25, 0 });
+        p.radius = 0.72;
+        p.visual_tint = aim.weapon_accent;
+        push(out, n, .{ .fired = .beam_saber });
+    }
 }
 
 pub const Grip = struct { base: V, dir: V };

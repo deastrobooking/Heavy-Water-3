@@ -52,6 +52,11 @@ pub const Content = struct {
     crate: MeshHandle,
     /// Centered unit cube; machine parts and device bodies scale it per axis.
     block: MeshHandle,
+    /// Continuous curved plasma blade, narrow white spine, and crescent wave mesh.
+    saber_blade: MeshHandle,
+    saber_core: MeshHandle,
+    saber_wave: MeshHandle,
+    saber_wave_core: MeshHandle,
     /// Unit cylinder along X for wheels.
     wheel: MeshHandle,
     /// The hand-authored test Arbor (phase 6), relative to its trunk-base origin.
@@ -229,6 +234,11 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     for (&self.content.boulders, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.boulder(allocator, @intCast(i)), .named(Vegetation.boulder_names[i], Vegetation.stone ++ [_]f32{1})));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
+    const CombatGeometry = @import("../procedural/CombatGeometry.zig");
+    self.content.saber_blade = try self.register(allocator, try Model.fromMesh(allocator, try CombatGeometry.blade(allocator, false), .named("plasma greatblade", .{ 1, 1, 1, 1 })));
+    self.content.saber_core = try self.register(allocator, try Model.fromMesh(allocator, try CombatGeometry.blade(allocator, true), .named("plasma spine", .{ 1, 1, 1, 1 })));
+    self.content.saber_wave = try self.register(allocator, try Model.fromMesh(allocator, try CombatGeometry.wave(allocator, false), .named("saber crescent", .{ 1, 1, 1, 1 })));
+    self.content.saber_wave_core = try self.register(allocator, try Model.fromMesh(allocator, try CombatGeometry.wave(allocator, true), .named("saber crescent core", .{ 1, 1, 1, 1 })));
     self.content.test_arbor = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").renderMesh(allocator), .named("test arbor", .{ 1, 1, 1, 1 })));
     self.content.test_arbor_lod = try self.register(allocator, try Model.fromMesh(allocator, try @import("../procedural/TestArbor.zig").lodMesh(allocator), .named("test arbor lod", .{ 1, 1, 1, 1 })));
     self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
@@ -313,6 +323,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "boulder_round", .handle = self.content.boulders[0] },                                .{ .name = "boulder_tall", .handle = self.content.boulders[1] },
         .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "orb", .handle = self.content.orb },
         .{ .name = "spike", .handle = self.content.spike },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
+        .{ .name = "saber_blade", .handle = self.content.saber_blade },                     .{ .name = "saber_core", .handle = self.content.saber_core },                                   .{ .name = "saber_wave", .handle = self.content.saber_wave },
+        .{ .name = "saber_wave_core", .handle = self.content.saber_wave_core },
         .{ .name = "test_arbor", .handle = self.content.test_arbor },                                   .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
         .{ .name = "district", .handle = self.content.district },                                       .{ .name = "arbor_1", .handle = self.arbors[0].mesh },
         .{ .name = "arbor_1_lod", .handle = self.arbors[0].lod },                                       .{ .name = "arbor_2", .handle = self.arbors[1].mesh },

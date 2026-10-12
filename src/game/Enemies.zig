@@ -209,8 +209,8 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
         self.nests[self.nest_count] = .{ .position = .{ x, Terrain.surface(seed, x, z).height, z } };
         self.nest_count += 1;
     }
-    const practice_x = spawn[0] + 110;
-    const practice_z = spawn[2] + 35;
+    const practice_x = spawn[0] + 42;
+    const practice_z = spawn[2] + 16;
     self.nests[training_nest] = .{ .position = .{ practice_x, Terrain.surface(seed, practice_x, practice_z).height, practice_z }, .alive = false, .health = 0, .spawn_timer = 2 };
     return self;
 }
@@ -325,7 +325,7 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
     const random = self.rng.random();
 
     // Renewable low-threat ground practice patrol, kept separate from the Hive nest quota.
-    if (self.training_enabled and nearAny(players, self.nests[training_nest].position, 160)) {
+    if (self.training_enabled and nearAny(players, self.nests[training_nest].position, 100)) {
         self.training_timer = @max(0, self.training_timer - dt);
         var practice_count: usize = 0;
         for (self.units) |slot| {
@@ -334,9 +334,13 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
         if (practice_count < 3 and self.training_timer == 0) {
             const center = self.nests[training_nest].position;
             const offset: V = if (practice_count == 1) .{ 3, 0, 0 } else if (practice_count == 2) .{ -3, 0, 0 } else .{ 0, 0, 3 };
-            const kind: Kind = if (practice_count == 2) .scalari_stinger else .scalari_scout;
+            const kind: Kind = switch (practice_count) {
+                0 => .scalari_miner,
+                1 => .scalari_scout,
+                else => .scalari_stinger,
+            };
             _ = self.spawnAt(kind, training_nest, R.add(center, offset), 1);
-            self.training_timer = 16;
+            self.training_timer = 10;
         }
     }
 

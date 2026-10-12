@@ -1244,10 +1244,36 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (hands and self.target == .none) {
         const f = aim.forward();
         if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |t| self.target = t;
-        if (self.target == .none) {
-            if (self.garage.nearby(self.player.feet, 5.0)) |car| self.target = .{ .car = car };
-        }
     }
+    if (!hands) {
+        const f = aim.forward();
+        if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |vehicle| switch (vehicle) {
+            .car, .jet => switch (self.target) {
+                .none, .prop, .structure, .bridge => self.target = vehicle,
+                else => {},
+            },
+            else => {},
+        };
+    }
+    // A nearby car remains a reliable contextual target when the aim ray lands on terrain or
+    // scenery. Preserve closer semantic targets such as a stall, device, jet or character.
+    if (self.garage.nearby(self.player.feet, 6.5)) |car| switch (self.target) {
+        .none, .prop, .structure, .bridge => self.target = .{ .car = car },
+        else => {},
+    };
+    // Vehicle boarding is contextual rather than a Hands-tool action: the left face button
+    // should still work after selecting a weapon or build tool.
+    if (primary) switch (self.target) {
+        .car => |car| {
+            Frontier.board(self, car, camera);
+            primary = false;
+        },
+        .jet => {
+            Frontier.boardJet(self, camera);
+            primary = false;
+        },
+        else => {},
+    };
     if (actions.channel_down or actions.channel_up) Build.adjustChannel(self, if (actions.channel_up) 1 else -1);
     switch (self.tools.tool) {
         .hands => {

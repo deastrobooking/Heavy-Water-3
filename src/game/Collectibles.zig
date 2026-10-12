@@ -25,7 +25,8 @@ pub const kind_count = enum_compat.fields(Kind).len;
 pub const tuning = .{
     .max_items = 128,
     .max_drops = 32,
-    .pickup_radius = 1.6,
+    .pickup_radius = 3.5,
+    .pickup_height = 3.5,
     .drop_lifetime = 90.0,
     .lumen_per_plaza = 3,
     .lumen_per_road = 1,
@@ -191,7 +192,7 @@ pub fn collect(self: *Collectibles, picked: *Picked, players: []const V, dt: f32
 fn near(feet: V, item: V) bool {
     // From the feet to chest height, so a jump or a step up still picks it up.
     const d = R.sub(item, R.add(feet, .{ 0, 0.9, 0 }));
-    return d[0] * d[0] + d[2] * d[2] < radius * radius and @abs(d[1]) < 1.8;
+    return d[0] * d[0] + d[2] * d[2] < radius * radius and @abs(d[1]) < tuning.pickup_height;
 }
 
 /// Uncollected world pickups of `kind` (for the HUD and tests).

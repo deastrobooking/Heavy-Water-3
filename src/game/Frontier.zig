@@ -223,13 +223,22 @@ pub fn freePet(sb: *Sandbox, p: usize, species: Pets.Species) void {
         return;
     }
     if (!sb.kits[p].freePet(species)) return;
+    const kit = &sb.kits[p];
+    const capture_xp: u32 = 100;
+    const pet_xp: u32 = 60;
+    kit.wallet.scrap +|= 15;
+    kit.wallet.parts +|= 2;
+    kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= 2;
+    kit.pet_xp[@intFromEnum(species)] +|= pet_xp;
+    const leveled = kit.awardCombatXP(capture_xp);
     const spot = sb.pets.spots[@intFromEnum(species)];
-    sb.pets.summon(p, species, spot.position, sb.kits[p].petLevel(species));
+    sb.pets.summon(p, species, spot.position, kit.petLevel(species));
     sb.pets.cheer(p);
     const i = Pets.info(species);
     burst(sb, R.add(spot.position, .{ 0, 1, 0 }), 2.5, i.glow);
     sb.cue(.vault, spot.position);
-    sb.say("P{d}: collar broken! {s} the {s} joins you", .{ p + 1, i.name, i.kind });
+    sb.say("P{d}: {s} captured! +{d} XP, +15 scrap, +2 parts, +2 lumen; {s} starts at level {d}", .{ p + 1, i.name, capture_xp, i.name, kit.petLevel(species) });
+    if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ p + 1, kit.combatLevel() });
     sb.progress.setFlag("freed_pet");
 }
 
@@ -675,6 +684,24 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 .trooper => 65,
                 .sentinel, .bulwark => 100,
             };
+            const scrap_reward: u32 = if (!scalari) 0 else switch (u.kind) {
+                .scalari_scout => 3,
+                .scalari_stinger => 6,
+                .scalari_titan => 40,
+                .scalari_miner => 2,
+                .scalari_hybrid => 8,
+                else => 0,
+            };
+            const parts_reward: u32 = if (!scalari) 0 else switch (u.kind) {
+                .scalari_scout => 1,
+                .scalari_stinger => 2,
+                .scalari_titan => 8,
+                .scalari_miner => 2,
+                .scalari_hybrid => 2,
+                else => 0,
+            };
+            const alloy_reward: u32 = if (scalari) 0 else if (u.kind == .sentinel or u.kind == .bulwark) 3 else 1;
+            const lumen_reward: u32 = if (!scalari and random.float(f32) < 0.35) 1 else 0;
             var winner: ?usize = null;
             var winner_distance = std.math.inf(f32);
             for (0..Sandbox.max_players) |p| if (sb.present(p)) {
@@ -688,38 +715,20 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             if (winner) |player_index| {
                 const kit = &sb.kits[player_index];
                 const leveled = kit.awardCombatXP(xp);
-                if (scalari) kit.wallet.scrap +|= switch (u.kind) {
-                    .scalari_scout => 3,
-                    .scalari_stinger => 6,
-                    .scalari_titan => 40,
-                    .scalari_miner => 2,
-                    .scalari_hybrid => 8,
-                    else => 0,
-                };
-                if (scalari) kit.wallet.parts +|= switch (u.kind) {
-                    .scalari_scout => 1,
-                    .scalari_stinger => 2,
-                    .scalari_titan => 8,
-                    .scalari_miner => 2,
-                    .scalari_hybrid => 2,
-                    else => 0,
-                };
+                kit.wallet.scrap +|= scrap_reward;
+                kit.wallet.parts +|= parts_reward;
+                kit.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] +|= alloy_reward;
+                kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= lumen_reward;
+                if (scalari) {
+                    sb.say("P{d}: +{d} combat XP, +{d} scrap, +{d} parts", .{ player_index + 1, xp, scrap_reward, parts_reward });
+                } else {
+                    sb.say("P{d}: +{d} combat XP, +{d} Hive alloy, +{d} lumen (auto-collected)", .{ player_index + 1, xp, alloy_reward, lumen_reward });
+                }
                 if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
+            } else {
+                sb.collectibles.drop(.hive_alloy, u.position);
             }
             robotLearns(sb, u.position);
-            if (!scalari) {
-                sb.collectibles.drop(.hive_alloy, u.position);
-                if (u.kind == .sentinel or u.kind == .bulwark) {
-                    sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ 1.2, 0, 0 }));
-                    sb.collectibles.drop(.hive_alloy, R.add(u.position, .{ -1.2, 0, 0.6 }));
-                } else if (random.float(f32) < 0.35) sb.collectibles.drop(.lumen_shard, R.add(u.position, .{ 0.8, 0, 0 }));
-            }
-            // Drops fall to the floor below.
-            for (&sb.collectibles.drops) |*slot| if (slot.*) |*d| {
-                if (d.age == 0) if (sb.physics.castRay(d.position, .{ 0, -1, 0 }, 80, .none)) |floor| {
-                    d.position[1] = floor.point[1] + 0.9;
-                };
-            };
             sb.cue(.boom, u.position);
             if (scalari) {
                 sb.progress.setFlag("scalari_fought");
@@ -870,6 +879,9 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .martial_fire = !armed and sb.tools.tool == .hands and sb.trigger.fire and sb.target == .none,
         .martial_guard = !armed and sb.tools.tool == .hands and (sb.trigger.alt or sb.trigger.saber),
         .energy_kick = sb.player.energy_kick_timer > 0,
+        .saber_down = input.stomp or sb.player.motion == .stomp,
+        .vertical_speed = sb.player.velocity[1],
+        .throw_saber = input.dodge and sb.trigger.saber,
         .saber = armed and sb.trigger.saber,
         .weapon_accent = rgb3(Profile.accent_colors[sb.profile.accent]),
         .direct = sb.trigger.direct,
@@ -894,6 +906,9 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .fire = !frozen and g.fire and g.trading == null,
             .saber = !frozen and g.alt and g.trading == null,
             .energy_kick = g.player.energy_kick_timer > 0,
+            .saber_down = g.input.stomp or g.player.motion == .stomp,
+            .vertical_speed = g.player.velocity[1],
+            .throw_saber = g.input.dodge and g.alt,
             .weapon_accent = rgb3(Profile.accent_colors[g.profile.accent]),
             .direct = true,
             .cycle = !frozen and g.next_weapon and g.trading == null,
@@ -1543,7 +1558,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     };
     // Held weapons, at each armed player's right hand.
     for (&sb.combat.arsenals, 0..) |*arsenal, player| if (arsenal.grip) |g| if (arsenal.active) |kind| if (room(out, n, max_weapon_parts)) {
-        n += heldWeapon(out[n..], c.block, c.gem, c.spike, kind, g, arsenal, t, rgb3(Profile.accent_colors[sb.profileOf(player).accent]));
+        n += heldWeapon(out[n..], c.block, c.gem, c.spike, c.saber_blade, c.saber_core, kind, g, arsenal, t, rgb3(Profile.accent_colors[sb.profileOf(player).accent]));
     };
     // Ranger sentries (a squat body, a head turned toward its target) and arc grenades.
     for (sb.specials.sentries) |slot| if (slot) |s| if (room(out, n, 3)) {
@@ -1559,8 +1574,15 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     };
     // Player shots and effects.
     for (sb.combat.arsenals) |arsenal| for (arsenal.system.projectiles.items) |p| if (p.active) {
-        if (p.kind == .saber_wave) {
-            if (room(out, n, 14)) n += saberWave(out[n..], c.block, p.position, p.velocity, p.visual_tint orelse .{ 0.3, 0.95, 1 }, p.radius, t);
+        if (p.kind == .saber_wave or p.kind == .saber_boomerang) {
+            if (p.kind == .saber_wave and room(out, n, 2)) n += saberWave(out[n..], c.saber_wave, c.saber_wave_core, p.position, p.velocity, p.visual_tint orelse .{ 0.3, 0.95, 1 }, p.radius, t);
+            if (p.kind == .saber_boomerang and room(out, n, 2)) {
+                const tint: [3]f32 = p.visual_tint orelse .{ 0.3, 0.95, 1 };
+                const rotation = facing(p.velocity);
+                out[n] = .{ .mesh = c.saber_blade, .transform = .{ .position = p.position }, .tint = Material.emissive(.{ tint[0], tint[1], tint[2], 1 }, 1.4), .size = .{ 0.9, 0.9, 0.9 }, .rotation = rotation };
+                out[n + 1] = .{ .mesh = c.saber_core, .transform = .{ .position = p.position }, .tint = Material.emissive(.{ 0.95, 0.99, 1, 1 }, 1.8), .size = .{ 0.9, 0.9, 0.9 }, .rotation = rotation };
+                n += 2;
+            }
             continue;
         }
         if (!room(out, n, 1)) continue;
@@ -1569,16 +1591,25 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         out[n] = .{ .mesh = c.block, .transform = .{ .position = p.position }, .tint = Material.emissive(.{ color[0], color[1], color[2], 1 }, 1), .size = .{ s, s, @max(0.6, s * 3) }, .rotation = facing(p.velocity) };
         n += 1;
     };
-    for (sb.combat.effects) |slot| if (slot) |e| if (room(out, n, 1)) {
+    for (sb.combat.effects) |slot| if (slot) |e| {
         const k = 1 - e.age / e.life;
         const tint = Material.emissive(.{ e.color[0], e.color[1], e.color[2], 1 }, k);
+        if ((e.kind == .slash or e.kind == .trail) and room(out, n, 2)) {
+            const scale = @max(0.2, e.size * (1.4 + k));
+            const rotation = facing(e.dir);
+            out[n] = .{ .mesh = c.saber_wave, .transform = .{ .position = e.position }, .tint = Material.emissive(.{ e.color[0], e.color[1], e.color[2], 1 }, 1.2 * k), .size = .{ scale, scale, scale }, .rotation = rotation };
+            out[n + 1] = .{ .mesh = c.saber_wave_core, .transform = .{ .position = e.position }, .tint = Material.emissive(.{ 0.94, 0.98, 1, 1 }, 1.45 * k), .size = .{ scale, scale, scale }, .rotation = rotation };
+            n += 2;
+            continue;
+        }
+        if (!room(out, n, 1)) continue;
         out[n] = switch (e.kind) {
-            .slash => .{ .mesh = c.block, .transform = .{ .position = e.position }, .tint = tint, .size = .{ e.size * 1.6, 0.08, 0.35 }, .rotation = facing(e.dir) },
+            .slash => unreachable,
             .beam => blk: {
                 const length = if (e.length > 0) e.length else 80;
                 break :blk .{ .mesh = c.block, .transform = .{ .position = R.add(e.position, R.scale(e.dir, length / 2)) }, .tint = tint, .size = .{ e.size * 0.4 * k, e.size * 0.4 * k, length }, .rotation = facing(e.dir) };
             },
-            .trail => .{ .mesh = c.block, .transform = .{ .position = e.position }, .tint = tint, .size = .{ e.size, e.size, e.length }, .rotation = facing(e.dir) },
+            .trail => unreachable,
             .burst, .spark, .muzzle => .{ .mesh = c.gem, .transform = .{ .position = e.position }, .tint = tint, .size = @splat(e.size * (1.5 - k * 0.5)) },
         };
         n += 1;
@@ -1655,12 +1686,11 @@ fn rgb3(c: [4]f32) [3]f32 {
     return .{ c[0], c[1], c[2] };
 }
 
-fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
+fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, saber_blade: @import("../asset/Catalog.zig").MeshHandle, saber_core: @import("../asset/Catalog.zig").MeshHandle, kind: Combat.WeaponKind, grip: Combat.Grip, arsenal: *const Combat.Arsenal, t: f32, accent: [3]f32) usize {
     const heat = arsenal.charge();
-    // A broad, segmented plasma greatblade gives the swing a readable curved silhouette at
-    // gameplay distance. Its white-hot spine sits inside the colored blade; segments overlap
-    // slightly so the arc reads as one continuous energized edge while preserving the curve.
+    // One swept mesh makes the energized edge read as a continuous curved blade at distance.
     if (kind == .beam_saber) {
+        for (arsenal.system.projectiles.items) |projectile| if (projectile.active and projectile.kind == .saber_boomerang) return 0;
         const z = R.normalize(grip.dir);
         const side = if (@abs(z[1]) > 0.98) @as(V, .{ 1, 0, 0 }) else R.normalize(R.cross(.{ 0, 1, 0 }, z));
         const up = R.cross(z, side);
@@ -1676,16 +1706,12 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
         write(out, &count, block, grip.base, side, up, z, .{ 0, 0, -0.03 }, .{ 0.12, 0.12, 0.32 }, .{ gunmetal[0], gunmetal[1], gunmetal[2], 1 }, frame);
         write(out, &count, gem_mesh, grip.base, side, up, z, .{ 0, 0, 0.17 }, .{ 0.22, 0.18, 0.16 }, Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 1.1), frame);
         write(out, &count, block, grip.base, side, up, z, .{ 0.12, 0, 0.12 }, .{ 0.42, 0.075, 0.11 }, .{ plate[0], plate[1], plate[2], 1 }, frame);
-        for (0..6) |i| {
-            const f: f32 = @floatFromInt(i);
-            const curve = f * f * 0.032;
-            const along = 0.43 + f * 0.51;
-            const shimmer = 0.88 + 0.12 * @sin(t * 13 + f * 1.7);
-            const taper = 0.19 + 0.13 * @sin(f * std.math.pi / 5);
-            const segment_frame = frame.mul(m.Quat.fromAxisAngle(m.Vec3.unit_y, f * 0.095));
-            write(out, &count, block, grip.base, side, up, z, .{ curve, f * 0.018, along }, .{ taper, 0.105, 0.57 }, Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 0.78 * shimmer), segment_frame);
-            write(out, &count, block, grip.base, side, up, z, .{ curve + 0.045, f * 0.018 + 0.055, along + 0.008 }, .{ taper * 0.31, 0.048, 0.56 }, Material.emissive(.{ 0.86, 0.97, 1, 1 }, 1.35), segment_frame);
-        }
+        const blade_at = R.add(grip.base, R.scale(z, 0.36));
+        const pulse = 0.92 + 0.08 * @sin(t * 12);
+        write(out, &count, saber_blade, blade_at, side, up, z, .{ 0, 0, 0 }, .{ 1, 1, 0.92 }, Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 0.92 * pulse), frame);
+        const normal = frame.rotate(m.Vec3.unit_y);
+        const core_base = R.add(blade_at, .{ normal.x * 0.11, normal.y * 0.11, normal.z * 0.11 });
+        write(out, &count, saber_core, core_base, side, up, z, .{ 0, 0, 0 }, .{ 1, 1, 0.92 }, Material.emissive(.{ 0.92, 0.98, 1, 1 }, 1.5), frame);
         write(out, &count, gem_mesh, grip.base, side, up, z, .{ 0.99, 0.20, 3.49 }, .{ 0.18, 0.16, 0.22 }, Material.emissive(.{ 0.92, 0.99, 1, 1 }, 1.65), frame.mul(m.Quat.fromAxisAngle(m.Vec3.unit_y, 0.55)));
         return count;
     }
@@ -1793,23 +1819,13 @@ fn energyNet(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandl
     return count;
 }
 
-/// A curved energy slash built from short overlapping facets: the outer ribbon follows the
-/// selected suit accent and a narrower pale edge gives it a bright anime-style cutting crest.
-fn saberWave(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, at: V, velocity: V, accent: [3]f32, radius: f32, t: f32) usize {
-    const forward = R.normalize(velocity);
-    const side = R.normalize(R.cross(.{ 0, 1, 0 }, forward));
+/// Two layered meshes create a smooth accent corona and white-hot inner edge.
+fn saberWave(out: []World.Prop, outer: @import("../asset/Catalog.zig").MeshHandle, core: @import("../asset/Catalog.zig").MeshHandle, at: V, velocity: V, accent: [3]f32, radius: f32, t: f32) usize {
     const rotation = facing(velocity);
-    const span = @max(1.8, radius * 1.65);
-    const thick = @max(0.08, radius * 0.12);
-    const bob = @sin(t * 16) * 0.06;
-    for (0..7) |i| {
-        const u = @as(f32, @floatFromInt(i)) / 6 * 2 - 1;
-        const pos = R.add(at, R.add(R.scale(side, u * span), .{ 0, 0.15 + (1 - u * u) * radius * 0.52 + bob, (1 - u * u) * 0.28 }));
-        const width = span / 3.0 + 0.08;
-        out[i] = .{ .mesh = block, .transform = .{ .position = pos }, .tint = Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 1.65), .size = .{ width, thick, 0.12 }, .rotation = rotation };
-        out[i + 7] = .{ .mesh = block, .transform = .{ .position = R.add(pos, .{ 0, 0.045, 0.015 }) }, .tint = Material.emissive(.{ 0.92, 0.98, 1, 1 }, 1.9), .size = .{ width * 0.57, thick * 0.34, 0.13 }, .rotation = rotation };
-    }
-    return 14;
+    const scale = @max(0.6, radius * (1.15 + 0.035 * @sin(t * 16)));
+    out[0] = .{ .mesh = outer, .transform = .{ .position = at }, .tint = Material.emissive(.{ accent[0], accent[1], accent[2], 1 }, 1.65), .size = .{ scale, scale, scale }, .rotation = rotation };
+    out[1] = .{ .mesh = core, .transform = .{ .position = at }, .tint = Material.emissive(.{ 0.92, 0.98, 1, 1 }, 1.9), .size = .{ scale, scale, scale }, .rotation = rotation };
+    return 2;
 }
 
 /// The Starbowl: a floating slab with a lit ring, low walls, four corner pylons with beacons,

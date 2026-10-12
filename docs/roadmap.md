@@ -146,15 +146,15 @@ Next:
 
 ## Frontier wildlife, Scalari machines and a robot companion — first slice started
 
-The wilds gain a catch-and-companion loop alongside the existing starter animal pet. The initial implementation reuses four existing animal species at seeded Frontier encounters: a close ranger draws their attention, two energy-net hits leave the animal weakened and snared, and interaction catches it alive. Scalari machine enemies drop personal salvage components; a fabricator uses them to build a second, robotic helper that fights beside the animal companion and levels from combat. Health, capture state, and helper rewards need a real playthrough and tuning before this slice is complete.
+The wilds gain a catch-and-companion loop alongside the existing starter animal pet. Four existing animal species now appear 48–80 m from spawn, flee an approaching ranger, and can be snared with two energy-net hits before interaction catches them alive. Fresh captures separately grant 100 combat XP, 60 pet XP, 15 scrap, two parts and two lumen shards. A low-threat Scalari prospector, scout and stinger patrol arrives close to spawn. Enemy takedowns auto-credit combat XP and personal salvage to the nearest active player; nearby ground loot also auto-collects within a forgiving 3.5 m radius. A fabricator uses Scalari salvage components to build a second, robotic helper that fights beside the animal companion and levels from combat. Health, capture state, and helper rewards still need an in-game playthrough and tuning before this slice is complete.
 
 The Scalari are synthetic AI overlords in transforming combat frames. They created the Hive's insect castes as slave workers and warriors. Combat should mix distinct machine drone roles with engineered insects and machine-insect hybrids, while Hive relay spires provide the local command and reinforcement source. Keep species, drone chassis, loot, capture rules, and companion behavior in small data-driven game modules rather than adding per-creature special cases to `Sandbox`.
 
 First playable slice, contained in the existing Frontier:
-1. **Started:** energy-net weakening/capture gates and close-range animal retaliation are in `game/Pets.zig` and `game/Frontier.zig`. Still validate escaping, co-op ownership, and the real encounter flow.
+1. **Started:** energy-net weakening/capture gates, fleeing wildlife and separate capture rewards are in `game/Pets.zig` and `game/Frontier.zig`. Still validate net aim, escaping, co-op ownership, and the real encounter flow.
 2. **Started:** existing Scalari scout, miner, stinger, titan roles now have a hybrid melee class with personal parts and XP. Add broader drone/insect behaviors and tune field encounters.
 3. **Started:** a fabricator recipe, following/combat behavior, health, combat XP levels, and per-player Kit/save fields exist for one field droid. Add a player-facing upgrade interface and review balance.
-4. **Open:** run and inspect a Frontier smoke route that catches an animal, loots Scalari parts, builds the droid, and uses both helpers; add migration and round-trip coverage.
+4. **Open:** run and inspect a Frontier smoke route that catches an animal, earns automatic takedown salvage, builds the droid, and uses both helpers; add migration and round-trip coverage.
 
 Defer a broad biome roster, multiple robot chassis, robot programming, and colony-scale production until this first field loop is playable and tuned.
 

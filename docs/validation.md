@@ -2,6 +2,14 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Nearby loot, visible wild encounters and capture rewards — 2026-10-11
+
+- Ground pickups now auto-collect within 3.5 m horizontally and 3.5 m vertically. Enemy takedowns immediately credit the nearest present player's Kit with XP and materials, so ranged kills no longer leave required salvage behind; Scalari pay scrap and parts, Hive units pay alloy and sometimes lumen. Hive drops remain for the no-player case.
+- Four net-capturable animals now spawn 48–80 m from the starting point, within the near-body rendering range, and flee over terrain when approached. The practice patrol starts about 45 m from spawn with a low-damage prospector droid, followed by scout and stinger roles.
+- A fresh pet capture separately grants 100 combat XP, 60 pet XP, 15 scrap, two parts and two lumen shards to that player's kit.
+- **Checked:** `git diff --check`, `python3 tools/zig.py build check`, and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed with the pinned macOS compiler; the optimized executable was refreshed.
+- **Not checked:** headless tests, Metal smoke/capture, hands-on play (including net aiming, capture interaction and reward display), benchmarks, Zig 0.17, Linux/Windows compilation or runtime. Prior uncommitted work in the tree is still present and was not altered as part of this feature.
+
 ## Running, dodge, dash and jump gestures — 2026-10-11
 
 - Ground dodge now starts a short low roll even from a standstill; the previous minimum-speed gate made it appear unresponsive. An air dodge gives a brief evade, and a second tap upgrades it to the powered dash. The double-tap window is 0.42 seconds, and paired taps can chain up to four boosts. Sprint plus forward and jump launches the extended long jump; backward movement plus jump launches the backflip. Added separate sprint, roll, dash, long-jump and backflip poses, including timed rotation through the backflip.
@@ -89,9 +97,16 @@ Platform gate results for the same commit are in [engine alignment](plans/alignm
 - Updated the portable preset example to match the real factory mapping and documented the button roles.
 - `python3 tools/zig.py build check` passed on the default Zig/Mach channel. Headless tests, smoke, other compiler channels and cross-compiles were not run.
 
+## Contextual vehicle boarding and smooth saber moves — 2026-10-11
+
+- Nearby parked vehicles now remain interact targets when the aim ray lands on terrain, generic scenery or a bridge. The forgiving proximity radius is 6.5 m, boarding works from any selected tool, and the target prompt names X as the left face button. Semantic nearby targets such as a person, kiosk, device or jet keep priority.
+- Replaced segmented held-blade pieces and block-built saber waves with generated curved blade, inner-spine and 64-segment crescent meshes. The third quick cut fires a smaller weak wave; the held charge remains the stronger, longer-reaching wave. Dash attacks slash through, ascending attacks rise, falling/stomp attacks cut down, neutral air attacks spin, and attack+dodge throws a piercing saber that returns to its owner.
+- **Checked:** `python3 tools/zig.py build check` passed on the pinned default compiler. A ReleaseSafe Metal API Validation capture (`-Dshowcase=37 -Dcapture-frame=120`) completed twice on Apple M3 Pro with no reported validation errors; the smooth crescent shape and updated blade were inspected in `zig-out/saber-mesh-review.png`.
+- **Not checked:** headless tests, full smoke, benchmarks, controller-in-hand boarding, move timing/target damage during gameplay, Zig 0.17, cross-compiles or Linux/Windows runtime. Compile-only vehicle reach and combat behavior still need direct input verification.
+
 ## Vehicle boarding prompt and keyboard interaction — 2026-10-11
 
-- Parked garage cars now remain interactable within five meters if the aim ray misses their chassis or is occluded by terrain. This also keeps the boarding prompt visible while standing beside a car.
+- Parked garage cars remain interactable within 6.5 meters if the aim ray misses their chassis or is occluded by terrain. This also keeps the boarding prompt visible while standing beside a car.
 - The existing `I` investigate key now performs contextual interaction; it still toggles the inspection panel when aimed at a structure. Vehicle prompts list `I`, controller `X`, and mouse click.
 - The default Zig/Mach `build check` and installed `build` passed. `git diff --check` passed. Headless tests, smoke, Metal visual review, and other compiler/platform checks were not run.
 

@@ -40,7 +40,7 @@ The campaign expansion spans the Arbor Frontier, Hive/Scalari Homeworld, Gaia an
 | V | Toggle walking and free-flight modes |
 | F2 / F4 | Change camera view / customize your ranger |
 | 1 / 2 / 3 / 4 / 5 | Hands / build / wire / bridge / weapon tools |
-| Weapon tool | Left click or trackpad click fires; hold to charge or draw. The first click also captures mouse look and fires immediately. Right button is the alternate; Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), hold after a cut to charge a wave, right button guards (parries bolts at first). Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
+| Weapon tool | Left click or trackpad click fires; hold to charge or draw. The first click also captures mouse look and fires immediately. Right button is the alternate; Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), the third quick cut fires a weaker crescent, and hold after a cut to charge the stronger wave. Dash + attack cuts through; attack while rising, falling/stomping, or neutral in air gives an up, down, or spin slash. Attack + dodge throws the returning blade. Right button guards. Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
 | Z / C / H | Class specials. Ranger: arc grenade, sentry turret, overshield. Synthetic: phase dash, kinetic slam, lumen lance |
 | Left click the starter Skimmer, hands | Board it. W / S drive, A / D turn, Space or E climb, Q descend, Shift boost, F to leave |
 | Left click the fabricator kiosk | Fabricate cars, suits, armor, weapons and the Kestrel fighter from pickups |
@@ -77,12 +77,13 @@ Up to four players share one window in split screen. On macOS, controllers expos
 | Left / right stick | Move / look |
 | A | Jump |
 | B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
-| X | One contextual interact button: meet/recruit a nearby hero, talk or trade, board/exit vehicles, operate machine buttons, salvage relics, or inspect an aimed machine structure; hold to hang and mantle. A remains jump. |
+| X (left face button) | One contextual interact button: meet/recruit a nearby hero, talk or trade, board/exit nearby vehicles from any selected tool, operate machine buttons, salvage relics, or inspect an aimed machine structure; hold to hang and mantle. A remains jump. |
 | D-pad | In gameplay, left / right switch owned weapons for P1 and guests; up / down trigger specials 1 and 2 (up with RB held: special 3). P1's menus and panels use the D-pad for navigation; a market stall uses up/down for rows. |
 | Movement gestures | Hold W + Shift and press Space for a long jump; hold S and press Space while moving for a backflip. Tap Left Ctrl for a ground roll or short air evade; double tap within 0.42 seconds for a powered dash, then repeat to chain up to four boosts. Controller: hold forward + LT and press A for a long jump; hold back and press A while moving for a backflip; tap B to dodge and double tap B to dash. |
 | In any menu or panel (P1's controller) | D-pad or left stick moves (hold to repeat), A or X chooses, B goes back, right stick scrolls panels taller than the screen |
 | Right trigger | Fire the selected energy weapon; starts with level 1 rapid shot (machine gun) |
-| RB | Quick-draw the neon-purple beam saber with blue electrical pulses; tap for a cut, hold then release for a charged wave |
+| RB | Quick-draw the beam saber; tap for a cut, three quick cuts fire a weaker crescent, hold then release for a charged wave |
+| RB + B | Throw the saber; it pierces enemies and returns |
 | Menu (P1's controller) | On the title, start (CONTINUE or NEW GAME, whichever is highlighted); in the creator, finish; in play, open or close the pause menu. P1 can start and play the whole game from a controller |
 | Right stick click (R3) | First- / third-person view |
 | LB / Y | Grapple / cycle traversal kit |

@@ -16,6 +16,7 @@ pub const ProjectileKind = enum(u8) {
     heavy_bolt,
     bazooka_orb,
     saber_wave,
+    saber_boomerang,
     energy_net,
 };
 
@@ -32,6 +33,9 @@ pub const Projectile = struct {
     max_lifetime: f32 = 3.0,
     radius: f32 = 0.2,
     homing_target: ?V = null,
+    return_origin: ?V = null,
+    return_to: ?V = null,
+    returning: bool = false,
     homing_turn_rate: f32 = 12.0,
     homing_speed: f32 = 38.0,
     owner_is_player: bool = true,
@@ -130,6 +134,20 @@ pub const ProjectilePool = struct {
                 }
             }
 
+            if (p.kind == .saber_boomerang) {
+                const target = p.return_to orelse p.return_origin orelse p.position;
+                if (!p.returning and p.return_origin != null and R.length(R.sub(p.position, p.return_origin.?)) >= 13) p.returning = true;
+                if (p.returning) {
+                    const delta = R.sub(target, p.position);
+                    const distance = R.length(delta);
+                    if (distance <= @max(1.25, R.length(p.velocity) * dt)) {
+                        p.active = false;
+                        self.active_count -|= 1;
+                    } else p.position = R.add(p.position, R.scale(R.normalize(delta), R.length(p.velocity) * dt));
+                    continue;
+                }
+            }
+
             p.velocity[1] -= p.gravity * dt;
 
             // Physics raycast along trajectory
@@ -138,6 +156,13 @@ pub const ProjectilePool = struct {
             const dir = R.normalize(step_vec);
 
             if (physics.castRay(p.position, dir, dist, .none)) |hit| {
+                if (p.kind == .saber_boomerang) {
+                    p.position = hit.point;
+                    p.returning = true;
+                    const target = p.return_to orelse p.return_origin orelse p.position;
+                    p.velocity = R.scale(R.normalize(R.sub(target, p.position)), @max(39, R.length(p.velocity)));
+                    continue;
+                }
                 if (hit_count < hits_out.len) {
                     hits_out[hit_count] = .{
                         .projectile_index = i,

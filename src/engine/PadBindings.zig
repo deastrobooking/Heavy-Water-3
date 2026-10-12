@@ -68,7 +68,7 @@ pub fn actionName(action: Action) []const u8 {
     return switch (action) {
         .jump => "JUMP",
         .dodge => "DODGE / DOUBLE TAP DASH",
-        .interact => "INTERACT / DISCOVER / MANTLE",
+        .interact => "LEFT FACE / X: INTERACT / BOARD",
         .grapple => "GRAPPLE",
         .traversal => "CYCLE TRAVERSAL",
         .view => "CAMERA VIEW",
