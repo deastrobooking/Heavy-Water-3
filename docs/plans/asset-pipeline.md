@@ -105,4 +105,4 @@ Each source file `X` gets a sidecar `X.meta` next to it:
 - **Generation bumps:** code that caches handles across frames must re-resolve. Mitigation: the generation check already exists, so stale use fails loudly in tests.
 - **Concurrent swaps:** hot reload while the catalog is read on two threads. Mitigation: swap only under the render mutex, between snapshots, as `App.publish` already does.
 
-**Out of scope:** a full graphical editor, texture compression, and audio import. The modifier document and preview commands are the first mesh authoring interface; a native editor UI follows once imported models have a runtime path.
+**Out of scope:** a full graphical editor, texture compression, and audio import. The modifier document and preview commands are the first mesh authoring interface; a native editor UI follows once imported models have a runtime path. The staged plan for that editor, with a review of the current modifier commands, is in [mesh-editor.md](mesh-editor.md).
