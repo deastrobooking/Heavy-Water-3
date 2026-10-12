@@ -29,7 +29,7 @@ const Modifiers = @import("asset/Modifiers.zig");
 ///   asset-compiler compile-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.hwmesh> [bind|run]
 ///       compile a source-hash-validated, modifier-baked static model for the game
 ///   asset-compiler modifier-list <modifiers.json>
-///       list editable connected mesh islands by stable source vertex ID
+///       list editable connected mesh islands by stable source vertex ID for offline authoring
 ///   asset-compiler modifier-edit <input.json> <output.json> part <id> <property> <values...>
 ///       author one source-linked label/surface/color/scale/offset edit without replacing input
 ///       or: modifier-edit <input.json> <output.json> palette <skin|eyes|armor|energy> <r> <g> <b>

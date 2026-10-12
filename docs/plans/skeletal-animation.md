@@ -6,13 +6,15 @@
 
 - **Characters:** `character/Ranger.zig` builds weighted humanoid geometry, applies profile clothing and armor, and CPU-skins it from a fixed humanoid skeleton. Player, keeper, pedestrian and Hive trooper rendering already uses this path.
 - **Procedural poses:** traversal uses walk phase and motion state; combat maps aim, saber swing, guard, cast and throw actions onto joints. Troopers now add tactical cover, timed melee strike and grenade-throw poses on the same rig.
-- **Importer:** the glTF importer rejects skins and animations.
+- **Importer:** source tracing reports skin joints and parent links. A CPU-only preview path evaluates bind pose or compatible ranger-run rotations from glTF `JOINTS_0`, `WEIGHTS_0`, and inverse binds, but the normal runtime importer still rejects skinned nodes and does not import animation channels. `HWMS` contains no joints, weights, or skeleton.
 - **Renderer:** characters are skinned on the GPU. `render/skin.wgsl` is a vertex stage that blends per-joint dual quaternions from a palette uniform; `render/Characters.zig` uploads each character's bind-pose mesh once and writes its palette every frame. `-Dcpu-skinning` keeps the old CPU path.
-- **Still needed:** glTF skin/animation import (`HWAN`), named attachments, and per-bone combat hitboxes.
+- **Still needed:** runtime glTF skin import (`HWSK`), animation channel import (`HWAN`), compatible-rig retargeting, named attachments, and per-bone combat hitboxes.
 
 ## Progress
 
-The first gameplay slice reuses the established skeleton and renderer: a wounded trooper crouches behind cover, melee timing drives a shoulder/elbow/chest/hip strike, and the arm throw pose follows grenade launch progress. An allocation-free rotation-track sampler drives keyed walk, run and climb cycles; a per-character fixed-step controller maps traversal states and crossfades between clip groups. Headless tests verify action poses, key interpolation, loop seams, blend weights, traversal mapping and transitions. The `HWAN` format and glTF animation import are still pending.
+The first gameplay slice reuses the established skeleton and renderer: a wounded trooper crouches behind cover, melee timing drives a shoulder/elbow/chest/hip strike, and the arm throw pose follows grenade launch progress. An allocation-free rotation-track sampler drives keyed walk, run and climb cycles; a per-character fixed-step controller maps traversal states and crossfades between clip groups. Headless tests verify action poses, key interpolation, loop seams, blend weights, traversal mapping and transitions. GLB trace and offline CPU skin previews exist, but the runtime `HWSK`/`HWAN` asset path is still pending.
+
+The bundled Test+Chroma Captain source has 65 joints. Preserve its complete skeleton and weights; initially route rigs beyond the GPU palette limit through CPU skinning. Do not truncate influences or silently drop joints just to fit the 64-joint GPU palette.
 
 **GPU skinning (slice 2), 2026-10-10:** `Ranger.skinnedVertices` builds the bind-pose mesh with joints and weights (colours baked in), and `Ranger.posePalette` writes the pose as 64 dual quaternions (2 KiB) into a 32-slot palette buffer, bound per character with a dynamic offset. The shader blends exactly as the CPU `Pose.skinDualQuats` path does (antipodality against the first joint, normalized by the real part). A test skins a human, a lion, a spider and an armored eagle in run and swing poses through a WGSL mirror and matches the CPU to under 1e-4 m. Characters with more than 64 joints fall back to the CPU path. Frontier benchmark skinning p99 dropped from 2.05 ms to 0.15 ms.
 
@@ -20,7 +22,7 @@ The first gameplay slice reuses the established skeleton and renderer: a wounded
 
 ### Assets (through phase 13)
 
-- **Skinned model, `HWSK` v1:** vertices add `joints: [4]u8` and `weights: [4]u8` (unorm), so 64 joints at most per draw, which is plenty for humanoids. The skeleton stores joint names, parent indices (parent before child), the rest pose (TRS), and inverse bind matrices. Named sockets are a joint plus an offset transform.
+- **Skinned model, `HWSK` v1:** vertices add `joints: [4]u16` and `weights: [4]u8` (unorm), preserving imported joint indices without assuming the draw palette size. The skeleton stores joint names, parent indices (parent before child), the rest pose (TRS), and inverse bind matrices. Named sockets are a joint plus an offset transform. The current GPU path handles 64 joints; larger rigs use CPU skinning until palette paging is implemented.
 - **Animation clip, `HWAN` v1:** a skeleton GUID; per-joint translation, rotation, and scale tracks (STEP or LINEAR, with CUBICSPLINE resampled at import); duration; loop flag; and events (footstep, hit window) for gameplay and audio.
 - **Importer:** reads glTF `skins`, `JOINTS_0` and `WEIGHTS_0` (u8 or u16 joints; float or normalized weights renormalized to 8 bits), inverse bind matrices, and `animations`. Its import settings are root scale, joint whitelist, resample rate, and clip splitting by name or frame range.
 
@@ -45,14 +47,14 @@ A rigged ranger is generated in Zig, not downloaded: the block avatar's proporti
 
 ## Slices
 
-1. **Import and pose math.** The glTF skin and animation importer, the `HWSK` and `HWAN` formats, sampling, and the global and skin matrix pipeline, all tested headlessly.
+1. **Import and pose math.** The glTF skin and animation importer, the `HWSK` and `HWAN` formats, sampling, and the global and skin matrix pipeline. Preserve complete rigs including Captain's 65-joint source; map compatible imported names onto gameplay clips and validate them on the CPU fallback before optimizing GPU palettes.
 2. **GPU skinning — done.** The skinned pipeline, palette uniforms, the generated ranger replacing the block avatar for players, and Metal validation in smoke.
 3. **Controller and attachments.** The Motion → clip mapping with crossfades and the locomotion blend, sockets and attachments (carried crate, tools), and hitbox capsules for combat.
 4. **Crowds.** Pedestrians and keepers use skinned characters, with skinning for distant or culled characters skipped.
 
 ## Acceptance
 
-- **Import:** the fixture glTF imports, and joint hierarchy, inverse binds, and weights round-trip exactly. Weights sum to 1 ± 1/255. Malformed skins (cycles, more than 64 joints, bad weights) are rejected.
+- **Import:** the fixture glTF imports, and joint hierarchy, inverse binds, and weights round-trip exactly. Weights sum to 1 ± 1/255. Malformed skins (cycles, more than the importer cap of 1024 joints, invalid joint indices, or bad weights) are rejected; valid rigs over the GPU palette limit remain intact on the CPU path.
 - **Pose math:** sampling at keys returns exact keys. Interpolation matches reference values. The rest pose times the inverse bind gives identity skin matrices, and a two-bone chain test checks global composition.
 - **Gameplay:** a headless Sandbox test drives each traversal state and checks the selected clip and crossfade weights. A carried crate stays at the hand socket within 1 cm while walking, and hitbox capsules follow the arm through a swing.
 - **Rendering:** smoke with Metal validation shows animated characters. Render CPU with four players and twenty animated characters stays inside the existing budget, measured with a new benchmark route.

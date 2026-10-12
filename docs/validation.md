@@ -1110,8 +1110,16 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** `python3 tools/zig.py build check` and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed; the latter rebuilt the installed executable. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=34 -Dcapture-frame=120` captured the Kestrel dogfight HUD on Apple M3 Pro / Metal; the image was inspected and Metal API validation reported no errors. `git diff --check` passed.
 - **Not checked:** headless tests, hands-on keyboard/controller flight, barrel-roll animation/evade timing, boost/brake feel, Zig 0.17, Linux/Windows compilation or runtime, and benchmarks.
 
-## Standalone mesh modifier authoring — 2026-10-12
+## CLI mesh modifier authoring — 2026-10-12
 
 - Expanded the source-hash-linked Captain modifier document into a usable headless authoring flow. `modifier-list` exposes stable island IDs and spatial context; `modifier-edit` writes one validated change to a separate document and supports part labels, material roles, explicit colors, per-island scale/offset, and shared skin/eye/armor/energy palettes. Invalid values are rejected before output; exact same-path input/output is rejected.
 - **Checked:** `python3 tools/zig.py build check`, `python3 tools/zig.py build install`, and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed on the default compiler; ReleaseFast reinstalled the game. The generated Captain is still 74 islands / 5,688 vertices. Manually listed all IDs, edited label 912, changed the armor palette and scaled that pauldron in separate output documents, then rendered `zig-out/Captain.custom.png`; image inspected successfully. An out-of-range scale and an input-equals-output edit were both rejected. `git diff --check` passed.
-- **Not checked:** headless tests, the graphical Mach viewport, click/face selection, undo/redo, editing a live rig or textures, 0.17, Linux/Windows, or an in-game custom modifier install. This is the standalone document-editing foundation, not the full visual editor yet.
+- **Not checked:** headless tests, a graphical Mach viewport (there is no standalone GUI target yet), click/face selection, undo/redo, editing a live rig or textures, 0.17, Linux/Windows, or an in-game custom modifier install. This is command-line sidecar authoring only.
+
+## Mesh editor, runtime rigs, and animation capture status — 2026-10-12
+
+- Corrected the tool status: the previous modifier work added offline CLI commands, not the standalone graphical editor. No `mesh-editor` Mach target or visible editor window exists yet. [The editor plan](plans/mesh-editor.md) defines the separate app and its first-slice acceptance.
+- Corrected the rig status: the GLB trace and CPU bind/run preview understand skin data for review; `HWMS` remains static and runtime gameplay still uses the game's procedural rig. Captain's source has 65 joints, one more than the current GPU palette; preserve it and start with CPU skinning for imported rigs. [Skeletal animation](plans/skeletal-animation.md) records the integration boundary.
+- Added a staged design for user animation capture: begin from repeatable local video, turn pose tracks into editable canonical motion, then add local webcam capture behind a platform boundary. The repository currently has no webcam/video input. [Animation capture](plans/animation-capture.md) records privacy, quality limits, and dependencies.
+- **Checked:** documentation/source status review only; no code or platform build changed in this clarification.
+- **Not checked:** any visual editor, runtime imported rig, camera capture, pose estimator, or video-to-animation prototype.
