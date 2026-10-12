@@ -562,6 +562,29 @@ pub fn replaceModel(self: *Catalog, allocator: std.mem.Allocator, guid: Guid, mo
     return next;
 }
 
+/// Replaces a transient tool-owned mesh entry and advances its generation so the renderer
+/// uploads the replacement. Unlike `replaceModel`, this does not require a registry GUID or
+/// rewrite any named content references. Call while holding the render mutex.
+pub fn replaceHandle(self: *Catalog, allocator: std.mem.Allocator, handle: *MeshHandle, model: Model) !void {
+    errdefer model.deinit(allocator);
+    const entry = self.meshes.get(handle.*) orelse return error.UnknownHandle;
+    if (!entry.ready) return error.AssetNotReady;
+    if (handle.generation == std.math.maxInt(u16)) return error.GenerationExhausted;
+
+    var staged = self.materials;
+    for (entry.materials[0..entry.model.submeshes.len]) |material_handle| _ = staged.remove(material_handle);
+    var materials: [Model.max_submeshes]MaterialHandle = @splat(.none);
+    for (model.submeshes, 0..) |submesh, i| materials[i] = try staged.add(model.materials[submesh.material]);
+
+    const old_model = entry.model;
+    const next: MeshHandle = .{ .index = handle.index, .generation = handle.generation + 1 };
+    self.materials = staged;
+    entry.* = .{ .model = model, .materials = materials };
+    self.meshes.generations[handle.index] = next.generation;
+    handle.* = next;
+    old_model.deinit(allocator);
+}
+
 test "model reload bumps generation and rebinds GUID and content without consuming pool slots" {
     const a = std.testing.allocator;
     var catalog: Catalog = undefined;

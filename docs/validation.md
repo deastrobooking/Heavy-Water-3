@@ -1118,8 +1118,15 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 
 ## Mesh editor, runtime rigs, and animation capture status — 2026-10-12
 
-- Corrected the tool status: the previous modifier work added offline CLI commands, not the standalone graphical editor. No `mesh-editor` Mach target or visible editor window exists yet. [The editor plan](plans/mesh-editor.md) defines the separate app and its first-slice acceptance.
+- At that earlier review point, the modifier work had added offline CLI commands but no standalone editor. The next section records the editor implementation added afterward. [The editor plan](plans/mesh-editor.md) tracks remaining work.
 - Corrected the rig status: the GLB trace and CPU bind/run preview understand skin data for review; `HWMS` remains static and runtime gameplay still uses the game's procedural rig. Captain's source has 65 joints, one more than the current GPU palette; preserve it and start with CPU skinning for imported rigs. [Skeletal animation](plans/skeletal-animation.md) records the integration boundary.
 - Added a staged design for user animation capture: begin from repeatable local video, turn pose tracks into editable canonical motion, then add local webcam capture behind a platform boundary. The repository currently has no webcam/video input. [Animation capture](plans/animation-capture.md) records privacy, quality limits, and dependencies.
 - **Checked:** documentation/source status review only; no code or platform build changed in this clarification.
 - **Not checked:** any visual editor, runtime imported rig, camera capture, pose estimator, or video-to-animation prototype.
+
+## Standalone mesh editor first UI — 2026-10-12
+
+- Added `src/MeshEditor.zig` as an independent Mach app and `mesh-editor` / `mesh-editor-build` build steps. It loads the source Captain GLB plus its sidecar without starting gameplay simulation, lists all 74 disconnected islands, and supports list/click selection, rename, component scale/color, sidecar save, orbit/zoom and bind versus compatible procedural-run pose preview.
+- Added `Catalog.replaceHandle` for transactional preview mesh replacement with a generation bump, so edited geometry uploads as a new mesh while the renderer rejects stale handles.
+- **Checked:** `python3 tools/zig.py build mesh-editor-build`, `python3 tools/zig.py build check`, `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build mesh-editor-build`, and `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build mesh-editor -Dcapture-frame=3` passed; captured frame 3 at 2880×1800 and inspected it. The front-view Captain mesh and editor panels were visible, and Metal emitted no validation errors. The editor opens the source GLB and uses `Modifiers.apply` against the source-linked sidecar for its viewport. `git diff --check` passed.
+- **Not checked:** interactive rename/color/scale behavior during a live session, regular-game `build check`, headless tests, runtime imported skeletal rendering, glTF animation-channel import, retargeted authored clips, webcam/video input, or pose estimation. The run-pose toggle is still an offline CPU-skinned static preview; `HWMS` contains no rig. No modifier sidecar was edited during validation.
