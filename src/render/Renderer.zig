@@ -372,6 +372,10 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
             .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "weights"), .shader_location = 9 },
             .{ .format = .uint8x4, .offset = @offsetOf(Ranger.SkinnedVertex, "kind"), .shader_location = 10 },
             .{ .format = .float32x2, .offset = @offsetOf(Ranger.SkinnedVertex, "face_uv"), .shader_location = 11 },
+            .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "eye_geometry"), .shader_location = 12 },
+            .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "eye_style"), .shader_location = 13 },
+            .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "eye_iris"), .shader_location = 14 },
+            .{ .format = .float32x4, .offset = @offsetOf(Ranger.SkinnedVertex, "eye_shadow"), .shader_location = 15 },
         } }),
         gpu.VertexBufferLayout.init(.{ .array_stride = @sizeOf(Instance), .step_mode = .instance, .attributes = &.{
             .{ .format = .float32x4, .offset = 0, .shader_location = 3 },

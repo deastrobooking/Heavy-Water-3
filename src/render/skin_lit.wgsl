@@ -12,6 +12,10 @@ struct SkinOut {
     // Head forward (+Z) and left (+X) axes in world space, for the face shadow map.
     @location(5) fwd: vec3<f32>,
     @location(6) left: vec3<f32>,
+    @location(7) eye_geometry: vec4<f32>,
+    @location(8) eye_style: vec4<f32>,
+    @location(9) eye_iris: vec4<f32>,
+    @location(10) eye_shadow: vec4<f32>,
 };
 
 @vertex fn vertex_skinned(
@@ -22,6 +26,10 @@ struct SkinOut {
     @location(9) weights: vec4<f32>,
     @location(10) kind: vec4<u32>,
     @location(11) face_uv: vec2<f32>,
+    @location(12) eye_geometry: vec4<f32>,
+    @location(13) eye_style: vec4<f32>,
+    @location(14) eye_iris: vec4<f32>,
+    @location(15) eye_shadow: vec4<f32>,
     @location(3) translation_scale: vec4<f32>,
     @location(4) tint: vec4<f32>,
     @location(6) stretch: vec4<f32>,
@@ -38,6 +46,10 @@ struct SkinOut {
     out.style = vec2<f32>(f32(kind.x), f32(kind.y));
     out.fwd = rotate(rotation, rotate(s.real, vec3<f32>(0.0, 0.0, 1.0)));
     out.left = rotate(rotation, rotate(s.real, vec3<f32>(1.0, 0.0, 0.0)));
+    out.eye_geometry = eye_geometry;
+    out.eye_style = eye_style;
+    out.eye_iris = eye_iris;
+    out.eye_shadow = eye_shadow;
     return out;
 }
 
@@ -79,10 +91,73 @@ fn face_lit(uv: vec2<f32>, fwd: vec3<f32>, left: vec3<f32>, l: vec3<f32>, soft: 
     return smoothstep(ctrl - w, ctrl + w, face_shadow_map(u, uv.y));
 }
 
+// Resolution independent eye drawing. The CPU face marks intentionally omit the eye
+// shapes on GPU-skinned characters; these SDFs are evaluated at fragment resolution.
+fn eye_ellipse(p: vec2<f32>, center: vec2<f32>, radii: vec2<f32>) -> f32 {
+    let delta = (p - center) / radii;
+    return (length(delta) - 1.0) * min(radii.x, radii.y);
+}
+
+fn eye_over(dst: vec3<f32>, src: vec3<f32>, alpha: f32) -> vec3<f32> {
+    return mix(dst, src, clamp(alpha, 0.0, 1.0));
+}
+
+fn draw_anime_eyes(
+    original: vec3<f32>, uv: vec2<f32>, geometry: vec4<f32>, style: vec4<f32>,
+    iris_color: vec3<f32>, iris_dark: vec3<f32>,
+) -> vec3<f32> {
+    let side = select(-1.0, 1.0, uv.x >= 0.5);
+    let p = vec2<f32>(0.5 + abs(uv.x - 0.5), uv.y);
+    let spacing = geometry.x;
+    let eye_y = geometry.y;
+    let w = geometry.z * 0.5;
+    let h = w * geometry.w;
+    let tilt = style.x;
+    let pupil_size = style.y;
+    let center = vec2<f32>(0.5 + spacing, eye_y);
+    let q = vec2<f32>(p.x, p.y - (p.x - center.x) * tilt);
+    // A small UV-space transition stays smooth with Mach's current WGSL compiler,
+    // which rejects derivative builtins in this shared module.
+    let aa = 0.0035;
+    let eye_d = eye_ellipse(q, center, vec2<f32>(w, h));
+    let eye_mask = 1.0 - smoothstep(-aa, aa, eye_d);
+    var color = original;
+    color = eye_over(color, vec3<f32>(0.96, 0.93, 0.86), eye_mask);
+
+    let iris_center = vec2<f32>(center.x, center.y - h * 0.12);
+    let iris_r = vec2<f32>(w * 0.54, h * 0.78);
+    let iris_d = eye_ellipse(q, iris_center, iris_r);
+    let iris_mask = (1.0 - smoothstep(-aa, aa, iris_d)) * eye_mask;
+    let gradient = clamp((q.y - (iris_center.y - iris_r.y)) / (2.0 * iris_r.y), 0.0, 1.0);
+    let iris = mix(iris_color, iris_dark, smoothstep(0.25, 0.95, gradient));
+    color = eye_over(color, iris, iris_mask);
+    let rim = (1.0 - smoothstep(0.0, aa * 2.0, abs(iris_d) - aa * 0.6)) * eye_mask * 0.62;
+    color = eye_over(color, iris_dark, rim);
+
+    let pupil_d = eye_ellipse(q, iris_center + vec2<f32>(0.0, iris_r.y * 0.05), iris_r * vec2<f32>(pupil_size, pupil_size * 1.1));
+    color = eye_over(color, iris_dark * 0.45, (1.0 - smoothstep(-aa, aa, pupil_d)) * eye_mask);
+    let highlight = eye_ellipse(q, iris_center + vec2<f32>(-iris_r.x * 0.35 * side, iris_r.y * 0.42), iris_r * vec2<f32>(0.30, 0.22));
+    color = eye_over(color, vec3<f32>(0.96, 0.93, 0.86), (1.0 - smoothstep(-aa, aa, highlight)) * eye_mask);
+    if (style.z > 1.5) {
+        let highlight_small = eye_ellipse(q, iris_center + vec2<f32>(iris_r.x * 0.38 * side, -iris_r.y * 0.45), iris_r * vec2<f32>(0.13, 0.10));
+        color = eye_over(color, vec3<f32>(1.0), (1.0 - smoothstep(-aa, aa, highlight_small)) * eye_mask * 0.9);
+    }
+    let lid_shadow = smoothstep(center.y + h * 0.45, center.y + h * 0.95, q.y) * eye_mask * (1.0 - iris_mask) * 0.60;
+    color = eye_over(color, vec3<f32>(0.72, 0.70, 0.86), lid_shadow);
+
+    // A softly antialiased upper ink line keeps the anime silhouette without a pixel stair-step.
+    let upper = abs(eye_d - h * 0.025);
+    let upper_mask = (1.0 - smoothstep(aa, aa * 2.3, upper)) * smoothstep(center.y - h * 0.12, center.y + h * 0.28, q.y);
+    return eye_over(color, vec3<f32>(0.29, 0.21, 0.19), upper_mask * 0.88);
+}
+
 @fragment fn frag_skinned(in: SkinOut) -> @location(0) vec4<f32> {
-    let base = in.tint.rgb;
+    var base = in.tint.rgb;
     if (in.tint.a < 0.0) {
         return vec4<f32>(hazed(base, in.world, 0.0), 1.0);
+    }
+    if (in.style.y > 0.5) {
+        base = draw_anime_eyes(base, in.uv, in.eye_geometry, in.eye_style, in.eye_iris.rgb, in.eye_shadow.rgb);
     }
     let flags = u32(cel.v[0].w);
     let m = 2u + u32(in.style.x) * 6u;

@@ -189,6 +189,16 @@ pub const Expression = struct {
 };
 
 pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
+    return faceDecalImpl(uv, eyes, expr, aa, true);
+}
+
+/// Face marks for the GPU-skinned path. The eyes are evaluated per fragment in
+/// `skin_lit.wgsl`; brows, nose and mouth remain baked into the mesh colors.
+pub fn faceDecalWithoutEyes(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
+    return faceDecalImpl(uv, eyes, expr, aa, false);
+}
+
+fn faceDecalImpl(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32, draw_eyes: bool) Decal {
     var out: Decal = .{ .color = Rgb.init(0, 0, 0), .alpha = 0 };
     if (uv.x < 0 or uv.y < 0) return out;
     // Warm charcoal keeps linework distinct from skin without turning the eye into a black mask.
@@ -204,7 +214,7 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
     // tilt outer corner up
     const q = Vec2.init(p.x, p.y - (p.x - ec.x) * eyes.tilt);
 
-    if (expr.eye_open > 0.08) {
+    if (draw_eyes and expr.eye_open > 0.08) {
         // eye opening: ellipse with flattened bottom
         const d_open = ellipse(q, ec, w, h);
         const in_eye = 1 - m.smoothstep(-aa, aa, d_open);
@@ -263,7 +273,7 @@ pub fn faceDecal(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32) Decal {
         if (q.y < ec.y - h * 0.55 and q.x > ec.x) {
             out = over(out, lash, (1 - m.smoothstep(aa * 0.5, aa * 1.5, @abs(d_lo))) * 0.48);
         }
-    } else {
+    } else if (draw_eyes) {
         // closed eye: a happy arc
         const d = ellipse(q, Vec2.init(ec.x, ec.y - h * 3), w * 0.95, w * 0.55);
         const a = (1 - m.smoothstep(aa, aa * 2.5, @abs(d))) * @as(f32, if (q.y > ec.y - h * 3) 1 else 0);

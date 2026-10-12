@@ -2,6 +2,12 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Smooth GPU-drawn character eyes — 2026-10-12
+
+- Moved eye whites, irises, pupils, highlights and upper eyelid ink from coarse head-vertex color interpolation to SDF drawing in the GPU-skinned character fragment shader. Eye geometry and both iris colors travel with each character's skinned vertices, so the existing eye customization is retained. Brows, nose and mouth remain baked face marks.
+- **Checked:** `python3 tools/zig.py build check` passed. A ReleaseSafe close-up capture (`-Dcharacter-showcase=3 -Dcharacter-view=4 -Dcapture-frame=120`, Metal API Validation enabled) completed on Apple M3 Pro without Metal validation messages; `zig-out/eyes-review.png` was inspected and shows smooth iris boundaries and highlights.
+- **Not checked:** headless tests, hands-on creator/gameplay review, CPU-skinned custom characters, Zig 0.17, Linux/Windows builds or runtime, and performance benchmarks. Mach's current WGSL compiler rejects derivative built-ins here, so smoothing uses a fixed UV-space edge band rather than screen-scaled derivatives.
+
 ## Detroit Riverfront, Belle Isle, and Windsor crossings — 2026-10-12
 
 - Widened only Detroit's lane-zero river reach, fading it back to the regular channel beyond the city; terrain remains above water across Belle Isle and the streamed water ribbon splits around the island.
@@ -1068,3 +1074,9 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - Bumped the district generator to 8 and save format to 24; district generators 3–7 migrate with plaza and player-bridge IDs preserved. Extended the supported save window to format 12 so the documented wallet migration remains available.
 - **Checked:** `python3 tools/zig.py build check` passed; all **423 headless tests** passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=64 -Dcapture-frame=120` captured and visually inspected the Rootway gallery on Apple M3 Pro / Metal. The road is clear through the ribs, and Metal API validation reported no errors. The 300-frame Metal smoke completed all nine stages, including city traffic and save round-trip; traffic and shrine-interaction regression tests passed.
 - **Not checked:** Linux/Windows runtime, cross-compilation, performance benchmarks, or the 0.17 channel in this review.
+
+## Startup title background stability — 2026-10-12
+
+- The title camera now holds an elevated city panorama rather than orbiting through giant Arbor canopies. Gameplay simulation, pickup collection, combat, and the day cycle pause while the title is open, so the background cannot advance or change under the menu.
+- **Checked:** `python3 tools/zig.py build check` passed. A 120-frame title-menu capture ran on Apple M3 Pro / Metal with `MTL_DEBUG_LAYER=1` and was inspected; the city remains framed behind the menu and no Metal API validation errors appeared.
+- **Not checked:** screen-recorded temporal flicker measurement; the local display capture interface was unavailable. The title camera and gameplay state are now held stable in code.

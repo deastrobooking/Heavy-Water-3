@@ -253,6 +253,11 @@ pub const SkinnedVertex = extern struct {
     kind: [4]u8,
     /// Face UV (u across the face, v chin to crown); -1 where the vertex has none.
     face_uv: [2]f32,
+    /// Eye design carried to the fragment shader for resolution-independent drawing.
+    eye_geometry: [4]f32,
+    eye_style: [4]f32,
+    eye_iris: [4]f32,
+    eye_shadow: [4]f32,
 };
 /// Joints per character in the GPU palette (two vec4s, a dual quaternion, per joint).
 pub const max_palette_joints = 64;
@@ -269,10 +274,32 @@ pub fn gpuSkinnable(self: *const Ranger) bool {
 /// colours as baked for the CPU mesh (face decals included). The caller owns the slice.
 pub fn skinnedVertices(self: *const Ranger, a: std.mem.Allocator) ![]SkinnedVertex {
     const out = try a.alloc(SkinnedVertex, self.mesh.vertices.len);
-    for (out, self.character.mesh.vertices.items, self.mesh.vertices) |*o, source, baked| {
+    for (out, self.character.mesh.vertices.items, self.mesh.vertices, self.character.color_index.items) |*o, source, baked, color_index| {
         var joints: [4]u8 = undefined;
         for (&joints, source.joints) |*j, s| j.* = @intCast(s);
-        o.* = .{ .position = .{ source.pos.x, source.pos.y, source.pos.z }, .normal = .{ source.normal.x, source.normal.y, source.normal.z }, .color = baked.color, .joints = joints, .weights = source.weights, .kind = .{ @intFromEnum(source.material), @intFromBool(source.region == .face and source.uv.x >= 0 and source.uv.y >= 0), 0, 0 }, .face_uv = .{ source.uv.x, source.uv.y } };
+        const has_face_uv = source.region == .face and source.uv.x >= 0 and source.uv.y >= 0;
+        const skin = self.character.palette.items[color_index];
+        const eyes = self.character.spec.eyes;
+        var face_color = baked.color;
+        if (has_face_uv) {
+            var face = skin;
+            const marks = toon.faceDecalWithoutEyes(source.uv, eyes, .{}, 0.008);
+            if (marks.alpha > 0) face = toon.mix(face, marks.color, marks.alpha);
+            face_color = .{ face.r, face.g, face.b };
+        }
+        o.* = .{
+            .position = .{ source.pos.x, source.pos.y, source.pos.z },
+            .normal = .{ source.normal.x, source.normal.y, source.normal.z },
+            .color = face_color,
+            .joints = joints,
+            .weights = source.weights,
+            .kind = .{ @intFromEnum(source.material), @intFromBool(has_face_uv), 0, 0 },
+            .face_uv = .{ source.uv.x, source.uv.y },
+            .eye_geometry = .{ eyes.spacing, eyes.height, eyes.size, eyes.aspect },
+            .eye_style = .{ eyes.tilt, eyes.pupil_size, @floatFromInt(eyes.highlight_count), 0 },
+            .eye_iris = .{ eyes.iris_color.r, eyes.iris_color.g, eyes.iris_color.b, 1 },
+            .eye_shadow = .{ eyes.iris_dark.r, eyes.iris_dark.g, eyes.iris_dark.b, 1 },
+        };
     }
     return out;
 }

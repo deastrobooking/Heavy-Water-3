@@ -715,18 +715,21 @@ fn newGame(self: *App) void {
     self.sandbox.creator.begin(self.sandbox.profile);
 }
 
-/// Title backdrop: a slow orbit over the city.
+/// Title backdrop: a steady, elevated downtown view above the giant Arbor canopies. Moving through
+/// the canopy produced distracting foreground pop while the city streamed behind the menu.
 fn titleCamera(self: *App) void {
     const layout = &self.sandbox.catalog.district;
-    const center = layout.nodes[0].position;
-    const angle = self.seconds * 0.025 + 2.2;
+    var center: [3]f32 = .{ 0, 0, 0 };
+    for (layout.nodes) |node| center = R3.add(center, node.position);
+    center = R3.scale(center, 1.0 / @as(f32, @floatFromInt(layout.nodes.len)));
+    const angle: f32 = 0.6;
     const camera = &self.engine.camera;
     self.sandbox.player.mode = .fly;
-    camera.position = mach.math.vec3(center[0] + @sin(angle) * 300, center[1] + 110, center[2] + @cos(angle) * 300);
-    const dx = center[0] + 60 - camera.position.x();
-    const dz = center[2] + 120 - camera.position.z();
+    camera.position = mach.math.vec3(center[0] + @sin(angle) * 460, center[1] + 230, center[2] + @cos(angle) * 460);
+    const dx = center[0] - camera.position.x();
+    const dz = center[2] - camera.position.z();
     camera.yaw = std.math.atan2(dx, dz);
-    camera.pitch = std.math.atan2(center[1] + 20 - camera.position.y(), @sqrt(dx * dx + dz * dz));
+    camera.pitch = std.math.atan2(center[1] + 150 - camera.position.y(), @sqrt(dx * dx + dz * dz));
 }
 
 /// Mouse over the GUI: hovering selects, clicking also activates.
@@ -1088,8 +1091,9 @@ pub fn update(self: *App, core: *mach.Core) void {
     for (0..steps) |_| {
         if (options.benchmark_frontier) self.driveFrontierBenchmark();
         self.routePads();
-        // The pause menu stops the world; the title keeps it alive behind the menu.
-        if (!paused) {
+        // Menus never advance gameplay. The title can still render the city, but combat, pickups
+        // and the day cycle wait until a player enters the world.
+        if (!paused and !title) {
             const warmup: u64 = @import("engine/Flythrough.zig").frontier_warmup_frames;
             const measuring = options.benchmark_frontier and self.rendered_frames_seen >= warmup and self.rendered_frames_seen < warmup + options.benchmark_frames;
             if (measuring) {
