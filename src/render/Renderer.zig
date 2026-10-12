@@ -505,7 +505,16 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         @as(f32, @floatFromInt(self.frames)) / @as(f32, @floatFromInt(options.smoke_frames))
     else
         self.time_of_day;
-    const light = Sky.at(sky_time);
+    var light = Sky.at(sky_time);
+    if (self.scene.space_review) light = .{
+        .direction = .{ 0.35, 0.88, -0.31 },
+        .color = .{ 0.92, 0.96, 1.0 },
+        .ambient_sky = .{ 0.30, 0.36, 0.48 },
+        .ambient_ground = .{ 0.12, 0.16, 0.23 },
+        .horizon = .{ 0.006, 0.012, 0.032 },
+        .zenith = .{ 0.002, 0.005, 0.018 },
+        .night = 0,
+    };
     self.clock = if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)
         @as(f32, @floatFromInt(self.frames % 216_000)) / 60
     else

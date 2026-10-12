@@ -1418,6 +1418,16 @@ fn showcase(self: *App) void {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
         eye = .{ 0, 680, 470 };
+    } else if (v == 66) {
+        // Habitat and Mother art review: frame their full cylindrical silhouettes in space.
+        target = .{ 0, 790, 0 };
+        eye = .{ 760, 920, 520 };
+    } else if (v == 67) {
+        // Review the new Wilds architecture as a clean lineup over the seeded terrain.
+        const Terrain = @import("procedural/Terrain.zig");
+        const ground = Terrain.surface(self.sandbox.seed, 0, 0).height;
+        target = .{ 0, ground + 4.5, 0 };
+        eye = .{ 0, ground + 18, 66 };
     } else if (v == 9) {
         const s = District.span(layout, layout.edges[0]);
         target = s.point(0.6);
@@ -1914,7 +1924,6 @@ fn loadNextRanger(self: *App) void {
     }
     self.report("EVERY SAVED RANGER IS ALREADY IN PLAY", .{});
 }
-
 
 fn quickload(self: *App) bool {
     const bytes = Save.readFile(self.io, self.allocator, Save.default_path) catch |err| {
@@ -2557,6 +2566,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
     renderer.views[0].camera = self.engine.camera;
+    if (options.showcase == 67) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const ground = Terrain.surface(self.sandbox.seed, 0, 0).height;
+        renderer.views[0].camera.position = mach.math.vec3(0, ground + 18, 66);
+        renderer.views[0].camera.yaw = std.math.pi;
+        renderer.views[0].camera.pitch = -0.202;
+    }
     if (options.character_showcase > 0) {
         const feet = self.sandbox.player.feet;
         // Orbit the avatar for review: angle from the front, camera distance and look height.
@@ -2622,9 +2638,11 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
+    if (options.showcase == 66 or options.showcase == 67) renderer.prop_count = 0;
     renderer.scene.flora_review = options.showcase == 62;
     renderer.scene.flora_review_seed = self.sandbox.seed;
     renderer.scene.flora_review_origin = floraReviewOrigin();
+    renderer.scene.space_review = options.showcase == 66;
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
         const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
             .{ .mesh = self.sandbox.catalog.content.scalari_throne_serpent, .position = .{ -120, 480, 15 }, .scale = 1 },
@@ -2640,14 +2658,44 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             renderer.prop_count += 1;
         }
     }
+    if (options.showcase == 66 and renderer.prop_count + 4 <= renderer.props.len) {
+        const habitat = self.sandbox.catalog.content.helios_habitat;
+        const habitat_glow = self.sandbox.catalog.content.helios_habitat_glow;
+        const mother = self.sandbox.catalog.content.rand_mother;
+        const mother_glow = self.sandbox.catalog.content.rand_mother_glow;
+        const showcase_props = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32, tint: [4]f32 }{
+            .{ .mesh = mother, .position = .{ 0, 790, -360 }, .scale = 0.9, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = mother_glow, .position = .{ 0, 790, -360 }, .scale = 0.9, .tint = .{ 1, 1, 1, 1.65 } },
+            .{ .mesh = habitat, .position = .{ 0, 790, 360 }, .scale = 1.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = habitat_glow, .position = .{ 0, 790, 360 }, .scale = 1.0, .tint = .{ 1, 1, 1, 1.65 } },
+        };
+        for (showcase_props) |prop| {
+            renderer.props[renderer.prop_count] = .{ .mesh = prop.mesh, .transform = .{ .position = prop.position, .scale = prop.scale }, .tint = prop.tint };
+            renderer.prop_count += 1;
+        }
+    }
+    if (options.showcase == 67 and renderer.prop_count + 3 <= renderer.props.len) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const c = &self.sandbox.catalog.content;
+        const assets = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, x: f32 }{
+            .{ .mesh = c.wilds_cabin, .x = -22 },
+            .{ .mesh = c.wilds_barn, .x = 0 },
+            .{ .mesh = c.cave_temple, .x = 22 },
+        };
+        for (assets) |asset| {
+            const ground = Terrain.surface(self.sandbox.seed, asset.x, 0).height;
+            renderer.props[renderer.prop_count] = .{ .mesh = asset.mesh, .transform = .{ .position = .{ asset.x, ground, 0 } }, .tint = .{ 1, 1, 1, 1 } };
+            renderer.prop_count += 1;
+        }
+    }
     // The removal set is large; copy it only when it changed.
     if (self.published_revision != self.sandbox.modifications.revision) {
         renderer.modifications = self.sandbox.modifications;
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
-    renderer.views[0].hide_owner = if (sandbox.bodyShown()) 0 else 1;
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 67 or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
@@ -2772,7 +2820,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             }
         }
     }
-    if (options.showcase == 62 or options.showcase == 63) renderer.hud_lines = @splat(.{});
+    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66) renderer.hud_lines = @splat(.{});
     self.publishGui(renderer, minutes);
 }
 
@@ -2784,7 +2832,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
     self.ui_height = 720 / self.menu.settings.ui_scale;
     renderer.ui.reset(self.ui_height * width / height, self.ui_height);
     self.hit_len = 0;
-    if ((options.showcase != 0 and options.showcase < 18) or options.showcase == 47 or options.showcase == 62 or options.showcase == 63) return;
+    if ((options.showcase != 0 and options.showcase < 18) or options.showcase == 47 or options.showcase == 62 or options.showcase == 63 or options.showcase == 66) return;
     const sandbox = &self.sandbox;
     var inspect: [Renderer.panel_capacity]Build.PanelLine = @splat(.{});
     var inspect_slices: [Renderer.panel_capacity][]const u8 = undefined;

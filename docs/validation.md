@@ -1080,3 +1080,10 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - The title camera now holds an elevated city panorama rather than orbiting through giant Arbor canopies. Gameplay simulation, pickup collection, combat, and the day cycle pause while the title is open, so the background cannot advance or change under the menu.
 - **Checked:** `python3 tools/zig.py build check` passed. A 120-frame title-menu capture ran on Apple M3 Pro / Metal with `MTL_DEBUG_LAYER=1` and was inspected; the city remains framed behind the menu and no Metal API validation errors appeared.
 - **Not checked:** screen-recorded temporal flicker measurement; the local display capture interface was unavailable. The title camera and gameplay state are now held stable in code.
+
+## Mountain Wilds farmsteads and cave sanctuaries — 2026-10-12
+
+- Added generated cabin, field barn, and rootbound sanctuary meshes to the runtime asset catalog. Seeded farmsteads appear on the cityward approach to mountain cave mouths with low crop beds; cave cache rooms carry the sanctuary and a hue-matched signal crystal. The cave heart and Hive nest layout are unchanged.
+- Cave waves still cap at four active ground enemies. Each cave rolls once for an 18% rare spawn chance, choosing a Scalari hybrid or stinger in a regular trooper slot; both reuse the existing combat, loot, XP, and rendering paths.
+- **Checked:** default `python3 tools/zig.py build check` passed. ReleaseSafe showcase capture with `MTL_DEBUG_LAYER=1` (`-Dshowcase=67 -Dcapture-frame=120 -Daudio=false`) completed on Apple M3 Pro / Metal; the cabin, barn, and sanctuary lineup was inspected in `zig-out/wilds-assets-review.png`, and no Metal API validation errors were reported. `git diff --check` passed.
+- **Not checked:** headless tests (not run), in-cave placement during gameplay, farm route visibility across seeds, rare-spawn probability in a playthrough, collision/entry for the buildings, hands-on cave combat, benchmarks, Zig 0.17, Linux/Windows compilation or runtime.

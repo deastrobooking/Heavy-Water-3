@@ -1650,7 +1650,10 @@ fn nearestLiveNest(sb: *const Sandbox, surface_only: bool) ?V {
     for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| {
         if (!nest.alive or (surface_only and nest.cave)) continue;
         const d = R.length(R.sub(nest.position, sb.player.feet));
-        if (d < best) { best = d; chosen = nest.position; }
+        if (d < best) {
+            best = d;
+            chosen = nest.position;
+        }
     }
     return chosen;
 }
@@ -1662,7 +1665,10 @@ fn nearestCarrier(sb: *const Sandbox) ?V {
         if (!carrier.alive) continue;
         const point = carrier.position();
         const d = R.length(R.sub(point, sb.player.feet));
-        if (d < best) { best = d; chosen = point; }
+        if (d < best) {
+            best = d;
+            chosen = point;
+        }
     }
     return chosen;
 }
@@ -1854,7 +1860,11 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
     for (parts, 0..) |part, i| {
         const at = R.add(grip.base, R.add(R.add(R.scale(side, part.at[0]), R.scale(up, part.at[1])), R.scale(z, part.at[2])));
         const color: [4]f32 = .{ part.color[0], part.color[1], part.color[2], 1 };
-        const mesh = switch (part.shape) { .block => block, .gem => gem_mesh, .spike => spike };
+        const mesh = switch (part.shape) {
+            .block => block,
+            .gem => gem_mesh,
+            .spike => spike,
+        };
         const shape_rotation = if (part.shape == .spike) weapon_rotation.mul(m.Quat.fromTo(m.Vec3.unit_y, m.Vec3.unit_z)) else weapon_rotation;
         out[i] = .{ .mesh = mesh, .transform = .{ .position = at }, .tint = if (part.glow > 0) Material.emissive(color, part.glow) else color, .size = part.size, .rotation = quat(shape_rotation) };
     }
@@ -1988,6 +1998,7 @@ fn publishWildkin(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) u
 /// the caves), cave rock near P1, and lumen crystals lighting the chambers.
 fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
     const Caves = Sandbox.Caves;
+    const c = &sb.catalog.content;
     var n = start;
     var underground = sb.cave_inside[0] != null;
     for (sb.guests, 1..) |g, i| if (g.active and sb.cave_inside[i] != null) {
@@ -1998,6 +2009,42 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
         n += 1;
     }
     const eye = sb.player.feet;
+    // Four working-looking farmsteads sit on the cityward approach to the mountain paths.
+    // Their simple field geometry and outbuildings make the transition from metro to Wilds legible.
+    var farm_ranges: [@import("../procedural/Mountains.zig").count]bool = @splat(false);
+    for (sb.caves.systems[0..sb.caves.count]) |*sys| {
+        if (farm_ranges[sys.range]) continue;
+        const farm: V = R.add(sys.entrance, R.scale(sys.inward, -155));
+        const dx = farm[0] - eye[0];
+        const dz = farm[2] - eye[2];
+        if (dx * dx + dz * dz > 520 * 520) continue;
+        farm_ranges[sys.range] = true;
+        const yaw = std.math.atan2(-sys.inward[0], -sys.inward[2]);
+        const farm_orientation = m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw);
+        const rot = quat(farm_orientation);
+        const cabin_y = Terrain.surface(sb.seed, farm[0], farm[2]).height;
+        if (n < out.len) {
+            out[n] = .{ .mesh = c.wilds_cabin, .transform = .{ .position = .{ farm[0], cabin_y, farm[2] } }, .rotation = rot, .tint = .{ 1, 1, 1, 1 } };
+            n += 1;
+        }
+        const barn_offset = farm_orientation.rotate(m.Vec3.init(-24, 0, -7));
+        const barn_at = R.add(farm, .{ barn_offset.x, barn_offset.y, barn_offset.z });
+        const barn_y = Terrain.surface(sb.seed, barn_at[0], barn_at[2]).height;
+        if (n < out.len) {
+            out[n] = .{ .mesh = c.wilds_barn, .transform = .{ .position = .{ barn_at[0], barn_y, barn_at[2] } }, .rotation = rot, .tint = .{ 1, 1, 1, 1 } };
+            n += 1;
+        }
+        // Ordered, low crop beds are visible color bands, not collision walls.
+        for (0..4) |row| {
+            if (n == out.len) break;
+            const offset = farm_orientation.rotate(m.Vec3.init(25, 0, -20 + @as(f32, @floatFromInt(row)) * 9));
+            const x = farm[0] + offset.x;
+            const z = farm[2] + offset.z;
+            const y = Terrain.surface(sb.seed, x, z).height;
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ x, y + 0.12, z } }, .rotation = rot, .size = .{ 19, 0.24, 5.2 }, .tint = if (row % 2 == 0) .{ 0.22, 0.31, 0.16, 1 } else .{ 0.37, 0.28, 0.13, 1 } };
+            n += 1;
+        }
+    }
     for (sb.caves.systems[0..sb.caves.count], 0..) |*sys, i| {
         var d: f32 = 0;
         for ([_]usize{ 0, 2 }) |a| d = @max(d, @max(sys.lo[a] - eye[a], eye[a] - sys.hi[a]));
@@ -2011,6 +2058,21 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
         const hues = [_][3]f32{ .{ 0.35, 0.9, 1 }, .{ 0.75, 0.45, 1 }, .{ 0.45, 1, 0.6 }, .{ 1, 0.7, 0.35 } };
         const hue = hues[i % hues.len];
         for (sys.rooms[0..sys.room_count], 0..) |room, r| {
+            if (room.role == .cache and n + 3 <= out.len) {
+                const parent = sys.rooms[room.parent];
+                const toward = R.sub(parent.center, room.center);
+                const orientation = m.Quat.fromAxisAngle(m.Vec3.unit_y, std.math.atan2(toward[0], toward[2]));
+                const shrine_at: V = .{ room.center[0], room.floor, room.center[2] };
+                out[n] = .{ .mesh = sb.catalog.content.cave_temple, .transform = .{ .position = shrine_at }, .size = .{ 0.66, 0.66, 0.66 }, .rotation = quat(orientation), .tint = .{ 1, 1, 1, 1 } };
+                n += 1;
+                const gem_offset = orientation.rotate(m.Vec3.init(0, 7.2, -0.8));
+                const gem_at = R.add(shrine_at, .{ gem_offset.x, gem_offset.y, gem_offset.z });
+                out[n] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = gem_at }, .size = .{ 0.8, 1.4, 0.8 }, .rotation = quat(orientation), .tint = Material.emissive(hue ++ [_]f32{1}, 0.9 + 0.1 * @sin(t * 1.3 + @as(f32, @floatFromInt(r)))) };
+                n += 1;
+                const trim_offset = orientation.rotate(m.Vec3.init(0, 4.3, 3.95));
+                out[n] = .{ .mesh = sb.catalog.content.block, .transform = .{ .position = R.add(shrine_at, .{ trim_offset.x, trim_offset.y, trim_offset.z }) }, .size = .{ 0.2, 1.8, 0.12 }, .rotation = quat(orientation), .tint = Material.emissive(hue ++ [_]f32{1}, 0.7 + 0.2 * @sin(t * 1.7 + @as(f32, @floatFromInt(i)))) };
+                n += 1;
+            }
             const count: usize = if (room.role == .heart) 8 else 5;
             for (0..count) |k| {
                 if (n == out.len) return n;

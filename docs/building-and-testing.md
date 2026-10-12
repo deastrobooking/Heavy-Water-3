@@ -176,6 +176,8 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 9 | Street level |
 | 10–15 | Roads 1–6 at dusk |
 | 64, 65 | Dusk close-ups of the two gem-set Arbor Rootway galleries |
+| 66 | Early procedural orbital habitat cylinder beside Rand Corporation's Mother construction ark (art review only) |
+| 67 | Wilds architecture lineup: cabin, barn, and cave sanctuary |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |

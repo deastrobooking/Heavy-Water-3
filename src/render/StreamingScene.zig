@@ -69,6 +69,8 @@ last_center: ?Key = null,
 flora_review: bool = false,
 flora_review_seed: u64 = 0,
 flora_review_origin: [3]f32 = .{ 0, 0, 0 },
+/// Isolated backdrop for orbital vehicle art-review captures.
+space_review: bool = false,
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, seed: u64, catalog: *const Catalog) !Scene {
     const stream = try Streamer.create(allocator, io, seed);
@@ -135,6 +137,21 @@ fn baseColor(self: *const Scene, handle: Catalog.MeshHandle) [4]f32 {
 
 /// `hide_owner` (nonzero) skips that player's avatar parts: its own first-person view.
 pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Mat4x4, culling: bool, upload_budget: usize, removed: *const Modifications, props: []const World.Prop, hide_owner: u8) void {
+    if (self.space_review) {
+        self.draw_count = 0;
+        self.prop_count = 0;
+        self.instance_count = 1;
+        self.resident_count = 0;
+        self.terrain_draws = 0;
+        self.active_missing = 0;
+        self.relic_count = 0;
+        self.plant_count = 0;
+        self.flora_counts = @splat(0);
+        self.boulder_counts = @splat(0);
+        for (&self.residents) |*resident| resident.visible = false;
+        self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
+        return;
+    }
     const center = Key.fromPosition(camera.position.x(), camera.position.z());
     if (self.last_center) |previous| {
         if (!Key.eql(center, previous)) self.center_changes += 1;

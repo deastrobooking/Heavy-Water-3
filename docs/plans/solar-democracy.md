@@ -1,6 +1,6 @@
 # Solar frontier and Galactic Democratic Compact
 
-**Status:** ordered eight-planet, twelve-moon, and Scalari mining-front data plus the campaign framework. One low-threat Scalari Prospector combat unit has been added near the Frontier nests. No planetary travel, transforming Kestrel modes, stations, mining production, or Compact voting is playable yet.
+**Status:** ordered eight-planet, twelve-moon, and Scalari mining-front data plus the campaign framework. One low-threat Scalari Prospector combat unit has been added near the Frontier nests. No planetary travel, transforming Kestrel modes, stations, mining production, or Compact voting is playable yet. Future orbital construction follows the staged capability gates in [Project Helios](space-habitat-network.md); that plan distinguishes the rotating-habitat physics from unverified megastructure engineering.
 
 ## Campaign frame
 
@@ -31,7 +31,7 @@ Gaia remains an artificial globe in Saturn space, not a ninth planet. The Hive/S
 
 Visitable local-flight destinations include Luna; Phobos and Deimos; Io, Europa, Ganymede and Callisto; Titan and Enceladus; Titania and Oberon; and Triton. Each moon gets a bounded local region and a station/docking approach. The player selects a planet or moon from a chart, fast-travels there, then flies locally around its surface, moons, and stations. No continuous interplanetary flight, full orbit propagation, or absolute solar-system renderer is planned.
 
-Each destination grows from a mining camp and landing dock into a modular station, then a linked city district. Across the campaign these settlements can join into futuristic city-planets: large connected urban belts and surface/underground habitats around each world's distinct climate and terrain. Terraformation is staged by regional projects and public votes, not an instant planet-wide toggle. Venus begins with floating cities; its path can add upper-atmosphere processing, sealed surface habitats, and long-term climate intervention, with resident consent and ecological consequences as mission choices.
+Candidate settlement arcs grow from prospecting and a landing/communications outpost into a local resource demonstration, a modular station, and then connected city districts where the site's resources, climate and logistics justify them. This is not a promise that every planet or moon has an economical mine or that every settlement becomes a city. Across the campaign, settlements may join into futuristic city-planets: connected urban belts and sealed surface, subsurface or orbital habitats adapted to each world's conditions. Terraformation is staged by regional projects and public votes, not an instant planet-wide toggle. Venus begins with floating pressure habitats; upper-atmosphere processing, sealed surface habitats, and long-term climate intervention remain separate speculative steps with resident consent and ecological consequences as mission choices.
 
 ### Gaia's printed city-world
 
@@ -41,7 +41,7 @@ Treat each builder swarm as a readable, modular crew rather than background part
 
 ## Fusion-pulse travel
 
-Ship blueprints gain a **fusion-pulse drive** with a fictional strategic cruise rating of **0.5c**. It powers fast-travel transitions on the campaign chart; there is no continuous interplanetary cruise scene or orbit simulation. Within a planet/moon region, ships retain readable local m/s handling, can fly to orbital infrastructure, and dock at or build stations. Transit time can compress to a short departure/arrival sequence while leaving route choice, hazards, defense, and resource cost meaningful. The 0.5c rating is fictional game technology, not a claim about real fusion engineering.
+Ship blueprints gain a **fusion-pulse drive** with a fictional strategic cruise rating of **0.5c**. It powers fast-travel transitions on the campaign chart; there is no continuous interplanetary cruise scene or orbit simulation. Within a planet/moon region, ships retain readable local m/s handling, can fly to orbital infrastructure, and dock at or build stations. Transit time can compress to a short departure/arrival sequence while leaving route choice, hazards, defense, and resource cost meaningful. The 0.5c rating is fictional game technology, not a claim about real fusion engineering or the transfer speeds used in the science-grounded habitat plan.
 
 ## Scalari mining droids
 
@@ -62,7 +62,7 @@ Transformations are explicit, interruptible state transitions. A selected form c
 ## Delivery order
 
 1. Surface the eight-planet/twelve-moon roster in a local campaign chart. Select a body, fast-travel there, and fly a bounded local region.
-2. Build a landing dock plus a modular station loop: habitat, refinery, mining bay, power relay, greenhouse, defense grid, and terraformer.
+2. Build the first local dock and service station after the Earth liberation loop; add power, communications, cargo handling and repair before habitation. Keep later mining, refinery, greenhouse and habitat pieces behind site surveys, resource processing, thermal and life-support gates. Use the ordered habitat sequence in [Project Helios](space-habitat-network.md).
 3. Bring the Prospector mining droid into one Scalari site with scan/drill/disable behavior, resource output, a readable vulnerability, and a mission result.
 4. Add the Solar Assembly / Compact charter, representatives, public decision outcomes, and visible membership and crisis states.
 5. Build Kestrel form states and a timed transform animation with continuity for position, attitude, hull, heat, and weapons.

@@ -158,7 +158,7 @@ pub const Unit = struct {
     }
 };
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
-pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false, seeded: bool = false, arena: bool = false };
+pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false, seeded: bool = false, arena: bool = false, rare_spawn_rolled: bool = false };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
 pub const Grenade = struct { position: V, velocity: V = @splat(0), fuse: f32 = 1.25, damage: f32 = 24, radius: f32 = 4.2 };
 
@@ -274,15 +274,18 @@ fn spawnUnit(self: *Enemies, nest: u8) void {
     var troopers: usize = 0;
     var skirmishers: usize = 0;
     var bulwarks: usize = 0;
+    var cave_population: usize = 0;
     for (self.units) |slot| if (slot) |u| if (u.nest == nest) {
         sentinels += @intFromBool(u.kind == .sentinel);
         troopers += @intFromBool(u.kind == .trooper);
         skirmishers += @intFromBool(u.kind == .skirmisher);
         bulwarks += @intFromBool(u.kind == .bulwark);
+        cave_population += @intFromBool(self.nests[nest].cave);
     };
     const n = self.nests[nest];
-    if (n.cave and troopers >= cave_troopers) return;
-    const kind: Kind = if (n.cave) .trooper else if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else if (skirmishers == 0) .skirmisher else if (bulwarks == 0) .bulwark else .drone;
+    if (n.cave and cave_population >= cave_troopers) return;
+    const rare = n.cave and !n.rare_spawn_rolled and random.float(f32) < 0.18;
+    const kind: Kind = if (rare) (if (random.boolean()) .scalari_hybrid else .scalari_stinger) else if (n.cave) .trooper else if (sentinels == 0) .sentinel else if (troopers < troopers_per_nest) .trooper else if (skirmishers == 0) .skirmisher else if (bulwarks == 0) .bulwark else .drone;
     const spread: f32 = if (n.cave) 3.5 else 7;
     for (&self.units, 0..) |*slot, i| if (slot.* == null) {
         self.unit_generations[i] +%= 1;
@@ -298,6 +301,7 @@ fn spawnUnit(self: *Enemies, nest: u8) void {
             .health = stats(kind).health,
             .orbit = random.float(f32) * 2 * std.math.pi,
         };
+        if (n.cave) self.nests[nest].rare_spawn_rolled = true;
         return;
     };
 }

@@ -107,6 +107,15 @@ pub const Content = struct {
     scalari_throne_serpent_glow: MeshHandle,
     scalari_worldcoil_ark: MeshHandle,
     scalari_worldcoil_ark_glow: MeshHandle,
+    /// Early orbital art-review models: rotating settlement cylinder and its construction ark.
+    helios_habitat: MeshHandle,
+    helios_habitat_glow: MeshHandle,
+    rand_mother: MeshHandle,
+    rand_mother_glow: MeshHandle,
+    /// Hand-built mountain Wilds settlement and ancient cave sanctuary.
+    wilds_cabin: MeshHandle,
+    wilds_barn: MeshHandle,
+    cave_temple: MeshHandle,
 };
 /// One hover car design: its body, a rotor drawn spinning at each pivot, emissive light strips,
 /// and the mass properties the simulation flies it with.
@@ -264,6 +273,12 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         self.content.raceway = try self.register(allocator, try Model.fromMesh(allocator, try course.mesh(allocator), .named("sprint raceway", .{ 1, 1, 1, 1 })));
     }
     {
+        const Wilds = @import("../vehicle/WildsMeshes.zig");
+        self.content.wilds_cabin = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.cabin(allocator), .named("mountain cabin", .{ 1, 1, 1, 1 })));
+        self.content.wilds_barn = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.barn(allocator), .named("mountain barn", .{ 1, 1, 1, 1 })));
+        self.content.cave_temple = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.caveTemple(allocator), .named("rootbound cave sanctuary", .{ 1, 1, 1, 1 })));
+    }
+    {
         const H = @import("../vehicle/HiveMeshes.zig");
         const white: [4]f32 = .{ 1, 1, 1, 1 };
         inline for (.{ .{ "drone", H.drone }, .{ "sentinel", H.sentinel }, .{ "spire", H.spire } }) |entry| {
@@ -301,6 +316,18 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
             glow_owned = false;
             @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
         }
+        const Helios = @import("../vehicle/HeliosMeshes.zig");
+        inline for (.{
+            .{ "helios_habitat", Helios.habitatCylinder },
+            .{ "rand_mother", Helios.motherArk },
+        }) |entry| {
+            const pair = try entry[1](allocator);
+            var glow_owned = true;
+            errdefer if (glow_owned) pair.glow.deinit(allocator);
+            @field(self.content, entry[0]) = try self.register(allocator, try Model.fromMesh(allocator, pair.shell, .named(entry[0], white)));
+            glow_owned = false;
+            @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
+        }
     }
     self.district = try District.generate(seed);
     self.content.district = try self.reserve();
@@ -322,15 +349,15 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "fern", .handle = self.content.flora[1] },                                           .{ .name = "wildflower", .handle = self.content.flora[2] },
         .{ .name = "broadleaf", .handle = self.content.flora[3] },                                      .{ .name = "needleleaf", .handle = self.content.flora[4] },
         .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "redwood", .handle = self.content.flora[6] },
-        .{ .name = "manzanita", .handle = self.content.flora[7] },                                     .{ .name = "ember_blossom", .handle = self.content.flora[8] },
-        .{ .name = "moonbell", .handle = self.content.flora[9] },                                      .{ .name = "sunspear", .handle = self.content.flora[10] },
-        .{ .name = "copper_fan", .handle = self.content.flora[11] },                                   .{ .name = "moon_cascade", .handle = self.content.flora[12] },
-        .{ .name = "star_blossom", .handle = self.content.flora[13] },
-        .{ .name = "boulder_round", .handle = self.content.boulders[0] },                                .{ .name = "boulder_tall", .handle = self.content.boulders[1] },
-        .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "orb", .handle = self.content.orb },
-        .{ .name = "spike", .handle = self.content.spike },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
-        .{ .name = "saber_blade", .handle = self.content.saber_blade },                     .{ .name = "saber_core", .handle = self.content.saber_core },                                   .{ .name = "saber_wave", .handle = self.content.saber_wave },
-        .{ .name = "saber_wave_core", .handle = self.content.saber_wave_core },
+        .{ .name = "manzanita", .handle = self.content.flora[7] },                                      .{ .name = "ember_blossom", .handle = self.content.flora[8] },
+        .{ .name = "moonbell", .handle = self.content.flora[9] },                                       .{ .name = "sunspear", .handle = self.content.flora[10] },
+        .{ .name = "copper_fan", .handle = self.content.flora[11] },                                    .{ .name = "moon_cascade", .handle = self.content.flora[12] },
+        .{ .name = "star_blossom", .handle = self.content.flora[13] },                                  .{ .name = "boulder_round", .handle = self.content.boulders[0] },
+        .{ .name = "boulder_tall", .handle = self.content.boulders[1] },                                .{ .name = "boulder_slab", .handle = self.content.boulders[2] },
+        .{ .name = "orb", .handle = self.content.orb },                                                 .{ .name = "spike", .handle = self.content.spike },
+        .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
+        .{ .name = "saber_blade", .handle = self.content.saber_blade },                                 .{ .name = "saber_core", .handle = self.content.saber_core },
+        .{ .name = "saber_wave", .handle = self.content.saber_wave },                                   .{ .name = "saber_wave_core", .handle = self.content.saber_wave_core },
         .{ .name = "test_arbor", .handle = self.content.test_arbor },                                   .{ .name = "test_arbor_lod", .handle = self.content.test_arbor_lod },
         .{ .name = "district", .handle = self.content.district },                                       .{ .name = "arbor_1", .handle = self.arbors[0].mesh },
         .{ .name = "arbor_1_lod", .handle = self.arbors[0].lod },                                       .{ .name = "arbor_2", .handle = self.arbors[1].mesh },
@@ -339,7 +366,10 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "scalari_void_lance_glow", .handle = self.content.scalari_void_lance_glow },         .{ .name = "scalari_dreadclaw", .handle = self.content.scalari_dreadclaw },
         .{ .name = "scalari_dreadclaw_glow", .handle = self.content.scalari_dreadclaw_glow },           .{ .name = "scalari_throne_serpent", .handle = self.content.scalari_throne_serpent },
         .{ .name = "scalari_throne_serpent_glow", .handle = self.content.scalari_throne_serpent_glow }, .{ .name = "scalari_worldcoil_ark", .handle = self.content.scalari_worldcoil_ark },
-        .{ .name = "scalari_worldcoil_ark_glow", .handle = self.content.scalari_worldcoil_ark_glow },
+        .{ .name = "scalari_worldcoil_ark_glow", .handle = self.content.scalari_worldcoil_ark_glow },   .{ .name = "helios_habitat", .handle = self.content.helios_habitat },
+        .{ .name = "helios_habitat_glow", .handle = self.content.helios_habitat_glow },                 .{ .name = "rand_mother", .handle = self.content.rand_mother },
+        .{ .name = "rand_mother_glow", .handle = self.content.rand_mother_glow },                       .{ .name = "wilds_cabin", .handle = self.content.wilds_cabin },
+        .{ .name = "wilds_barn", .handle = self.content.wilds_barn },                                   .{ .name = "cave_temple", .handle = self.content.cave_temple },
     };
     for (generated) |g| {
         var full: [64]u8 = undefined;
