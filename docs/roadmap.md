@@ -400,7 +400,7 @@ The next phases close the gaps to a production engine, in this order. [Engine al
 - **Identity:** stable GUID asset references (`AssetRef`) with `.meta` sidecars holding the GUID, source hash, importer version, and typed import settings.
 - **Build output:** a manifest with dependencies, and content packs.
 - **Runtime:** a registry, async loading with progress and per-frame GPU budgets, and hot reload by GUID with generation-bumped handles.
-- **3D authoring:** the host `asset-compiler` converts static `.gltf`/`.glb` geometry into HWMS; `trace` maps source identity and scene parts, and `split` exports independently addressable selected-scene primitives with a content manifest. Missing normals are generated, and GLB container structure is validated.
+- **3D authoring:** the host `asset-compiler` converts static `.gltf`/`.glb` geometry into HWMS; `trace` maps source identity and scene parts, and `split` exports selected-scene primitives. `modifiers` creates editable labels, surface colors and per-part transforms for disconnected mesh islands; `preview-modified` renders those edits with CPU-skinned bind or compatible procedural-run poses. Captain currently exists in this offline authoring path; importing its rig into gameplay and adding it to the playable type picker remain open. Missing normals are generated, and GLB structure is validated.
 
 Remaining: model modules are not yet accepted by Mod API 1 or placed/crafted in-game; texture, audio, scene and animation resources need their runtime paths. Acceptance: renames keep identity; only changed sources reimport; invalid references are rejected without mutation; a 64-asset pack loads within the frame budget; a model edited on disk swaps in a running session. See [plan](plans/asset-pipeline.md).
 

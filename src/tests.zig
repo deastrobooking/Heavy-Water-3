@@ -62,6 +62,7 @@ test {
     _ = @import("machine/Sap.zig");
     _ = @import("asset/Model.zig");
     _ = @import("asset/Gltf.zig");
+    _ = @import("asset/Modifiers.zig");
     _ = @import("asset/Catalog.zig");
     _ = @import("world/Modifications.zig");
     _ = @import("world/World.zig");

@@ -1,0 +1,1656 @@
+{
+  "format": 1,
+  "character_type": "captain",
+  "source_hash": "blake3:d92a9e88e9ebe5395d9d9c2fa5f37462906aa17d2b846827d662cc02fc082c5a",
+  "overall_scale": 1,
+  "skin_color": [
+    0.74,
+    0.48,
+    0.34
+  ],
+  "eye_color": [
+    0.08,
+    0.86,
+    1.0
+  ],
+  "armor_color": [
+    0.58,
+    0.68,
+    0.76
+  ],
+  "energy_color": [
+    1.0,
+    0.28,
+    0.12
+  ],
+  "parts": [
+    {
+      "id": 0,
+      "label": "boot / foot",
+      "surface": "armor",
+      "center": [
+        -0.21189089119434357,
+        0.05826239287853241,
+        0.08628054708242416
+      ],
+      "vertex_count": 84,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 16,
+      "label": "boot / foot",
+      "surface": "armor",
+      "center": [
+        -0.21751193702220917,
+        0.09380229562520981,
+        0.11260123550891876
+      ],
+      "vertex_count": 28,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 38,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        -0.15574264526367188,
+        0.23672722280025482,
+        0.1167566105723381
+      ],
+      "vertex_count": 115,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 40,
+      "label": "boot / foot",
+      "surface": "armor",
+      "center": [
+        -0.14920051395893097,
+        0.10770668834447861,
+        0.10699470341205597
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 76,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        -0.22430427372455597,
+        0.12363685667514801,
+        0.05771901085972786
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 112,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        -0.20043954253196716,
+        0.1364135444164276,
+        0.03277596831321716
+      ],
+      "vertex_count": 8,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 186,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        -0.13387051224708557,
+        0.1261393129825592,
+        0.08032233268022537
+      ],
+      "vertex_count": 9,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 229,
+      "label": "left thigh / knee",
+      "surface": "armor",
+      "center": [
+        -0.17029626667499542,
+        0.31020504236221313,
+        0.06481128185987473
+      ],
+      "vertex_count": 30,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 281,
+      "label": "left thigh / knee",
+      "surface": "armor",
+      "center": [
+        -0.07393557578325272,
+        0.269355446100235,
+        0.11475591361522675
+      ],
+      "vertex_count": 25,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 305,
+      "label": "chest / back",
+      "surface": "armor",
+      "center": [
+        -0.0018116276478394866,
+        0.6720998287200928,
+        0.14697131514549255
+      ],
+      "vertex_count": 1227,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 307,
+      "label": "left thigh / knee",
+      "surface": "armor",
+      "center": [
+        -0.1488851010799408,
+        0.348012238740921,
+        0.11215217411518097
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 321,
+      "label": "left forearm / elbow",
+      "surface": "armor",
+      "center": [
+        -0.20123139023780823,
+        0.4761400520801544,
+        0.16364315152168274
+      ],
+      "vertex_count": 156,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 338,
+      "label": "left forearm / elbow",
+      "surface": "armor",
+      "center": [
+        -0.1878862828016281,
+        0.5623615980148315,
+        0.1321384161710739
+      ],
+      "vertex_count": 134,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 455,
+      "label": "left forearm / elbow",
+      "surface": "armor",
+      "center": [
+        -0.10237753391265869,
+        0.5710111260414124,
+        0.16118167340755463
+      ],
+      "vertex_count": 65,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 480,
+      "label": "left thigh / knee",
+      "surface": "armor",
+      "center": [
+        -0.16166181862354279,
+        0.3120388090610504,
+        0.07581931352615356
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 592,
+      "label": "left thigh / knee",
+      "surface": "armor",
+      "center": [
+        -0.082872174680233,
+        0.324734091758728,
+        0.15790478885173798
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 595,
+      "label": "left thigh / knee",
+      "surface": "armor",
+      "center": [
+        -0.0790473222732544,
+        0.2865939438343048,
+        0.12280278652906418
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 799,
+      "label": "left upper arm",
+      "surface": "armor",
+      "center": [
+        -0.20889562368392944,
+        0.6074219346046448,
+        0.12393471598625183
+      ],
+      "vertex_count": 22,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 905,
+      "label": "left upper arm",
+      "surface": "armor",
+      "center": [
+        -0.1460031121969223,
+        0.6428223252296448,
+        0.10200897604227066
+      ],
+      "vertex_count": 70,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 912,
+      "label": "captain left pauldron",
+      "surface": "armor",
+      "center": [
+        -0.1274016797542572,
+        0.7892102003097534,
+        0.0959019660949707
+      ],
+      "vertex_count": 86,
+      "scale": [
+        1.12,
+        1.04,
+        1.08
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1099,
+      "label": "left upper arm",
+      "surface": "armor",
+      "center": [
+        -0.06185907870531082,
+        0.594696044921875,
+        0.21911625564098358
+      ],
+      "vertex_count": 16,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1141,
+      "label": "left upper arm",
+      "surface": "armor",
+      "center": [
+        -0.046142563223838806,
+        0.5829264521598816,
+        0.11401371657848358
+      ],
+      "vertex_count": 6,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1243,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        -0.0874633640050888,
+        0.764211118221283,
+        0.15389007329940796
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1528,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        -0.060560427606105804,
+        0.804158627986908,
+        0.09469953179359436
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1555,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        -0.05166621878743172,
+        0.7728577256202698,
+        0.15753182768821716
+      ],
+      "vertex_count": 16,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1563,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        -0.04640026390552521,
+        0.7937012910842896,
+        0.09766989946365356
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1576,
+      "label": "helmet / head",
+      "surface": "armor",
+      "center": [
+        2.4452278012176976e-05,
+        0.8028320670127869,
+        0.10784920305013657
+      ],
+      "vertex_count": 40,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1588,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        -0.033965542912483215,
+        0.8548753261566162,
+        0.14134997129440308
+      ],
+      "vertex_count": 65,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1630,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        0.01637144200503826,
+        0.9022670388221741,
+        0.1631697118282318
+      ],
+      "vertex_count": 70,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1665,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        0.012972070835530758,
+        0.8738037347793579,
+        0.16432297229766846
+      ],
+      "vertex_count": 60,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1683,
+      "label": "head detail",
+      "surface": "eyes",
+      "center": [
+        -0.023992303758859634,
+        0.8840110301971436,
+        0.1552956998348236
+      ],
+      "vertex_count": 11,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1694,
+      "label": "head detail",
+      "surface": "eyes",
+      "center": [
+        -0.06123485043644905,
+        0.9122425317764282,
+        0.1524326205253601
+      ],
+      "vertex_count": 22,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1708,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        3.1913550628814846e-05,
+        0.9336857199668884,
+        0.1524464339017868
+      ],
+      "vertex_count": 69,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1713,
+      "label": "head detail",
+      "surface": "eyes",
+      "center": [
+        0.00012214164598844945,
+        0.8834228515625,
+        0.18994148075580597
+      ],
+      "vertex_count": 4,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 1808,
+      "label": "helmet / head",
+      "surface": "armor",
+      "center": [
+        0.004140156786888838,
+        0.7551828026771545,
+        -0.08338075876235962
+      ],
+      "vertex_count": 1338,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2153,
+      "label": "left forearm / elbow",
+      "surface": "armor",
+      "center": [
+        -0.07240703701972961,
+        0.5734477639198303,
+        -0.1716051548719406
+      ],
+      "vertex_count": 19,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2167,
+      "label": "left upper arm",
+      "surface": "armor",
+      "center": [
+        -0.23732507228851318,
+        0.7259317636489868,
+        -0.08111564815044403
+      ],
+      "vertex_count": 24,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2298,
+      "label": "left forearm / elbow",
+      "surface": "armor",
+      "center": [
+        -0.13578082621097565,
+        0.5794870257377625,
+        -0.1923956573009491
+      ],
+      "vertex_count": 19,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2405,
+      "label": "left upper arm",
+      "surface": "armor",
+      "center": [
+        -0.05712897330522537,
+        0.6504094004631042,
+        -0.20639273524284363
+      ],
+      "vertex_count": 26,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2596,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        -0.0967610776424408,
+        0.81396484375,
+        -0.040934186428785324
+      ],
+      "vertex_count": 3,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2746,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        0.1332191824913025,
+        0.1269528716802597,
+        0.0798882246017456
+      ],
+      "vertex_count": 9,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2747,
+      "label": "right thigh / knee",
+      "surface": "armor",
+      "center": [
+        0.07391588389873505,
+        0.2693357765674591,
+        0.11463868618011475
+      ],
+      "vertex_count": 25,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2751,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        0.15546222031116486,
+        0.2353343963623047,
+        0.11721930652856827
+      ],
+      "vertex_count": 115,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2759,
+      "label": "boot / foot",
+      "surface": "armor",
+      "center": [
+        0.1491798609495163,
+        0.1077166274189949,
+        0.10699460655450821
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2764,
+      "label": "boot / foot",
+      "surface": "armor",
+      "center": [
+        0.2119719386100769,
+        0.0581691600382328,
+        0.08632690459489822
+      ],
+      "vertex_count": 84,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2766,
+      "label": "boot / foot",
+      "surface": "armor",
+      "center": [
+        0.2174767404794693,
+        0.0938369631767273,
+        0.11263595521450043
+      ],
+      "vertex_count": 28,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2889,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        0.2243039757013321,
+        0.12364683300256729,
+        0.05771883949637413
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 2927,
+      "label": "shin armor",
+      "surface": "armor",
+      "center": [
+        0.2004392445087433,
+        0.1364743709564209,
+        0.03277582302689552
+      ],
+      "vertex_count": 8,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3000,
+      "label": "right thigh / knee",
+      "surface": "armor",
+      "center": [
+        0.17062266170978546,
+        0.30764856934547424,
+        0.06542176008224487
+      ],
+      "vertex_count": 31,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3024,
+      "label": "right thigh / knee",
+      "surface": "armor",
+      "center": [
+        0.07860299944877625,
+        0.32050564885139465,
+        0.1559855192899704
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3033,
+      "label": "right thigh / knee",
+      "surface": "armor",
+      "center": [
+        0.07906074821949005,
+        0.28652599453926086,
+        0.122707799077034
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3201,
+      "label": "right thigh / knee",
+      "surface": "armor",
+      "center": [
+        0.14391061663627625,
+        0.34672027826309204,
+        0.11804194748401642
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3272,
+      "label": "right forearm / elbow",
+      "surface": "armor",
+      "center": [
+        0.2011176198720932,
+        0.4763696491718292,
+        0.1639358550310135
+      ],
+      "vertex_count": 162,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3284,
+      "label": "right forearm / elbow",
+      "surface": "armor",
+      "center": [
+        0.10237760841846466,
+        0.5710261464118958,
+        0.16118159890174866
+      ],
+      "vertex_count": 65,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3403,
+      "label": "right forearm / elbow",
+      "surface": "armor",
+      "center": [
+        0.18805167078971863,
+        0.562210738658905,
+        0.13236941397190094
+      ],
+      "vertex_count": 135,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3423,
+      "label": "right thigh / knee",
+      "surface": "armor",
+      "center": [
+        0.16167521476745605,
+        0.31201159954071045,
+        0.07583273947238922
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3586,
+      "label": "right upper arm",
+      "surface": "armor",
+      "center": [
+        0.06185917556285858,
+        0.594696044921875,
+        0.2191161811351776
+      ],
+      "vertex_count": 16,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3627,
+      "label": "right upper arm",
+      "surface": "armor",
+      "center": [
+        0.04614260047674179,
+        0.5829263925552368,
+        0.114013671875
+      ],
+      "vertex_count": 6,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3806,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.08746341615915298,
+        0.7642110586166382,
+        0.15389002859592438
+      ],
+      "vertex_count": 48,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 3901,
+      "label": "right upper arm",
+      "surface": "armor",
+      "center": [
+        0.14603102207183838,
+        0.6428502202033997,
+        0.10200195759534836
+      ],
+      "vertex_count": 70,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4043,
+      "label": "right upper arm",
+      "surface": "armor",
+      "center": [
+        0.2088956981897354,
+        0.6074219346046448,
+        0.12393464148044586
+      ],
+      "vertex_count": 22,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4071,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.12739600241184235,
+        0.7892158627510071,
+        0.09590188413858414
+      ],
+      "vertex_count": 86,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4257,
+      "label": "head detail",
+      "surface": "eyes",
+      "center": [
+        0.01310228556394577,
+        0.8723958134651184,
+        0.18758144974708557
+      ],
+      "vertex_count": 3,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4280,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.046400319784879684,
+        0.7937147617340088,
+        0.09769701212644577
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4282,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        0.03615916520357132,
+        0.8561148047447205,
+        0.14140254259109497
+      ],
+      "vertex_count": 65,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4289,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.05111699923872948,
+        0.77288818359375,
+        0.15783697366714478
+      ],
+      "vertex_count": 16,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4334,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.06056046858429909,
+        0.8041585683822632,
+        0.09468593448400497
+      ],
+      "vertex_count": 36,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4401,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        0.054363932460546494,
+        0.8943041563034058,
+        0.1102323830127716
+      ],
+      "vertex_count": 43,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4963,
+      "label": "head detail",
+      "surface": "eyes",
+      "center": [
+        0.04467777907848358,
+        0.93359375,
+        0.03491215780377388
+      ],
+      "vertex_count": 4,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 4980,
+      "label": "head detail",
+      "surface": "armor",
+      "center": [
+        0.06872560828924179,
+        0.908447265625,
+        -0.031127898022532463
+      ],
+      "vertex_count": 28,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 5084,
+      "label": "right forearm / elbow",
+      "surface": "armor",
+      "center": [
+        0.07243261486291885,
+        0.5734477639198303,
+        -0.171605184674263
+      ],
+      "vertex_count": 19,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 5139,
+      "label": "right forearm / elbow",
+      "surface": "armor",
+      "center": [
+        0.1357806771993637,
+        0.5794613361358643,
+        -0.19239573180675507
+      ],
+      "vertex_count": 19,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 5511,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.0824381485581398,
+        0.7779948115348816,
+        -0.0743001252412796
+      ],
+      "vertex_count": 3,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    },
+    {
+      "id": 5516,
+      "label": "shoulder plate",
+      "surface": "armor",
+      "center": [
+        0.09578452259302139,
+        0.81494140625,
+        -0.040445953607559204
+      ],
+      "vertex_count": 3,
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "offset": [
+        0,
+        0,
+        0
+      ],
+      "color": null
+    }
+  ]
+}

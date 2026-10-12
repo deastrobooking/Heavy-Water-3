@@ -7,6 +7,10 @@ const Guid = @import("asset/Guid.zig");
 const Registry = @import("asset/Registry.zig");
 const Heightmap = @import("procedural/Heightmap.zig");
 const Synth = @import("audio/Synth.zig");
+const Raster = @import("character/raster.zig");
+const CharacterMath = @import("character/math.zig");
+const CharacterSpec = @import("character/spec.zig");
+const Modifiers = @import("asset/Modifiers.zig");
 
 /// Build-time tool:
 ///   asset-compiler compile <source> <source.meta> <output>
@@ -16,6 +20,12 @@ const Synth = @import("audio/Synth.zig");
 ///       validate asset identity and write a source-to-module report for 3D review/mod packaging
 ///   asset-compiler split <source.glb|source.gltf> <source.meta> <output-directory>
 ///       write one validated HWMS module per selected-scene node/mesh/primitive and modules.json
+///   asset-compiler preview-bind <source.glb|source.gltf> <source.meta> <output.png> [bind|run]
+///       CPU-skin the bind pose or the game's native procedural run pose into a review PNG
+///   asset-compiler modifiers <source.glb|source.gltf> <source.meta> <output.json>
+///       create a source-linked, auto-labeled Captain modifier document for editing
+///   asset-compiler preview-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.png> [bind|run]
+///       apply palette, label and per-part shape edits, then render a review PNG
 ///   asset-compiler manifest <output> (<source.meta> <name> <output-name>)...
 ///       write the asset manifest the runtime registry loads
 ///   asset-compiler import <directory>
@@ -31,11 +41,14 @@ pub fn main(init: std.process.Init) !void {
     if (args.len >= 2 and std.mem.eql(u8, args[1], "compile") and args.len == 5) return compile(init.gpa, io, args[2], args[3], args[4]);
     if (args.len == 5 and std.mem.eql(u8, args[1], "trace")) return trace(init.gpa, io, args[2], args[3], args[4]);
     if (args.len == 5 and std.mem.eql(u8, args[1], "split")) return split(init.gpa, io, args[2], args[3], args[4]);
+    if ((args.len == 5 or args.len == 6) and std.mem.eql(u8, args[1], "preview-bind")) return previewBind(init.gpa, io, args[2], args[3], args[4], if (args.len == 6) args[5] else "bind");
+    if (args.len == 5 and std.mem.eql(u8, args[1], "modifiers")) return createModifiers(init.gpa, io, args[2], args[3], args[4]);
+    if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "preview-modified")) return previewModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
     if (args.len >= 3 and std.mem.eql(u8, args[1], "manifest") and (args.len - 3) % 3 == 0) return manifest(init.gpa, io, args[2], args[3..]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "import")) return import(init.gpa, io, args[2]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "sounds")) return writeSounds(init.gpa, io, args[2]);
     if (args.len == 4 or args.len == 8) if (std.mem.eql(u8, args[1], "heightmap")) return compileHeightmap(init.gpa, io, args[2], args[3], args[4..]);
-    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source.glb|source.gltf> <meta> <output.json> | split <source.glb|source.gltf> <meta> <output-dir> | manifest <output> (<meta> <name> <output-name>)... | import <dir> | heightmap <source.pgm> <output.hwmh> [world-width world-depth elevation base-height]", .{});
+    std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source> <meta> <output.json> | split <source> <meta> <output-dir> | preview-bind <source> <meta> <output.png> [bind|run] | modifiers <source> <meta> <output.json> | preview-modified <source> <meta> <modifiers.json> <output.png> [bind|run] | manifest ... | import <dir> | heightmap ...", .{});
     return error.InvalidArguments;
 }
 
@@ -165,6 +178,160 @@ fn trace(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path:
     defer gpa.free(json);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = json });
     std.log.info("trace: {s} -> {s}", .{ source_path, output_path });
+}
+
+fn previewBind(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, output_path: []const u8, pose_name: []const u8) !void {
+    const source = try readFile(gpa, io, source_path);
+    defer gpa.free(source);
+    const meta_bytes = try readFile(gpa, io, meta_path);
+    defer gpa.free(meta_bytes);
+    const meta = try Meta.check(gpa, meta_bytes, source_path, source);
+    if (meta.kind != .model) return error.UnsupportedKind;
+    var context: Context = .{ .io = io, .dir = std.fs.path.dirname(source_path) orelse "." };
+    const pose: Gltf.PreviewPose = if (std.mem.eql(u8, pose_name, "bind")) .bind else if (std.mem.eql(u8, pose_name, "run")) .run else return error.InvalidPreviewPose;
+    var model = try Gltf.compilePosePreview(gpa, source, .{ .context = &context, .load = Context.load }, pose);
+    defer model.deinit(gpa);
+    if (meta.model.scale != 1) {
+        for (model.mesh.vertices) |*v| {
+            for (&v.position) |*c| c.* *= meta.model.scale;
+        }
+        model.computeBounds();
+    }
+    var image = try renderBindPose(gpa, &model, null);
+    defer image.deinit(gpa);
+    var png: std.ArrayList(u8) = .empty;
+    defer png.deinit(gpa);
+    try image.writePng(gpa, &png);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = png.items });
+    std.log.info("{s} preview: {d} vertices, {d} triangles -> {s} (CPU-skinned review image; rig not included in HWMS)", .{ @tagName(pose), model.mesh.vertices.len, model.mesh.indices.len / 3, output_path });
+}
+
+fn createModifiers(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, output_path: []const u8) !void {
+    const source = try readFile(gpa, io, source_path);
+    defer gpa.free(source);
+    const meta_bytes = try readFile(gpa, io, meta_path);
+    defer gpa.free(meta_bytes);
+    const meta = try Meta.check(gpa, meta_bytes, source_path, source);
+    if (meta.kind != .model) return error.UnsupportedKind;
+    var context: Context = .{ .io = io, .dir = std.fs.path.dirname(source_path) orelse "." };
+    var model = try Gltf.compilePosePreview(gpa, source, .{ .context = &context, .load = Context.load }, .bind);
+    defer model.deinit(gpa);
+    if (meta.model.scale != 1) {
+        for (model.mesh.vertices) |*vertex| {
+            for (&vertex.position) |*axis| axis.* *= meta.model.scale;
+        }
+    }
+    model.computeBounds();
+    const hash = Meta.hashSource(source);
+    const document = try Modifiers.generate(gpa, model, &hash);
+    defer Modifiers.deinit(gpa, document);
+    const json = try std.json.Stringify.valueAlloc(gpa, document, .{ .whitespace = .indent_2 });
+    defer gpa.free(json);
+    if (std.fs.path.dirname(output_path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = json });
+    std.log.info("modifiers: generated {d} auto-labeled mesh islands for {s} (edit labels, surfaces, colors, and scales in {s})", .{ document.parts.len, @tagName(document.character_type), output_path });
+}
+
+fn previewModified(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, modifiers_path: []const u8, output_path: []const u8, pose_name: []const u8) !void {
+    const source = try readFile(gpa, io, source_path);
+    defer gpa.free(source);
+    const meta_bytes = try readFile(gpa, io, meta_path);
+    defer gpa.free(meta_bytes);
+    const modifier_bytes = try readFile(gpa, io, modifiers_path);
+    defer gpa.free(modifier_bytes);
+    const meta = try Meta.check(gpa, meta_bytes, source_path, source);
+    if (meta.kind != .model) return error.UnsupportedKind;
+    const parsed = try std.json.parseFromSlice(Modifiers.Document, gpa, modifier_bytes, .{});
+    defer parsed.deinit();
+    var context: Context = .{ .io = io, .dir = std.fs.path.dirname(source_path) orelse "." };
+    const pose: Gltf.PreviewPose = if (std.mem.eql(u8, pose_name, "bind")) .bind else if (std.mem.eql(u8, pose_name, "run")) .run else return error.InvalidPreviewPose;
+    var model = try Gltf.compilePosePreview(gpa, source, .{ .context = &context, .load = Context.load }, pose);
+    defer model.deinit(gpa);
+    if (meta.model.scale != 1) {
+        for (model.mesh.vertices) |*vertex| {
+            for (&vertex.position) |*axis| axis.* *= meta.model.scale;
+        }
+    }
+    model.computeBounds();
+    const analysis = try Modifiers.apply(gpa, &model, parsed.value, &Meta.hashSource(source));
+    defer gpa.free(analysis.vertex_parts);
+    defer gpa.free(analysis.components);
+    const triangle_colors = try gpa.alloc([3]f32, model.mesh.indices.len / 3);
+    defer gpa.free(triangle_colors);
+    for (triangle_colors, 0..) |*color, i| color.* = Modifiers.triangleSurfaceColor(parsed.value, analysis, model, i);
+    var image = try renderBindPose(gpa, &model, triangle_colors);
+    defer image.deinit(gpa);
+    var png: std.ArrayList(u8) = .empty;
+    defer png.deinit(gpa);
+    try image.writePng(gpa, &png);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = png.items });
+    std.log.info("modified preview: {s}, {d} editable mesh islands, {d} vertices -> {s}", .{ @tagName(parsed.value.character_type), parsed.value.parts.len, model.mesh.vertices.len, output_path });
+}
+
+const BindPoseShader = struct {
+    light: CharacterMath.Vec3,
+    low_y: f32,
+    height: f32,
+    triangle_colors: ?[][3]f32 = null,
+
+    pub fn fragment(s: BindPoseShader, f: Raster.Fragment) ?CharacterSpec.Rgb {
+        // Texture-free test assets still get a useful cel-material preview. The height ramp is
+        // deliberately diagnostic, so parts and silhouette remain readable without authored UVs.
+        const t = std.math.clamp((f.world.y - s.low_y) / s.height, 0, 1);
+        const lower = CharacterSpec.Rgb.hex(0x263e60);
+        const upper = CharacterSpec.Rgb.hex(0x73b9bf);
+        const base = CharacterSpec.Rgb.init(
+            lower.r + (upper.r - lower.r) * t,
+            lower.g + (upper.g - lower.g) * t,
+            lower.b + (upper.b - lower.b) * t,
+        );
+        const ndl = @max(f.normal.normalize().dot(s.light), 0);
+        const band: f32 = if (ndl < 0.22) 0.48 else if (ndl < 0.58) 0.76 else 1.0;
+        const tint = if (s.triangle_colors) |colors| if (f.tri < colors.len) colors[f.tri] else [3]f32{ 1, 1, 1 } else [3]f32{ 1, 1, 1 };
+        return CharacterSpec.Rgb.init(base.r * band * tint[0], base.g * band * tint[1], base.b * band * tint[2]);
+    }
+};
+
+fn renderBindPose(gpa: std.mem.Allocator, model: *const Model, triangle_colors: ?[][3]f32) !Raster.Image {
+    const V = CharacterMath.Vec3;
+    const width: usize = 512;
+    const height: usize = 768;
+    const factor: usize = 2;
+    const lo = V.init(model.bounds_min[0], model.bounds_min[1], model.bounds_min[2]);
+    const hi = V.init(model.bounds_max[0], model.bounds_max[1], model.bounds_max[2]);
+    const center = lo.add(hi).scale(0.5);
+    const extents = hi.sub(lo);
+    const radius = @max(extents.length() * 0.5, 0.1);
+    const fovy = CharacterMath.radians(32);
+    const target = V.init(center.x, lo.y + extents.y * 0.50, center.z);
+    const fit_distance = extents.y * 0.5 / @tan(fovy * 0.5) * 1.24;
+    const distance = @max(fit_distance, radius * 3.5);
+    const eye = target.add(V.init(distance * 0.07, distance * 0.035, distance));
+    const W = width * factor;
+    const H = height * factor;
+    const aspect = @as(f32, @floatFromInt(W)) / @as(f32, @floatFromInt(H));
+    const view_proj = CharacterMath.Mat4.perspective(fovy, aspect, @max(radius * 0.02, 0.01), distance + radius * 4).mul(CharacterMath.Mat4.lookAt(eye, target, V.unit_y));
+    const positions = try gpa.alloc(V, model.mesh.vertices.len);
+    defer gpa.free(positions);
+    const normals = try gpa.alloc(V, model.mesh.vertices.len);
+    defer gpa.free(normals);
+    const uvs = try gpa.alloc(CharacterMath.Vec2, model.mesh.vertices.len);
+    defer gpa.free(uvs);
+    for (model.mesh.vertices, positions, normals, uvs) |vertex, *p, *n, *uv| {
+        p.* = V.init(vertex.position[0], vertex.position[1], vertex.position[2]);
+        n.* = V.init(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+        uv.* = CharacterMath.Vec2.init(vertex.uv[0], vertex.uv[1]);
+    }
+    var image = try Raster.Image.init(gpa, W, H, CharacterSpec.Rgb.hex(0x101927));
+    errdefer image.deinit(gpa);
+    image.fillGradient(CharacterSpec.Rgb.hex(0x172a3b), CharacterSpec.Rgb.hex(0x08121f));
+    Raster.drawTriangles(&image, view_proj, positions, normals, uvs, model.mesh.indices, .none, 0, BindPoseShader{
+        .light = V.init(-0.45, 0.72, 0.64).normalize(),
+        .low_y = lo.y,
+        .height = @max(extents.y, 0.01),
+        .triangle_colors = triangle_colors,
+    });
+    return image.downsample(gpa, factor);
 }
 
 fn split(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, output_dir: []const u8) !void {

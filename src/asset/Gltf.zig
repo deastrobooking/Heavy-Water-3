@@ -1,6 +1,8 @@
 const std = @import("std");
 const Mesh = @import("../render/Mesh.zig");
 const Model = @import("Model.zig");
+const GameAnimation = @import("../character/Animation.zig");
+const GameSkeleton = @import("../character/skeleton.zig");
 
 /// glTF 2.0 importer for the asset compiler. Supports .gltf (data-URI or resolver-loaded buffers)
 /// and .glb; triangle primitives with POSITION (NORMAL and TEXCOORD_0 optional); u8/u16/u32
@@ -24,7 +26,7 @@ const Doc = struct {
     buffers: []const struct { byteLength: usize, uri: ?[]const u8 = null } = &.{},
     extensionsRequired: []const []const u8 = &.{},
     extensionsUsed: []const []const u8 = &.{},
-    skins: []const std.json.Value = &.{},
+    skins: []const SkinDef = &.{},
     animations: []const std.json.Value = &.{},
     images: []const ImageDef = &.{},
     textures: []const std.json.Value = &.{},
@@ -39,9 +41,15 @@ const Node = struct {
     scale: [3]f32 = .{ 1, 1, 1 },
     skin: ?u32 = null,
 };
+const SkinDef = struct {
+    name: ?[]const u8 = null,
+    joints: []const u32 = &.{},
+    inverseBindMatrices: ?u32 = null,
+    skeleton: ?u32 = null,
+};
 const ImageDef = struct { name: ?[]const u8 = null, uri: ?[]const u8 = null, mimeType: ?[]const u8 = null, bufferView: ?u32 = null };
 const Primitive = struct {
-    attributes: struct { POSITION: u32, NORMAL: ?u32 = null, TEXCOORD_0: ?u32 = null },
+    attributes: struct { POSITION: u32, NORMAL: ?u32 = null, TEXCOORD_0: ?u32 = null, JOINTS_0: ?u32 = null, WEIGHTS_0: ?u32 = null },
     indices: ?u32 = null,
     material: ?u32 = null,
     mode: u32 = 4,
@@ -83,6 +91,14 @@ pub const TraceModule = struct {
     world_transform: ?Mat,
 };
 pub const TraceDependency = struct { kind: []const u8, uri: ?[]const u8, embedded: bool, byte_length: ?usize = null };
+pub const TraceJoint = struct { index: u32, node: u32, name: []const u8, parent_joint: ?u32 };
+pub const TraceSkin = struct {
+    index: u32,
+    name: []const u8,
+    joint_count: usize,
+    inverse_bind_accessor: ?u32,
+    joints: []const TraceJoint,
+};
 pub const Trace = struct {
     trace_format: u32 = 2,
     source_format: []const u8,
@@ -93,6 +109,7 @@ pub const Trace = struct {
     mesh_count: usize,
     material_count: usize,
     modules: []const TraceModule,
+    skins: []const TraceSkin,
     dependencies: []const TraceDependency,
     extensions_used: []const []const u8,
     extensions_required: []const []const u8,
@@ -177,6 +194,8 @@ fn traceInArena(arena: std.mem.Allocator, source: []const u8) !Trace {
     if (doc.animations.len != 0) try notes.append(arena, "Animations are traced but not imported into runtime clips yet.");
     if (doc.textures.len != 0 or doc.images.len != 0) try notes.append(arena, "Image textures are traced but the current HWMS material path imports base-color factors only.");
 
+    const skins = try traceSkins(arena, doc);
+
     return .{
         .source_format = if (is_glb) "glb" else "gltf",
         .gltf_version = doc.asset.version,
@@ -186,6 +205,7 @@ fn traceInArena(arena: std.mem.Allocator, source: []const u8) !Trace {
         .mesh_count = doc.meshes.len,
         .material_count = doc.materials.len,
         .modules = try modules.toOwnedSlice(arena),
+        .skins = skins,
         .dependencies = dependencies[0..dependency_count],
         .extensions_used = doc.extensionsUsed,
         .extensions_required = doc.extensionsRequired,
@@ -197,35 +217,151 @@ fn traceInArena(arena: std.mem.Allocator, source: []const u8) !Trace {
     };
 }
 
+fn traceSkins(arena: std.mem.Allocator, doc: Doc) ![]const TraceSkin {
+    if (doc.skins.len == 0) return &.{};
+    const node_parents = try arena.alloc(?u32, doc.nodes.len);
+    @memset(node_parents, null);
+    for (doc.nodes, 0..) |node, parent_index| for (node.children) |child| {
+        if (child >= doc.nodes.len) return error.InvalidNode;
+        if (node_parents[child] != null) return error.MultipleNodeParents;
+        node_parents[child] = @intCast(parent_index);
+    };
+
+    const result = try arena.alloc(TraceSkin, doc.skins.len);
+    for (doc.skins, 0..) |skin, skin_index| {
+        if (skin.joints.len > 1024) return error.TooManyJoints;
+        const joint_map = try arena.alloc(?u32, doc.nodes.len);
+        @memset(joint_map, null);
+        for (skin.joints, 0..) |node_index, joint_index| {
+            if (node_index >= doc.nodes.len) return error.InvalidJoint;
+            if (joint_map[node_index] != null) return error.DuplicateJoint;
+            joint_map[node_index] = @intCast(joint_index);
+        }
+        const joints = try arena.alloc(TraceJoint, skin.joints.len);
+        for (skin.joints, 0..) |node_index, joint_index| {
+            var parent_joint: ?u32 = null;
+            var ancestor = node_parents[node_index];
+            var depth: usize = 0;
+            while (ancestor) |node_parent| : (depth += 1) {
+                if (depth > doc.nodes.len) return error.NodeCycle;
+                if (joint_map[node_parent]) |joint_parent| {
+                    parent_joint = joint_parent;
+                    break;
+                }
+                ancestor = node_parents[node_parent];
+            }
+            const node_name = doc.nodes[node_index].name orelse try std.fmt.allocPrint(arena, "node_{d}", .{node_index});
+            joints[joint_index] = .{ .index = @intCast(joint_index), .node = node_index, .name = node_name, .parent_joint = parent_joint };
+        }
+        result[skin_index] = .{
+            .index = @intCast(skin_index),
+            .name = skin.name orelse try std.fmt.allocPrint(arena, "skin_{d}", .{skin_index}),
+            .joint_count = skin.joints.len,
+            .inverse_bind_accessor = skin.inverseBindMatrices,
+            .joints = joints,
+        };
+    }
+    return result;
+}
+
 const SceneNodes = struct { active: []bool, world: []Mat };
 
 fn selectedNodes(arena: std.mem.Allocator, doc: Doc) !SceneNodes {
+    return selectedNodesWithPose(arena, doc, .bind);
+}
+
+fn selectedNodesWithPose(arena: std.mem.Allocator, doc: Doc, pose: PreviewPose) !SceneNodes {
     const active = try arena.alloc(bool, doc.nodes.len);
     @memset(active, false);
     const world = try arena.alloc(Mat, doc.nodes.len);
     if (doc.scenes.len != 0) {
         const scene_index = doc.scene orelse 0;
         if (scene_index >= doc.scenes.len) return error.InvalidScene;
-        for (doc.scenes[scene_index].nodes) |root| try markActive(doc, active, world, root, identity, 0);
+        for (doc.scenes[scene_index].nodes) |root| {
+            if (pose == .run) try markActiveRun(doc, active, world, root, identity, .{ 0, 0, 0, 1 }, .{ 0, 0, 0, 1 }, 0) else try markActive(doc, active, world, root, identity, 0, .bind);
+        }
     } else {
         const referenced = try arena.alloc(bool, doc.nodes.len);
         @memset(referenced, false);
         for (doc.nodes) |node| for (node.children) |child| {
             if (child < referenced.len) referenced[child] = true;
         };
-        for (referenced, 0..) |is_child, i| if (!is_child) try markActive(doc, active, world, @intCast(i), identity, 0);
+        for (referenced, 0..) |is_child, i| if (!is_child) {
+            if (pose == .run) try markActiveRun(doc, active, world, @intCast(i), identity, .{ 0, 0, 0, 1 }, .{ 0, 0, 0, 1 }, 0) else try markActive(doc, active, world, @intCast(i), identity, 0, .bind);
+        };
     }
     return .{ .active = active, .world = world };
 }
 
-fn markActive(doc: Doc, active: []bool, world: []Mat, index: u32, parent: Mat, depth: u32) anyerror!void {
+fn markActive(doc: Doc, active: []bool, world: []Mat, index: u32, parent: Mat, depth: u32, pose: PreviewPose) anyerror!void {
     if (index >= doc.nodes.len) return error.InvalidNode;
     if (depth > 64) return error.NodeCycle;
     if (active[index]) return;
     const node = doc.nodes[index];
     active[index] = true;
-    world[index] = mul(parent, node.matrix orelse trs(node.translation, node.rotation, node.scale));
-    for (node.children) |child| try markActive(doc, active, world, child, world[index], depth + 1);
+    const local = node.matrix orelse trs(node.translation, node.rotation, node.scale);
+    world[index] = mul(parent, local);
+    for (node.children) |child| try markActive(doc, active, world, child, world[index], depth + 1, pose);
+}
+
+fn sourcePoseDelta(name: ?[]const u8) ?[4]f32 {
+    const source_name = name orelse return null;
+    for (GameAnimation.run_tracks) |track| {
+        const target_name = switch (@as(GameSkeleton.Joint, @enumFromInt(track.joint))) {
+            .chest => "mixamorig:Spine2",
+            .upper_arm_l => "mixamorig:LeftArm",
+            .upper_arm_r => "mixamorig:RightArm",
+            .thigh_l => "mixamorig:LeftUpLeg",
+            .thigh_r => "mixamorig:RightUpLeg",
+            .shin_l => "mixamorig:LeftLeg",
+            .shin_r => "mixamorig:RightLeg",
+            else => continue,
+        };
+        if (std.mem.eql(u8, source_name, target_name)) {
+            const q = GameAnimation.sample(GameAnimation.run, track, std.math.pi * 0.5);
+            return .{ q.x, q.y, q.z, q.w };
+        }
+    }
+    return null;
+}
+
+fn markActiveRun(doc: Doc, active: []bool, world: []Mat, index: u32, parent_world: Mat, parent_bind_q: [4]f32, parent_pose_q: [4]f32, depth: u32) anyerror!void {
+    if (index >= doc.nodes.len) return error.InvalidNode;
+    if (depth > 64) return error.NodeCycle;
+    const node = doc.nodes[index];
+    if (node.matrix != null) return error.PosedMatrixNodeUnsupported;
+    active[index] = true;
+    const bind_local_q = node.rotation;
+    const converted_delta = if (sourcePoseDelta(node.name)) |delta|
+        quatMul(quatMul(quatConjugate(parent_bind_q), delta), parent_bind_q)
+    else
+        .{ 0, 0, 0, 1 };
+    const pose_local_q = quatNormalize(quatMul(converted_delta, bind_local_q));
+    const bind_world_q = quatNormalize(quatMul(parent_bind_q, bind_local_q));
+    const pose_world_q = quatNormalize(quatMul(parent_pose_q, pose_local_q));
+    const local_pose = trs(node.translation, pose_local_q, node.scale);
+    world[index] = mul(parent_world, local_pose);
+    for (node.children) |child| try markActiveRun(doc, active, world, child, world[index], bind_world_q, pose_world_q, depth + 1);
+}
+
+fn quatMul(a: [4]f32, b: [4]f32) [4]f32 {
+    const ax, const ay, const az, const aw = a;
+    const bx, const by, const bz, const bw = b;
+    return .{
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    };
+}
+
+fn quatConjugate(q: [4]f32) [4]f32 {
+    return .{ -q[0], -q[1], -q[2], q[3] };
+}
+
+fn quatNormalize(q: [4]f32) [4]f32 {
+    const len = @sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    return if (len > 1e-8) .{ q[0] / len, q[1] / len, q[2] / len, q[3] / len } else .{ 0, 0, 0, 1 };
 }
 
 pub fn traceJson(allocator: std.mem.Allocator, source: []const u8, provenance: anytype) ![]u8 {
@@ -250,16 +386,29 @@ pub fn externalBuffers(arena: std.mem.Allocator, source: []const u8) ![]const []
 }
 
 pub fn compile(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver) !Model {
-    return compileFiltered(allocator, source, resolver, null);
+    return compileFiltered(allocator, source, resolver, null, false, .bind);
+}
+
+pub const PreviewPose = enum { bind, run };
+
+/// Compile a skinned source into a static visual preview. Skin weights and inverse-bind matrices
+/// are evaluated on the CPU; the resulting HWMS contains no rig or animation data.
+pub fn compileBindPosePreview(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver) !Model {
+    return compilePosePreview(allocator, source, resolver, .bind);
+}
+
+/// Preview one of the game's native procedural poses on a compatible named humanoid rig.
+pub fn compilePosePreview(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, pose: PreviewPose) !Model {
+    return compileFiltered(allocator, source, resolver, null, true, pose);
 }
 
 /// Compile one node's primitive into an independent HWMS module, retaining its accumulated
 /// ancestor transform. `inspect` supplies stable source addresses for these selectors.
 pub fn compileModule(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, address: ModuleAddress) !Model {
-    return compileFiltered(allocator, source, resolver, address);
+    return compileFiltered(allocator, source, resolver, address, false, .bind);
 }
 
-fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, selector: ?ModuleAddress) !Model {
+fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, selector: ?ModuleAddress, allow_skin_preview: bool, preview_pose: PreviewPose) !Model {
     var arena_state: std.heap.ArenaAllocator = .init(allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -279,7 +428,8 @@ fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: R
         data.* = if (def.uri) |uri| try loadUri(arena, uri, resolver) else if (i == 0 and glb_bin != null) glb_bin.? else return error.MissingBuffer;
         if (data.len < def.byteLength) return error.BufferTooShort;
     }
-    var builder: Builder = .{ .doc = doc, .buffers = buffers, .arena = arena, .selector = selector };
+    const node_state = try selectedNodesWithPose(arena, doc, if (allow_skin_preview) preview_pose else .bind);
+    var builder: Builder = .{ .doc = doc, .buffers = buffers, .arena = arena, .selector = selector, .allow_skin_preview = allow_skin_preview, .node_world = node_state.world, .node_active = node_state.active };
     if (doc.scene) |i| if (i >= doc.scenes.len) return error.InvalidScene;
     const roots: []const u32 = if (doc.scenes.len > 0) doc.scenes[doc.scene orelse 0].nodes else blk: {
         // Without scenes, every node not referenced as a child is a root.
@@ -320,39 +470,80 @@ const Builder = struct {
     /// glTF material index → runtime material index; the last slot is the default material.
     material_map: [Model.max_materials + 1]?u32 = @splat(null),
     selector: ?ModuleAddress = null,
+    allow_skin_preview: bool = false,
+    node_world: []const Mat,
+    node_active: []const bool,
 
     fn visit(self: *Builder, index: u32, parent: Mat, depth: u32) !void {
         if (index >= self.doc.nodes.len) return error.InvalidNode;
         if (depth > 64) return error.NodeCycle;
         const node = self.doc.nodes[index];
-        if (node.skin != null) return error.SkinsUnsupported;
+        if (node.skin != null and !self.allow_skin_preview) return error.SkinsUnsupported;
         const local = node.matrix orelse trs(node.translation, node.rotation, node.scale);
         const world = mul(parent, local);
         if (node.mesh) |m| {
             if (m >= self.doc.meshes.len) return error.InvalidMesh;
             for (self.doc.meshes[m].primitives, 0..) |p, primitive_index| {
                 const selected = self.selector == null or (self.selector.?.node == index and @as(usize, self.selector.?.primitive) == primitive_index);
-                if (selected) try self.primitive(p, world);
+                if (selected) try self.primitive(p, world, node.skin);
             }
         }
         for (node.children) |child| try self.visit(child, world, depth + 1);
     }
 
-    fn primitive(self: *Builder, p: Primitive, world: Mat) !void {
+    fn primitive(self: *Builder, p: Primitive, world: Mat, skin_index: ?u32) !void {
         if (p.mode != 4) return error.NonTrianglePrimitive;
         if (p.targets != null) return error.MorphTargetsUnsupported;
         const positions = try self.accessor(p.attributes.POSITION, "VEC3");
         const normals: ?View = if (p.attributes.NORMAL) |normal_accessor| try self.accessor(normal_accessor, "VEC3") else null;
         const uvs: ?View = if (p.attributes.TEXCOORD_0) |t| try self.accessor(t, "VEC2") else null;
+        const skin_mats: ?[]const Mat = if (skin_index) |i| if (self.allow_skin_preview) try self.skinMatrices(i) else return error.SkinsUnsupported else null;
+        const joints: ?View = if (p.attributes.JOINTS_0) |j| try self.accessor(j, "VEC4") else null;
+        const weights: ?View = if (p.attributes.WEIGHTS_0) |w| try self.accessor(w, "VEC4") else null;
         if ((normals != null and normals.?.count != positions.count) or (uvs != null and uvs.?.count != positions.count)) return error.AttributeCountMismatch;
+        if (skin_mats != null and (joints == null or weights == null)) return error.MissingSkinAttributes;
+        if ((joints != null and joints.?.count != positions.count) or (weights != null and weights.?.count != positions.count)) return error.AttributeCountMismatch;
         if (positions.component != 5126 or (normals != null and normals.?.component != 5126)) return error.UnsupportedComponentType;
         if (uvs) |u| if (u.component != 5126) return error.UnsupportedComponentType;
+        if (skin_mats != null and (weights.?.component != 5126 or (joints.?.component != 5121 and joints.?.component != 5123))) return error.UnsupportedSkinComponentType;
 
         const base: u32 = @intCast(self.vertices.items.len);
         const normal_matrix = normalMatrix(world);
         for (0..positions.count) |i| {
-            const pos = transformPoint(world, positions.vec(3, i));
-            const n = if (normals) |view| normalize(transformVector(normal_matrix, view.vec(3, i))) else [3]f32{ 0, 1, 0 };
+            var pos: [3]f32 = undefined;
+            var n: [3]f32 = .{ 0, 1, 0 };
+            if (skin_mats) |palette| {
+                const source_pos = positions.vec(3, i);
+                const source_n = if (normals) |view| view.vec(3, i) else [3]f32{ 0, 1, 0 };
+                const bone_indices = joints.?.uint4(i);
+                const bone_weights = weights.?.vec(4, i);
+                pos = .{ 0, 0, 0 };
+                n = .{ 0, 0, 0 };
+                var weight_sum: f32 = 0;
+                for (0..4) |influence| {
+                    const weight = bone_weights[influence];
+                    if (!std.math.isFinite(weight) or weight < 0) return error.InvalidSkinWeights;
+                    if (weight == 0) continue;
+                    if (bone_indices[influence] >= palette.len) return error.InvalidJoint;
+                    const matrix = palette[bone_indices[influence]];
+                    const transformed_pos = transformPoint(matrix, source_pos);
+                    const transformed_n = transformVector(normalMatrix(matrix), source_n);
+                    for (0..3) |axis| {
+                        pos[axis] += transformed_pos[axis] * weight;
+                        n[axis] += transformed_n[axis] * weight;
+                    }
+                    weight_sum += weight;
+                }
+                if (weight_sum < 1e-6) return error.InvalidSkinWeights;
+                for (0..3) |axis| {
+                    pos[axis] /= weight_sum;
+                    n[axis] /= weight_sum;
+                }
+                n = normalize(n);
+            } else {
+                pos = transformPoint(world, positions.vec(3, i));
+                n = if (normals) |view| normalize(transformVector(normal_matrix, view.vec(3, i))) else .{ 0, 1, 0 };
+            }
             const uv = if (uvs) |u| u.vec(2, i) else [2]f32{ 0, 0 };
             for (pos ++ n ++ uv) |v| if (!std.math.isFinite(v)) return error.NonFiniteValue;
             try self.vertices.append(self.arena, .{ .position = pos, .normal = n, .uv = uv });
@@ -391,6 +582,26 @@ const Builder = struct {
         }
         if (self.submeshes.items.len == Model.max_submeshes) return error.TooManySubmeshes;
         try self.submeshes.append(self.arena, .{ .first_index = first, .index_count = count, .material = material_index });
+    }
+
+    fn skinMatrices(self: *Builder, skin_index: u32) ![]const Mat {
+        if (skin_index >= self.doc.skins.len) return error.InvalidSkin;
+        const skin = self.doc.skins[skin_index];
+        if (skin.joints.len == 0 or skin.joints.len > 1024) return error.InvalidSkin;
+        const palette = try self.arena.alloc(Mat, skin.joints.len);
+        var inverse_binds: ?View = null;
+        if (skin.inverseBindMatrices) |accessor_index| {
+            inverse_binds = try self.accessor(accessor_index, "MAT4");
+            if (inverse_binds.?.component != 5126 or inverse_binds.?.count != skin.joints.len) return error.InvalidInverseBindMatrices;
+        }
+        for (skin.joints, 0..) |node_index, joint_index| {
+            if (node_index >= self.doc.nodes.len or !self.node_active[node_index]) return error.InvalidJoint;
+            const inverse_bind = if (inverse_binds) |view| view.mat4(joint_index) else identity;
+            // In mesh space glTF applies inverse(mesh-world) * joint-world * inverse-bind,
+            // then the renderer's mesh-world transform. Those outer mesh transforms cancel.
+            palette[joint_index] = mul(self.node_world[node_index], inverse_bind);
+        }
+        return palette;
     }
 
     fn generateNormals(self: *Builder, base: u32, first: u32, count: u32) !void {
@@ -449,7 +660,7 @@ const Builder = struct {
             5125, 5126 => 4,
             else => return error.UnsupportedComponentType,
         };
-        const components: usize = if (std.mem.eql(u8, expected_type, "SCALAR")) 1 else if (std.mem.eql(u8, expected_type, "VEC2")) 2 else 3;
+        const components: usize = if (std.mem.eql(u8, expected_type, "SCALAR")) 1 else if (std.mem.eql(u8, expected_type, "VEC2")) 2 else if (std.mem.eql(u8, expected_type, "VEC4")) 4 else if (std.mem.eql(u8, expected_type, "MAT4")) 16 else 3;
         const element = component_size * components;
         const stride = bv.byteStride orelse element;
         if (stride < element) return error.InvalidStride;
@@ -476,6 +687,21 @@ const View = struct {
         var result: [n]f32 = undefined;
         for (&result, 0..) |*v, c| v.* = @bitCast(std.mem.readInt(u32, self.bytes[self.offset(i) + c * 4 ..][0..4], .little));
         return result;
+    }
+
+    fn mat4(self: View, i: usize) Mat {
+        return self.vec(16, i);
+    }
+
+    fn uint4(self: View, i: usize) [4]u32 {
+        var out: [4]u32 = undefined;
+        const at = self.offset(i);
+        for (&out, 0..) |*value, c| value.* = switch (self.component) {
+            5121 => self.bytes[at + c],
+            5123 => std.mem.readInt(u16, self.bytes[at + c * 2 ..][0..2], .little),
+            else => unreachable,
+        };
+        return out;
     }
 };
 
