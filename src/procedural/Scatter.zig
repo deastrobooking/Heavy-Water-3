@@ -40,7 +40,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const frost = if (kind == .vegetation) Biome.cover(seed, x, z, Noise.height(seed, x, z), @sqrt(nx * nx + nz * nz)).snow else 0;
         const choice = Seed.unit(Seed.mix(h +% 3));
         if (frost > 0.25 and choice <= 0.82 and Seed.unit(Seed.mix(h +% 5)) < frost) continue;
-        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.985) Vegetation.tree_first + @as(u8, @intCast(Seed.mix(h +% 4) % Vegetation.tree_count)) else if (choice > 0.84) 2 else if (choice > 0.75) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.67) 7 else if (choice > 0.42) 1 else 0;
+        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.985) Vegetation.tree_variants[@intCast(Seed.mix(h +% 4) % Vegetation.tree_count)] else if (choice > 0.84) 2 else if (choice > 0.75) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.67) 7 else if (choice > 0.42) 1 else 0;
         const color = biome.color();
         const shade = 0.84 + 0.28 * Seed.unit(Seed.mix(h +% 5));
         const tint: [4]f32 = if (variant < 6) .{ color[0] * 0.8 / Vegetation.colors[variant][0], color[1] * 1.3 / Vegetation.colors[variant][1], color[2] * 0.9 / Vegetation.colors[variant][2], 1 } else if (variant == 6) .{ shade, shade * 0.48, shade * 0.55, 1 } else .{ shade * (0.8 + 0.2 * color[0]), shade * (0.85 + 0.15 * color[1]), shade * (0.8 + 0.2 * color[2]), 1 };
@@ -48,8 +48,8 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
             .local_id = @intCast(i),
             .kind = kind,
             .variant = variant,
-            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (variant == 6) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
-            .tint = if (kind == .relic) .{ 0.40, 0.72, 0.81, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
+            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .tint = if (kind == .relic) .{ shade, shade, shade, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
         };
         count += 1;
     }

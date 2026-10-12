@@ -907,7 +907,7 @@ fn drawShop(c: *Canvas, sb: *const Sandbox, stall: u8, v: Rect) void {
         }
         y += 34;
     }
-    const about = if (sb.trade_row == 0) "Salvage glowing relics with right click; every stall buys parts." else ware_about[sb.trade_row - 1];
+    const about = if (sb.trade_row == 0) "Harvest young trees for parts; every stall buys them." else ware_about[sb.trade_row - 1];
     c.text(r.x + 18, r.y + r.h - 50, about, 1, dim);
     c.text(r.x + 18, r.y + r.h - 28, "ENTER BUY / SELL  ESC CLOSE  KITS PLACE WITH THE BUILD TOOL (2)", 0.9, alpha(dim, 0.8));
 }
@@ -1280,7 +1280,7 @@ test "every screen lays out inside the window and records hits" {
 }
 
 /// Keep marker labels separate while retaining a small dot at their true projected position.
-fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: Color, selected: bool, occupied: *[7]Rect, count: *usize) void {
+fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: Color, selected: bool, occupied: []Rect, count: *usize) void {
     const outside = fx < 0.03 or fx > 0.97 or fy < 0.12 or fy > 0.95;
     const x = map.x + map.w * std.math.clamp(fx, 0.03, 0.97);
     const y = map.y + map.h * std.math.clamp(fy, 0.12, 0.95);
@@ -1298,8 +1298,10 @@ fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: 
         }
         if (!overlaps) break;
     }
-    occupied[count.*] = tag;
-    count.* += 1;
+    if (count.* < occupied.len) {
+        occupied[count.*] = tag;
+        count.* += 1;
+    }
     c.rect(.{ .x = x - 2, .y = y - 2, .w = 4, .h = 4 }, color);
     if (selected) {
         c.frame(.{ .x = x - 5, .y = y - 5, .w = 10, .h = 10 }, 1, ink);
@@ -1310,9 +1312,9 @@ fn mapMarker(c: *Canvas, map: Rect, fx: f32, fy: f32, label: []const u8, color: 
 }
 
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
-    const r = menuRect(c, @min(720, c.width - 30), @min(650, c.height - 30));
+    const r = menuRect(c, @min(720, c.width - 30), @min(690, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
-    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 285 };
+    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 390 };
     c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
     const span: f32 = switch (menu.map_zoom) {
         0 => 350,
@@ -1321,7 +1323,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     };
     const depth = span * map.h / map.w;
     const player_position = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
-    const destination = if (menu.row < 3) menu.row else menu.map_destination;
+    const destination = if (menu.row < Sandbox.travel_count) menu.row else menu.map_destination;
     const focus = if (menu.map_frame_destination) sb.travelPoint(destination) else player_position;
     for (0..12) |z| for (0..20) |x| {
         const fx = @as(f32, @floatFromInt(x)) / 20;
@@ -1340,12 +1342,11 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
     }
     c.print(map.x + 8, map.y + 8, 1, ink, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
-    var occupied: [7]Rect = undefined;
+    var occupied: [12]Rect = undefined;
     var marker_count: usize = 0;
-    for (0..3) |i| {
+    for (0..Sandbox.travel_count) |i| {
         const point = sb.travelPoint(i);
-        var label: [8]u8 = undefined;
-        mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, std.fmt.bufPrint(&label, "{d}", .{i + 1}) catch "?", gold, destination == i, &occupied, &marker_count);
+        mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, Sandbox.travel_labels[i], gold, destination == i, &occupied, &marker_count);
     }
     for (0..4) |i| {
         if (i > 0 and !sb.guests[i - 1].active) continue;
@@ -1360,7 +1361,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         const on = menu.enabled(i);
         c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
         if (on) c.hit(row, hitId(.menu, i));
-        if (i < 3) {
+        if (i < Sandbox.travel_count) {
             const point = sb.travelPoint(i);
             const dx = point[0] - player_position[0];
             const dz = point[2] - player_position[2];

@@ -163,9 +163,9 @@ Defer a broad biome roster, multiple robot chassis, robot programming, and colon
 The terrain, rivers and plants get their own shading stages over the cel shader, and the ground now matters underfoot.
 - **Ground:** world-space grass drift and tufts, stone strata on steep faces (and on the mountain panorama and cave walls), snow on the flats with blue shadows and sun glints. No textures, no chunk seams.
 - **Water:** rivers ripple downstream, mirror the sky, glint, and foam along the banks; waterfalls streak white. Blended, drawn last.
-- **Foliage:** grass, native shrubs and three luminous wildflowers join grassland ferns; broadleaf, needleleaf, willow and engineered redwood silhouettes sway in gusting wind. Redwood tops reach 152.4 m (500 ft), and the other fantasy tree forms rise roughly 96–150 m.
-- **Night flora:** leaf flecks retain each species' pigment as they emit light: crimson redwood, red ember blossom, blue moonbell, gold sunspear and the existing green/cyan plants.
-- **Scatter:** faceted boulders on high, steep and dry ground; snow thins the flora and frosts trees and stones. Towering tree forms are deliberately rare beside low native ground cover. Candidate IDs remain stable; scatter generator version 6 records the new distribution and rejects old generator versions rather than silently changing their world.
+- **Foliage:** grass, native shrubs and three luminous wildflowers join grassland ferns; broadleaf, needleleaf, willow, engineered redwood, copper-fan, moon-cascade and star-blossom trees sway in gusting wind. Redwood tops reach 152.4 m (500 ft), and the other giant forms rise roughly 96–150 m. Higher resolution leaf meshes soften the silhouettes, with fan whorls, hanging sprays and open flower tiers separating the new species.
+- **Night flora:** leaf flecks retain each species' pigment as they emit light: crimson redwood, red ember blossom, blue moonbell, gold sunspear, and the violet, teal, green and cyan tree and plant palettes.
+- **Scatter:** faceted boulders on high, steep and dry ground; snow thins the flora and frosts trees and stones. Towering tree forms are deliberately rare beside low native ground cover. Former blue cube salvage nodes are now harvestable broadleaf saplings, 6.1–18.3 m (20–60 ft) tall. Candidate IDs remain stable; scatter generator version 8 migrates generator-5 through generator-7 saves without moving saved object IDs.
 - **Footing:** rivers can be waded and swum; snow is slow and slides, marsh and sand drag, the hoverboard is quicker on snow. Footsteps crunch on snow and splash in water; falling in splashes.
 
 Acceptance: tests for ground cover and footing, the river surface, boulder meshes and placement, runner speed and stopping on each ground, the wade-to-swim transition, and ground-voiced footsteps; a clean Metal-validated smoke; captures `-Dshowcase=36` (river and waterfall), `41` (a range from the foothills) and `48` (meadow).
@@ -282,6 +282,8 @@ Implemented:
 - **Pedestrians:** eight use the character controller on the walkways.
 - **Closing bridges:** removing an occupied bridge closes it to new traffic and removes it once empty.
 - **Markets:** stalls at the three towers buy salvaged parts for scrap and sell kits of three new market blueprints. Kits place, use up and refund, and stock sells out and restocks at dawn.
+- **Metro first slice:** a static light-rail loop now follows the plaza roads, with luminous paired tracks, outboard supports, and boarding platforms at the South, North, and West market towers. The three stations are selectable destinations on the world map; arrivals land on a clear station platform.
+- **Metro first slice:** a static light-rail loop now follows the plaza roads, with luminous paired tracks, outboard supports, and boarding platforms at the South, North, and West market towers. The three stations are selectable destinations on the world map; arrivals land on a clear station platform.
 - **Saves:** format 8 and content 6 save the wallet, stall stock, market day and kit machines.
 
 Acceptance evidence, all with the real Sandbox:
@@ -292,6 +294,10 @@ Acceptance evidence, all with the real Sandbox:
 - A market run salvages a part, opens a stall, sells, buys a kit to sell-out, places, refuses capture, refunds, closes when walking away, round-trips a save, and restocks at the next dawn.
 
 See [canopy city](city.md) and [validation](validation.md).
+
+Next metropolitan slice: grow this canopy hub into an Earth city region with a dense downtown and public venue block, residential suburbs, farms, then a clear wilds edge. Build the first mall/arcade/music venue around a traversable maintenance tunnel and subway platform, and make the light-rail stations and rooftop parkour routes usable together. After the other Earth city regions and a spaceport exist, extend the same transit modules into high-speed intercity and port links. Do not represent disconnected cities or a spaceport as travel destinations before their playable arrival areas exist.
+
+Next metropolitan slice: grow this canopy hub into an Earth city region with a dense downtown and public venue block, residential suburbs, farms, then a clear wilds edge. Build the first mall/arcade/music venue around a traversable maintenance tunnel and subway platform, and make the light-rail stations and rooftop parkour routes usable together. After the other Earth city regions and a spaceport exist, extend the same transit modules into high-speed intercity and port links. Do not represent disconnected cities or a spaceport as travel destinations before their playable arrival areas exist.
 
 Also implemented:
 

@@ -40,6 +40,7 @@ pub const recipes = [_]Recipe{
     .{ .tab = .armor, .output = .{ .armor = .buster }, .cost = .{ .lumen = 10, .alloy = 12 }, .about = "Round blue battle armor with a forearm buster cannon." },
     .{ .tab = .armor, .output = .{ .armor = .iron_titan }, .cost = .{ .rotor = 3, .alloy = 18 }, .about = "Sharp-edged titan plate with finned greaves, calf thrusters and a winged pack." },
     .{ .tab = .armor, .output = .{ .armor = .battle_plate }, .cost = .{ .lumen = 12, .alloy = 14 }, .about = "Flared cream battle plate with gold cuffs and a scouter lens." },
+    .{ .tab = .armor, .output = .{ .armor = .solar_mantle }, .cost = .{ .lumen = 14, .rotor = 1, .alloy = 10 }, .about = "Streamlined ceramic armor with a layered chest setting, restrained bronze trim and a solar core." },
     .{ .tab = .weapons, .output = .{ .weapon = .blaster }, .cost = .{ .lumen = 6, .scrap = 20 }, .about = "Buster blaster. Charges while the trigger is held." },
     .{ .tab = .weapons, .output = .{ .weapon = .beam_saber }, .cost = .{ .lumen = 4, .scrap = 15 }, .about = "Lumen blade: a three-cut combo, a dash cut, a held wave cut; alternate guards and parries." },
     .{ .tab = .weapons, .output = .{ .weapon = .energy_bow }, .cost = .{ .lumen = 8, .alloy = 6 }, .about = "Draw to power up. Alternate fire shoots a warp arrow." },

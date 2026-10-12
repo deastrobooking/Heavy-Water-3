@@ -7,6 +7,7 @@ const Blueprint = @import("../machine/Blueprint.zig");
 const Profile = @import("Profile.zig");
 const Market = @import("../city/Market.zig");
 const Kit = @import("Kit.zig");
+const District = @import("../procedural/District.zig");
 
 /// JSON save document. Any change to its meaning bumps `format_version`. A save is only loaded
 /// into a world with the same seed, generator version, and content version, unless an explicit
@@ -23,10 +24,12 @@ const Kit = @import("Kit.zig");
 /// upgrades, gear, pickups, pets and wallet), leaving only what the team shares in `progress`;
 /// v14 adds per-ranger combat experience to each kit; v15 adds mod character ids to profiles;
 /// v16 adds each kit's fabricated field droid and its independent upgrade experience; v17
-/// migrates generator-5 saves to the new giant-flora scatter while preserving stable object IDs.
+/// migrates generator-5 saves to giant flora; v18 migrates generator-6 saves to new tree forms;
+/// v19 migrates generator-7 saves to harvestable young trees; v20 adds metro district geometry;
+/// v21 adds steampunk root galleries without changing plaza or bridge identities.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 17;
+pub const format_version: u32 = 21;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -102,19 +105,24 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     var parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format > format_version or doc.format + 5 < format_version) return error.UnsupportedSaveFormat;
+    if (doc.format > format_version or doc.format + 7 < format_version) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) {
-        if (doc.generator == 5 and doc.format < format_version) {
-            // Candidate IDs did not move, so collected-object references and saved removals
-            // remain valid when generator 5 worlds adopt the new flora distribution.
+        if ((doc.generator == 5 or doc.generator == 6 or doc.generator == 7) and doc.format < format_version) {
+            // Candidate IDs did not move, so saved removals stay attached to their new visuals.
             parsed.value.generator = Seed.generator_version;
+            parsed.value.format = format_version;
+        } else return error.GeneratorMismatch;
+    }
+    if (doc.district_generator != District.generator_version) {
+        if ((doc.district_generator == 3 or doc.district_generator == 4) and doc.format < format_version) {
+            // Plaza, bridge, and tree identities are stable; the gallery is regenerated geometry.
+            parsed.value.district_generator = District.generator_version;
             parsed.value.format = format_version;
         } else return error.GeneratorMismatch;
     }
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
     if (doc.arbor_generator != @import("../procedural/Arbor.zig").generator_version) return error.GeneratorMismatch;
-    if (doc.district_generator != @import("../procedural/District.zig").generator_version) return error.GeneratorMismatch;
     if (doc.bridges.len > @import("../procedural/District.zig").max_bridges) return error.InvalidSave;
     if (doc.collected.len > Modifications.capacity or doc.props.len > prop_count) return error.InvalidSave;
     for (doc.player.feet) |v| if (!finite(v)) return error.InvalidSave;

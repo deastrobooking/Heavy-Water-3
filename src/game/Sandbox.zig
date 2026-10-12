@@ -32,6 +32,7 @@ const Sandbox = @This();
 const Arbor = @import("../procedural/Arbor.zig");
 const Sap = @import("../machine/Sap.zig");
 const District = @import("../procedural/District.zig");
+const Metro = @import("../procedural/Metro.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
@@ -1946,8 +1947,8 @@ pub fn pick(self: *const Sandbox, eye: math.Vec3, forward: math.Vec3, max_distan
         const ref = Modifications.ObjectRef.of(chunk.key, object.local_id);
         const s = object.transform.scale;
         const p = object.transform.position;
-        // Relic cube spans y ∈ [0, 2] × scale in model space.
-        const hit = Physics.rayBox(origin, dir, .{ p[0], p[1] + s, p[2] }, .{ 0.5 * s, s, 0.5 * s }) orelse continue;
+        // Salvage sapling spans approximately one unit high above its ground origin.
+        const hit = Physics.rayBox(origin, dir, .{ p[0], p[1] + s * 0.5, p[2] }, .{ 0.42 * s, s * 0.5, 0.42 * s }) orelse continue;
         if (hit.distance >= best_distance or self.modifications.contains(ref)) continue;
         best = .{ .relic = .{ .ref = ref, .position = p } };
         best_distance = hit.distance;
@@ -2077,6 +2078,71 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
             out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = R.add(s.point(0.5), R.rotate(q, .{ x, 1.15, 0 })) }, .size = .{ 0.22, 0.12, s.length() }, .rotation = q, .tint = Material.emissive(.{ 0.35 + 0.4 * night, 0.85, 0.95, 1 }, 0.15 + 0.85 * night) };
             n += 1;
         }
+    }
+    // The two Arbor ring approaches are steam-powered root galleries. Their inset sapphires,
+    // opals and amber crystals brighten with the canopy's night cycle.
+    const jewel_colors = [_][4]f32{
+        .{ 0.18, 0.95, 0.84, 1 },
+        .{ 0.96, 0.38, 0.76, 1 },
+        .{ 1.0, 0.62, 0.22, 1 },
+    };
+    for (self.catalog.district.nodes, 0..) |node, tree_index| {
+        if (node.tree == null or node.tree.? == 0) continue;
+        const span = District.trunkSpur(&self.catalog.district, tree_index);
+        const orientation = span.rotation();
+        for ([_]f32{ -1.35, 1.35 }) |x| {
+            if (n == out.len) break;
+            const position = R.add(span.point(0.5), R.rotate(orientation, .{ x, 6.05, 0 }));
+            out[n] = .{
+                .mesh = self.catalog.content.block,
+                .transform = .{ .position = position },
+                .size = .{ 0.28, 0.24, span.length() },
+                .rotation = orientation,
+                .tint = Material.emissive(.{ 0.26, 0.9, 1.0, 1 }, 0.35 + 0.65 * night),
+            };
+            n += 1;
+        }
+        for (0..7) |lamp| {
+            if (n == out.len) break;
+            const t = (@as(f32, @floatFromInt(lamp)) + 0.5) / 7;
+            const position = R.add(span.point(t), R.rotate(orientation, .{ 0, 7.45, 0 }));
+            out[n] = .{
+                .mesh = self.catalog.content.block,
+                .transform = .{ .position = position },
+                .size = .{ 0.82, 0.18, 0.34 },
+                .rotation = orientation,
+                .tint = Material.emissive(.{ 1, 0.62, 0.25, 1 }, 0.45 + 0.5 * night),
+            };
+            n += 1;
+        }
+        for (0..5) |i| for ([_]f32{ -4.55, 4.55 }) |x| {
+            if (n == out.len) break;
+            const t = (@as(f32, @floatFromInt(i)) + 0.5) / 5;
+            const local: Physics.Vec3 = .{ x, 3.15, 0 };
+            const position = R.add(span.point(t), R.rotate(orientation, local));
+            const color = jewel_colors[(i + tree_index) % jewel_colors.len];
+            out[n] = .{
+                .mesh = self.catalog.content.gem,
+                .transform = .{ .position = position },
+                .size = .{ 2.2, 2.4, 1.8 },
+                .rotation = orientation,
+                .tint = Material.emissive(color, 0.94 + 0.06 * night),
+            };
+            n += 1;
+            if (n < out.len) {
+                // A slim emissive lozenge in front of the faceted mesh keeps each inlaid jewel
+                // legible against the dark rootwood and its brass socket.
+                const face = R.mul(orientation, R.mul(R.axisAngle(.{ 0, 1, 0 }, std.math.pi / 2.0), R.axisAngle(.{ 0, 0, 1 }, std.math.pi / 4.0)));
+                out[n] = .{
+                    .mesh = self.catalog.content.block,
+                    .transform = .{ .position = position },
+                    .size = .{ 1.18, 1.3, 0.12 },
+                    .rotation = face,
+                    .tint = Material.emissive(color, 0.88 + 0.12 * night),
+                };
+                n += 1;
+            }
+        };
     }
     for (self.catalog.district.buildings[0..self.catalog.district.building_count], 0..) |b, k| {
         if (n == out.len) break;
@@ -3844,7 +3910,16 @@ test "a guest fires their own blaster with the trigger and downs a drone" {
 }
 
 /// Stable regional destinations shared by the map and fast travel.
+pub const travel_count = 3 + Metro.stop_nodes.len;
+pub const travel_labels = [_][]const u8{ "BASE CAMP", "ROOTDEEP 1", "ROOTDEEP 2", "SOUTH LINE", "NORTH LINE", "WEST LINE" };
+
 pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
+    if (destination >= 3 and destination < travel_count) {
+        const node_id = Metro.destinationNode(destination - 3).?;
+        const node = self.catalog.district.nodes[node_id];
+        // Station platform top, plus a small clearance for the ranger's feet.
+        return R.add(node.position, .{ 0, 0.78, 0 });
+    }
     var point = if (destination == 0 or destination > self.shrines.len) spawn else R.add(self.shrines[destination - 1].origin, .{ 0, 0, -12 });
     point[1] = Terrain.surface(self.seed, point[0], point[2]).height + 0.1;
     return point;
@@ -3863,6 +3938,24 @@ pub fn travelBlocked(self: *const Sandbox, p: usize) ?[]const u8 {
 fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
     const origin = self.travelPoint(destination);
     const shape: Physics.Character = .{};
+    if (destination >= 3) {
+        var ring: i32 = 0;
+        while (ring <= 6) : (ring += 1) {
+            var z = -ring;
+            while (z <= ring) : (z += 1) {
+                var x = -ring;
+                while (x <= ring) : (x += 1) {
+                    if (@abs(x) != ring and @abs(z) != ring) continue;
+                    const candidate = R.add(origin, .{ @as(f32, @floatFromInt(x)) * 2, 0, @as(f32, @floatFromInt(z)) * 2 });
+                    if (self.physics.overlapsBox(R.add(candidate, .{ 0, shape.height / 2, 0 }), .{ shape.radius, shape.height / 2, shape.radius })) continue;
+                    const hit = self.physics.castRay(R.add(candidate, .{ 0, 2, 0 }), .{ 0, -1, 0 }, 3, .none) orelse continue;
+                    if (hit.normal[1] < 0.7) continue;
+                    return .{ candidate[0], hit.point[1] + 0.1, candidate[2] };
+                }
+            }
+        }
+        return null;
+    }
     var ring: i32 = 0;
     while (ring <= 6) : (ring += 1) {
         var z = -ring;
@@ -3890,7 +3983,7 @@ fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
 }
 
 pub fn fastTravel(self: *Sandbox, p: usize, destination: usize, camera: *Camera) bool {
-    if (destination > self.shrines.len or self.travelBlocked(p) != null) return false;
+    if (destination >= travel_count or self.travelBlocked(p) != null) return false;
     const point = self.travelArrival(destination) orelse return false;
     if (p == 0) {
         self.release();

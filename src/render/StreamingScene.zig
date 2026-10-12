@@ -127,7 +127,7 @@ pub fn uploadMeshes(self: *Scene, device: *gpu.Device, queue: *gpu.Queue, budget
     return bytes;
 }
 
-/// Material base color of a single-material catalog mesh (relics, vegetation).
+/// Material base color of a single-material catalog mesh (harvestable saplings, vegetation).
 fn baseColor(self: *const Scene, handle: Catalog.MeshHandle) [4]f32 {
     const entry = self.catalog.mesh(handle) orelse return .{ 1, 1, 1, 1 };
     return (self.catalog.material(entry.materials[0]) orelse return .{ 1, 1, 1, 1 }).base_color;
@@ -240,7 +240,7 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
     if (kind == .vegetation and self.flora_review) if (variant) |v| {
         if (self.instance_count < self.instances.len) {
             const position = floraReviewPosition(self.flora_review_seed, self.flora_review_origin, v);
-            const scale: f32 = if (v == 6) 150 else if (Vegetation.isTree(v)) 132 else if (v == 7) 2.5 else 2.2;
+            const scale: f32 = if (Vegetation.isRedwood(v)) 150 else if (Vegetation.isTree(v)) 132 else if (v == 7) 2.5 else 2.2;
             self.instances[self.instance_count] = .{ .translation_scale = .{ position[0], position[1], position[2], scale }, .tint = multiply(.{ 1, 1, 1, 1 }, color) };
             self.instance_count += 1;
         }
@@ -250,14 +250,17 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
 
 fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
     const xoff: f32 = switch (variant) {
-        3 => -120,
-        4 => -40,
-        5 => 40,
-        6 => 120,
+        3 => -210,
+        4 => -140,
+        5 => -70,
+        6 => 0,
         7 => -18,
         8 => -6,
         9 => 6,
         10 => 18,
+        11 => 70,
+        12 => 140,
+        13 => 210,
         else => 0,
     };
     // Pull the low flora toward the camera so its forms read beneath the distant giants.
@@ -322,8 +325,8 @@ pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
     for (self.flora_counts, 0..) |count, variant| {
         if (count == 0) continue;
         const handle = self.catalog.content.flora[variant];
-        if (Vegetation.isTree(@intCast(variant))) {
-            if (self.gpuMesh(self.catalog.content.tree_trunks[variant - Vegetation.tree_first])) |trunk| trunk.draw(pass, count, next);
+        if (Vegetation.treeIndex(@intCast(variant))) |species| {
+            if (self.gpuMesh(self.catalog.content.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
         }
         if (self.gpuMesh(handle)) |mesh| mesh.draw(pass, count, next);
         next += count;

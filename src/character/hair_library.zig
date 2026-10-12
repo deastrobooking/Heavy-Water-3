@@ -152,6 +152,27 @@ const spike_tail = [_]C{
     .{ .az = 1.35, .el = 0.45, .yaw = 1.5, .pitch = -0.9, .length = 0.4, .width = 0.2, .taper = 1.0, .stand = 0.3, .mirror = true },
 };
 
+/// A braided crown with two long, rope-like locks framing the face and flowing over the shoulders.
+const crown_braid = [_]C{
+    .{ .az = 0.05, .el = 1.25, .yaw = 0.1, .pitch = -0.45, .length = 0.76, .width = 0.19, .thickness = 0.12, .taper = 1.65, .curl = 1.1, .stand = 0.42, .layer = 2, .sway = true },
+    .{ .az = -0.45, .el = 1.05, .yaw = -0.2, .pitch = -0.65, .length = 0.90, .width = 0.17, .thickness = 0.12, .taper = 1.7, .curl = -1.0, .stand = 0.38, .layer = 1, .sway = true, .mirror = true },
+    .{ .az = -0.9, .el = 0.78, .yaw = -0.55, .pitch = -0.75, .length = 0.80, .width = 0.16, .thickness = 0.11, .taper = 1.7, .curl = 1.25, .stand = 0.35, .sway = true, .mirror = true },
+    .{ .az = -1.45, .el = 0.45, .yaw = -1.0, .pitch = -0.8, .length = 0.64, .width = 0.15, .thickness = 0.10, .taper = 1.75, .curl = -1.1, .stand = 0.3, .sway = true, .mirror = true },
+    .{ .az = pi, .el = 0.9, .yaw = pi, .pitch = 0.1, .length = 0.84, .width = 0.19, .thickness = 0.12, .taper = 1.7, .stand = 0.4, .layer = 1, .sway = true },
+    .{ .az = 2.25, .el = 0.8, .yaw = 2.3, .pitch = -0.2, .length = 0.7, .width = 0.16, .thickness = 0.1, .taper = 1.7, .curl = 0.6, .stand = 0.35, .mirror = true },
+};
+
+/// A wind-swept anime cut: offset part, layered swept bangs and long, separated back locks.
+const tempest_sweep = [_]C{
+    .{ .az = -0.45, .el = 1.25, .yaw = -0.85, .pitch = 0.55, .length = 0.8, .width = 0.30, .thickness = 0.23, .taper = 1.35, .curl = -0.4, .flick = 0.45, .stand = 0.55, .layer = 2 },
+    .{ .az = 0.05, .el = 1.12, .yaw = -0.45, .pitch = 0.25, .length = 0.78, .width = 0.29, .thickness = 0.22, .taper = 1.4, .curl = -0.3, .stand = 0.5, .layer = 1, .mirror = true },
+    .{ .az = 0.7, .el = 0.95, .yaw = -0.15, .pitch = 0.15, .length = 0.68, .width = 0.25, .thickness = 0.19, .taper = 1.45, .curl = 0.25, .stand = 0.4, .mirror = true },
+    .{ .az = 1.5, .el = 0.82, .yaw = 0.8, .pitch = -0.05, .length = 0.62, .width = 0.24, .thickness = 0.18, .taper = 1.5, .curl = 0.45, .stand = 0.4, .mirror = true },
+    .{ .az = 2.25, .el = 0.75, .yaw = 1.5, .pitch = -0.25, .length = 0.84, .width = 0.26, .thickness = 0.18, .taper = 1.5, .curl = 0.65, .stand = 0.4, .sway = true, .mirror = true },
+    .{ .az = pi, .el = 0.92, .yaw = pi, .pitch = -0.55, .length = 0.94, .width = 0.28, .thickness = 0.2, .taper = 1.45, .curl = 0.55, .flick = 0.45, .stand = 0.45, .sway = true },
+    .{ .az = 0.35, .el = 0.74, .yaw = 0.4, .pitch = -0.85, .length = 0.54, .width = 0.23, .thickness = 0.17, .taper = 1.5, .stand = 0.3, .mirror = true },
+};
+
 const mohawk_cap: hs.CapDef = .{ .hairline = .{ 0.62, 0.2, -0.3, -0.88, -0.95 } };
 const high_front_cap: hs.CapDef = .{ .hairline = .{ 0.75, 0.55, 0.0, -0.7, -0.9 } };
 
@@ -167,6 +188,8 @@ const table = [_]struct { style: spec.HairStyle, def: hs.StyleDef }{
     .{ .style = .big_fringe, .def = .{ .name = "big_fringe", .clumps = &big_fringe } },
     .{ .style = .topknot, .def = .{ .name = "topknot", .clumps = &topknot, .cap = topknot_cap } },
     .{ .style = .spike_tail, .def = .{ .name = "spike_tail", .clumps = &spike_tail } },
+    .{ .style = .crown_braid, .def = .{ .name = "crown_braid", .clumps = &crown_braid } },
+    .{ .style = .tempest_sweep, .def = .{ .name = "tempest_sweep", .clumps = &tempest_sweep } },
 };
 
 /// Every built-in definition, for tests and tools.

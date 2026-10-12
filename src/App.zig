@@ -220,6 +220,15 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
                 else => .open,
             };
         }
+        if (options.character_showcase == 44 or options.character_showcase == 45) {
+            // Review the new fitted helmet profiles, appended hair cuts and Solar Mantle set.
+            self.sandbox.profile.armor = .solar_mantle;
+            self.sandbox.profile.clothing = .exo_rig;
+            self.sandbox.profile.helmet = if (options.character_showcase == 44) .pilot else .recon;
+            self.sandbox.profile.hair_style = if (options.character_showcase == 44) .crown_braid else .tempest_sweep;
+            self.sandbox.profile.presentation = if (options.character_showcase == 44) .masculine else .feminine;
+            self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
+        }
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -1394,6 +1403,13 @@ fn showcase(self: *App) void {
         self.sandbox.body_yaw = 0;
         target = .{ x, ground + 0.92, z };
         eye = .{ x, ground + 1.5, z + 4.4 };
+    } else if (v == 64 or v == 65) {
+        const node_id: usize = if (v == 64) 2 else 4;
+        const span = District.trunkSpur(layout, node_id);
+        const entrance = span.point(-0.32);
+        const inside = span.point(0.72);
+        eye = .{ entrance[0], entrance[1] + 4.1, entrance[2] };
+        target = .{ inside[0], inside[1] + 4.1, inside[2] };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -1409,8 +1425,8 @@ fn showcase(self: *App) void {
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
-    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62;
-    self.sandbox.tick = if (v == 62) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
+    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65;
+    self.sandbox.tick = if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
     const dz = target[2] - eye[2];
@@ -2663,7 +2679,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.hud_lines[1].set("HOLDING CRATE {d}  CLICK DROP", .{i});
     } else switch (sandbox.target) {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  X / CLICK GRAB", .{i}),
-        .relic => |r| renderer.hud_lines[1].set("RELIC {d}:{d}:{d}  X / CLICK SALVAGE", .{ r.ref.x, r.ref.z, r.ref.id }),
+        .relic => |r| renderer.hud_lines[1].set("YOUNG TREE {d}:{d}:{d}  X / CLICK HARVEST", .{ r.ref.x, r.ref.z, r.ref.id }),
         .bridge => |i| renderer.hud_lines[1].set("YOUR BRIDGE {d}  TOOL 4 + RMB REMOVE", .{i}),
         .stall => |i| renderer.hud_lines[1].set("TALK TO {s}  X / CLICK", .{Screens.keeperName(sandbox, i)}),
         .walker => renderer.hud_lines[1].set("CANOPY LOCAL  X / CLICK TALK", .{}),

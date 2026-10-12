@@ -22,7 +22,7 @@ pub const Error = error{ MaxLevel, NotEnoughScrap, NotEnoughParts, AlreadyOwned,
 
 pub const Info = struct { name: []const u8, summary: []const u8 };
 pub const info = [upgrade_count]Info{
-    .{ .name = "FUEL TANK", .summary = "Larger heavy-water cell: +30 jet fuel per level." },
+    .{ .name = "FUEL TANK", .summary = "Long-range heavy-water cell: +100 flight fuel per level." },
     .{ .name = "JET EFFICIENCY", .summary = "Cooler injectors: every jet, glide and dash burns 15% less fuel per level." },
     .{ .name = "SPRINT SERVOS", .summary = "Leg servos: +1.2 m/s sprint speed per level." },
     .{ .name = "STAMINA WEAVE", .summary = "Sap-fibre lining: stamina recovers 40% faster per level." },
@@ -131,7 +131,7 @@ pub fn suit(self: *const Kit) Player.Suit {
         }
     }.f;
     return .{
-        .fuel_max = 100 + 30 * l(self, .fuel_tank),
+        .fuel_max = 240 + 100 * l(self, .fuel_tank),
         .burn = 1 - 0.15 * l(self, .jet_efficiency),
         .sprint = Player.sprint_speed + 1.2 * l(self, .sprint_servos),
         .stamina_regen = 20 * (1 + 0.4 * l(self, .stamina_weave)),
@@ -303,7 +303,7 @@ test "upgrades charge the kit's wallet, cap at max level, and tune the suit" {
     try k.buy(.fuel_tank);
     try k.buy(.fuel_tank);
     try std.testing.expectError(error.MaxLevel, k.buy(.fuel_tank));
-    try std.testing.expectApproxEqAbs(@as(f32, 190), k.suit().fuel_max, 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 540), k.suit().fuel_max, 1e-4);
     try k.buy(.jet_efficiency);
     try std.testing.expectApproxEqAbs(@as(f32, 0.85), k.suit().burn, 1e-4);
     try std.testing.expectEqual(@as(u32, 1), k.partsPerSalvage());

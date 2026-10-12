@@ -2,6 +2,45 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Steampunk Arbor Rootways — 2026-10-12
+
+- Added a reusable covered approach at each of the two outer Arbor ring plazas. Riveted bronze ribs and portal frames enclose the pedestrian/road path, paired metro rails pass through the crown, and five inset colored gems per side are published with night-responsive emission.
+- Kept tree and plaza geometry intact: the gallery reaches the root-ring approach and frames its portal; it does not cut a physical opening through the living trunk.
+- Bumped district generator version to 5 and save format to 21. District-generator-3 and -4 saves migrate with stable bridge endpoints.
+- **Checked:** default `python3 tools/zig.py build check`, ReleaseSafe Metal capture `MTL_DEBUG_LAYER=1 ... build run -Dshowcase=64 -Dcapture-frame=120`, and `git diff --check` passed. `zig-out/rootway-review.png` was inspected; the rail and amber ceiling lights read through the gallery and the three gem hues are visible along both walls. Metal API Validation reported no errors.
+- **Not checked:** headless tests, hands-on gallery traversal, Zig 0.17, Linux/Windows builds or runtime.
+
+## Canopy metro first slice — 2026-10-12
+
+- Added `procedural/Metro.zig`: paired elevated guide rails and ties over the six plaza roads, outboard supports, and boarding platforms at the three market towers. These reuse the district's render/collision piece pipeline; station decks are walkable.
+- Added South, North and West Line destinations to the per-player world map and fast-travel flow. Station arrivals use a nearby clear platform point. The UI map shows all six current destinations and party markers.
+- Bumped district generator version to 4 and save format to 20; generator-3 worlds migrate while preserving their saved bridges. Scatter generator 8 and its generator-5 through -7 save migrations remain supported.
+- **Checked:** default `python3 tools/zig.py build check`, `python3 tools/zig.py build -Doptimize=ReleaseFast`, and `git diff --check` passed; the installed executable was refreshed. ReleaseSafe captures `-Dshowcase=8` and `-Dshowcase=55` completed on Apple M3 Pro with Metal API Validation enabled and no reported errors; `zig-out/metro-city-review.png` and `zig-out/metro-map-review.png` were inspected.
+- **Not checked:** headless tests, manual station arrival/reachability, rail traversal, moving train behavior, downtown/suburb/farm generation, subway/venue interiors, high-speed intercity rail, spaceport arrivals, or Linux/Windows/Zig 0.17.
+
+## Harvestable young trees — 2026-10-11
+
+- Replaced the repeated blue cube salvage markers with small broadleaf trees that combine a leafy crown and trunk in one mesh. Their generated heights range from 6.1 to 18.3 m (20–60 ft); the giant tree scale is unchanged. They remain harvestable for parts, with a tree-sized interaction target.
+- Bumped scatter generator version to 8 and save format to 19. Generator-5, -6 and -7 saves migrate while preserving candidate IDs and collected-object removals.
+- **Checked:** `python3 tools/zig.py build check` and `git diff --check` passed. `MTL_DEBUG_LAYER=1 caffeinate -d -u -t 120 python3 tools/zig.py build run -Dshowcase=62 -Dcapture-frame=120 -Daudio=false -Doptimize=ReleaseSafe` completed on Apple M3 Pro with no Metal validation messages. `zig-out/sapling-review.png` was inspected; the blue blocks are replaced by tree silhouettes.
+- **Not checked:** headless tests, hands-on harvest reach and reward flow, Zig 0.17, Linux/Windows builds or runtime.
+
+## Forward flight and expanded jet fuel — 2026-10-11
+
+- Holding forward and tapping dodge three times within 0.92 seconds launches into sustained forward flight. Flight cruises at 32 m/s, reaches 52 m/s with sprint, uses jump/ascend to climb, and reaches 76 m/s during chained dash bursts. Each flight dash uses 18 fuel before efficiency upgrades.
+- Increased the base fuel reserve from 100 to 240 and each of the three fuel-tank upgrade levels from +30 to +100, for 540 maximum (620 for winged heroes). Fuel efficiency applies to sustained flight and its dash bursts.
+- Updated the upgrade description and movement documentation. The gesture works through the existing keyboard dodge binding and controller dodge button while forward is held.
+- **Checked:** default pinned `python3 tools/zig.py build check`, `python3 tools/zig.py build -Doptimize=ReleaseFast`, and `git diff --check` passed; the installed executable was refreshed.
+- **Not checked:** headless tests, hands-on keyboard/controller timing, flight steering against terrain, fuel depletion/recharge feel, gameplay smoke, Metal capture, benchmarks, Zig 0.17, Linux/Windows builds or runtime.
+
+
+## Character silhouette and fantasy canopy expansion — 2026-10-11
+
+- Added two built-in hair cuts (crown braid and tempest sweep), pilot and recon helmet profiles, and the fabricable Solar Mantle armor set. New enum choices are appended to preserve existing saved tags; the helmet cycle reads its length from reflection.
+- Added copper-fan, moon-cascade and star-blossom giant trees alongside the existing four forms, each with its own trunk and leaf pigment. Raised crown mesh tessellation and added a repeatable character showcase for reviewing the new armor, helmet and hair combinations. Scatter generator version 7 preserves candidate IDs; save format 18 migrates generator-5 and generator-6 worlds.
+- **Checked:** default pinned `python3 tools/zig.py build check`, `python3 tools/zig.py build -Doptimize=ReleaseFast`, and `git diff --check` passed; the installed executable was refreshed. ReleaseSafe captures for `-Dshowcase=62` and `-Dcharacter-showcase=44..45` completed on Apple M3 Pro with Metal API Validation enabled and no reported validation errors. The tree lineup and character captures were visually inspected. The first character capture exposed oversized pilot helmet temple pods, which were reduced before the final captures.
+- **Not checked:** headless tests, full gameplay smoke, benchmark, Zig 0.17, Linux/Windows compilation or runtime, old-save round-trip at runtime, and hands-on creator browsing. The first captured lineup remains visually dense and partly dark; clean close-ups of individual tree silhouettes and helmet fit still need review.
+
 ## Nearby loot, visible wild encounters and capture rewards — 2026-10-11
 
 - Ground pickups now auto-collect within 3.5 m horizontally and 3.5 m vertically. Enemy takedowns immediately credit the nearest present player's Kit with XP and materials, so ranged kills no longer leave required salvage behind; Scalari pay scrap and parts, Hive units pay alloy and sometimes lumen. Hive drops remain for the no-player case.

@@ -65,6 +65,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
 | `-Dcharacter-showcase=6..38` | 0 | Hairstyle review in the creator, in `Profile.HairStyle` order (6 = short, 30..38 = the anime cuts). |
 | `-Dcharacter-showcase=40..43` | 0 | The `emberwear` example mod in the creator: 40 hair, face and ink cel style; 41 phoenix armor over a hardsuit; 42 sealed helmet; 43 second hairstyle on the exo rig. |
+| `-Dcharacter-showcase=44..45` | 0 | Solar Mantle with the new crown braid and pilot helmet (44), or tempest sweep and recon helmet (45). |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
 | `-Dcharacter-view=0..5` | 0 | Character review camera around the avatar (with `-Dcharacter-showcase`): 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up. The close-ups use the same frame as the creator's head zoom. |
 | `-Dcharacter-pose=0..4` | 0 | Hold an arm pose for armor review: 1 aim, 2 overhead swing, 3 cast (arms raised), 4 guard. |
@@ -171,6 +172,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 7, 8 | City overview, by day and at dusk |
 | 9 | Street level |
 | 10–15 | Roads 1–6 at dusk |
+| 64, 65 | Dusk close-ups of the two gem-set Arbor Rootway galleries |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |

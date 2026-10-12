@@ -1057,6 +1057,18 @@ const battle_plate_pieces = [_]Piece{
     .{ .kind = .ear_fin, .anchor = .head, .sides = .left, .when = .helmeted, .color = .trim, .shape = .{ .silhouette = .round, .crest = 0.03 } },
 };
 
+const solar_mantle_shape: ShapeSpec = .{ .silhouette = .round, .flare = 0.22, .crest = 0.035, .roundness = 0.78, .overlap = 0.38 };
+const solar_mantle_pieces = [_]Piece{
+    .{ .kind = .dome_pauldron, .anchor = .upper_arm, .offset = .{ 0.038, -0.026, 0.006 }, .size = .{ 0.09, 0.064, 0.09 }, .shape = .{ .silhouette = .round, .flare = 0.1, .roundness = 0.85 } },
+    .{ .kind = .chest_dome, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.035, 0 }, .size = .{ 0.12, 0.095, 0.038 } },
+    .{ .kind = .core, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.015, 0.025 }, .size = .{ 0.028, 0.028, 0.022 }, .color = .glow },
+    .{ .kind = .gem, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.075, 0.03 }, .size = .{ 0.034, 0.045, 0.02 }, .color = .accent },
+    .{ .kind = .skirt_plate, .anchor = .hips, .offset = .{ 0.16, -0.07, 0.035 }, .size = .{ 0.032, 0.078, 0.06 }, .color = .secondary },
+    .{ .kind = .finned_greave, .anchor = .shin, .size = .{ 0.06, 0.15, 0.05 }, .shape = .{ .silhouette = .round, .flare = 0.12, .roundness = 0.8 } },
+    .{ .kind = .backpack, .anchor = .chest, .sides = .center, .offset = .{ 0, 0.02, 0 }, .size = .{ 0.072, 0.085, 0.034 }, .color = .secondary, .shape = .{ .silhouette = .finned, .flare = 0.12, .crest = 0.025, .roundness = 0.7 } },
+    .{ .kind = .ear_fin, .anchor = .head, .when = .helmeted, .color = .trim, .shape = .{ .silhouette = .round, .roundness = 0.9 } },
+};
+
 /// The built-in sets, in the order of the `Profile.Armor` tags they match.
 pub const builtin_sets = [_]ArmorSetDef{
     .{ .name = "none", .title = "No armor", .metal = Rgb.hex(0x71868e), .secondary = Rgb.hex(0x71868e), .trim = Rgb.hex(0x17242f) },
@@ -1071,6 +1083,7 @@ pub const builtin_sets = [_]ArmorSetDef{
     .{ .name = "buster", .title = "Buster", .metal = Rgb.hex(0x2f6fd6), .secondary = Rgb.hex(0x4cc4f0), .trim = Rgb.hex(0x14285c), .dark = Rgb.hex(0x101c38), .shape = buster_shape, .visor = .slit, .pieces = &buster_pieces },
     .{ .name = "iron_titan", .title = "Iron Titan", .metal = Rgb.hex(0xb0262c), .secondary = Rgb.hex(0x2a4d9c), .trim = Rgb.hex(0xc9d0d8), .dark = Rgb.hex(0x222831), .shape = iron_titan_shape, .visor = .slit, .pieces = &iron_titan_pieces },
     .{ .name = "battle_plate", .title = "Battle Plate", .metal = Rgb.hex(0xf1ead2), .secondary = Rgb.hex(0x2a3c78), .trim = Rgb.hex(0xd9a93a), .dark = Rgb.hex(0x232a40), .shape = battle_plate_shape, .visor = .scouter, .pieces = &battle_plate_pieces },
+    .{ .name = "solar_mantle", .title = "Solar Mantle", .metal = Rgb.hex(0xd8d5c3), .secondary = Rgb.hex(0x34585c), .trim = Rgb.hex(0xb38749), .dark = Rgb.hex(0x202b30), .shape = solar_mantle_shape, .visor = .wrap, .pieces = &solar_mantle_pieces },
 };
 
 // ---------------------------------------------------------------- tests

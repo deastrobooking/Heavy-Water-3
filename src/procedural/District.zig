@@ -8,9 +8,11 @@ const Seed = @import("Seed.zig");
 const Terrain = @import("Terrain.zig");
 const TestArbor = @import("TestArbor.zig");
 const CanopyCourse = @import("CanopyCourse.zig");
+const Metro = @import("Metro.zig");
+const Rootway = @import("Rootway.zig");
 const V = R.Vec3;
-/// v3: glass-bay facades and open observatory crowns on the seeded skyline.
-pub const generator_version: u32 = 3;
+/// v5: steampunk rail galleries and crystal portals cover the Arbor-ring approaches.
+pub const generator_version: u32 = 5;
 const Bridges = @import("Bridges.zig");
 const Skyline = @import("Skyline.zig");
 pub const Building = Skyline.Building;
@@ -49,7 +51,7 @@ pub fn Pieces(comptime capacity: usize) type {
         }
     };
 }
-pub const CityParts = Pieces(4096);
+pub const CityParts = Pieces(8192);
 pub const BridgeParts = Pieces(320);
 pub const Span = struct {
     a: V,
@@ -312,6 +314,7 @@ pub fn geometry(layout: *const Layout) !CityParts {
             }
             const parts = try bridgeParts(layout, trunkSpur(layout, i), .vine);
             for (parts.slice()) |p| try out.add(p);
+            try Rootway.geometry(trunkSpur(layout, i), &out);
             try Skyline.plazaBraces(layout, node.position, &out);
         }
     }
@@ -331,6 +334,7 @@ pub fn geometry(layout: *const Layout) !CityParts {
     var course: [CanopyCourse.max_pieces]CanopyCourse.Piece = undefined;
     const course_count = CanopyCourse.generate(sites[0..site_count], &course);
     for (course[0..course_count]) |piece| try out.add(.{ .center = piece.center, .size = piece.size, .rotation = piece.rotation, .color = piece.color, .solid = piece.solid });
+    try Metro.geometry(layout, &out);
     return out;
 }
 

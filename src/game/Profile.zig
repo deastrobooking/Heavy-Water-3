@@ -65,7 +65,7 @@ pub const Species = enum {
 };
 pub const species_count = enum_compat.fields(Species).len;
 // Keep the original tags so existing JSON save profiles continue to decode unchanged.
-pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part, spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail };
+pub const HairStyle = enum { short, ponytail, long, crest, hood, bob, twin_tails, bun, braids, curly, undercut, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part, spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail, crown_braid, tempest_sweep };
 /// Steps of the per-style hair adjustments; the middle one leaves the style as designed.
 pub const hair_levels: u8 = 5;
 pub const hair_neutral: u8 = 2;
@@ -86,10 +86,10 @@ pub const Class = enum { ranger, synthetic };
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
 /// Armor sets. Each tag names an `ArmorSetDef` in `character/armor.zig`; tags are only ever
 /// appended and saves store the tag by name, so older saves read unchanged.
-pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, starforge, deep_prism, mobile_suit, buster, iron_titan, battle_plate };
+pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, starforge, deep_prism, mobile_suit, buster, iron_titan, battle_plate, solar_mantle };
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
-pub const Helmet = enum { open, visor, sealed };
+pub const Helmet = enum { open, visor, sealed, pilot, recon };
 pub const Field = enum { name, class, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, cel_style };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
@@ -178,7 +178,7 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .outfit => self.outfit = cycle(self.outfit, delta, outfit_colors.len),
         .clothing => self.clothing = @enumFromInt(cycle(@intFromEnum(self.clothing), delta, enum_compat.fields(Clothing).len)),
         .armor => self.armor = @enumFromInt(cycle(@intFromEnum(self.armor), delta, enum_compat.fields(Armor).len)),
-        .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, 3)),
+        .helmet => self.helmet = @enumFromInt(cycle(@intFromEnum(self.helmet), delta, enum_compat.fields(Helmet).len)),
         .boot_style => self.boot_style = @enumFromInt(cycle(@intFromEnum(self.boot_style), delta, enum_compat.fields(BootStyle).len)),
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
         .gemstone => self.gemstone = @enumFromInt(cycle(@intFromEnum(self.gemstone), delta, enum_compat.fields(Gemstone).len)),

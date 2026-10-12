@@ -53,6 +53,9 @@ pub const map_items = [_]Item{
     .{ .label = "TRAVEL: BASE CAMP", .command = .travel },
     .{ .label = "TRAVEL: ROOTDEEP SHRINE 1", .command = .travel },
     .{ .label = "TRAVEL: ROOTDEEP SHRINE 2", .command = .travel },
+    .{ .label = "METRO: SOUTH LINE", .command = .travel },
+    .{ .label = "METRO: NORTH LINE", .command = .travel },
+    .{ .label = "METRO: WEST LINE", .command = .travel },
     .{ .label = "FRAME DESTINATION / PLAYER" },
     .{ .label = "RESUME", .command = .@"resume" },
 };
@@ -172,7 +175,7 @@ pub fn rows(self: *const Menu) u8 {
 /// Whether a row can be chosen (CONTINUE and LOAD need a save).
 pub fn enabled(self: *const Menu, row: usize) bool {
     if (row >= self.rows()) return false;
-    if (self.screen == .world_map and row < 3) return self.hero_player < 4 and self.travel_players & (@as(u8, 1) << @intCast(self.hero_player)) != 0;
+    if (self.screen == .world_map and row < 6) return self.hero_player < 4 and self.travel_players & (@as(u8, 1) << @intCast(self.hero_player)) != 0;
     if (self.screen == .title and row == 0) return self.has_save;
     if (self.screen == .pause and pause_items[row].command == .load) return self.has_save;
     if (self.screen == .arena) return switch (arena_items[row].command) {
@@ -196,14 +199,14 @@ fn step(self: *Menu, delta: i32) void {
         if (self.enabled(@intCast(r))) break;
     }
     self.row = @intCast(r);
-    if (self.screen == .world_map and self.row < 3) self.map_destination = self.row;
+    if (self.screen == .world_map and self.row < 6) self.map_destination = self.row;
 }
 
 /// Points at a row (mouse hover); disabled rows are ignored.
 pub fn select(self: *Menu, row: u8) void {
     if (row < self.rows() and self.enabled(row)) {
         self.row = row;
-        if (self.screen == .world_map and row < 3) self.map_destination = row;
+        if (self.screen == .world_map and row < 6) self.map_destination = row;
     }
 }
 
@@ -211,8 +214,8 @@ pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .none) return .none;
     if (self.screen == .controls) return self.controlsKey(k);
     if (self.screen == .pad_controls) return self.padControlsKey(k);
-    if (self.screen == .world_map and self.row < 3) self.map_destination = self.row;
-    if (self.screen == .world_map and k == .confirm and self.row == 3) {
+    if (self.screen == .world_map and self.row < 6) self.map_destination = self.row;
+    if (self.screen == .world_map and k == .confirm and self.row == 6) {
         self.map_frame_destination = !self.map_frame_destination;
         return .none;
     }
@@ -633,7 +636,7 @@ test "nested player map returns to its parent and blocked travel skips equally f
     try std.testing.expectEqual(@as(u8, 0), m.row);
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     _ = m.key(.down);
-    try std.testing.expectEqual(@as(u8, 3), m.row);
+    try std.testing.expectEqual(@as(u8, 6), m.row);
     _ = m.key(.confirm);
     try std.testing.expect(m.map_frame_destination);
     _ = m.key(.back);

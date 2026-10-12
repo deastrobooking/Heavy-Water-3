@@ -258,7 +258,7 @@ pub fn buildHair(
         .bob => 0.1,
         .short_spiky, .undercut, .mohawk, .nova_spike, .alien_crown => 0.0,
         // data-driven styles never reach this procedural path (see `hair_library`)
-        .spiky_hero, .widow_flame, .fringe_spikes, .super_flare, .flip_bob, .pilot_sweep, .big_fringe, .topknot, .spike_tail => 0.0,
+        .spiky_hero, .widow_flame, .fringe_spikes, .super_flare, .flip_bob, .pilot_sweep, .big_fringe, .topknot, .spike_tail, .crown_braid, .tempest_sweep => 0.0,
     };
     const curl_in: f32 = if (hs.style == .bob) 1.0 else 0.15;
 

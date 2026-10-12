@@ -225,8 +225,12 @@ pub fn install(self: *Catalog, allocator: std.mem.Allocator, handle: MeshHandle,
 pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u64) !void {
     self.* = .{};
     errdefer self.deinit(allocator);
-    self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.cube(allocator), .named("relic", .{ 1, 1, 1, 1 })));
-    for (&self.content.flora, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, if (Vegetation.isTree(@intCast(i))) try Vegetation.tree(allocator, @intCast(i - Vegetation.tree_first)) else try Vegetation.plant(allocator, @intCast(i)), .named(Vegetation.names[i], Vegetation.colors[i])));
+    self.content.relic = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.sapling(allocator), .named("salvage sapling", .{ 1, 1, 1, 1 })));
+    for (&self.content.flora, 0..) |*handle, i| {
+        const variant: u8 = @intCast(i);
+        const generated_mesh = if (Vegetation.treeIndex(variant)) |species| try Vegetation.tree(allocator, species) else try Vegetation.plant(allocator, variant);
+        handle.* = try self.register(allocator, try Model.fromMesh(allocator, generated_mesh, .named(Vegetation.names[i], Vegetation.colors[i])));
+    }
     self.content.plant = self.content.flora[0];
     for (&self.content.tree_trunks, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator, @intCast(i)), .named("canopy trunk", Vegetation.trunk_colors[i])));
     self.content.orb = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.orb(allocator), .named("orb", .{ 1, 1, 1, 1 })));
@@ -320,6 +324,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "willow", .handle = self.content.flora[5] },                                         .{ .name = "redwood", .handle = self.content.flora[6] },
         .{ .name = "manzanita", .handle = self.content.flora[7] },                                     .{ .name = "ember_blossom", .handle = self.content.flora[8] },
         .{ .name = "moonbell", .handle = self.content.flora[9] },                                      .{ .name = "sunspear", .handle = self.content.flora[10] },
+        .{ .name = "copper_fan", .handle = self.content.flora[11] },                                   .{ .name = "moon_cascade", .handle = self.content.flora[12] },
+        .{ .name = "star_blossom", .handle = self.content.flora[13] },
         .{ .name = "boulder_round", .handle = self.content.boulders[0] },                                .{ .name = "boulder_tall", .handle = self.content.boulders[1] },
         .{ .name = "boulder_slab", .handle = self.content.boulders[2] },                                 .{ .name = "orb", .handle = self.content.orb },
         .{ .name = "spike", .handle = self.content.spike },                                 .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },

@@ -160,6 +160,8 @@ pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const Char
         .big_fringe => .big_fringe,
         .topknot => .topknot,
         .spike_tail => .spike_tail,
+        .crown_braid => .crown_braid,
+        .tempest_sweep => .tempest_sweep,
     };
     var hair_storage: hair_def.StyleDef = undefined;
     var custom_hair: ?*const hair_def.StyleDef = null;
@@ -788,6 +790,7 @@ fn armorContext(p: Profile, lm: @import("body.zig").Landmarks) armor_kit.Context
             .open => .open,
             .visor => .visor,
             .sealed => .sealed,
+            .pilot, .recon => .visor,
         },
         .suited = p.clothing == .hardsuit or p.clothing == .vanguard,
         .gem = gemstoneColor(p.gemstone),
@@ -833,11 +836,20 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile, def: *const armor
         };
     }
     if (p.clothing == .exo_rig or p.clothing == .hardsuit or p.clothing == .vanguard) try suitDetail(a, ch, p);
+    if (p.helmet == .pilot or p.helmet == .recon) {
+        for ([_]f32{ -1, 1 }) |side| {
+            const temple = V.init(side * (lm.head_half_width + 0.018 * h), lm.chin_y + 0.47 * lm.H, 0.015 * lm.H);
+            const radii = if (p.helmet == .pilot) V.init(0.035 * h, 0.082 * h, 0.068 * h) else V.init(0.022 * h, 0.054 * h, 0.058 * h);
+            try plateWithMaterial(a, ch, .head, temple, radii, metal, .armor);
+            try plateWithMaterial(a, ch, .head, temple.add(V.init(side * 0.020 * h, 0, 0.008 * h)), V.init(0.006 * h, 0.032 * h, 0.032 * h), accent, .armor);
+        }
+        if (p.helmet == .pilot) try plateWithMaterial(a, ch, .head, V.init(0, lm.chin_y + 0.88 * lm.H, 0.11 * lm.H), V.init(0.72 * lm.head_half_width, 0.075 * lm.H, 0.10 * lm.H), metal, .armor);
+    }
     // Armor sets are data (`armor.zig`): the set's pieces fit to the body built so far.
     try armor_kit.emitSet(a, ch, def, armorContext(p, lm));
     try bootDetails(a, ch, p, metal, accent);
     const wildkin = p.species != .human;
-    if (p.helmet == .sealed or p.hair_style == .hood or wildkin) {
+    if (p.helmet == .sealed or p.helmet == .pilot or p.hair_style == .hood or wildkin) {
         // Conceal hair under the helmet/hood instead of allowing it to poke through. Wildkin
         // have fur, scales or feathers instead, built by `Beasts`.
         var write: usize = 0;
@@ -850,13 +862,16 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile, def: *const armor
             write += 3;
         }
         ch.mesh.indices.shrinkRetainingCapacity(write);
-        if (p.helmet == .sealed or p.hair_style == .hood) {
+        if (p.helmet == .sealed or p.helmet == .pilot or p.hair_style == .hood) {
             const shell_center = V.init(0, lm.chin_y + 0.56 * lm.H, -0.02 * lm.H);
             const shell_radii = V.init(lm.head_half_width + 0.05 * lm.H, 0.55 * lm.H, 0.53 * lm.H);
             if (p.helmet == .sealed) {
                 try plateWithMaterial(a, ch, .head, shell_center, shell_radii, metal, .armor);
                 // The shell ellipsoid stops short of the jaw; a guard closes the lower face.
                 try plateWithMaterial(a, ch, .head, V.init(0, lm.chin_y + 0.27 * lm.H, -0.01 * lm.H), V.init(lm.head_half_width + 0.035 * lm.H, 0.32 * lm.H, 0.5 * lm.H), metal, .armor);
+            } else if (p.helmet == .pilot) {
+                // Flight helmet leaves the lower face open and keeps the shell behind the brow.
+                try plateWithMaterial(a, ch, .head, V.init(0, lm.chin_y + 0.62 * lm.H, -0.095 * lm.H), V.init(lm.head_half_width + 0.025 * lm.H, 0.46 * lm.H, 0.36 * lm.H), metal, .armor);
             } else {
                 try plate(a, ch, .head, shell_center, shell_radii, rgb(Profile.outfit_colors[p.outfit], 0.7));
             }
@@ -864,7 +879,7 @@ fn equip(a: std.mem.Allocator, ch: *gen.Character, p: Profile, def: *const armor
     }
     // Wildkin show their faces: no visor, and their own features.
     if (wildkin) return Beasts.build(a, ch, p);
-    if (p.helmet != .open) try armor_kit.emitVisor(a, ch, def.visor, metal, dark, accent);
+    if (p.helmet != .open) try armor_kit.emitVisor(a, ch, if (p.helmet == .recon) .scouter else def.visor, metal, dark, accent);
 }
 
 fn bootDetails(a: std.mem.Allocator, ch: *gen.Character, p: Profile, metal: spec.Rgb, accent: spec.Rgb) !void {

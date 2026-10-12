@@ -19,7 +19,7 @@ pub const jump_speed: f32 = 9.4;
 pub const Water = struct { min: V, max: V };
 /// Suit tuning from purchased upgrades (see `Progress`); the defaults are the base suit.
 pub const Suit = struct {
-    fuel_max: f32 = 100,
+    fuel_max: f32 = 240,
     /// Multiplies every fuel cost (jets, glide, dashes, boards).
     burn: f32 = 1,
     sprint: f32 = sprint_speed,
@@ -67,7 +67,7 @@ shape: Physics.Character = .{},
 traversal: Traversal = .grapple,
 motion: Motion = .idle,
 stamina: f32 = 100,
-fuel: f32 = 100,
+fuel: f32 = 240,
 climb_energy: f32 = 100,
 breath: f32 = 12,
 hover_enabled: bool = false,
@@ -90,6 +90,10 @@ dodge_tap_window: f32 = 0,
 dash_chain_timer: f32 = 0,
 dash_chain_count: u8 = 0,
 dash_direction: V = .{ 0, 0, 1 },
+/// Forward plus three rapid dodge taps engages sustained, fuel-powered flight.
+flight_tap_window: f32 = 0,
+flight_tap_count: u8 = 0,
+flight_engaged: bool = false,
 boost_timer: f32 = 0,
 boost_cooldown: f32 = 0,
 landing: f32 = 0,
@@ -194,12 +198,14 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const pressed = input.jump_pressed or (input.jump and !self.previous_jump);
     const released = !input.jump and self.previous_jump;
     self.previous_jump = input.jump;
-    for ([_]*f32{ &self.jump_buffer, &self.coyote, &self.wall_lock, &self.grab_cooldown, &self.roll_timer, &self.dash_timer, &self.dash_cooldown, &self.dodge_tap_window, &self.dash_chain_timer, &self.boost_timer, &self.boost_cooldown, &self.tap_timer, &self.landing, &self.long_jump_timer, &self.backflip_timer, &self.energy_kick_timer, &self.grapple.timer }) |timer| decay(timer, dt);
+    for ([_]*f32{ &self.jump_buffer, &self.coyote, &self.wall_lock, &self.grab_cooldown, &self.roll_timer, &self.dash_timer, &self.dash_cooldown, &self.dodge_tap_window, &self.dash_chain_timer, &self.boost_timer, &self.boost_cooldown, &self.tap_timer, &self.flight_tap_window, &self.landing, &self.long_jump_timer, &self.backflip_timer, &self.energy_kick_timer, &self.grapple.timer }) |timer| decay(timer, dt);
     if (self.dash_chain_timer == 0) self.dash_chain_count = 0;
     self.grapple.heat = @max(0, self.grapple.heat - 24 * dt);
     if (self.grapple.mode == .cooldown and self.grapple.timer == 0) self.grapple.mode = .ready;
     if (input.cycle_mode) {
         self.traversal = @enumFromInt(@intFromEnum(self.traversal) +% 1);
+        self.flight_engaged = false;
+        self.flight_tap_count = 0;
         self.releaseGrapple();
         self.motion = .fall;
         self.roll_timer = 0;
@@ -220,8 +226,30 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const raw = R.add(R.scale(forward, input.forward), R.scale(right, input.right));
     const strength = @min(1, R.length(raw));
     const wish = R.normalize(raw);
-    var dash_started = false;
-    if (input.dodge) {
+    var flight_started = false;
+    if (input.dodge and input.forward >= 0.65 and !self.flight_engaged) {
+        self.flight_tap_count = if (self.flight_tap_window > 0) self.flight_tap_count + 1 else 1;
+        self.flight_tap_window = 0.92;
+        if (self.flight_tap_count >= 3) {
+            self.flight_tap_count = 0;
+            self.flight_tap_window = 0;
+            self.traversal = .flight;
+            self.flight_engaged = true;
+            self.grounded = false;
+            self.velocity = R.add(R.scale(forward, 32), .{ 0, 12, 0 });
+            self.dash_timer = 0;
+            self.dash_chain_timer = 0;
+            self.dash_chain_count = 0;
+            self.releaseGrapple();
+            flight_started = true;
+        }
+    } else if (input.dodge and !self.flight_engaged) {
+        self.flight_tap_count = 0;
+        self.flight_tap_window = 0;
+    }
+    var dash_started = flight_started;
+    var dash_burst_started = false;
+    if (input.dodge and !flight_started) {
         if (self.dodge_tap_window > 0 and self.dash_chain_count < 4) {
             self.dodge_tap_window = 0;
             self.dash_chain_count += 1;
@@ -231,6 +259,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.shape.height = 1.8;
             self.dash_direction = if (strength > 0.1) wish else forward;
             dash_started = true;
+            dash_burst_started = true;
         } else if (self.dash_chain_count < 4) {
             self.dodge_tap_window = 0.42;
         }
@@ -243,7 +272,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     if (self.grounded) {
         self.coyote = 0.16;
         self.wall_charges = 2;
-        self.fuel = @min(self.suit.fuel_max, self.fuel + 12 * dt);
+        if (!self.flight_engaged) self.fuel = @min(self.suit.fuel_max, self.fuel + 12 * dt);
         self.climb_energy = @min(100, self.climb_energy + 13 * dt);
     }
     const sprinting = input.fast and strength > 0.82 and self.stamina > 0;
@@ -266,6 +295,9 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     if (water_top) |top| {
         self.wading = top - self.feet[1];
         self.motion = .swim;
+        self.flight_engaged = false;
+        self.flight_tap_count = 0;
+        self.dash_timer = 0;
         self.releaseGrapple();
         self.grounded = false;
         const submerged = self.feet[1] + 1.35 < top;
@@ -430,7 +462,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.stamina = @max(0, self.stamina - 28 * dt);
             self.motion = .wall_slide;
         }
-        if (input.jump and !pressed and !self.grounded and self.fuel > 0 and self.motion != .stomp and self.wall_lock == 0) {
+        if (input.jump and !pressed and !self.grounded and self.fuel > 0 and self.motion != .stomp and self.wall_lock == 0 and !self.flight_engaged) {
             switch (self.traversal) {
                 .grapple, .hover_jet => {
                     self.velocity[1] = if (self.hover_enabled) self.velocity[1] * @exp(-7.5 * dt) else @min(7, self.velocity[1] + 26 * dt);
@@ -462,8 +494,30 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                 },
             }
         }
+        if (self.flight_engaged) {
+            if (self.fuel <= 0) {
+                self.flight_engaged = false;
+            } else {
+                const flight_forward = forward;
+                const flight_right = right;
+                const vertical = std.math.clamp(input.up + @as(f32, @floatFromInt(@intFromBool(input.jump))), -1, 1);
+                const flight_raw = R.add(R.add(R.scale(flight_forward, input.forward), R.scale(flight_right, input.right)), .{ 0, vertical, 0 });
+                const flight_length = R.length(flight_raw);
+                const flight_strength = @min(1, flight_length);
+                const flight_dir = if (flight_length > 0.05) R.scale(flight_raw, 1 / flight_length) else @as(V, .{ 0, 0, 0 });
+                const flight_speed: f32 = if (input.fast) 52 else if (input.forward < -0.1) 18 else 32;
+                const target_velocity = R.scale(flight_dir, flight_speed * flight_strength);
+                self.velocity = approach(self.velocity, target_velocity, (if (input.fast) @as(f32, 44) else 32) * dt);
+                self.grounded = false;
+                self.motion = .jet;
+                const burn: f32 = if (flight_strength < 0.05) 1.2 else if (input.fast) 6 else 3.2;
+                self.fuel = @max(0, self.fuel - burn * self.suit.burn * dt);
+            }
+        }
+        if (dash_burst_started and self.flight_engaged) self.fuel = @max(0, self.fuel - 18 * self.suit.burn);
         if (self.dash_timer > 0) {
-            self.velocity = R.add(R.scale(self.dash_direction, 42), .{ 0, self.velocity[1], 0 });
+            const dash_speed: f32 = if (self.traversal == .flight and self.flight_engaged) 76 else 42;
+            self.velocity = R.add(R.scale(self.dash_direction, dash_speed), .{ 0, self.velocity[1], 0 });
             self.motion = .dash;
         }
         if (board and self.velocity[1] < 0) if (physics.castRay(R.add(self.feet, .{ 0, 0.2, 0 }), .{ 0, -1, 0 }, 3, .none)) |hit| {

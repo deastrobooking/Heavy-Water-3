@@ -247,7 +247,7 @@ pub const face_presets = [_]FacePreset{
     },
 };
 
-pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part, spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail };
+pub const HairStyle = enum { bob, long_straight, twin_tails, short_spiky, ponytail, bun, braids, curly, undercut, mohawk, short_curly, curly_fade, curly_coils, afro, long_curls, textured_crop, locs, swept_back, layered_shag, nova_spike, alien_crown, crew_cut, side_part, spiky_hero, widow_flame, fringe_spikes, super_flare, flip_bob, pilot_sweep, big_fringe, topknot, spike_tail, crown_braid, tempest_sweep };
 
 /// Data-driven styles are described by `hair_style.StyleDef`; see `hair_library.zig`.
 const hair_style = @import("hair_style.zig");
