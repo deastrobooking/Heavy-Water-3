@@ -226,6 +226,22 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.clothing = .undersuit;
             self.sandbox.profile.accent = 0;
         }
+        const tweak = options.character_tweak;
+        if (tweak & 1 != 0) self.sandbox.profile.presentation = .feminine;
+        if (tweak & 2 != 0) self.sandbox.profile.height = 0.9;
+        if (tweak & 4 != 0) self.sandbox.profile.height = 1.1;
+        if (tweak & 8 != 0) self.sandbox.profile.helmet = .open;
+        if (tweak & 16 != 0) self.sandbox.profile.helmet = .sealed;
+        if (tweak & 32 != 0) self.sandbox.profile.helmet = .visor;
+        if (options.character_face > 0) self.sandbox.profile.face_style = @enumFromInt(@min(options.character_face - 1, enum_compat.fields(Profile.FaceStyle).len - 1));
+        if (options.character_hair_color > 0) self.sandbox.profile.hair_color = @min(options.character_hair_color - 1, Profile.hair_colors.len - 1);
+        self.sandbox.pose_override = switch (options.character_pose) {
+            1 => .{ .action = .aim },
+            2 => .{ .action = .swing, .arc = .overhead, .t = 0.35 },
+            3 => .{ .action = .cast, .t = 0.5 },
+            4 => .{ .action = .guard, .t = 1 },
+            else => null,
+        };
         self.sandbox.creator.begin(self.sandbox.profile);
         self.sandbox.player.mode = .walk;
     }
@@ -2493,9 +2509,19 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.views[0].camera = self.engine.camera;
     if (options.character_showcase > 0) {
         const feet = self.sandbox.player.feet;
-        renderer.views[0].camera.position = mach.math.vec3(feet[0], feet[1] + 1.12, feet[2] + 2.8);
-        renderer.views[0].camera.yaw = std.math.pi;
-        renderer.views[0].camera.pitch = -0.08;
+        // Orbit the avatar for review: angle from the front, camera distance and look height.
+        const angle: f32 = switch (options.character_view) {
+            1 => std.math.pi / 2.0,
+            2 => std.math.pi,
+            3, 5 => 0.62,
+            else => 0,
+        };
+        const face = options.character_view >= 4;
+        const dist: f32 = if (face) 0.95 else 2.8;
+        const eye_y: f32 = if (face) 1.58 * self.sandbox.profile.height else 1.12;
+        renderer.views[0].camera.position = mach.math.vec3(feet[0] + dist * @sin(angle), feet[1] + eye_y, feet[2] + dist * @cos(angle));
+        renderer.views[0].camera.yaw = std.math.pi + angle;
+        renderer.views[0].camera.pitch = if (face) -0.02 else -0.08;
     }
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);

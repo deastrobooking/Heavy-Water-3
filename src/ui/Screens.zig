@@ -756,55 +756,84 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
     };
 }
 
+/// Height of a section title row in the creator; compact so the whole list fits a 720p window.
+const creator_header: f32 = 16;
+/// Narrowest row the creator uses before it scrolls to keep the selected field in view.
+const creator_min_step: f32 = 19;
+
 fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     const cr = &sb.creator;
     const fields = enum_compat.fields(Profile.Field);
-    // Rows tighten (never below 19) so the longer list still fits a 720p window.
-    const avail = v.h - 24 - 96 - sections.len * 22;
-    const step = std.math.clamp(avail / @as(f32, @floatFromInt(fields.len)), 19, row_height);
-    const h = 96 + @as(f32, @floatFromInt(fields.len)) * step + sections.len * 22;
-    const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(8, (v.h - h) / 2), .w = 460, .h = h };
-    panel(c, r, if (cr.confirmed) "CUSTOMIZE RANGER" else "CREATE YOUR RANGER");
-    var y = r.y + 46;
-    inline for (fields, 0..) |f, i| {
-        const field: Profile.Field = @enumFromInt(f.value);
-        for (sections) |s| if (s.first == field) {
-            c.text(r.x + 18, y + 8, s.title, 0.9, alpha(accent, 0.8));
-            c.rect(.{ .x = r.x + 18 + Canvas.textWidth(s.title, 0.9) + 8, .y = y + 12, .w = r.w - 60 - Canvas.textWidth(s.title, 0.9), .h = 1 }, alpha(accent, 0.25));
-            y += 22;
-        };
-        const row: Rect = .{ .x = r.x + 10, .y = y, .w = r.w - 20, .h = step - 2 };
-        const selected = cr.field == field;
-        rowBack(c, row, selected);
-        c.hit(row, hitId(.creator_field, i));
-        var label_buffer: [24]u8 = undefined;
-        const ty = row.y + (step - 10) / 2 - 1;
-        c.text(row.x + 14, ty, pretty(&label_buffer, f.name), 1, if (selected) accent else dim);
-        var buffer: [40]u8 = undefined;
-        var value = cr.value(field, &buffer);
-        var pretty_buffer: [40]u8 = undefined;
-        if (field != .name) value = pretty(&pretty_buffer, value);
-        const vx = row.x + 196;
-        if (field != .name) {
-            button(c, .{ .x = vx, .y = row.y + 1, .w = 20, .h = step - 4 }, "<", hitId(.creator_left, i), false);
-            button(c, .{ .x = row.x + row.w - 28, .y = row.y + 1, .w = 20, .h = step - 4 }, ">", hitId(.creator_right, i), false);
-        }
-        var tx = vx + 30;
-        if (swatch(field, cr.draft)) |color| {
-            c.rect(.{ .x = tx, .y = row.y + (step - 14) / 2 - 1, .w = 26, .h = 14 }, color);
-            c.frame(.{ .x = tx, .y = row.y + (step - 14) / 2 - 1, .w = 26, .h = 14 }, 1, .{ 1, 1, 1, 0.4 });
-            tx += 34;
-        }
-        c.text(tx, ty, value, 1, ink);
-        y += step;
-    }
     const clothing_count = enum_compat.fields(Profile.Clothing).len;
     const all: u8 = @intCast((@as(u16, 1) << clothing_count) - 1);
     const locked = clothing_count - @popCount(cr.owned & all);
-    if (locked > 0) c.print(r.x + 18, y + 8, 0.9, gold, "{d} ARMOR SUITS LOCKED: BUY THEM FROM MARO, SOUTH MARKET", .{locked});
-    const done: Rect = .{ .x = r.x + r.w - 140, .y = r.y + r.h - 40, .w = 120, .h = 28 };
+    // Title above, below: an optional shop notice, then the hint line beside the DONE button.
+    const top: f32 = 46;
+    const bottom: f32 = 50 + @as(f32, if (locked > 0) 16 else 0);
+    const avail = v.h - 16 - top - bottom;
+    const n: f32 = @floatFromInt(fields.len);
+    const headers: f32 = @floatFromInt(sections.len);
+    // Every row at a comfortable height when it fits; otherwise a window of rows follows the cursor.
+    var first: usize = 0;
+    var last: usize = fields.len;
+    var step: f32 = row_height;
+    if (avail >= n * creator_min_step + headers * creator_header) {
+        step = std.math.clamp((avail - headers * creator_header) / n, creator_min_step, row_height);
+    } else {
+        step = creator_min_step;
+        const room: usize = @intFromFloat(@max(3, (avail - 3 * creator_header) / step));
+        const at: usize = @intFromEnum(cr.field);
+        first = @min(at -| room / 2, fields.len -| room);
+        last = @min(fields.len, first + room);
+    }
+    var visible_headers: f32 = 0;
+    for (sections) |s| {
+        const at: usize = @intFromEnum(s.first);
+        if (at >= first and at < last) visible_headers += 1;
+    }
+    const h = top + @as(f32, @floatFromInt(last - first)) * step + visible_headers * creator_header + bottom;
+    const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(8, (v.h - h) / 2), .w = 460, .h = h };
+    panel(c, r, if (cr.confirmed) "CUSTOMIZE RANGER" else "CREATE YOUR RANGER");
+    var y = r.y + top;
+    inline for (fields, 0..) |f, i| {
+        const field: Profile.Field = @enumFromInt(f.value);
+        if (i >= first and i < last) {
+            for (sections) |s| if (s.first == field) {
+                c.text(r.x + 18, y + 4, s.title, 0.9, alpha(accent, 0.8));
+                c.rect(.{ .x = r.x + 18 + Canvas.textWidth(s.title, 0.9) + 8, .y = y + 8, .w = r.w - 60 - Canvas.textWidth(s.title, 0.9), .h = 1 }, alpha(accent, 0.25));
+                y += creator_header;
+            };
+            const row: Rect = .{ .x = r.x + 10, .y = y, .w = r.w - 20, .h = step - 2 };
+            const selected = cr.field == field;
+            rowBack(c, row, selected);
+            c.hit(row, hitId(.creator_field, i));
+            var label_buffer: [24]u8 = undefined;
+            const ty = row.y + (step - 10) / 2 - 1;
+            c.text(row.x + 14, ty, pretty(&label_buffer, f.name), 1, if (selected) accent else dim);
+            var buffer: [40]u8 = undefined;
+            var value = cr.value(field, &buffer);
+            var pretty_buffer: [40]u8 = undefined;
+            if (field != .name) value = pretty(&pretty_buffer, value);
+            const vx = row.x + 196;
+            if (field != .name) {
+                button(c, .{ .x = vx, .y = row.y + 1, .w = 20, .h = step - 4 }, "<", hitId(.creator_left, i), false);
+                button(c, .{ .x = row.x + row.w - 28, .y = row.y + 1, .w = 20, .h = step - 4 }, ">", hitId(.creator_right, i), false);
+            }
+            var tx = vx + 30;
+            if (swatch(field, cr.draft)) |color| {
+                c.rect(.{ .x = tx, .y = row.y + (step - 14) / 2 - 1, .w = 26, .h = 14 }, color);
+                c.frame(.{ .x = tx, .y = row.y + (step - 14) / 2 - 1, .w = 26, .h = 14 }, 1, .{ 1, 1, 1, 0.4 });
+                tx += 34;
+            }
+            c.text(tx, ty, value, 1, ink);
+            y += step;
+        }
+    }
+    if (locked > 0) c.print(r.x + 18, y + 4, 0.9, gold, "{d} ARMOR SUITS LOCKED: BUY THEM FROM MARO, SOUTH MARKET", .{locked});
+    // The hint shares a line with DONE; the shop notice above has its own.
+    const done: Rect = .{ .x = r.x + r.w - 140, .y = r.y + r.h - 38, .w = 120, .h = 28 };
     button(c, done, "DONE", hitId(.creator_done, 0), false);
-    c.text(r.x + 18, r.y + r.h - 30, if (cr.confirmed) "TYPE NAME  ENTER DONE  ESC CANCEL" else "TYPE A NAME, THEN ENTER", 0.9, dim);
+    c.text(r.x + 18, done.y + 10, if (cr.confirmed) "TYPE NAME  ENTER DONE  ESC CANCEL" else "TYPE A NAME, THEN ENTER", 0.9, dim);
 }
 
 // ---------------------------------------------------------------- shop, upgrades, wardrobe
