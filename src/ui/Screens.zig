@@ -23,6 +23,7 @@ const Pets = @import("../game/Pets.zig");
 const Encounters = @import("../game/Encounters.zig");
 const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
+const District = @import("../procedural/District.zig");
 pub const Rect = Canvas.Rect;
 const Color = Canvas.Color;
 
@@ -1342,7 +1343,8 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         c.rect(.{ .x = map.x + map.w * f, .y = map.y, .w = 1, .h = map.h }, alpha(dim, 0.2));
         c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
     }
-    c.print(map.x + 8, map.y + 8, 1, ink, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
+    c.print(map.x + 8, map.y + 8, 1, ink, "{s} / ARBOR REACH", .{District.city_name});
+    c.print(map.x + 8, map.y + 23, 0.8, dim, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
     var occupied: [12]Rect = undefined;
     var marker_count: usize = 0;
     for (0..Sandbox.travel_count) |i| {

@@ -8,7 +8,7 @@ This document is a player-facing overview of the current prototype. The [roadmap
 
 The Rootdeep is a wild forest floor of ruins, seed vaults, and shrines. Above it, enormous Arbors draw groundwater through living wood and concentrate deuterium in their sap. Settlements climb the trunks into the Crown, connected by towers, plazas, and bridges. Nature and machinery are interdependent: sap powers devices, roots carry signals, and the city changes as players build.
 
-The current playable world is a bounded, seeded canopy district with three distinct Arbors, generated towers and roads, markets, traffic, pedestrians, Rootsong networks, and two solver-verified shrines. It is a substantial systems prototype, not yet the full open-world wilderness or civilization simulation described in the long-term vision.
+The current playable world centers on Detroit, Michigan, reimagined as the Detroit Arbor Reach: a bounded seeded canopy district with three distinct Arbors, modern and Gothic towers, an industrial skyline and riverfront, Belle Isle, two Windsor crossings, markets, traffic, pedestrians, Rootsong networks, and two solver-verified shrines. Smaller pines now bridge the streetside parks and the giant wild forest. It is a substantial systems prototype, not yet the full open-world wilderness or civilization simulation described in the long-term vision.
 
 See [World and Systems](world.md), [Arbor Genomes and Sap](arbors.md), [Canopy City](city.md), and [Rootdeep Shrines](rootdeep.md).
 

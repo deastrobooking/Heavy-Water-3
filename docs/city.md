@@ -1,6 +1,6 @@
-# Canopy city
+# Detroit Arbor Reach
 
-The first city is a bounded lower-canopy district around the three resident Arbors. Six stable plaza anchors form a loop, with three generated towers, two trunk-ring plazas and their spurs, market canopies, and vine-supported bridge roads. The test Arbor's existing ramp and tower provide the walking entrance.
+The first city is **Detroit, Michigan**, reimagined as the Detroit Arbor Reach: a bounded lower-canopy district around three resident Arbors. The city keeps Detroit's industrial and civic character, translated into living infrastructure: older Gothic civic landmarks and newer spired towers share the skyline with foundries, machine halls, pipe runs, rail yards, and Hive-vulnerable production blocks. A broad Detroit River runs past an industrial promenade and ferry pavilion; Belle Isle is a dry, wooded park island with paths and pedestrian approaches. Two large road bridges cross toward Windsor, with illuminated cable towers on the grand crossing. Six stable plaza anchors form a loop, with three generated towers, two trunk-ring plazas and their spurs, market canopies, and vine-supported bridge roads. The test Arbor's existing ramp and tower provide the walking entrance.
 
 ## Visit and build
 
@@ -13,7 +13,7 @@ The first city is a bounded lower-canopy district around the three resident Arbo
 
 ## The sky city
 
-The district is a city in the sky, held up by steel. Every road is a styled steel bridge, assigned by span length so that one district shows every style, longest first:
+The district is a city in the sky, held up by steel and living roots. Around the canopy loop, the district skyline mixes modern Arbor towers, warm-windowed Gothic landmarks with lancet arches and clustered pinnacles, and broad industrial buildings with exhaust stacks, service pipes, and overhead transfer gantries. The east/northeast industrial belt gives Hive forces a believable foothold around the factories and rail works. Every road is a styled steel bridge, assigned by span length so that one district shows every style, longest first:
 
 | Style | Structure | Colour |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ Roads without towers stand on **braced pole piers**: twin steel columns from con
 
 The skyline has **skyscrapers**, about twenty per district. Some stand alone on the forest floor, up to about 270 m to the spire. Each tower plaza also has a skyscraper beside it, joined by a walkable **sky lobby** deck at plaza level.
 
-Towers have setback tiers, floor bands, corner fins, a crown, and a spire. Four palettes (glass teal, bronze, white with cyan fins, and dark steel with copper fins) keep the skyline varied.
+Modern towers have setback tiers, floor bands, corner fins, a crown, and a spire. The Gothic palette uses weathered warm-gray stone, narrow gold-lit windows, pointed arches, and clustered spires; the factory palette uses charcoal steel, oxidation-orange structure, repeated monitor bays, exposed flues, and red hazard lamps. Existing glass-teal, bronze, white/cyan and dark-steel palettes remain on modern towers.
 
 Placement is seeded and validated. A tower keeps clear of every road and trunk spur, every plaza-to-plaza route a player could still bridge, plazas, trunks, the spawn area, and other towers. A player bridge through a tower is rejected with "A SKYSCRAPER BLOCKS THIS ROUTE".
 
@@ -85,13 +85,13 @@ Approximate world positions (X, Z); the seed shifts tower positions slightly:
 
 ## Generation and validation
 
-`procedural/District.zig` owns district generator v5, its layout graph, and shared geometry descriptions. `procedural/CanopyCourse.zig` builds the ladder, patio, ramp, bridge, and grapple-anchor modules used at the market towers. `procedural/Metro.zig` builds the elevated rail loop and station decks; `procedural/Rootway.zig` builds ribbed, gem-set transit galleries at the Arbor-ring approaches. The seed varies the template and terrain-relative elevation. Generation validates before the catalog installs a render mesh or the Sandbox installs collision. New bridges go through the same checks before allocation or mutation.
+`procedural/District.zig` owns district generator v7, its layout graph, Detroit building styles, and shared geometry descriptions. `procedural/DetroitRiverfront.zig` builds the promenade, ferry terminal, Belle Isle park fixtures, pedestrian approaches, and two cross-river road bridges. `procedural/Hydrology.zig` and streamed chunks widen only Detroit's local river and leave Belle Isle terrain above the water. `procedural/CanopyCourse.zig` builds the ladder, patio, ramp, bridge, and grapple-anchor modules used at the market towers. `procedural/Metro.zig` builds the elevated rail loop and station decks; `procedural/Rootway.zig` builds ribbed, gem-set transit galleries at the Arbor-ring approaches. The seed varies the template and terrain-relative elevation. Generation validates before the catalog installs a render mesh or the Sandbox installs collision. Player-built canopy bridges still go through the existing checks before allocation or mutation.
 
 The standard 14 m deck contains two 3.5 m traffic lanes, two 3 m walkways, and two 0.5 m rail strips. Roads have solid decks, rails and end pylons, with decorative vine cables and hangers. Plazas overlap road ends to avoid gaps. Tower bodies reach the ground; floor bands and market bays distinguish their roofs. Trunk plazas are segmented rings connected to their adjacent junctions.
 
 Validation checks graph reachability, endpoint IDs, finite bounded positions, span length, grades of at most **6%**, trunk and plaza envelopes, road crossings, junction approach angles, trunk spurs, and reserved market bays. Terrain clearance is sampled every 4 m at the road center and both edges, requiring 6 m beneath the deck. The fixed legacy test-Arbor entrance still has its original 10% descending bridge and spiral ramp; it is outside the new district road rules.
 
-The generated district uses one resident mesh and one static collider, including the fixed parkour course, Metro loop, and Rootway galleries. Player bridges use existing block instances and their own mesh colliders. Save loading validates the graph and stages allocating collision work before replacing live state; a failed allocation preserves the current session. The district generator is **5** (v2 added styled bridges and skyline; v3 added glass bays and observatory crowns; v4 adds Metro rails and stations; v5 adds the Rootway galleries). The current save format is **21**; district-generator-3 and -4 worlds migrate while retaining their stable bridge endpoints and removals.
+The generated district uses one resident mesh and one static collider, including the fixed parkour course, Metro loop, Rootway galleries, Detroit skyline, and riverfront. Player bridges use existing block instances and their own mesh colliders. Save loading validates the graph and stages allocating collision work before replacing live state; a failed allocation preserves the current session. The district generator is **7** (v2 added styled bridges and skyline; v3 added glass bays and observatory crowns; v4 adds Metro rails and stations; v5 adds the Rootway galleries; v6 adds Detroit Gothic and industrial forms; v7 adds the wide river, Belle Isle and Windsor crossings). The save format is **23**; district-generator-3 through -6 worlds migrate while retaining stable plaza and player-bridge endpoints and removals.
 
 ## Current limits
 

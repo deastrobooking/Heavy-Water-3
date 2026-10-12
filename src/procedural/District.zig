@@ -10,9 +10,12 @@ const TestArbor = @import("TestArbor.zig");
 const CanopyCourse = @import("CanopyCourse.zig");
 const Metro = @import("Metro.zig");
 const Rootway = @import("Rootway.zig");
+const DetroitRiverfront = @import("DetroitRiverfront.zig");
 const V = R.Vec3;
-/// v5: steampunk rail galleries and crystal portals cover the Arbor-ring approaches.
-pub const generator_version: u32 = 5;
+/// v7: Detroit's broad river, Belle Isle crossings, and Windsor bridges join the skyline.
+pub const generator_version: u32 = 7;
+pub const city_name = "Detroit, Michigan";
+pub const district_name = "Detroit Arbor Reach";
 const Bridges = @import("Bridges.zig");
 const Skyline = @import("Skyline.zig");
 pub const Building = Skyline.Building;
@@ -335,6 +338,7 @@ pub fn geometry(layout: *const Layout) !CityParts {
     const course_count = CanopyCourse.generate(sites[0..site_count], &course);
     for (course[0..course_count]) |piece| try out.add(.{ .center = piece.center, .size = piece.size, .rotation = piece.rotation, .color = piece.color, .solid = piece.solid });
     try Metro.geometry(layout, &out);
+    try DetroitRiverfront.geometry(layout.seed, &out);
     return out;
 }
 

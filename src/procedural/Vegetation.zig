@@ -3,18 +3,18 @@ const std = @import("std");
 const Mesh = @import("../render/Mesh.zig");
 const GenMesh = @import("../character/mesh.zig").Mesh;
 const Seed = @import("Seed.zig");
-pub const variant_count = 14;
+pub const variant_count = 15;
 pub const tree_first = 3;
 pub const tree_count = 7;
 pub const tree_variants = [_]u8{ 3, 4, 5, 6, 11, 12, 13 };
-pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow", "redwood", "manzanita", "ember_blossom", "moonbell", "sunspear", "copper_fan", "moon_cascade", "star_blossom" };
+pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow", "redwood", "manzanita", "ember_blossom", "moonbell", "sunspear", "copper_fan", "moon_cascade", "star_blossom", "pine" };
 /// Material base colours, by variant (scatter tints multiply them).
 pub const colors = [variant_count][4]f32{
     .{ 0.30, 0.56, 0.22, 1 }, .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 },
     .{ 0.18, 0.43, 0.20, 1 }, .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 },
     .{ 0.34, 0.055, 0.09, 1 }, .{ 0.25, 0.43, 0.22, 1 }, .{ 0.82, 0.12, 0.21, 1 },
     .{ 0.16, 0.42, 0.86, 1 }, .{ 0.92, 0.58, 0.12, 1 },
-    .{ 0.46, 0.68, 0.34, 1 }, .{ 0.26, 0.55, 0.48, 1 }, .{ 0.52, 0.34, 0.68, 1 },
+    .{ 0.46, 0.68, 0.34, 1 }, .{ 0.26, 0.55, 0.48, 1 }, .{ 0.52, 0.34, 0.68, 1 }, .{ 0.12, 0.31, 0.16, 1 },
 };
 pub const trunk_colors = [tree_count][4]f32{
     .{ 0.24, 0.15, 0.09, 1 }, .{ 0.21, 0.13, 0.08, 1 }, .{ 0.28, 0.19, 0.12, 1 }, .{ 0.76, 0.44, 0.48, 1 },
@@ -52,8 +52,8 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     if (variant >= variant_count or isTree(variant)) return error.InvalidPlant;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant >= 8) 600 else 48);
-    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant >= 8) 2400 else 72);
+    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant == 14) 900 else if (variant >= 8) 600 else 48);
+    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant == 14) 2100 else if (variant >= 8) 2400 else 72);
     if (variant == 0) {
         for (0..9) |i| {
             const t = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
@@ -89,6 +89,32 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
         for (centers, 0..) |center, i| {
             const size = 0.16 + Seed.unit(Seed.mix(i + 7)) * 0.055;
             try ellipsoid(a, &out, center, .{ size, size * 0.72, size }, 5, 8);
+        }
+    } else if (variant == 14) {
+        // A modest, irregularly layered pine: a visible bole, whorled branches, and open air
+        // between needle sprays keep it readable at woodland scale instead of a solid cone.
+        try cone(a, &out, 0, 1, 0.045);
+        for (0..7) |tier| {
+            const tf: f32 = @floatFromInt(tier);
+            const y = 0.24 + tf * 0.095;
+            const reach = 0.34 * (1 - tf * 0.105);
+            const boughs: usize = if (tier < 3) 7 else 6;
+            for (0..boughs) |bough| {
+                const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(bough)) + @as(f32, @floatFromInt(tier % 2)) * 0.45) / @as(f32, @floatFromInt(boughs));
+                const root: [3]f32 = .{ @cos(angle) * 0.035, y, @sin(angle) * 0.035 };
+                const elbow: [3]f32 = .{ @cos(angle) * reach * 0.68, y + 0.025, @sin(angle) * reach * 0.68 };
+                const tip: [3]f32 = .{ @cos(angle) * reach, y - 0.105, @sin(angle) * reach };
+                const width = 0.11 * (1 - tf * 0.045);
+                try blade(a, &out, root, elbow, width, angle);
+                try blade(a, &out, elbow, tip, width * 0.64, angle);
+                for (0..3) |spray| {
+                    const f = @as(f32, @floatFromInt(spray + 1)) * 0.23;
+                    const side = if (spray % 2 == 0) @as(f32, 1) else -1;
+                    const start = [3]f32{ elbow[0] * (1 - f), elbow[1] - f * 0.12, elbow[2] * (1 - f) };
+                    const end = [3]f32{ start[0] + @cos(angle + side * 0.85) * 0.16, start[1] + 0.12, start[2] + @sin(angle + side * 0.85) * 0.16 };
+                    try blade(a, &out, start, end, 0.055, angle + side * 0.6);
+                }
+            }
         }
     } else {
         // Flowering natives have a thin stem and a distinct six-petal luminous crown.

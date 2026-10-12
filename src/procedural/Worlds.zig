@@ -156,7 +156,7 @@ pub fn featurePack(world: Id) *const FeaturePack {
 /// is already playable. The Arbor Frontier has two ocean-region concepts in addition to its five
 /// original canopy and river regions.
 pub const cities = [_]City{
-    .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Arboris Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Canopy markets, transit bridges, and the first shipyard route." },
+    .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Detroit Arbor Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Detroit, Michigan reimagined as a canopy city: historic civic towers, riverfront industry, transit bridges, and the first shipyard route." },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },

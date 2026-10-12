@@ -2,6 +2,24 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Detroit Riverfront, Belle Isle, and Windsor crossings — 2026-10-12
+
+- Widened only Detroit's lane-zero river reach, fading it back to the regular channel beyond the city; terrain remains above water across Belle Isle and the streamed water ribbon splits around the island.
+- Added an industrial promenade and ferry pavilion, park paths/fixtures on Belle Isle, two static road bridges toward Windsor, and two pedestrian approach spans linking the island to both banks. They share the district mesh/collider, while existing player-built bridge anchors and IDs remain unchanged.
+- Bumped district generator to v7 and save format to v23. District generator 3–6 saves migrate with their plaza and player bridge identities retained.
+- Added hydrology regression coverage for broad Detroit water, dry island terrain, and the narrow channel outside Detroit.
+- Increased the terrain upload budget default to 384 KiB (minimum 322 KiB) to fit the split river-water buffers.
+- **Checked:** `python3 tools/zig.py build -Doptimize=ReleaseFast` passed with the default pinned compiler and installed `zig-out/bin/heavy-water`; `git diff --check` passed.
+- **Not checked:** headless tests, Metal capture or visual inspection, walking/driving the spans, vehicle clearance, save migration round-trip, benchmarks, Zig 0.17, Linux/Windows compilation or runtime. River width, bank approaches, and bridge height need in-game review.
+
+## Detroit Arbor Reach and native pines — 2026-10-12
+
+- Named the first city Detroit, Michigan, and show Detroit / Arbor Reach on the world map. The procedural skyline now mixes modern canopy towers, warm-windowed Gothic civic spires, and broad industrial factories with flues, service piping, hazard lamps, and transfer gantries; the industrial belt is a deliberate Hive foothold.
+- Added a smaller layered pine mesh, scaled to 6–18 m and seeded through lower-arid forest and parkland scatter. Existing giant tree forms remain unchanged.
+- Bumped the district generator to v6, scatter/world generator to v9, and save format to v22. District-generator-3 through -5 and scatter-generator-5 through -8 saves migrate while preserving plaza, bridge, and collected-object identities.
+- **Checked:** `git diff --check` only.
+- **Not checked:** build, tests, Metal capture or visual inspection, seed coverage for city silhouettes, hands-on routes, save migration round-trip, benchmarks, Zig 0.17, Linux/Windows compilation or runtime. Gothic/factory composition and pine scale need in-game review.
+
 ## Rootdeep shrine presentation and campaign beacon — 2026-10-12
 
 - Replaced the stepped exterior shrine crowns and monumental piers with open rootwork arches, dark stone thresholds, inset lumen channels, and suspended ember/teal crystal crowns. Puzzle interiors, collision, solver, rewards, and saves are unchanged.

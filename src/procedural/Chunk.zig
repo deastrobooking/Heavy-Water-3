@@ -8,8 +8,9 @@ pub const extent = @import("../world/ChunkKey.zig").extent;
 pub const terrain_vertex_count = (cells + 1) * (cells + 1);
 pub const terrain_index_count = cells * cells * 6;
 pub const max_river_lanes = 3;
-pub const river_vertices_per_lane = (cells + 1) * 2 + 4;
-pub const river_indices_per_lane = cells * 6 + 6;
+pub const river_ribbons_per_lane = 2;
+pub const river_vertices_per_lane = river_ribbons_per_lane * ((cells + 1) * 2 + 4);
+pub const river_indices_per_lane = river_ribbons_per_lane * (cells * 6 + 6);
 pub const vertex_count = terrain_vertex_count + max_river_lanes * river_vertices_per_lane;
 pub const index_count = terrain_index_count + max_river_lanes * river_indices_per_lane;
 pub const Cancel = struct { token: *const std.atomic.Value(u64), expected: u64 };
@@ -86,25 +87,35 @@ fn fillRivers(seed: u64, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u
         for (0..cells + 1) |step| {
             const x = ox + @as(f32, @floatFromInt(step)) * (extent / cells);
             const center_z = Hydrology.centerZ(seed, lane, x);
-            if (center_z + Hydrology.water_width >= oz and center_z - Hydrology.water_width <= oz + extent) intersects = true;
+            const half = Hydrology.surfaceHalfWidth(lane, x);
+            if (center_z + half >= oz and center_z - half <= oz + extent) intersects = true;
         }
         if (!intersects) continue;
         if (vertex_at + river_vertices_per_lane > vertices.len or index_at + river_indices_per_lane > indices.len) return false;
-        const first = vertex_at;
-        for (0..cells + 1) |step| {
-            const x = ox + @as(f32, @floatFromInt(step)) * (extent / cells);
-            const z = Hydrology.centerZ(seed, lane, x);
-            const level = Hydrology.level(seed, lane, x);
-            const half = Hydrology.water_width * 0.5;
-            vertices[vertex_at] = waterVertex(x, level, z - half, step, 0);
-            vertices[vertex_at + 1] = waterVertex(x, level, z + half, step, 1);
-            vertex_at += 2;
-            if (step == 0) continue;
-            const a: u32 = @intCast(first + (step - 1) * 2);
-            const base = index_at + (step - 1) * 6;
-            @memcpy(indices[base..][0..6], &[_]u32{ a, a + 1, a + 2, a + 1, a + 3, a + 2 });
+        for (0..river_ribbons_per_lane) |ribbon| {
+            const first = vertex_at;
+            for (0..cells + 1) |step| {
+                const x = ox + @as(f32, @floatFromInt(step)) * (extent / cells);
+                const z = Hydrology.centerZ(seed, lane, x);
+                const level = Hydrology.level(seed, lane, x);
+                const half = Hydrology.surfaceHalfWidth(lane, x);
+                const isle = Hydrology.belleIsleHalfWidth(x);
+                const edges = if (isle > 0.05)
+                    (if (ribbon == 0) [2]f32{ -half, -isle } else [2]f32{ isle, half })
+                else if (ribbon == 0)
+                    [2]f32{ -half, half }
+                else
+                    [2]f32{ 0, 0 };
+                vertices[vertex_at] = waterVertex(x, level, z + edges[0], step, 0);
+                vertices[vertex_at + 1] = waterVertex(x, level, z + edges[1], step, 1);
+                vertex_at += 2;
+                if (step == 0) continue;
+                const a: u32 = @intCast(first + (step - 1) * 2);
+                const base = index_at + (step - 1) * 6;
+                @memcpy(indices[base..][0..6], &[_]u32{ a, a + 1, a + 2, a + 1, a + 3, a + 2 });
+            }
+            index_at += cells * 6;
         }
-        index_at += cells * 6;
 
         const lane_seed = @import("Seed.zig").mix(seed ^ @as(u64, @bitCast(lane)) ^ 0x464c4f57);
         const phase = @floor(@import("Seed.zig").unit(lane_seed) * Hydrology.fall_period / 4) * 4;
@@ -114,17 +125,27 @@ fn fillRivers(seed: u64, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u
         const center_z = Hydrology.centerZ(seed, lane, fall_x);
         const high = Hydrology.level(seed, lane, fall_x - 0.01);
         const low = Hydrology.level(seed, lane, fall_x + 0.01);
-        const half = Hydrology.water_width * 0.5;
-        // The curtain faces downstream (+x), which also tells the water shader it is falling.
-        for ([_]f32{ high, high, low, low }, [_]f32{ -half, half, -half, half }, 0..) |y, dz, k| {
-            vertices[vertex_at + k] = waterVertex(fall_x, y, center_z + dz, cells + 1, @intCast(k % 2));
-            vertices[vertex_at + k].normal = .{ 1, 0, 0 };
+        const half = Hydrology.surfaceHalfWidth(lane, fall_x);
+        const isle = Hydrology.belleIsleHalfWidth(fall_x);
+        for (0..river_ribbons_per_lane) |ribbon| {
+            const edges = if (isle > 0.05)
+                (if (ribbon == 0) [2]f32{ -half, -isle } else [2]f32{ isle, half })
+            else if (ribbon == 0)
+                [2]f32{ -half, half }
+            else
+                [2]f32{ 0, 0 };
+            // The curtains face downstream (+x), split around the island when the waterfall
+            // crosses Belle Isle's local river reach.
+            for ([_]f32{ high, high, low, low }, [_]f32{ edges[0], edges[1], edges[0], edges[1] }, 0..) |y, dz, k| {
+                vertices[vertex_at + k] = waterVertex(fall_x, y, center_z + dz, cells + 1, @intCast(k % 2));
+                vertices[vertex_at + k].normal = .{ 1, 0, 0 };
+            }
+            const a: u32 = @intCast(vertex_at);
+            const base = index_at;
+            @memcpy(indices[base..][0..6], &[_]u32{ a, a + 2, a + 1, a + 1, a + 2, a + 3 });
+            vertex_at += 4;
+            index_at += 6;
         }
-        const a: u32 = @intCast(vertex_at);
-        const base = index_at;
-        @memcpy(indices[base..][0..6], &[_]u32{ a, a + 2, a + 1, a + 1, a + 2, a + 3 });
-        vertex_at += 4;
-        index_at += 6;
     }
     // Zero-area reserved indices reference a valid existing vertex and are ignored by rasterization.
     @memset(indices[index_at..], 0);

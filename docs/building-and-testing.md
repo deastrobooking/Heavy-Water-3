@@ -79,7 +79,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dcpu-skinning=true` | false | Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback). |
 | `-Dhot-reload=true` | false | Watch model, blueprint and mod script sources and reload them live. |
 | `-Dreload-smoke=true` | false | Reload test: edits an isolated crate fixture under `zig-out/reload-smoke` and checks the swap. |
-| `-Dupload-budget-kib=N` | 320 | Terrain upload budget per frame (at least 278). |
+| `-Dupload-budget-kib=N` | 384 | Terrain upload budget per frame (at least 322). |
 | `-Dasset-upload-kib=N` | 4096 | Late catalog mesh upload budget per frame. |
 | `-Dfield-upload-kib=N` | 2048 | Scale workload instance upload budget per frame. |
 

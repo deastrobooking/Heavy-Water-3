@@ -23,7 +23,7 @@ pub const mach_systems = .{ .init, .render, .deinit };
 pub const panel_capacity = 16;
 const Instance = Scene.Instance;
 comptime {
-    if (options.upload_budget < Scene.chunk_bytes) @compileError("upload-budget-kib must be at least 278");
+    if (options.upload_budget < Scene.chunk_bytes) @compileError("upload-budget-kib must be at least 322");
 }
 const Sky = @import("../engine/Sky.zig");
 /// Matches `Frame` in scene.wgsl.

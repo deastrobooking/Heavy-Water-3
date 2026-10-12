@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);
     options.addOption(usize, "field_upload", (b.option(usize, "field-upload-kib", "Scale workload instance upload budget per frame in KiB") orelse 2048) * 1024);
-    options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 278)") orelse 320) * 1024);
+    options.addOption(usize, "upload_budget", (b.option(usize, "upload-budget-kib", "Terrain upload budget per frame in KiB (minimum 322)") orelse 384) * 1024);
     options.addOption(bool, "audio", b.option(bool, "audio", "Open the system audio device (default true; false runs silent)") orelse true);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .mach = true, .core = true, .sysaudio = true, .sysgpu_backend = mach_gpu_backend });
     const enum_compat = b.createModule(.{ .root_source_file = b.path("src/compat/enum.zig"), .target = target, .optimize = optimize });

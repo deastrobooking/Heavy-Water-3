@@ -13,6 +13,7 @@ const V = R.Vec3;
 
 pub const max_buildings = 24;
 pub const target_skyline = 18;
+pub const Architecture = enum { modern, gothic, industrial };
 /// No tower within this distance of the new-game spawn.
 pub const spawn_clearance: f32 = 110;
 const spawn_xz: [2]f32 = .{ 0, -58 };
@@ -26,6 +27,7 @@ pub const Building = struct {
     spire: f32 = 0,
     tiers: u8 = 1,
     palette: u8 = 0,
+    architecture: Architecture = .modern,
     /// Tower plaza this one stands beside (sky lobby), if any.
     plaza: ?u8 = null,
 
@@ -42,7 +44,27 @@ const palettes = [_]struct { body: V, band: V, fin: V, glass: V }{
     .{ .body = .{ 0.46, 0.30, 0.22 }, .band = .{ 0.20, 0.17, 0.15 }, .fin = .{ 0.72, 0.52, 0.32 }, .glass = .{ 0.30, 0.58, 0.62 } },
     .{ .body = .{ 0.82, 0.84, 0.82 }, .band = .{ 0.30, 0.60, 0.64 }, .fin = .{ 0.40, 0.74, 0.78 }, .glass = .{ 0.23, 0.64, 0.72 } },
     .{ .body = .{ 0.26, 0.28, 0.34 }, .band = .{ 0.60, 0.64, 0.70 }, .fin = .{ 0.85, 0.55, 0.30 }, .glass = .{ 0.24, 0.51, 0.62 } },
+    .{ .body = .{ 0.39, 0.38, 0.35 }, .band = .{ 0.18, 0.19, 0.21 }, .fin = .{ 0.64, 0.57, 0.43 }, .glass = .{ 0.78, 0.62, 0.36 } },
+    .{ .body = .{ 0.22, 0.26, 0.29 }, .band = .{ 0.12, 0.15, 0.17 }, .fin = .{ 0.67, 0.34, 0.18 }, .glass = .{ 0.31, 0.44, 0.47 } },
 };
+
+fn paletteFor(style: Architecture, seed_palette: usize) u8 {
+    return switch (style) {
+        .modern => @intCast(seed_palette % 4),
+        .gothic => 4,
+        .industrial => 5,
+    };
+}
+
+fn architectureAt(x: f32, z: f32, roll: f32) Architecture {
+    // Detroit's riverfront factories sit beyond the civic core; historic stone towers cluster
+    // around the old market wards, while newer Arbor towers fill the remaining skyline.
+    if (x > 170 and z > 95) return .industrial;
+    if (x < -150 and z > 85 and z < 430) return .gothic;
+    if (roll < 0.21) return .gothic;
+    if (roll < 0.43) return .industrial;
+    return .modern;
+}
 
 fn planar(a: V, b: V) f32 {
     return @sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[2] - b[2]) * (a[2] - b[2]));
@@ -123,17 +145,25 @@ pub fn generate(layout: *District.Layout) void {
                 dir = d;
             }
         }
-        const half = 8 + 3 * Rand.unit(&h);
+        const nominal_half = 8 + 3 * Rand.unit(&h);
+        const architecture: Architecture = switch (i) {
+            1 => .gothic,
+            3 => .industrial,
+            5 => .gothic,
+            else => .modern,
+        };
+        const half = nominal_half * (if (architecture == .industrial) @as(f32, 1.35) else 1);
         const at = R.add(node.position, R.scale(dir, District.plaza_radius + half * std.math.sqrt2 + 4));
         var b: Building = .{
             .base = .{ at[0], Terrain.surface(layout.seed, at[0], at[2]).height, at[2] },
-            .half = .{ half, half },
-            .roof = node.position[1] + 60 + 90 * Rand.unit(&h),
-            .tiers = 2 + @as(u8, @intFromFloat(Rand.unit(&h) * 1.99)),
-            .palette = @intCast(i % palettes.len),
+            .half = if (architecture == .industrial) .{ half, half * 0.82 } else .{ half, half },
+            .roof = node.position[1] + (if (architecture == .industrial) @as(f32, 44) else 60) + (if (architecture == .industrial) @as(f32, 48) else 90) * Rand.unit(&h),
+            .tiers = if (architecture == .industrial) 1 else 2 + @as(u8, @intFromFloat(Rand.unit(&h) * 1.99)),
+            .palette = paletteFor(architecture, i),
+            .architecture = architecture,
             .plaza = @intCast(i),
         };
-        b.spire = b.roof + 14 + 26 * Rand.unit(&h);
+        b.spire = b.roof + (if (architecture == .gothic) @as(f32, 35) else if (architecture == .industrial) @as(f32, 8) else 14) + (if (architecture == .gothic) @as(f32, 45) else if (architecture == .industrial) @as(f32, 16) else 26) * Rand.unit(&h);
         if (clear(layout, lanes, layout.buildings[0..n], b, i)) {
             layout.buildings[n] = b;
             n += 1;
@@ -145,14 +175,23 @@ pub fn generate(layout: *District.Layout) void {
         const z = -260 + 800 * Rand.unit(&h);
         const ground = Terrain.surface(layout.seed, x, z).height;
         const tall = Rand.unit(&h);
+        const architecture = architectureAt(x, z, Rand.unit(&h));
+        const radius_scale: f32 = if (architecture == .industrial) 1.35 else 1;
+        const height_base: f32 = if (architecture == .industrial) 38 else if (architecture == .gothic) 55 else 50;
+        const height_range: f32 = if (architecture == .industrial) 70 else 210;
         var b: Building = .{
             .base = .{ x, ground, z },
-            .half = .{ 9 + 9 * Rand.unit(&h), 9 + 9 * Rand.unit(&h) },
-            .roof = ground + 50 + 210 * tall * tall,
-            .tiers = 1 + @as(u8, @intFromFloat(Rand.unit(&h) * 2.99)),
-            .palette = @intFromFloat(Rand.unit(&h) * (@as(f32, palettes.len) - 0.01)),
+            .half = .{ (9 + 9 * Rand.unit(&h)) * radius_scale, (9 + 9 * Rand.unit(&h)) * radius_scale },
+            .roof = ground + height_base + height_range * tall * tall,
+            .tiers = if (architecture == .industrial) 1 + @as(u8, @intFromFloat(Rand.unit(&h) * 1.99)) else 1 + @as(u8, @intFromFloat(Rand.unit(&h) * 2.99)),
+            .palette = paletteFor(architecture, @intFromFloat(Rand.unit(&h) * 4)),
+            .architecture = architecture,
         };
-        b.spire = b.roof + (if (tall > 0.5) 10 + 35 * Rand.unit(&h) else 3);
+        b.spire = b.roof + switch (architecture) {
+            .gothic => 32 + 52 * Rand.unit(&h),
+            .industrial => 14 + 36 * Rand.unit(&h),
+            .modern => if (tall > 0.5) 10 + 35 * Rand.unit(&h) else 3,
+        };
         if (!clear(layout, lanes, layout.buildings[0..n], b, null)) continue;
         layout.buildings[n] = b;
         n += 1;
@@ -160,7 +199,8 @@ pub fn generate(layout: *District.Layout) void {
     layout.building_count = n;
 }
 
-/// Setback tiers, inset glass bays, floor bands, crown ribs, a light-catching dome, and a spire.
+/// Detroit's mixed skyline: modern Arbor towers, pointed stone Gothic landmarks, and industrial
+/// works with flues, service gantries, and visible pipe runs.
 pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void {
     const p = palettes[b.palette];
     var bottom = b.base[1] - 2;
@@ -171,45 +211,99 @@ pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void
         try out.add(.{ .center = .{ b.base[0], bottom + height / 2, b.base[2] }, .size = .{ half[0] * 2, height, half[1] * 2 }, .color = p.body });
         // Narrow, inset glass bays break up the old blank box facades. Repeating three calm
         // vertical ribbons on each face keeps the tower legible from the ground and distant hills.
-        const bay_w = @min(1.5, half[0] * 0.22);
-        const bay_h = @max(2, height - 4);
+        const bay_w = switch (b.architecture) {
+            .gothic => @min(1.05, half[0] * 0.16),
+            .industrial => @min(1.2, half[0] * 0.17),
+            .modern => @min(1.5, half[0] * 0.22),
+        };
+        const bay_h = @max(2, height - if (b.architecture == .gothic) @as(f32, 8) else 4);
         for ([_]f32{ -0.58, 0, 0.58 }) |u| {
             try out.add(.{ .center = .{ b.base[0] + u * half[0], bottom + height / 2, b.base[2] + half[1] + 0.12 }, .size = .{ bay_w, bay_h, 0.18 }, .color = p.glass, .solid = false });
             try out.add(.{ .center = .{ b.base[0] + u * half[0], bottom + height / 2, b.base[2] - half[1] - 0.12 }, .size = .{ bay_w, bay_h, 0.18 }, .color = p.glass, .solid = false });
             try out.add(.{ .center = .{ b.base[0] + half[0] + 0.12, bottom + height / 2, b.base[2] + u * half[1] }, .size = .{ 0.18, bay_h, bay_w }, .color = p.glass, .solid = false });
             try out.add(.{ .center = .{ b.base[0] - half[0] - 0.12, bottom + height / 2, b.base[2] + u * half[1] }, .size = .{ 0.18, bay_h, bay_w }, .color = p.glass, .solid = false });
+            if (b.architecture == .gothic) {
+                const x = b.base[0] + u * half[0];
+                const left: V = .{ x - bay_w * 0.6, bottom + 2.5, b.base[2] + half[1] + 0.22 };
+                const peak: V = .{ x, bottom + height - 2.5, b.base[2] + half[1] + 0.22 };
+                const right: V = .{ x + bay_w * 0.6, bottom + 2.5, b.base[2] + half[1] + 0.22 };
+                try Bridges.beam(out, left, peak, 0.32, p.fin, false);
+                try Bridges.beam(out, peak, right, 0.32, p.fin, false);
+                const back_left: V = .{ left[0], left[1], b.base[2] - half[1] - 0.22 };
+                const back_peak: V = .{ peak[0], peak[1], b.base[2] - half[1] - 0.22 };
+                const back_right: V = .{ right[0], right[1], b.base[2] - half[1] - 0.22 };
+                try Bridges.beam(out, back_left, back_peak, 0.32, p.fin, false);
+                try Bridges.beam(out, back_peak, back_right, 0.32, p.fin, false);
+            }
         }
         // Floor bands, at most 14 per tier.
         const spacing = @max(7, height / 14);
         var y = bottom + spacing;
         while (y < top - 1) : (y += spacing) try out.add(.{ .center = .{ b.base[0], y, b.base[2] }, .size = .{ half[0] * 2 + 0.6, 0.45, half[1] * 2 + 0.6 }, .color = p.band, .solid = false });
         for ([_]f32{ -1, 1 }) |sx| for ([_]f32{ -1, 1 }) |sz| {
-            try out.add(.{ .center = .{ b.base[0] + sx * (half[0] + 0.2), bottom + height / 2, b.base[2] + sz * (half[1] + 0.2) }, .size = .{ 0.7, height, 0.7 }, .color = p.fin, .solid = false });
+            const width: f32 = if (b.architecture == .gothic) 1.6 else if (b.architecture == .industrial) 0.9 else 0.7;
+            try out.add(.{ .center = .{ b.base[0] + sx * (half[0] + 0.2), bottom + height / 2, b.base[2] + sz * (half[1] + 0.2) }, .size = .{ width, height, width }, .color = p.fin, .solid = false });
         };
         try out.add(.{ .center = .{ b.base[0], top + 0.6, b.base[2] }, .size = .{ half[0] * 2 + 1.2, 1.2, half[1] * 2 + 1.2 }, .color = p.band });
         bottom = top;
         half = .{ half[0] * 0.72, half[1] * 0.72 };
     }
-    // Layer a shallow, faceted dome above the crown. Its open ribs preserve the sky through the
-    // structure and read as an observatory crown instead of another solid cube.
-    try out.add(.{ .center = .{ b.base[0], b.roof + 2.5, b.base[2] }, .size = .{ half[0] * 1.2, 4, half[1] * 1.2 }, .color = p.fin });
-    const dome_r = @min(half[0], half[1]) * 0.44;
-    var lower: [3]f32 = .{ b.base[0], b.roof + 4.6, b.base[2] };
-    var upper: [3]f32 = .{ b.base[0], b.roof + 13, b.base[2] };
-    for (0..12) |i| {
-        const a0 = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 12;
-        const a1 = @as(f32, @floatFromInt(i + 1)) * 2 * std.math.pi / 12;
-        lower[0] = b.base[0] + @cos(a0) * dome_r;
-        lower[1] = b.roof + 4.6;
-        lower[2] = b.base[2] + @sin(a0) * dome_r;
-        upper[0] = b.base[0] + @cos(a1) * dome_r;
-        upper[1] = b.roof + 4.6;
-        upper[2] = b.base[2] + @sin(a1) * dome_r;
-        try Bridges.beam(out, lower, upper, 0.62, p.glass, false);
-        const apex: V = .{ b.base[0], b.roof + 12.5, b.base[2] };
-        try Bridges.beam(out, lower, apex, 0.48, p.fin, false);
+    switch (b.architecture) {
+        .modern => {
+            // A light-catching observatory dome crowns the newer Arbor towers.
+            try out.add(.{ .center = .{ b.base[0], b.roof + 2.5, b.base[2] }, .size = .{ half[0] * 1.2, 4, half[1] * 1.2 }, .color = p.fin });
+            const dome_r = @min(half[0], half[1]) * 0.44;
+            var lower: [3]f32 = undefined;
+            var upper: [3]f32 = undefined;
+            for (0..12) |i| {
+                const a0 = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 12;
+                const a1 = @as(f32, @floatFromInt(i + 1)) * 2 * std.math.pi / 12;
+                lower = .{ b.base[0] + @cos(a0) * dome_r, b.roof + 4.6, b.base[2] + @sin(a0) * dome_r };
+                upper = .{ b.base[0] + @cos(a1) * dome_r, b.roof + 4.6, b.base[2] + @sin(a1) * dome_r };
+                try Bridges.beam(out, lower, upper, 0.62, p.glass, false);
+                const apex: V = .{ b.base[0], b.roof + 12.5, b.base[2] };
+                try Bridges.beam(out, lower, apex, 0.48, p.fin, false);
+            }
+            try Bridges.beam(out, .{ b.base[0], b.roof + 4, b.base[2] }, b.beacon(), 0.8, p.band, true);
+        },
+        .gothic => {
+            // Pitched pinnacles and flying buttress lines break the broad roof into an older
+            // civic silhouette; the gold lumen glass makes the lancet arches readable at dusk.
+            const roof_y = b.roof + 1;
+            const tip_y = b.spire;
+            try Bridges.beam(out, .{ b.base[0], roof_y, b.base[2] }, b.beacon(), 1.5, p.band, true);
+            for ([_]f32{ -1, 1 }) |sx| for ([_]f32{ -1, 1 }) |sz| {
+                const base: V = .{ b.base[0] + sx * half[0] * 0.78, roof_y, b.base[2] + sz * half[1] * 0.78 };
+                const tip: V = .{ base[0], roof_y + (tip_y - roof_y) * 0.58, base[2] };
+                try Bridges.beam(out, base, tip, 0.9, p.fin, false);
+                const flying: V = .{ b.base[0] + sx * half[0] * 0.28, roof_y + 9, b.base[2] + sz * half[1] * 0.28 };
+                try Bridges.beam(out, base, flying, 0.55, p.band, false);
+            };
+        },
+        .industrial => {
+            // Detroit's factory quarter: clustered exhaust flues, roof monitors, exposed pipes,
+            // and transfer gantries give the Hive useful heavy-industry silhouettes to occupy.
+            const delta = b.spire - b.roof;
+            for (0..3) |i| {
+                const f: f32 = @floatFromInt(i);
+                const x = b.base[0] + (f - 1) * @min(half[0] * 0.58, 11);
+                const z = b.base[2] + (if (i == 1) half[1] * 0.18 else -half[1] * 0.32);
+                const h = delta * (0.64 + f * 0.1);
+                try out.add(.{ .center = .{ x, b.roof + h * 0.5, z }, .size = .{ 2.6, h, 2.6 }, .color = p.band, .solid = false });
+                try out.add(.{ .center = .{ x, b.roof + h, z }, .size = .{ 3.8, 0.9, 3.8 }, .color = p.fin, .solid = false });
+                const warn = [_]f32{ 0.76, 0.18, 0.08 };
+                try out.add(.{ .center = .{ x, b.roof + h + 1.1, z }, .size = .{ 0.75, 0.75, 0.75 }, .color = warn, .solid = false });
+            }
+            for ([_]f32{ -1, 1 }) |side| {
+                const a: V = .{ b.base[0] + side * (half[0] + 0.4), b.base[1] + 5, b.base[2] - half[1] * 0.65 };
+                const b0: V = .{ b.base[0] + side * (half[0] + 0.4), b.roof - 2, b.base[2] + half[1] * 0.65 };
+                try Bridges.beam(out, a, b0, 0.65, p.fin, false);
+                const gantry_a: V = .{ b.base[0] - half[0], b.roof + 8, b.base[2] };
+                const gantry_b: V = .{ b.base[0] + half[0], b.roof + 8, b.base[2] };
+                try Bridges.beam(out, gantry_a, gantry_b, 0.55, p.band, false);
+            }
+        },
     }
-    try Bridges.beam(out, .{ b.base[0], b.roof + 4, b.base[2] }, b.beacon(), 0.8, p.band, true);
     if (b.plaza) |i| {
         // Sky lobby: a walkable deck from the plaza edge to the tower at plaza level.
         const node = layout.nodes[i].position;

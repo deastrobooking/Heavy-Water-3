@@ -26,10 +26,12 @@ const District = @import("../procedural/District.zig");
 /// v16 adds each kit's fabricated field droid and its independent upgrade experience; v17
 /// migrates generator-5 saves to giant flora; v18 migrates generator-6 saves to new tree forms;
 /// v19 migrates generator-7 saves to harvestable young trees; v20 adds metro district geometry;
-/// v21 adds steampunk root galleries without changing plaza or bridge identities.
+/// v21 adds steampunk root galleries without changing plaza or bridge identities; v22 adds small
+/// pine scatter and Detroit's Gothic/industrial skyline; v23 widens Detroit River, adds Belle
+/// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities.
 /// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
 /// Older saves are rejected.
-pub const format_version: u32 = 21;
+pub const format_version: u32 = 23;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -108,15 +110,15 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (doc.format > format_version or doc.format + 7 < format_version) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) {
-        if ((doc.generator == 5 or doc.generator == 6 or doc.generator == 7) and doc.format < format_version) {
+        if ((doc.generator == 5 or doc.generator == 6 or doc.generator == 7 or doc.generator == 8) and doc.format < format_version) {
             // Candidate IDs did not move, so saved removals stay attached to their new visuals.
             parsed.value.generator = Seed.generator_version;
             parsed.value.format = format_version;
         } else return error.GeneratorMismatch;
     }
     if (doc.district_generator != District.generator_version) {
-        if ((doc.district_generator == 3 or doc.district_generator == 4) and doc.format < format_version) {
-            // Plaza, bridge, and tree identities are stable; the gallery is regenerated geometry.
+        if ((doc.district_generator == 3 or doc.district_generator == 4 or doc.district_generator == 5 or doc.district_generator == 6) and doc.format < format_version) {
+            // Plaza and player-built bridge identities stay stable; Detroit terrain and structures regenerate.
             parsed.value.district_generator = District.generator_version;
             parsed.value.format = format_version;
         } else return error.GeneratorMismatch;

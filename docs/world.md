@@ -83,7 +83,7 @@ Each Arbor grows from a **genome**: a small, versioned set of parameters that is
 - **Vascular capacity:** sap flow, and therefore how much power the tree can supply to taps.
 - **Bark and lumen:** bark color and ridging, and the hue of the tree's bioluminescence.
 
-Outside the civic Arbors, the Frontier has its own giant native forest: broadleaf, needleleaf, willow, copper-fan, moon-cascade, and star-blossom silhouettes rise 96–150 m, while genetically modified redwoods reach 152.4 m (500 ft). Their narrow, tiered crowns carry dark-crimson bioluminescent leaves. Higher resolution leaf meshes soften the crown surfaces; overlapping fan whorls, cascading branch sprays, and open petal tiers give the new species distinct silhouettes. The forest floor mixes rounded manzanita, fern beds, ember blossoms, blue moonbells, and gold sunspears. Each species keeps its own red, blue, gold, violet, teal, or green pigment in the shared night-flora shader.
+Outside the civic Arbors, the Frontier has its own giant native forest: broadleaf, needleleaf, willow, copper-fan, moon-cascade, and star-blossom silhouettes rise 96–150 m, while genetically modified redwoods reach 152.4 m (500 ft). Their narrow, tiered crowns carry dark-crimson bioluminescent leaves. Smaller realistic pines, 6–18 m tall, add a scale transition through the parklands and outer city fringe. Higher resolution leaf meshes soften the giant crowns; overlapping fan whorls, cascading branch sprays, and open petal tiers give the fantasy species distinct silhouettes. The forest floor mixes rounded manzanita, fern beds, ember blossoms, blue moonbells, and gold sunspears. Each species keeps its own red, blue, gold, violet, teal, or green pigment in the shared night-flora shader.
 
 Branching uses space colonization: the crown volume is seeded with attraction points and branches grow toward them, which gives natural gaps and light wells. Grafting lets the player add a growth target so the tree extends a branch toward a tower or a planned bridge anchor over in-game days.
 
@@ -94,6 +94,8 @@ The canopy should feel like a whole inhabited ecosystem at impossible scale: bro
 Roots draw groundwater, xylem lifts it, and specialized cells enrich deuterium into the sap. **Sap taps** are generators placed on a trunk or branch, and they draw from that tree's vascular network. A tree's vascular capacity is the supply for every tap on it, so an over-tapped tree browns out. That is the existing machine power network, extended from one machine to one tree. Over-tapping stresses the tree (dimmer lumen, slower growth), which gives a reason to spread load across Arbors and to build pipes between them.
 
 ## The canopy city
+
+The first sanctuary city is **Detroit, Michigan**, remembered as the Detroit Arbor Reach. Its skyline keeps historic civic character alongside the canopy future: weathered Gothic stone halls, narrow pointed windows and clustered spires face modern Arbor towers, foundries, rail yards and heavy machine works. The industrial belt is an intentional Hive pressure point, with its exposed utilities and production lines suited to brood sabotage and Scalari occupation. A broad local reach of the river wraps around a dry, wooded Belle Isle, with riverfront promenades and two heavy bridges toward Windsor. Smaller native pines, 6–18 m tall, gather around parks and the outer edge of the city before the canopy forest gives way to the larger fantasy redwoods and Arbors.
 
 ### Grafted towers
 
