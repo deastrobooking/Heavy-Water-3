@@ -2223,7 +2223,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
 }
 
 fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8, catalog: *const Catalog, out: []World.Prop, start: usize) usize {
-    if (profile.body_style == .captain_test) if (catalog.mesh(catalog.content.captain_test)) |entry| {
+    if (profile.body_style == .captain_test or profile.body_style == .imported_glb) if (catalog.mesh(catalog.content.captain_test)) |entry| {
         if (entry.ready and start < out.len) {
             const model_height = @max(entry.model.bounds_max[1] - entry.model.bounds_min[1], 0.01);
             const scale = 1.8 * profile.height / model_height;

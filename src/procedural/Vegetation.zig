@@ -48,12 +48,44 @@ fn blade(a: std.mem.Allocator, out: *GenMesh, root: [3]f32, tip: [3]f32, width: 
     const t = try vertex(a, out, tip, .{ @sin(angle), 0.2, -@cos(angle) });
     try out.addTri(a, l, t, r);
 }
+
+/// Round swept wood keeps scaled giant pine branches from reading as oversized grass blades.
+fn twig(a: std.mem.Allocator, out: *GenMesh, start: [3]f32, end: [3]f32, root_radius: f32, tip_radius: f32) !void {
+    const sides = 6;
+    const axis_raw = [3]f32{ end[0] - start[0], end[1] - start[1], end[2] - start[2] };
+    const length = @sqrt(axis_raw[0] * axis_raw[0] + axis_raw[1] * axis_raw[1] + axis_raw[2] * axis_raw[2]);
+    if (length < 1e-5) return;
+    const axis = [3]f32{ axis_raw[0] / length, axis_raw[1] / length, axis_raw[2] / length };
+    const reference: [3]f32 = if (@abs(axis[1]) < 0.9) .{ 0, 1, 0 } else .{ 1, 0, 0 };
+    const crossed = cross3(axis, reference);
+    const crossed_length = @sqrt(crossed[0] * crossed[0] + crossed[1] * crossed[1] + crossed[2] * crossed[2]);
+    const u = [3]f32{ crossed[0] / crossed_length, crossed[1] / crossed_length, crossed[2] / crossed_length };
+    const v = cross3(axis, u);
+    const base: u32 = @intCast(out.vertices.items.len);
+    for (0..2) |ring| {
+        const center = if (ring == 0) start else end;
+        const radius = if (ring == 0) root_radius else tip_radius;
+        for (0..sides) |side| {
+            const angle = 2 * std.math.pi * @as(f32, @floatFromInt(side)) / sides;
+            const normal = [3]f32{ u[0] * @cos(angle) + v[0] * @sin(angle), u[1] * @cos(angle) + v[1] * @sin(angle), u[2] * @cos(angle) + v[2] * @sin(angle) };
+            _ = try vertex(a, out, .{ center[0] + normal[0] * radius, center[1] + normal[1] * radius, center[2] + normal[2] * radius }, normal);
+        }
+    }
+    for (0..sides) |side| {
+        const next = (side + 1) % sides;
+        try out.addQuad(a, base + @as(u32, @intCast(side)), base + @as(u32, @intCast(next)), base + sides + @as(u32, @intCast(next)), base + sides + @as(u32, @intCast(side)));
+    }
+}
+
+fn cross3(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+}
 pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     if (variant >= variant_count or isTree(variant)) return error.InvalidPlant;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant == 14) 900 else if (variant >= 8) 600 else 48);
-    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant == 14) 2100 else if (variant >= 8) 2400 else 72);
+    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant == 14) 9000 else if (variant >= 8) 600 else 48);
+    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant == 14) 36000 else if (variant >= 8) 2400 else 72);
     if (variant == 0) {
         for (0..9) |i| {
             const t = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
@@ -104,15 +136,15 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
                 const root: [3]f32 = .{ @cos(angle) * 0.035, y, @sin(angle) * 0.035 };
                 const elbow: [3]f32 = .{ @cos(angle) * reach * 0.68, y + 0.025, @sin(angle) * reach * 0.68 };
                 const tip: [3]f32 = .{ @cos(angle) * reach, y - 0.105, @sin(angle) * reach };
-                const width = 0.11 * (1 - tf * 0.045);
-                try blade(a, &out, root, elbow, width, angle);
-                try blade(a, &out, elbow, tip, width * 0.64, angle);
-                for (0..3) |spray| {
-                    const f = @as(f32, @floatFromInt(spray + 1)) * 0.23;
+                try twig(a, &out, root, elbow, 0.020 * (1 - tf * 0.045), 0.012);
+                try twig(a, &out, elbow, tip, 0.012, 0.003);
+                for (0..2) |spray| {
+                    const f = 0.42 + @as(f32, @floatFromInt(spray)) * 0.28;
                     const side = if (spray % 2 == 0) @as(f32, 1) else -1;
                     const start = [3]f32{ elbow[0] * (1 - f), elbow[1] - f * 0.12, elbow[2] * (1 - f) };
-                    const end = [3]f32{ start[0] + @cos(angle + side * 0.85) * 0.16, start[1] + 0.12, start[2] + @sin(angle + side * 0.85) * 0.16 };
-                    try blade(a, &out, start, end, 0.055, angle + side * 0.6);
+                    const spray_tip = [3]f32{ start[0] + @cos(angle + side * 0.85) * 0.10, start[1] + 0.055, start[2] + @sin(angle + side * 0.85) * 0.10 };
+                    try twig(a, &out, start, spray_tip, 0.006, 0.002);
+                    try ellipsoid(a, &out, .{ spray_tip[0] * 1.04, spray_tip[1] + 0.02, spray_tip[2] * 1.04 }, .{ 0.022, 0.03, 0.022 }, 5, 8);
                 }
             }
         }
@@ -264,16 +296,16 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
                     const root: [3]f32 = .{ @cos(angle) * 0.025, y, @sin(angle) * 0.025 };
                     const elbow: [3]f32 = .{ @cos(angle) * reach * 0.55 * jitter, y + 0.025, @sin(angle) * reach * 0.55 * jitter };
                     const tip: [3]f32 = .{ @cos(angle) * reach * jitter, y - 0.09, @sin(angle) * reach * jitter };
-                    try blade(a, &out, root, elbow, 0.045 * (1 - tf * 0.035), angle);
-                    try blade(a, &out, elbow, tip, 0.025, angle);
-                    for (0..3) |spray| {
-                        const t = 0.32 + @as(f32, @floatFromInt(spray)) * 0.22;
+                    try twig(a, &out, root, elbow, 0.027 * (1 - tf * 0.035), 0.017);
+                    try twig(a, &out, elbow, tip, 0.017, 0.004);
+                    for (0..2) |spray| {
+                        const t = 0.40 + @as(f32, @floatFromInt(spray)) * 0.28;
                         const side: f32 = if ((spray + tier) % 2 == 0) 1 else -1;
                         const at: [3]f32 = .{ elbow[0] + (tip[0] - elbow[0]) * t, elbow[1] + (tip[1] - elbow[1]) * t, elbow[2] + (tip[2] - elbow[2]) * t };
                         const twig_angle = angle + side * 0.78;
-                        const twig: [3]f32 = .{ at[0] + @cos(twig_angle) * 0.15, at[1] + 0.09, at[2] + @sin(twig_angle) * 0.15 };
-                        try blade(a, &out, at, twig, 0.018, twig_angle);
-                        try ellipsoid(a, &out, .{ twig[0] * 1.08, twig[1] + 0.035, twig[2] * 1.08 }, .{ 0.055, 0.07, 0.055 }, 6, 9);
+                        const spray_tip: [3]f32 = .{ at[0] + @cos(twig_angle) * 0.10, at[1] + 0.055, at[2] + @sin(twig_angle) * 0.10 };
+                        try twig(a, &out, at, spray_tip, 0.008, 0.002);
+                        try ellipsoid(a, &out, .{ spray_tip[0] * 1.04, spray_tip[1] + 0.025, spray_tip[2] * 1.04 }, .{ 0.027, 0.038, 0.027 }, 6, 9);
                     }
                 }
             }

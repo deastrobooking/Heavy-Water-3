@@ -83,7 +83,7 @@ pub const Presentation = enum { masculine, feminine };
 pub const Class = enum { ranger, synthetic };
 /// `captain_test` selects the bundled, modifier-baked GLB in the character preview and game.
 /// It is a static pose until runtime skeletal animation is implemented.
-pub const BodyStyle = enum { procedural, captain_test };
+pub const BodyStyle = enum { procedural, captain_test, imported_glb };
 /// Undersuit, field jacket, or a hard-surface armor suit over the undersuit: `exo_rig` (light
 /// articulated limb plates), `hardsuit` (full segmented harness), `vanguard` (heavy hardsuit).
 pub const Clothing = enum { undersuit, field_jacket, exo_rig, hardsuit, vanguard };
@@ -93,7 +93,7 @@ pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, 
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed, pilot, recon };
-pub const Field = enum { name, class, body_style, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, cel_style };
+pub const Field = enum { name, class, body_style, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, armor_metal_r, armor_metal_g, armor_metal_b, armor_secondary_r, armor_secondary_g, armor_secondary_b, armor_trim_r, armor_trim_g, armor_trim_b, cel_style };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -126,6 +126,11 @@ armor: Armor = .scout,
 helmet: Helmet = .visor,
 gemstone: Gemstone = .lumen,
 gem_cut: GemCut = .brilliant,
+/// Optional full RGB overrides for the native procedural armor generator. Null keeps the
+/// selected armor set's authored color; once edited, each channel is saved with the profile.
+armor_metal_color: ?[3]f32 = null,
+armor_secondary_color: ?[3]f32 = null,
+armor_trim_color: ?[3]f32 = null,
 /// Mod content chosen in the creator, by namespaced id. Each slot overrides the matching built-in
 /// choice above while its mod is installed; the built-in is the fallback when it is not.
 mod: CharacterContent.Selection = .{},
@@ -188,9 +193,24 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .accent => self.accent = cycle(self.accent, delta, accent_colors.len),
         .gemstone => self.gemstone = @enumFromInt(cycle(@intFromEnum(self.gemstone), delta, enum_compat.fields(Gemstone).len)),
         .gem_cut => self.gem_cut = @enumFromInt(cycle(@intFromEnum(self.gem_cut), delta, enum_compat.fields(GemCut).len)),
+        .armor_metal_r, .armor_metal_g, .armor_metal_b => adjustArmorColor(&self.armor_metal_color, self.armor, field, delta, 0),
+        .armor_secondary_r, .armor_secondary_g, .armor_secondary_b => adjustArmorColor(&self.armor_secondary_color, self.armor, field, delta, 3),
+        .armor_trim_r, .armor_trim_g, .armor_trim_b => adjustArmorColor(&self.armor_trim_color, self.armor, field, delta, 6),
         // Cel styles come only from mods (the Creator cycles them); there is no built-in to step.
         .cel_style => {},
     }
+}
+
+fn adjustArmorColor(value: *? [3]f32, armor: Armor, field: Field, delta: i32, first: usize) void {
+    const ArmorDef = @import("../character/armor.zig");
+    const def = ArmorDef.find(&ArmorDef.builtin_sets, @tagName(armor)) orelse &ArmorDef.builtin_sets[1];
+    var color = value.* orelse blk: {
+        const source = switch (first) { 0 => def.metal, 3 => def.secondary, else => def.trim };
+        break :blk [3]f32{ source.r, source.g, source.b };
+    };
+    const channel = @intFromEnum(field) - @intFromEnum(Field.armor_metal_r) - first;
+    color[channel] = std.math.clamp(color[channel] + @as(f32, @floatFromInt(delta)) * 0.05, 0, 1);
+    value.* = color;
 }
 
 fn stepLevel(level: u8, delta: i32) u8 {
@@ -229,12 +249,15 @@ pub const Doc = struct {
     helmet: Helmet = .visor,
     gemstone: Gemstone = .lumen,
     gem_cut: GemCut = .brilliant,
+    armor_metal_color: ?[3]f32 = null,
+    armor_secondary_color: ?[3]f32 = null,
+    armor_trim_color: ?[3]f32 = null,
     /// Namespaced ids of chosen mod content; absent in saves from before character mods.
     mod: CharacterContent.Selection.Doc = .{},
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .body_style = self.body_style, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .mod = self.mod.toDoc() };
+    return .{ .name = self.name(), .class = self.class, .body_style = self.body_style, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .armor_metal_color = self.armor_metal_color, .armor_secondary_color = self.armor_secondary_color, .armor_trim_color = self.armor_trim_color, .mod = self.mod.toDoc() };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -267,6 +290,10 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.helmet = doc.helmet;
     result.gemstone = doc.gemstone;
     result.gem_cut = doc.gem_cut;
+    for ([_]? [3]f32{ doc.armor_metal_color, doc.armor_secondary_color, doc.armor_trim_color }) |color| if (color) |rgb| for (rgb) |channel| if (!std.math.isFinite(channel) or channel < 0 or channel > 1) return error.InvalidProfile;
+    result.armor_metal_color = doc.armor_metal_color;
+    result.armor_secondary_color = doc.armor_secondary_color;
+    result.armor_trim_color = doc.armor_trim_color;
     // Ill-formed ids are corrupt; ids of mods that are not installed are kept and fall back later.
     result.mod = CharacterContent.Selection.fromDoc(doc.mod) catch return error.InvalidProfile;
     return result;

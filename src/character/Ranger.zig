@@ -97,7 +97,14 @@ pub fn modCelStyle(profile: Profile, content: ?*const CharacterContent.Registry)
 /// (anything unresolved falls back to the built-in choice). The result borrows nothing from it.
 pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const CharacterContent.Registry) !Ranger {
     var armor_storage: armor_kit.ArmorSetDef = undefined;
-    const armor_def = resolveArmor(profile, content, &armor_storage);
+    var armor_def = resolveArmor(profile, content, &armor_storage);
+    if (profile.armor_metal_color != null or profile.armor_secondary_color != null or profile.armor_trim_color != null) {
+        armor_storage = armor_def.*;
+        if (profile.armor_metal_color) |c| armor_storage.metal = .{ .r = c[0], .g = c[1], .b = c[2] };
+        if (profile.armor_secondary_color) |c| armor_storage.secondary = .{ .r = c[0], .g = c[1], .b = c[2] };
+        if (profile.armor_trim_color) |c| armor_storage.trim = .{ .r = c[0], .g = c[1], .b = c[2] };
+        armor_def = &armor_storage;
+    }
     var garments: [16]spec.GarmentSpec = undefined;
     const outfit_len = outfitShaped(profile, &garments, armor_def.shape);
     const feminine = profile.presentation == .feminine;
@@ -835,6 +842,9 @@ fn armorContext(p: Profile, lm: @import("body.zig").Landmarks) armor_kit.Context
             .star => .star,
             .teardrop => .teardrop,
         },
+        .metal_override = if (p.armor_metal_color) |c| .{ .r = c[0], .g = c[1], .b = c[2] } else null,
+        .secondary_override = if (p.armor_secondary_color) |c| .{ .r = c[0], .g = c[1], .b = c[2] } else null,
+        .trim_override = if (p.armor_trim_color) |c| .{ .r = c[0], .g = c[1], .b = c[2] } else null,
     };
 }
 

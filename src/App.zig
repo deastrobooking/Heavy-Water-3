@@ -154,8 +154,35 @@ queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
 
+/// Runtime content and saves are repository-root relative. If Finder or a shell starts the
+/// executable from another directory, recover that root by walking up from the executable.
+fn establishGameWorkingDirectory(io: std.Io) !void {
+    const marker = "tools/captain/Captain.modifiers.json";
+    const cwd = std.Io.Dir.cwd();
+    if (cwd.access(io, marker, .{})) |_| {
+        return;
+    } else |_| {}
+
+    var path_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var path_len = try std.process.executableDirPath(io, &path_buffer);
+    while (true) {
+        const candidate = path_buffer[0..path_len];
+        if (std.Io.Dir.openDirAbsolute(io, candidate, .{})) |dir| {
+            const has_game_files = if (dir.access(io, marker, .{})) |_| true else |_| false;
+            dir.close(io);
+            if (has_game_files) return std.process.setCurrentPath(io, candidate);
+        } else |_| {}
+
+        const parent = std.fs.path.dirname(candidate) orelse break;
+        if (parent.len == candidate.len) break;
+        path_len = parent.len;
+    }
+    return error.GameFilesNotFound;
+}
+
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
+    try establishGameWorkingDirectory(io);
     core.on_exit = app_mod.id.deinit;
     self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
@@ -1484,8 +1511,10 @@ fn showcase(self: *App) void {
         const ground = Terrain.surface(self.sandbox.seed, stage[0], stage[2]).height;
         self.sandbox.player.feet = .{ stage[0], ground, stage[2] };
         self.sandbox.player.velocity = .{ 0, 0, 0 };
-        target = .{ stage[0], ground + 20, stage[2] };
-        eye = .{ stage[0], ground + 26, stage[2] + 260 };
+        // Frame the trunks and crowns together; the old ground-level view looked past the
+        // staged trees and only showed the empty clearing beneath them.
+        target = .{ stage[0] + 28, ground + 75, stage[2] };
+        eye = .{ stage[0] + 28, ground + 98, stage[2] + 430 };
     } else if (v == 63) {
         const Terrain = @import("procedural/Terrain.zig");
         const stage = floraReviewOrigin();
@@ -1507,6 +1536,10 @@ fn showcase(self: *App) void {
         const inside = span.point(0.72);
         eye = .{ entrance[0], entrance[1] + 4.1, entrance[2] };
         target = .{ inside[0], inside[1] + 4.1, inside[2] };
+    } else if (v == 70) {
+        const origin = District.testOrigin(self.sandbox.seed);
+        target = .{ origin[0], origin[1] + 185, origin[2] };
+        eye = .{ origin[0] + 290, origin[1] + 250, origin[2] + 310 };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -2933,7 +2966,7 @@ fn saveMeshLibrary(self: *App) void {
         return;
     };
     defer self.allocator.free(json);
-    const path = if (self.sandbox.profile.body_style == .captain_test and self.imported_rig_status_len != 0) "saves/imported-character.modifiers.json" else "saves/captain.modifiers.json";
+    const path = if (self.sandbox.profile.body_style == .imported_glb and self.imported_rig_status_len != 0) "saves/imported-character.modifiers.json" else "saves/captain.modifiers.json";
     Save.writeFile(self.io, path, json) catch |err| {
         self.report("LIBRARY SAVE FAILED {s}", .{@errorName(err)});
         return;
@@ -2968,8 +3001,8 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     model = undefined;
     self.mesh_library = generated;
     self.mesh_library_preview_dirty = true;
-    self.sandbox.profile.body_style = .captain_test;
-    self.sandbox.creator.draft.body_style = .captain_test;
+    self.sandbox.profile.body_style = .imported_glb;
+    self.sandbox.creator.draft.body_style = .imported_glb;
     self.sandbox.creator.imported_selected = 0;
     self.sandbox.creator.imported_status = .ready;
     const app_status = std.fmt.bufPrint(&self.imported_rig_status, "RUN RETARGET {d}/7 JOINTS  |  STATIC IN GAME", .{mapped_count}) catch unreachable;

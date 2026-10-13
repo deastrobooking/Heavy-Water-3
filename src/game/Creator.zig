@@ -337,6 +337,7 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
         .body_style => switch (p.body_style) {
             .procedural => "procedural ranger",
             .captain_test => "CAPTAIN GLB (STATIC POSE)",
+            .imported_glb => if (self.imported_rig_status_len > 0) "IMPORTED GLB (PREVIEW READY)" else "IMPORTED GLB (IMPORT FIRST)",
         },
         .species => if (p.species == .human) "human" else std.fmt.bufPrint(buffer, "{s} form", .{@tagName(p.species)}) catch buffer,
         .coat => std.fmt.bufPrint(buffer, "COAT {d} OF {d}", .{ p.coat + 1, Profile.coat_colors.len }) catch buffer,
@@ -360,7 +361,28 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
         .accent => std.fmt.bufPrint(buffer, "LUMEN {d} OF {d}", .{ p.accent + 1, Profile.accent_colors.len }) catch buffer,
         .gemstone => @tagName(p.gemstone),
         .gem_cut => @tagName(p.gem_cut),
+        .armor_metal_r => colorChannelLabel(buffer, "METAL RED", p.armor_metal_color, p.armor, 0),
+        .armor_metal_g => colorChannelLabel(buffer, "METAL GREEN", p.armor_metal_color, p.armor, 1),
+        .armor_metal_b => colorChannelLabel(buffer, "METAL BLUE", p.armor_metal_color, p.armor, 2),
+        .armor_secondary_r => colorChannelLabel(buffer, "SECONDARY RED", p.armor_secondary_color, p.armor, 0),
+        .armor_secondary_g => colorChannelLabel(buffer, "SECONDARY GREEN", p.armor_secondary_color, p.armor, 1),
+        .armor_secondary_b => colorChannelLabel(buffer, "SECONDARY BLUE", p.armor_secondary_color, p.armor, 2),
+        .armor_trim_r => colorChannelLabel(buffer, "TRIM RED", p.armor_trim_color, p.armor, 0),
+        .armor_trim_g => colorChannelLabel(buffer, "TRIM GREEN", p.armor_trim_color, p.armor, 1),
+        .armor_trim_b => colorChannelLabel(buffer, "TRIM BLUE", p.armor_trim_color, p.armor, 2),
     };
+}
+
+fn colorChannelLabel(buffer: []u8, label: []const u8, custom: ?[3]f32, armor: Profile.Armor, channel: usize) []const u8 {
+    const ArmorDef = @import("../character/armor.zig");
+    const def = ArmorDef.find(&ArmorDef.builtin_sets, @tagName(armor)) orelse &ArmorDef.builtin_sets[1];
+    const defaults: [3]f32 = switch (label[0]) {
+        'M' => .{ def.metal.r, def.metal.g, def.metal.b },
+        'S' => .{ def.secondary.r, def.secondary.g, def.secondary.b },
+        else => .{ def.trim.r, def.trim.g, def.trim.b },
+    };
+    const base = custom orelse defaults;
+    return std.fmt.bufPrint(buffer, "{s} {d:.2}", .{ label, base[channel] }) catch buffer;
 }
 
 /// Panel text: a title, one line per field (the selected one marked), and the controls.

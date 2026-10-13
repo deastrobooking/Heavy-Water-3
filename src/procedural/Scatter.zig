@@ -56,7 +56,9 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const frost = if (kind == .vegetation) Biome.cover(seed, x, z, Noise.height(seed, x, z), @sqrt(nx * nx + nz * nz)).snow else 0;
         const choice = Seed.unit(Seed.mix(h +% 3));
         if (frost > 0.25 and choice <= 0.82 and Seed.unit(Seed.mix(h +% 5)) < frost) continue;
-        const variant: u8 = if (kind == .relic) 0 else if (choice > 0.985) Vegetation.tree_variants[@intCast(Seed.mix(h +% 4) % Vegetation.tree_count)] else if (choice > 0.96 and biome.arid < 0.58) 14 else if (choice > 0.84) 2 else if (choice > 0.75) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.67) 7 else if (choice > 0.42) 1 else 0;
+        // Long grass and fern fronds are sparse floor accents; rounded shrubs and flowering
+        // natives carry most of the understory so their silhouettes do not read like tree leaves.
+        const variant: u8 = if (kind == .relic) 0 else if (choice < 0.07) 0 else if (choice < 0.15) 1 else if (choice > 0.985) Vegetation.tree_variants[@intCast(Seed.mix(h +% 4) % Vegetation.tree_count)] else if (choice > 0.96 and biome.arid < 0.58) 14 else if (choice > 0.88) 2 else if (choice > 0.66) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.25) 7 else 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3));
         if (Vegetation.isTree(variant) and (nearSpawn(x, z, spawn_clearing) or District.nearRoad(seed, x, z, road_clearance))) continue;
         const color = biome.color();
         const shade = 0.84 + 0.28 * Seed.unit(Seed.mix(h +% 5));
@@ -65,7 +67,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
             .local_id = @intCast(i),
             .kind = kind,
             .variant = variant,
-            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 14) 6 + Seed.unit(Seed.mix(h +% 1)) * 12 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .transform = .{ .position = .{ x, Noise.height(seed, x, z) - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 14) 6 + Seed.unit(Seed.mix(h +% 1)) * 12 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else if (variant == 0) 0.55 + Seed.unit(Seed.mix(h +% 1)) * 0.55 else if (variant == 1) 0.7 + Seed.unit(Seed.mix(h +% 1)) * 0.65 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
             .tint = if (kind == .relic) .{ shade, shade, shade, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
         };
         count += 1;

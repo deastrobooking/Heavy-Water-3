@@ -222,13 +222,17 @@ pub const Context = struct {
     suited: bool = false,
     gem: Rgb = Rgb.hex(0x52f4fa),
     gem_cut: GemCut = .brilliant,
+    /// Optional linear RGB overrides supplied by the in-game native armor editor.
+    metal_override: ?Rgb = null,
+    secondary_override: ?Rgb = null,
+    trim_override: ?Rgb = null,
 };
 
 fn slotColor(def: *const ArmorSetDef, ctx: Context, slot: ColorSlot) Rgb {
     return switch (slot) {
-        .metal => def.metal,
-        .secondary => def.secondary,
-        .trim => def.trim,
+        .metal => ctx.metal_override orelse def.metal,
+        .secondary => ctx.secondary_override orelse def.secondary,
+        .trim => ctx.trim_override orelse def.trim,
         .dark => def.dark,
         .accent => .{ .r = ctx.accent.r * 1.2, .g = ctx.accent.g * 1.2, .b = ctx.accent.b * 1.2 },
         .glow => .{ .r = ctx.accent.r * 1.55, .g = ctx.accent.g * 1.55, .b = ctx.accent.b * 1.55 },

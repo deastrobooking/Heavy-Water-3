@@ -202,27 +202,26 @@ const Writer = struct {
         }
     }
     fn foliage(self: *Writer, center: V, half: V, color: V, phase: f32) void {
-        // Eight broad, uneven facets read as a connected crown cluster at distance. The slight
-        // radial changes break the old four-sided crystal silhouette without leaf-level detail.
-        const sides = 8;
-        const denominator: f32 = @floatFromInt(sides);
-        for (0..2) |side| for (0..sides) |j| {
-            const a0 = @as(f32, @floatFromInt(j)) * 2 * std.math.pi / denominator;
-            const a1 = @as(f32, @floatFromInt(j + 1)) * 2 * std.math.pi / denominator;
-            const r0 = 0.88 + 0.12 * @sin(a0 * 3 + phase);
-            const r1 = 0.88 + 0.12 * @sin(a1 * 3 + phase);
-            const lower: V = .{ 0, if (side == 0) half[1] else -half[1], 0 };
-            const a = R.add(center, lower);
-            const b: V = .{ @cos(a1) * half[0] * r1, 0, @sin(a1) * half[2] * r1 };
-            const c: V = .{ @cos(a0) * half[0] * r0, 0, @sin(a0) * half[2] * r0 };
-            const first = R.add(center, if (side == 0) b else c);
-            const second = R.add(center, if (side == 0) c else b);
-            const normal = R.normalize(R.cross(R.sub(first, a), R.sub(second, a)));
-            const shade: f32 = if (side == 0) 1.0 else 0.72;
-            const facet = R.scale(color, shade * (0.92 + 0.08 * @sin(a0 * 2 + phase)));
-            const base = self.v;
-            for ([_]V{ a, first, second }) |point| self.vertex(point, normal, facet, 10);
-            self.tri(base, base + 1, base + 2);
+        // Rounded, lightly lobed crown clusters keep a soft leaf mass while the branch skeleton
+        // remains visible through gaps. Smooth normals remove the old faceted-crystal look.
+        const rows = 6;
+        const sides = 12;
+        const base = self.v;
+        for (0..rows + 1) |row| for (0..sides) |column| {
+            const latitude = std.math.pi * @as(f32, @floatFromInt(row)) / rows;
+            const longitude = 2 * std.math.pi * @as(f32, @floatFromInt(column)) / sides;
+            const lobe = 0.96 + 0.04 * @sin(longitude * 3 + phase) * @sin(latitude);
+            const unit: V = .{ @sin(latitude) * @cos(longitude), @cos(latitude), @sin(latitude) * @sin(longitude) };
+            const position: V = .{ center[0] + unit[0] * half[0] * lobe, center[1] + unit[1] * half[1] * lobe, center[2] + unit[2] * half[2] * lobe };
+            const normal = R.normalize(.{ unit[0] / half[0], unit[1] / half[1], unit[2] / half[2] });
+            const shade = 0.90 + 0.10 * @sin(longitude * 2 + phase);
+            self.vertex(position, normal, R.scale(color, shade), 10);
+        };
+        for (0..rows) |row| for (0..sides) |column| {
+            const a = base + row * sides + column;
+            const b = base + row * sides + (column + 1) % sides;
+            self.tri(a, a + sides, b);
+            self.tri(b, a + sides, b + sides);
         };
     }
     fn box(self: *Writer, unit: Mesh, center: V, half: V, color: V) void {
@@ -250,9 +249,11 @@ pub fn mesh(allocator: std.mem.Allocator, tree: *const Tree, detail: Detail) !Me
     const platforms = if (detail == .proxy) 0 else tree.platform_count;
     const unit = try Mesh.block(allocator);
     defer unit.deinit(allocator);
-    const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + leaves * 48);
+    const leaf_vertices = 7 * 12;
+    const leaf_indices = 6 * 12 * 6;
+    const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + leaves * leaf_vertices);
     errdefer allocator.free(vertices);
-    const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + leaves * 48);
+    const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + leaves * leaf_indices);
     var writer: Writer = .{ .vertices = vertices, .indices = indices };
     for (tree.nodes[1..tree.count], 1..) |node, i| {
         if (detail != .proxy or node.depth < 3) writer.tube(tree.nodes[node.parent].position, node.position, tree.edgeStartRadius(i), node.radius, sides, tree.genome);

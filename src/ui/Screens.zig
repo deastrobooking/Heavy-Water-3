@@ -753,6 +753,7 @@ const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "BODY", .first = .height },
     .{ .title = "HAIR", .first = .hair_style },
     .{ .title = "GEAR", .first = .outfit },
+    .{ .title = "ARMOR COLOR STUDIO  /  RGB", .first = .armor_metal_r },
     .{ .title = "BOOTS", .first = .boot_style },
     // Cel styles exist only as mod content, so this row cycles "default" plus installed mods.
     .{ .title = "RENDER STYLE", .first = .cel_style },
@@ -775,8 +776,23 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
         },
         .coat => Profile.coat_colors[p.coat],
         .marking => Profile.coat_colors[p.marking],
+        .armor_metal_r, .armor_metal_g, .armor_metal_b => armorSwatch(p, 0),
+        .armor_secondary_r, .armor_secondary_g, .armor_secondary_b => armorSwatch(p, 1),
+        .armor_trim_r, .armor_trim_g, .armor_trim_b => armorSwatch(p, 2),
         else => null,
     };
+}
+
+fn armorSwatch(p: Profile, slot: u8) Color {
+    const Armor = @import("../character/armor.zig");
+    const def = Armor.find(&Armor.builtin_sets, @tagName(p.armor)) orelse &Armor.builtin_sets[1];
+    const custom = switch (slot) { 0 => p.armor_metal_color, 1 => p.armor_secondary_color, else => p.armor_trim_color };
+    const rgb = custom orelse switch (slot) {
+        0 => .{ def.metal.r, def.metal.g, def.metal.b },
+        1 => .{ def.secondary.r, def.secondary.g, def.secondary.b },
+        else => .{ def.trim.r, def.trim.g, def.trim.b },
+    };
+    return .{ rgb[0], rgb[1], rgb[2], 1 };
 }
 
 /// Height of a section title row in the creator; compact so the whole list fits a 720p window.
@@ -909,7 +925,7 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
     const r: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + (v.h - h) / 2, .w = w, .h = h };
     panel(c, r, "IMPORTED CHARACTER LIBRARY");
     const rig_label = if (cr.imported_rig_status_len > 0) cr.imported_rig_status[0..cr.imported_rig_status_len] else "NO EXTERNAL RIG  |  BUNDLED CAPTAIN COMPONENTS";
-    c.text(r.x + 18, r.y + 36, rig_label, 0.82, dim);
+    c.print(r.x + 18, r.y + 36, 0.76, dim, "LIVE 3D PREVIEW  |  {d} COMPONENTS  |  {s}", .{doc.parts.len, rig_label});
     button(c, .{ .x = r.x + r.w - 150, .y = r.y + 26, .w = 132, .h = 28 }, "IMPORT GLB", hitId(.imported_import_glb, 0), false);
 
     const filter_names = [_][]const u8{ "ALL", "ARMOR", "SKIN", "EYES", "ENERGY", "NEUTRAL" };

@@ -64,7 +64,7 @@ python3 tools/zig.py build -Doptimize=ReleaseFast
 ./zig-out/bin/heavy-water
 ```
 
-Run it from the repository root: the game reads and writes `saves/` (quicksave `saves/quicksave.json`, settings `saves/settings.json`, prefabs `saves/prefabs/`) and loads `mods/` relative to the working directory. An interactive build opens on the title screen.
+The executable searches upward from its current directory, then from its own location, for the game root. While it remains inside the checkout, you can launch it from any working directory; reads and writes for `saves/` (quicksave `saves/quicksave.json`, settings `saves/settings.json`, prefabs `saves/prefabs/`) and `mods/` are rooted at the checkout. An interactive build opens on the title screen.
 
 ### Game build options (`-D…`)
 
@@ -192,6 +192,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 64, 65 | Dusk close-ups of the two gem-set Arbor Rootway galleries |
 | 66 | Early procedural orbital habitat cylinder beside Rand Corporation's Mother construction ark (art review only) |
 | 67 | Wilds architecture lineup: cabin, barn, and cave sanctuary |
+| 70 | Detroit test Arbor, framed from trunk through crown |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |
@@ -229,7 +230,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 57 | The pause menu at 150% interface size, scrolled to its last item |
 | 58, 59 | The four pets on the meadow: in their Hive collars; freed, in the ranger's colours |
 | 60 | The bright, stepped Rootdeep temples and their luminous crowns |
-| 62 | Giant redwoods, old-growth pines and native flora under night lighting |
+| 62 | Framed review of giant redwoods, old-growth pines and native flora under night lighting |
 | 63 | Locomotion pose reel: sprint (frames 0–89), roll (90–179), dash (180–269), long jump (270–359), backflip (360–449), Superman flight (450 onward) |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.

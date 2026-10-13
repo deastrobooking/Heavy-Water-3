@@ -68,7 +68,7 @@ python3 tools/benchmark.py --canopy
 python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 meshes during measurement
 ```
 
-`run` needs a graphical desktop and GPU; headless tests do not open a window. The installed executable is `zig-out/bin/heavy-water`; run it from the repository root. Every build option, test, smoke run, benchmark, showcase and capture is documented in [Building and Testing](docs/building-and-testing.md).
+`run` needs a graphical desktop and GPU; headless tests do not open a window. The installed executable is `zig-out/bin/heavy-water`. While it remains inside the game checkout, it locates the repository root at startup, so it can be launched from Terminal or Finder with any working directory. Every build option, test, smoke run, benchmark, showcase and capture is documented in [Building and Testing](docs/building-and-testing.md).
 
 ## Documentation
 

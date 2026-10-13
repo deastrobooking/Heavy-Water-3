@@ -2,6 +2,12 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Launch from outside the checkout — 2026-10-12
+
+- Startup now checks for the game marker in the current directory and then walks upward from the executable's resolved path. Once found, it sets the process working directory to the checkout so all existing relative asset, mod and save paths stay consistent.
+- **Checked:** default `python3 tools/zig.py build check` and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed; launched the installed executable with cwd `/Users/home` for 12 seconds. It loaded both mods, initialized CoreAudio and Metal, and completed deferred mesh loading without a panic. `git diff --check` passed.
+- **Not checked:** Finder launch, running after moving the binary outside the checkout, packaged-app resources, tests, Zig 0.17, Linux or Windows.
+
 ## Modular Scalari villain frames and city assault first slice — 2026-10-12
 
 - Added data-driven frame/head/shoulder/arm/leg/back/weapon modules and five black-to-silver colorways in `game/EnemyDesign.zig`. The in-game Character Designer now opens HIVE FORGE to change a Titan's modules and palette; selected changes affect every Scalari siege frame for the current session.
@@ -1167,3 +1173,23 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - Promoted variant 14 from a small pine prop to an old-growth pine with descending irregular bough whorls. It now uses the same 96–150 m scatter tier as the other giant trees, while its procedural mesh keeps open gaps between branch fans.
 - **Checked:** `python3 tools/zig.py build check` passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=62 -Dcapture-frame=120 -Daudio=false` completed on Apple M3 Pro / Metal without API validation errors. The final capture was inspected, but its camera showed bare terrain rather than the staged trees, so it does not verify the new tree appearance. `git diff --check` passed.
 - **Not checked:** the tree forms in regular gameplay or at multiple distances, headless tests, the 0.17 channel, Linux/Windows compilation or runtime, and performance. The canopy and pine silhouettes still need a clear in-game visual review.
+
+## Forest-floor and canopy branch refinement — 2026-10-12
+
+- Reduced the share and scale of grass and ferns so they read as low understory accents instead of crowding the camera; kept large tree scale and flower variety. Replaced the generated Arbor's flat triangular crown clusters with rounded, softly lobed foliage. Added a space-colonized branch skeleton through the Detroit test Arbor's crown so the foliage connects back to the trunk. The flora review camera now frames the staged lineup, and showcase 70 gives a trunk-to-crown view of the test Arbor.
+- Updated the world guide to call for connected structural limbs, branch-supported patios and warm-lit canopy neighborhoods, with open visibility at ground level.
+- **Checked:** default `python3 tools/zig.py build check` and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed; ReleaseFast reinstalled `zig-out/bin/heavy-water`. `MTL_DEBUG_LAYER=1` ReleaseSafe captures ran for showcase 62 (giant flora) and showcase 70 (Detroit test Arbor) on Apple M3 Pro / Metal; both completed without Metal API validation errors. The captures were inspected: the flora lineup is in frame, and the test Arbor's major limbs now visibly join the trunk and crown. `git diff --check` passed.
+- **Not checked:** headless tests, gameplay across seeds, hands-on upper-canopy traversal, Zig 0.17, Linux/Windows, and performance. Upper branch collision paths and the small canopy neighborhoods remain open; the current three-city course and the test Arbor's lower ramp/bridge remain the playable routes. The views are still stylized and do not yet show fine leaves or lit homes at canopy scale.
+
+## Pine foliage and forest-floor grass reduction — 2026-10-13
+
+- Reduced long grass and fern candidates from roughly two thirds of scattered plants to 15%; rounded shrubs and flowering natives now make up most of the forest floor. Replaced both giant and young pine's flat blade-shaped boughs and sprays with tapered round branch segments and compact needle clusters, which keep scaled foliage from resembling oversized grass.
+- **Checked:** default `python3 tools/zig.py build check`, ReleaseFast `python3 tools/zig.py build -Doptimize=ReleaseFast` (rebuilt the installed executable), and `git diff --check` passed.
+- **Not checked:** Metal capture/visual inspection, headless tests, gameplay across seeds, Zig 0.17, Linux/Windows, or performance.
+
+## Imported GLB type visibility, preview, and armor RGB — 2026-10-12
+
+- Added a distinct **IMPORTED GLB** character model choice separate from the bundled Captain. Import selects it immediately, and the in-world Creator avatar is the live preview while editing the imported component document; the panel now identifies preview state and component count. The importer and startup loader continue using the same source-hash-backed generation path and single replaceable saved slot.
+- Added nine RGB channel controls for native armor metal, secondary, and trim colors. Unedited channels use the selected set's authored defaults; edited values serialize in the existing profile document and are consumed by native armor mesh generation.
+- **Checked:** default `python3 tools/zig.py build check`, ReleaseFast `python3 tools/zig.py build -Doptimize=ReleaseFast` (rebuilt the installed executable), and `git diff --check` passed.
+- **Not checked:** interactive GLB picker/import, preview appearance, armor color appearance, restart persistence, headless tests, Metal capture/validation, Zig 0.17, Linux/Windows, or benchmarks.

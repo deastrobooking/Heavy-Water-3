@@ -9,6 +9,7 @@ const Physics = @import("../physics/Physics.zig");
 const R = Physics.Rotation;
 const Vec3 = Physics.Vec3;
 const Vegetation = @import("Vegetation.zig");
+const Arbor = @import("Arbor.zig");
 
 pub const height: f32 = 320;
 /// Trunk and tower extend this far below the origin so uneven terrain never shows a gap.
@@ -202,6 +203,19 @@ pub fn renderMesh(allocator: std.mem.Allocator) !Mesh {
         try vertices.append(allocator, v);
     }
     for (crown.indices) |i| try indices.append(allocator, crown_base + i);
+    // The continuous redwood crown sits on a second, grafted limb system so it reads as a
+    // living tree rather than a bare pole with a detached green cap. The space-colonized limbs
+    // reach into the crown and stay continuous with the bole through tapered branch junctions.
+    const bough_tree = try Arbor.grow(0x43414e4f5059, .{ .height = 380, .crown_radius = 190, .platform_tendency = 0.85, .apical_dominance = 0.3 });
+    const bough_mesh = try Arbor.mesh(allocator, &bough_tree, .collision);
+    defer bough_mesh.deinit(allocator);
+    const bough_base: u32 = @intCast(vertices.items.len);
+    for (bough_mesh.vertices) |source| {
+        var v = source;
+        v.position = .{ source.position[0] * 0.34, source.position[1] * 0.34 + 175, source.position[2] * 0.34 };
+        try vertices.append(allocator, v);
+    }
+    for (bough_mesh.indices) |i| try indices.append(allocator, bough_base + i);
     const v = try allocator.dupe(Mesh.Vertex, vertices.items);
     errdefer allocator.free(v);
     return .{ .vertices = v, .indices = try allocator.dupe(u32, indices.items) };
