@@ -15,8 +15,6 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | --- | --- |
 | `python3 tools/zig.py build` | Builds and installs the game to `zig-out/bin/heavy-water` (Debug unless `-Doptimize` is given). |
 | `python3 tools/zig.py build run` | Builds and runs the game from the build cache (not the installed copy). |
-| `python3 tools/zig.py build mesh-editor` | Launches the standalone Mach mesh editor for the bundled Captain GLB. |
-| `python3 tools/zig.py build mesh-editor-build` | Builds the standalone mesh editor without launching it. |
 | `python3 tools/zig.py build check` | Compiles the application without running it. |
 | `python3 tools/zig.py build test` | Runs every deterministic test, headless. Add `--summary all` to see the pass count. |
 | `python3 tools/zig.py build assets` | Compiles source assets (glTF models, blueprints, and the modifier-baked Captain preview) into `zig-out/assets/`. |
@@ -30,15 +28,20 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `zig-out/bin/asset-compiler modifier-edit <input.json> <output.json> palette <skin|eyes|armor|energy> <r> <g> <b>` | Changes one shared palette color while retaining explicit per-part color overrides. |
 | `zig-out/bin/asset-compiler preview-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.png> [bind|run]` | Applies palette and per-part edits and renders a review image. A stale source or changed mesh-island set is rejected. |
 | `zig-out/bin/asset-compiler compile-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.hwmesh> [bind|run]` | Validates the GLB and modifier sidecar, bakes a selected static pose plus edits into a runtime HWMS mesh. |
-
-The standalone editor starts with the Captain GLB and its source-linked modifier sidecar. Up/Down select components and Left/Right plus W/E orbit the camera; click or scroll in the left list selects parts; the wheel over the viewport zooms; `R` renames (type, then Enter), `+`/`-` scales a selected island, `C` cycles its color, `P` toggles bind/procedural-run preview, and `S` saves `tools/captain/Captain.modifiers.json`. It currently saves in place and has no undo/redo or Save As. The pose toggle is an offline CPU skin preview using the existing game run animation; gameplay still uses the procedural character rig.
-| `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dcharacter-showcase=46 -Dcapture-frame=120` | Capture the bundled Captain mesh in the Creator on Metal for visual review. |
-
-The modifier commands are offline command-line utilities today; there is no standalone graphical editor target. List part IDs, write edits to a separate JSON file, then preview before compiling. A Mach viewport, click selection, editable project/session history, undo/redo, texture editing, and live rig editing are not implemented yet. Keep the original GLB and modifier file; source hashes and component IDs are checked again when previewing or compiling.
 | `python3 tools/zig.py build mods` | Builds the example WebAssembly mod's scripts into `mods/`. |
 | `python3 tools/zig.py build validate-mods [-- <dir>]` | Loads every mod under `mods/` (or one directory) as the game does and prints `file: key: reason` for each problem; non-zero exit on any rejection ([character content](mods.md#character-content)). |
 | `python3 tools/zig.py build sounds` | Writes every synthesized sound to `zig-out/sounds/*.wav` for listening. |
 | `python3 tools/zig.py build heightmap -- <in.pgm> <out.hwmh> [width depth elevation base]` | Imports a PGM heightmap to the runtime terrain format. |
+
+In the Character Designer, choose **IMPORTED PARTS** to browse the bundled Captain or use **IMPORT GLB** to select a binary `.glb` character. The importer maps supported humanoid bone names to the game's run tracks and shows the retargeted preview pose. This pose is baked into a static mesh for gameplay; live imported skeletal animation is not implemented yet. Select a component to hide/restore it, assign or clear a palette paint, switch its surface role, and adjust the selected skin, eye, armor, or energy color with the RGB controls. **SAVE LIBRARY** saves the matching modifier sidecar. The bundled Captain override uses `saves/captain.modifiers.json`; a user import and its sidecar are stored as `saves/imported-character.glb` and `saves/imported-character.modifiers.json` and reload on later launches.
+
+To capture the imported-component window on Metal for visual review:
+
+```sh
+MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dcharacter-showcase=46 -Dcapture-frame=120
+```
+
+The modifier commands remain useful for batch import and offline GLB preview. The in-game editor saves a local library override rather than editing the checked-in import recipe. Only binary GLB files with embedded buffers are supported by the in-game picker; external-buffer `.gltf` scenes, undo/redo, texture editing, component text relabeling, and live rig editing remain open.
 
 For backend-specific development builds, pass `-Dmach_gpu_backend=metal`, `vulkan`, `opengl`, or `d3d12`. The default selects the platform backend. Each backend requires a supported target and its native platform libraries.
 

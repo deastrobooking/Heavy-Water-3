@@ -21,11 +21,14 @@ const PadBindings = @import("engine/PadBindings.zig");
 const PadPreset = @import("game/PadPreset.zig");
 extern "c" fn hw_choose_save_json(json: [*]const u8, length: usize, suggested_name: [*:0]const u8) c_int;
 extern "c" fn hw_choose_open_json(buffer: [*]u8, capacity: usize, length: *usize) c_int;
+extern "c" fn hw_choose_open_glb(buffer: [*]u8, capacity: usize, length: *usize) c_int;
 const HotReload = @import("asset/HotReload.zig");
 const Registry = @import("asset/Registry.zig");
 const Guid = @import("asset/Guid.zig");
 const Loader = @import("asset/Loader.zig");
 const Profile = @import("game/Profile.zig");
+const MeshModifiers = @import("asset/Modifiers.zig");
+const MeshModel = @import("asset/Model.zig");
 const Life = @import("city/Life.zig");
 const Market = @import("city/Market.zig");
 const Menu = @import("ui/Menu.zig");
@@ -143,6 +146,13 @@ hovered: ?u16 = null,
 /// Mouse buttons held while captured: the weapon tool's primary and alternate triggers.
 fire_held: bool = false,
 alt_held: bool = false,
+mesh_library_arena: std.heap.ArenaAllocator = undefined,
+mesh_library: MeshModifiers.Document = undefined,
+mesh_library_base: ?[]u8 = null,
+mesh_library_preview_dirty: bool = false,
+queued_character_model: ?MeshModel = null,
+imported_rig_status: [96]u8 = @splat(0),
+imported_rig_status_len: usize = 0,
 
 pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App), renderer_mod: mach.Mod(Renderer), io: std.Io, allocator: std.mem.Allocator) !void {
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
@@ -151,6 +161,21 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     TestWorld.configure(world, options.seed);
     try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
     self.catalog = &world.catalog;
+    self.mesh_library_arena = std.heap.ArenaAllocator.init(allocator);
+    const saved_library = std.Io.Dir.cwd().readFileAlloc(io, "saves/captain.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20)) catch null;
+    const source_library_bytes = try std.Io.Dir.cwd().readFileAlloc(io, "tools/captain/Captain.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20));
+    const source_library = try std.json.parseFromSliceLeaky(MeshModifiers.Document, self.mesh_library_arena.allocator(), source_library_bytes, .{});
+    self.mesh_library = source_library;
+    if (saved_library) |bytes| {
+        if (std.json.parseFromSliceLeaky(MeshModifiers.Document, self.mesh_library_arena.allocator(), bytes, .{})) |override| {
+            if (validMeshLibraryOverride(source_library, override)) {
+                self.mesh_library = override;
+                self.mesh_library_preview_dirty = true;
+            } else std.log.warn("Ignoring stale or incompatible Captain component override; the file was preserved", .{});
+        } else |err| std.log.warn("Ignoring invalid Captain component override ({s}); the file was preserved", .{@errorName(err)});
+    }
+    self.loadSavedCharacterImport();
+    self.sandbox.creator.imported_doc = &self.mesh_library;
     self.started = std.Io.Timestamp.now(io, .awake);
     self.loader = try Loader.create(allocator, io);
     for (world.catalog.pending[0..world.catalog.pending_count], 0..) |p, i| {
@@ -253,6 +278,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             else => null,
         };
         self.sandbox.creator.begin(self.sandbox.profile);
+        if (options.character_showcase == 46 and options.capture_frame > 0) self.sandbox.creator.openImported();
         self.sandbox.player.mode = .walk;
     }
     // A person playing starts at the title screen (not in unattended smoke, benchmark, or
@@ -273,6 +299,19 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         self.menu.open(.title);
     }
     if (self.audio) |a| a.setVolumes(self.menu.settings);
+}
+
+fn validMeshLibraryOverride(source: MeshModifiers.Document, override: MeshModifiers.Document) bool {
+    if (source.format != override.format or !std.mem.eql(u8, source.source_hash, override.source_hash) or source.parts.len != override.parts.len) return false;
+    for (source.parts) |part| {
+        var found = false;
+        for (override.parts) |candidate| if (candidate.id == part.id) {
+            found = true;
+            break;
+        };
+        if (!found) return false;
+    }
+    return true;
 }
 
 fn uiSound(self: *App, event: Audio.Director.Ui) void {
@@ -774,6 +813,36 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.adjust(if (Screens.hitArea(hit) == .creator_left) -1 else 1);
         },
         .creator_done => if (click) self.creatorInput(.enter),
+        .creator_imported => if (click and sb.creator.open) sb.creator.openImported(),
+        .imported_import_glb => if (click and sb.creator.imported_open) self.chooseAndImportCharacter(),
+        .imported_filter => if (click and sb.creator.imported_open) sb.creator.cycleImportedFilter(@as(i32, row) - @as(i32, sb.creator.imported_filter)),
+        .imported_part => if (click and sb.creator.imported_doc != null) {
+            sb.creator.selectImported(row);
+        },
+        .imported_surface_left, .imported_surface_right => if (click) {
+            sb.creator.cycleImportedSurface(if (Screens.hitArea(hit) == .imported_surface_left) -1 else 1);
+            self.mesh_library_preview_dirty = true;
+        },
+        .imported_palette_left, .imported_palette_right => if (click) {
+            sb.creator.cycleImportedPalette(if (Screens.hitArea(hit) == .imported_palette_left) -1 else 1);
+            self.mesh_library_preview_dirty = true;
+        },
+        .imported_color => if (click) {
+            sb.creator.adjustImportedColor(row / 2, if (row % 2 == 0) -0.05 else 0.05);
+            self.mesh_library_preview_dirty = true;
+        },
+        .imported_paint => if (click) {
+            sb.creator.paintImportedPart();
+            self.mesh_library_preview_dirty = true;
+        },
+        .imported_toggle => if (click) {
+            sb.creator.toggleImportedPart();
+            self.mesh_library_preview_dirty = true;
+        },
+        .imported_back => if (click) {
+            sb.creator.imported_open = false;
+        },
+        .imported_save => if (click) self.saveMeshLibrary(),
         .fab_tab => if (sb.shop) |*shop| if (click) {
             shop.tab = row;
             shop.row = 0;
@@ -826,6 +895,17 @@ fn creatorInput(self: *App, k: Creator.Key) void {
         .escape => self.uiSound(.back),
         else => {},
     }
+    if (self.sandbox.creator.imported_open) switch (k) {
+        .left, .right, .char => self.mesh_library_preview_dirty = true,
+        else => {},
+    };
+    if (self.sandbox.creator.imported_open) switch (k) {
+        .char => |c| if (std.ascii.toLower(c) == 's') {
+            self.saveMeshLibrary();
+            return;
+        },
+        else => {},
+    };
     switch (self.sandbox.creator.key(k)) {
         .editing => {},
         .confirmed => |profile| {
@@ -2567,6 +2647,9 @@ fn installDeferred(self: *App) void {
 
 pub fn publish(self: *App, renderer: *Renderer) void {
     self.installDeferred();
+    self.installImportedCharacter();
+    self.sandbox.creator.imported_doc = &self.mesh_library;
+    self.applyMeshLibraryPreview();
     self.pumpReload(renderer);
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
@@ -2637,7 +2720,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     }
     renderer.tick = self.engine.time.tick;
     renderer.time_of_day = Sky.timeOfDay(self.sandbox.tick);
-    renderer.show_metrics = self.show_metrics;
+    renderer.show_metrics = self.show_metrics and !self.sandbox.creator.open;
     renderer.cel_style = self.cel_style;
     renderer.cel_debug = self.cel_debug;
     renderer.characters.content = self.sandbox.characters;
@@ -2829,6 +2912,136 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.publishGui(renderer, minutes);
 }
 
+/// Save the in-game component labels, roles and color palettes as a user library override.
+fn saveMeshLibrary(self: *App) void {
+    const json = std.json.Stringify.valueAlloc(self.allocator, self.mesh_library, .{ .whitespace = .indent_2 }) catch |err| {
+        self.report("LIBRARY SAVE FAILED {s}", .{@errorName(err)});
+        return;
+    };
+    defer self.allocator.free(json);
+    const path = if (self.sandbox.profile.body_style == .captain_test and self.imported_rig_status_len != 0) "saves/imported-character.modifiers.json" else "saves/captain.modifiers.json";
+    Save.writeFile(self.io, path, json) catch |err| {
+        self.report("LIBRARY SAVE FAILED {s}", .{@errorName(err)});
+        return;
+    };
+    self.sandbox.creator.imported_status = .saved;
+    self.report("IMPORTED CHARACTER LIBRARY SAVED", .{});
+}
+
+/// Import a binary GLB into the Character Designer. The current runtime format is static, so the
+/// importer evaluates the gameplay run controller on matching named joints and keeps the source
+/// GLB plus editable component sidecar for repeat edits and future live-skin support.
+fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
+    var scratch: std.heap.ArenaAllocator = .init(self.allocator);
+    defer scratch.deinit();
+    const trace = try @import("asset/Gltf.zig").inspect(scratch.allocator(), source);
+    if (trace.skin_count == 0) return error.CharacterNeedsSkin;
+    var model = try @import("asset/Gltf.zig").compilePosePreview(self.allocator, source, .{}, .run);
+    errdefer model.deinit(self.allocator);
+    const source_hash = @import("asset/Meta.zig").hashSource(source);
+    const generated = try MeshModifiers.generate(self.mesh_library_arena.allocator(), model, &source_hash);
+    const mapped_count = @import("asset/Gltf.zig").mappedGameplayJointCount(trace);
+    if (persist) {
+        try Save.writeFile(self.io, "saves/imported-character.glb", source);
+        const json = try std.json.Stringify.valueAlloc(scratch.allocator(), generated, .{ .whitespace = .indent_2 });
+        try Save.writeFile(self.io, "saves/imported-character.modifiers.json", json);
+    }
+    const base = try model.encode(self.allocator);
+    if (self.mesh_library_base) |old| self.allocator.free(old);
+    self.mesh_library_base = base;
+    if (self.queued_character_model) |old| old.deinit(self.allocator);
+    self.queued_character_model = model;
+    model = undefined;
+    self.mesh_library = generated;
+    self.mesh_library_preview_dirty = true;
+    self.sandbox.profile.body_style = .captain_test;
+    self.sandbox.creator.draft.body_style = .captain_test;
+    self.sandbox.creator.imported_selected = 0;
+    self.sandbox.creator.imported_status = .ready;
+    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "RUN RETARGET {d}/7 JOINTS  |  STATIC IN GAME", .{mapped_count}) catch unreachable;
+    self.imported_rig_status_len = app_status.len;
+    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "RUN RETARGET {d}/7 JOINTS  |  STATIC IN GAME", .{mapped_count}) catch unreachable;
+    self.sandbox.creator.imported_rig_status_len = creator_status.len;
+    if (persist) self.sandbox.creator.imported_open = true;
+}
+
+fn loadSavedCharacterImport(self: *App) void {
+    const source = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.glb", self.allocator, .limited(64 << 20)) catch return;
+    defer self.allocator.free(source);
+    const modifiers = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20)) catch {
+        self.importCharacterGlb(source, false) catch |err| std.log.warn("saved character import rejected: {s}", .{@errorName(err)});
+        return;
+    };
+    self.importCharacterGlb(source, false) catch |err| {
+        std.log.warn("saved character import rejected: {s}", .{@errorName(err)});
+        return;
+    };
+    const override = std.json.parseFromSliceLeaky(MeshModifiers.Document, self.mesh_library_arena.allocator(), modifiers, .{}) catch return;
+    if (validMeshLibraryOverride(self.mesh_library, override)) {
+        self.mesh_library = override;
+        self.mesh_library_preview_dirty = true;
+    }
+}
+
+fn chooseAndImportCharacter(self: *App) void {
+    if (@import("builtin").os.tag != .macos) return self.report("GLB PICKER IS AVAILABLE ON MACOS", .{});
+    const bytes = self.allocator.alloc(u8, 64 << 20) catch return self.report("NOT ENOUGH MEMORY TO OPEN GLB", .{});
+    defer self.allocator.free(bytes);
+    var length: usize = 0;
+    const result = hw_choose_open_glb(bytes.ptr, bytes.len, &length);
+    if (result == 0) return;
+    if (result < 0) return self.report("GLB IS LARGER THAN 64 MB OR COULD NOT BE READ", .{});
+    self.importCharacterGlb(bytes[0..length], true) catch |err| return self.report("GLB IMPORT FAILED: {s}", .{@errorName(err)});
+    self.report("CHARACTER IMPORTED — {s}", .{self.imported_rig_status[0..self.imported_rig_status_len]});
+}
+
+fn installImportedCharacter(self: *App) void {
+    const model = self.queued_character_model orelse return;
+    self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
+        model.deinit(self.allocator);
+        self.queued_character_model = null;
+        std.log.err("imported character install failed: {s}", .{@errorName(err)});
+        return;
+    };
+    self.queued_character_model = null;
+}
+
+/// The packaged Captain is already transform-baked. Rebuild from its immutable packed copy and
+/// apply only component surfaces/colors, so in-game palette edits do not double-scale geometry.
+fn applyMeshLibraryPreview(self: *App) void {
+    if (!self.mesh_library_preview_dirty) return;
+    const base = self.catalog.mesh(self.catalog.content.captain_test) orelse return;
+    if (!base.ready) return;
+    if (self.mesh_library_base == null) self.mesh_library_base = base.model.encode(self.allocator) catch |err| {
+        std.log.err("character library preview snapshot failed: {s}", .{@errorName(err)});
+        self.mesh_library_preview_dirty = false;
+        return;
+    };
+    var model = MeshModel.decode(self.allocator, self.mesh_library_base.?) catch |err| {
+        std.log.err("character library preview decode failed: {s}", .{@errorName(err)});
+        self.mesh_library_preview_dirty = false;
+        return;
+    };
+    var owned = true;
+    defer if (owned) model.deinit(self.allocator);
+    const analysis = MeshModifiers.recolor(self.allocator, &model, self.mesh_library) catch |err| {
+        std.log.err("character library preview update failed: {s}", .{@errorName(err)});
+        self.mesh_library_preview_dirty = false;
+        return;
+    };
+    defer {
+        self.allocator.free(analysis.vertex_parts);
+        self.allocator.free(analysis.components);
+    }
+    self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
+        std.log.err("character library mesh install failed: {s}", .{@errorName(err)});
+        self.mesh_library_preview_dirty = false;
+        return;
+    };
+    owned = false;
+    self.mesh_library_preview_dirty = false;
+}
+
 /// Lays out this frame's GUI in canvas units (720 tall at interface size 100%) and keeps its
 /// clickable areas for the next mouse events. Art-review showcases of the city draw none.
 fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
@@ -2921,6 +3134,9 @@ pub fn stop(self: *App) void {
     if (self.loader) |l| l.destroy();
     if (self.reload) |r| r.destroy();
     if (self.test_mode_save) |baseline| self.allocator.free(baseline);
+    if (self.mesh_library_base) |bytes| self.allocator.free(bytes);
+    if (self.queued_character_model) |model| model.deinit(self.allocator);
+    self.mesh_library_arena.deinit();
     if (options.reload_smoke and !self.reload_smoke_passed) @panic("Reload smoke did not reach GPU acceptance");
     defer self.sandbox.deinit();
     // The app thread has exited, so the sandbox can be read safely.

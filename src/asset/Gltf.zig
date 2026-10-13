@@ -307,22 +307,51 @@ fn markActive(doc: Doc, active: []bool, world: []Mat, index: u32, parent: Mat, d
 fn sourcePoseDelta(name: ?[]const u8) ?[4]f32 {
     const source_name = name orelse return null;
     for (GameAnimation.run_tracks) |track| {
-        const target_name = switch (@as(GameSkeleton.Joint, @enumFromInt(track.joint))) {
-            .chest => "mixamorig:Spine2",
-            .upper_arm_l => "mixamorig:LeftArm",
-            .upper_arm_r => "mixamorig:RightArm",
-            .thigh_l => "mixamorig:LeftUpLeg",
-            .thigh_r => "mixamorig:RightUpLeg",
-            .shin_l => "mixamorig:LeftLeg",
-            .shin_r => "mixamorig:RightLeg",
-            else => continue,
-        };
-        if (std.mem.eql(u8, source_name, target_name)) {
+        if (matchesControllerJoint(source_name, @enumFromInt(track.joint))) {
             const q = GameAnimation.sample(GameAnimation.run, track, std.math.pi * 0.5);
             return .{ q.x, q.y, q.z, q.w };
         }
     }
     return null;
+}
+
+/// Count distinct locomotion tracks that the imported skin can drive. This is shared by the
+/// Character Designer's compatibility report and the CPU retargeted preview.
+pub fn mappedGameplayJointCount(trace: Trace) usize {
+    var mapped: [GameSkeleton.humanoid_joint_count]bool = @splat(false);
+    for (trace.skins) |skin| for (skin.joints) |joint| {
+        for (GameAnimation.run_tracks) |track| if (matchesControllerJoint(joint.name, @enumFromInt(track.joint))) {
+            mapped[track.joint] = true;
+        };
+    };
+    var count: usize = 0;
+    for (mapped) |yes| count += @intFromBool(yes);
+    return count;
+}
+
+fn matchesControllerJoint(source: []const u8, joint: GameSkeleton.Joint) bool {
+    var normalized: [96]u8 = undefined;
+    var length: usize = 0;
+    for (source) |ch| {
+        if (!std.ascii.isAlphanumeric(ch)) continue;
+        if (length == normalized.len) return false;
+        normalized[length] = std.ascii.toLower(ch);
+        length += 1;
+    }
+    const name = normalized[0..length];
+    // Common Blender, Mixamo and Unity humanoid names after removing separators/prefix text.
+    const suffixes: []const []const u8 = switch (joint) {
+        .chest => &.{ "spine2", "upperchest", "chest", "spine03" },
+        .upper_arm_l => &.{ "leftarm", "leftupperarm", "upperarml", "arml" },
+        .upper_arm_r => &.{ "rightarm", "rightupperarm", "upperarmr", "armr" },
+        .thigh_l => &.{ "leftupleg", "leftthigh", "thighl", "uplegl" },
+        .thigh_r => &.{ "rightupleg", "rightthigh", "thighr", "uplegr" },
+        .shin_l => &.{ "leftleg", "leftlowerleg", "leftcalf", "shinl", "calfl" },
+        .shin_r => &.{ "rightleg", "rightlowerleg", "rightcalf", "shinr", "calfr" },
+        else => return false,
+    };
+    for (suffixes) |suffix| if (std.mem.endsWith(u8, name, suffix)) return true;
+    return false;
 }
 
 fn markActiveRun(doc: Doc, active: []bool, world: []Mat, index: u32, parent_world: Mat, parent_bind_q: [4]f32, parent_pose_q: [4]f32, depth: u32) anyerror!void {

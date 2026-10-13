@@ -1,48 +1,56 @@
-# Standalone Mesh Editor
-
-## Current status
-
-The repository now has a first standalone graphical slice: `python3 tools/zig.py build mesh-editor` launches the Mach editor, while `build mesh-editor-build` compiles it without launching. It opens the source Captain GLB, lists its 74 disconnected islands, selects by click or arrow keys, edits labels/colors/scales, previews bind or compatible procedural-run poses, and saves the source-hash-linked modifier sidecar. `asset-compiler modifier-list`, `modifier-edit`, and `preview-modified` remain available for batch editing.
-
-The source-linked modifier model is a useful foundation: the GLB remains immutable; disconnected triangle islands have source-derived IDs; labels, surface roles, palette colors, and per-part scale/offset are stored in JSON; and the compiler can preview or bake them. The GLB viewer/compiler can CPU-skin bind and compatible procedural-run previews, but runtime meshes still use static HWMS.
+# In-Game Imported Character Editor
 
 ## Product boundary
 
-Build a separate desktop authoring app using Mach, launched independently of the game and without starting the world simulation. Reuse the GLB reader, modifier model, CPU preview, runtime mesh renderer, and file formats. It is a focused asset tool, not a general polygon modeler.
+Keep routine imported-character customization in the game's Character Designer. The offline
+`asset-compiler` remains the batch importer and diagnostic path; Blender remains appropriate for
+topology, UVs, complex rig work, and other tasks that need a full DCC tool.
 
-The current window contains:
+## Current slice
 
-- a 3D viewport with Left/Right plus W/E orbit and wheel zoom;
-- a clickable, keyboard-navigable list of disconnected islands;
-- part rename (`R`, type, Enter), scale (`+`/`-`), color cycle (`C`), pose toggle (`P`), and sidecar save (`S`);
-- a compatible procedural run-pose preview using the existing CPU skin path.
+The Creator's **IMPORTED PARTS** window reads the source-linked Captain modifier document and
+browses its 74 disconnected mesh islands by surface category. It supports component selection,
+surface reassignment, per-component palette paint, show/hide, RGB palette adjustment for skin,
+eyes, armor and energy, and saving a local override at `saves/captain.modifiers.json`. Edits
+recolor or filter the build-baked mesh under the render mutex and appear in the live Captain
+preview. The checked-in GLB and modifier recipe remain unchanged.
 
-This is a first editing surface, not the complete authoring plan. It currently writes the Captain sidecar in place. It has no undo/redo, Save As, pan/gizmo, surface-role editor, dedicated palette controls, node/primitive tree, or visual component picking/highlight. The view does not edit the source GLB.
+The editor can also import one user-selected binary GLB (`IMPORT GLB`). It traces the skin, maps
+recognized Mixamo/Blender/Unity-style humanoid joint names to the game's run tracks, and evaluates
+that controller pose into the imported preview. The source is stored at
+`saves/imported-character.glb`; appearance edits are stored in
+`saves/imported-character.modifiers.json`. The window reports mapped run tracks and labels the
+result `STATIC IN GAME`: `HWMS` still discards skin data, so this is a retargeted static pose, not
+live gameplay animation. Importing another GLB replaces the current imported-character slot.
 
-Start with ray picking against the CPU model. Add face/edge/vertex selection, gizmos, GPU ID picking, materials/textures, and rig editing in later slices. Preserve selection by source path and component ID, not by array position. One drag or property edit should be one undo step. A session can begin as the existing source-hash-linked sidecar; a larger project folder is not a prerequisite.
+The component labels are importer heuristics and remain editable through the existing surface
+roles and palettes; free text relabeling is not yet available in-game. Per-island shape transforms
+remain in the offline modifier tool because the runtime mesh is baked. Runtime `HWSK`/`HWAN`
+serialization and live controller-driven imported characters remain separate stages.
 
-## Build slices
+## Next slices
 
-1. **Visible standalone shell — started:** Mach target opens the bundled Captain from the source GLB and shows the imported islands; the game simulation and saves are not started. General open-file selection and diagnostics remain.
-2. **Select and modify — started:** list selection, label/color/scale edits, bind/run preview, and sidecar save work. Remaining: surface roles, per-axis offset/scale fields, viewport hit selection/highlights, draft/revert, Save As, and edit history.
-3. **Undo and package:** undo/redo and dirty-state prompts; source-hash validation; export/compile preview; explicit diagnostics for unsupported textures, morphs, and rig features.
-4. **Rig preview:** inspect bones, weights, and imported clips using the runtime skeleton/animation formats; edits remain compatible with the game.
+1. **Library breadth:** discover multiple imported character assets and show their components
+   under useful categories. Preserve each source hash and component ID; reject stale overrides
+   without discarding them.
+2. **Component authoring:** add component relabeling, undo/redo, and basic size/offset controls
+   with one reversible action per edit. Keep edits source-linked and offer export as a separate
+   user copy.
+3. **Rig integration:** replace the current controller-pose bake with runtime `HWSK`/`HWAN`
+   import, live controller-driven animation, named sockets, and robust mapping controls.
+4. **User animation:** bring file-based and later webcam capture review into the same in-game
+   character workspace only after runtime skeleton and clip import work. Keep inference local and
+   make captured clips editable before they can enter gameplay.
 
-## First-slice acceptance
+## Acceptance
 
-- Launch the standalone app from its own build target without starting gameplay simulation.
-- Open the bundled Captain GLB and show its geometry and selectable islands. **Met in the first slice.**
-- Select an island by row, change its label/color/proportion, and see the preview update. **Met in the first slice.**
-- Save to a separate source-linked file, close/reopen it, and retain the edit; reject changed source/island sets without losing the working document. **Still open:** save currently targets the bundled sidecar in place.
-- Keep the regular game and asset build working; run a Metal validation capture of the editor viewport. **Editor capture passed 2026-10-12.**
+- A user can choose the imported Captain body, browse its source-linked pieces by category, adjust
+  appearance, hide or restore a part, and see the preview update without restarting.
+- Saving and reopening preserves library appearance edits without altering the checked-in GLB or
+  importer recipe.
+- A stale source/component set is reported clearly and does not replace the user's working file.
+- Routine library/color edits require no external application; advanced geometry and rig changes
+  can be exported to Blender and reimported.
 
-## Review notes carried forward
-
-- Auto labels and skin/eye guesses are spatial heuristics, not semantic truth. The bundled mesh is one fused primitive with a single base-color material, so authors should inspect labels and surface roles.
-- Sidecar edits are guarded by the source hash and component IDs during compilation. Do not silently rebase them after the GLB changes; preserve a recovery copy and offer explicit remapping later.
-- The modifier command interface still needs failure-path coverage: invalid edits must not replace the original file, and repeated labels/colors/transforms need round-trip checks.
-- Keep the GLB immutable, all authoring allocations explicit, and failed edits transactional. Use native Zig/Mach only; no C/C++ mesh library.
-
-## Not part of the first editor
-
-Full sculpting/topology authoring, UV authoring, material graphs, animation authoring, live webcam capture, and cloud processing. Runtime GLB skeleton/clip import is still missing; the `P` preview is an offline static pose produced by CPU-skinning the GLB with the existing procedural run animation. Animation capture is planned separately in [animation capture](animation-capture.md).
+See [asset pipeline](asset-pipeline.md), [skeletal animation](skeletal-animation.md), and
+[user animation capture](animation-capture.md) for importer and animation dependencies.

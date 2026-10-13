@@ -226,6 +226,7 @@ void hw_gamepads(HWPad *out) {
 // from its simulation thread, so each panel runs synchronously on the main queue.
 static int save_json_on_main(const char *json, size_t length, const char *suggested_name);
 static int open_json_on_main(char *buffer, size_t capacity, size_t *length);
+static int open_glb_on_main(char *buffer, size_t capacity, size_t *length);
 
 int hw_choose_save_json(const char *json, size_t length, const char *suggested_name) {
     if ([NSThread isMainThread]) return save_json_on_main(json, length, suggested_name);
@@ -238,6 +239,13 @@ int hw_choose_open_json(char *buffer, size_t capacity, size_t *length) {
     if ([NSThread isMainThread]) return open_json_on_main(buffer, capacity, length);
     __block int result = 0;
     dispatch_sync(dispatch_get_main_queue(), ^{ result = open_json_on_main(buffer, capacity, length); });
+    return result;
+}
+
+int hw_choose_open_glb(char *buffer, size_t capacity, size_t *length) {
+    if ([NSThread isMainThread]) return open_glb_on_main(buffer, capacity, length);
+    __block int result = 0;
+    dispatch_sync(dispatch_get_main_queue(), ^{ result = open_glb_on_main(buffer, capacity, length); });
     return result;
 }
 
@@ -259,6 +267,20 @@ static int open_json_on_main(char *buffer, size_t capacity, size_t *length) {
         NSOpenPanel *panel = [NSOpenPanel openPanel];
         panel.canChooseFiles = YES; panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;
         panel.allowedFileTypes = @[ @"json" ];
+        if ([panel runModal] != NSModalResponseOK || !panel.URL) return 0;
+        NSData *data = [NSData dataWithContentsOfURL:panel.URL];
+        if (!data || data.length > capacity) return -1;
+        memcpy(buffer, data.bytes, data.length);
+        *length = data.length;
+        return 1;
+    }
+}
+
+static int open_glb_on_main(char *buffer, size_t capacity, size_t *length) {
+    @autoreleasepool {
+        NSOpenPanel *panel = [NSOpenPanel openPanel];
+        panel.canChooseFiles = YES; panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;
+        panel.allowedFileTypes = @[ @"glb" ];
         if ([panel runModal] != NSModalResponseOK || !panel.URL) return 0;
         NSData *data = [NSData dataWithContentsOfURL:panel.URL];
         if (!data || data.length > capacity) return -1;

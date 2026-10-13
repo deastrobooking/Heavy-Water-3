@@ -29,7 +29,7 @@ Keep raw video as temporary input by default. The user explicitly starts capture
 1. **Animation asset foundation:** import and validate glTF TRS tracks into versioned `HWAN`; bind clips to skeleton identities; preview them on the existing rig and controller. This is a prerequisite for captured motion, even without a camera.
 2. **File-based capture prototype:** accept a prerecorded short clip so sessions are repeatable; identify one foreground person; estimate timestamped landmarks and confidence; smooth jitter; mark low-confidence/occluded spans; retarget onto the canonical game skeleton; allow trim, playback-speed, and root-motion controls; export `HWAN`.
 3. **Mac webcam source:** add a narrow platform capture interface only after checking Mach's support. The repository currently has no webcam/video-input path. Keep camera enumeration and frame acquisition isolated from the pure-Zig animation importer and retargeter. macOS is first; do not claim another platform until built and exercised there.
-4. **Editor integration:** show the clip timeline, confidence/occlusion track, source skeleton and target skeleton preview in the standalone Mesh Editor's animation workspace. Provide manual key correction and bake before the result can enter gameplay.
+4. **Editor integration:** show the clip timeline, confidence/occlusion track, source skeleton and target skeleton preview in the in-game Character Designer's imported-character workspace. Provide manual key correction and bake before the result can enter gameplay.
 
 ## Motion quality and limits
 
@@ -48,5 +48,5 @@ Pose estimation requires a model or algorithm in addition to video frames. Befor
 ## Dependencies and open work
 
 - [Skeletal animation](skeletal-animation.md): runtime skeleton, skin-weight, and clip import must land first.
-- [Standalone mesh editor](mesh-editor.md): its rig/animation preview workspace consumes imported clips and provides correction UI.
+- [In-game imported character editor](mesh-editor.md): its rig/animation workspace will consume imported clips and provide correction UI.
 - Camera backend and pose-estimation model choice remain open pending a local prototype and licensing/performance review.

@@ -4,6 +4,7 @@ const std = @import("std");
 const enum_compat = @import("enum_compat");
 const Profile = @import("Profile.zig");
 const CharacterContent = @import("CharacterContent.zig");
+const Modifiers = @import("../asset/Modifiers.zig");
 const Creator = @This();
 
 pub const Key = union(enum) { up, down, left, right, enter, escape, backspace, char: u8 };
@@ -31,15 +32,42 @@ owned_armor: u16 = 0xffff,
 owned_species: u32 = 1,
 /// Installed mod content; its entries follow the built-in choices of the matching fields.
 registry: ?*const CharacterContent.Registry = null,
+/// Source-linked imported character library shown in the in-game Character Designer.
+imported_doc: ?*Modifiers.Document = null,
+imported_open: bool = false,
+imported_selected: usize = 0,
+imported_filter: u8 = 0,
+imported_palette: Modifiers.Palette = .eyes,
+imported_palette_variant: u8 = 0,
+imported_status: enum { ready, unsaved, saved } = .ready,
+imported_rig_status: [96]u8 = @splat(0),
+imported_rig_status_len: usize = 0,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry, .imported_doc = self.imported_doc, .imported_selected = self.imported_selected, .imported_filter = self.imported_filter, .imported_palette = self.imported_palette, .imported_palette_variant = self.imported_palette_variant, .imported_status = self.imported_status, .imported_rig_status = self.imported_rig_status, .imported_rig_status_len = self.imported_rig_status_len };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
 
 pub fn key(self: *Creator, k: Key) Result {
     if (!self.open) return .editing;
+    if (self.imported_open) {
+        switch (k) {
+            .up => self.moveImported(-1),
+            .down => self.moveImported(1),
+            .left => self.cycleImportedSurface(-1),
+            .right => self.cycleImportedSurface(1),
+            .char => |c| switch (std.ascii.toLower(c)) {
+                'p' => self.cycleImportedPalette(1),
+                'c' => self.paintImportedPart(),
+                'h' => self.toggleImportedPart(),
+                else => {},
+            },
+            .escape, .enter => self.imported_open = false,
+            else => {},
+        }
+        return .editing;
+    }
     switch (k) {
         .up => self.field = @enumFromInt((@intFromEnum(self.field) + fields.len - 1) % fields.len),
         .down => self.field = @enumFromInt((@intFromEnum(self.field) + 1) % fields.len),
@@ -61,6 +89,131 @@ pub fn key(self: *Creator, k: Key) Result {
         },
     }
     return .editing;
+}
+
+pub fn openImported(self: *Creator) void {
+    if (self.imported_doc == null) return;
+    self.imported_open = true;
+    self.imported_selected = @min(self.imported_selected, self.imported_doc.?.parts.len -| 1);
+}
+
+pub fn moveImported(self: *Creator, delta: isize) void {
+    const doc = self.imported_doc orelse return;
+    if (doc.parts.len == 0) return;
+    const count: isize = @intCast(doc.parts.len);
+    self.imported_selected = @intCast(@mod(@as(isize, @intCast(self.imported_selected)) + delta, count));
+    self.alignImportedPalette();
+}
+
+pub fn selectImported(self: *Creator, index: usize) void {
+    const doc = self.imported_doc orelse return;
+    if (index >= doc.parts.len) return;
+    self.imported_selected = index;
+    self.alignImportedPalette();
+}
+
+fn alignImportedPalette(self: *Creator) void {
+    const doc = self.imported_doc orelse return;
+    if (self.imported_selected >= doc.parts.len) return;
+    self.imported_palette = switch (doc.parts[self.imported_selected].surface) {
+        .skin => .skin,
+        .eyes => .eyes,
+        .armor, .neutral => .armor,
+        .energy => .energy,
+    };
+}
+
+pub fn cycleImportedFilter(self: *Creator, delta: i32) void {
+    self.imported_filter = @intCast(@mod(@as(i32, self.imported_filter) + delta, 6));
+    const doc = self.imported_doc orelse return;
+    for (doc.parts, 0..) |part, i| if (self.matchesFilter(part.surface)) {
+        self.imported_selected = i;
+        self.alignImportedPalette();
+        return;
+    };
+}
+
+pub fn cycleImportedSurface(self: *Creator, delta: i32) void {
+    const doc = self.imported_doc orelse return;
+    if (self.imported_selected >= doc.parts.len) return;
+    const part = &doc.parts[self.imported_selected];
+    const surface_count: i32 = @intCast(enum_compat.fields(Modifiers.Surface).len);
+    part.surface = @enumFromInt(@mod(@as(i32, @intCast(@intFromEnum(part.surface))) + delta, surface_count));
+    self.imported_status = .unsaved;
+    self.imported_palette = switch (part.surface) {
+        .skin => .skin,
+        .eyes => .eyes,
+        .armor, .neutral => .armor,
+        .energy => .energy,
+    };
+}
+
+pub fn cycleImportedPalette(self: *Creator, delta: i32) void {
+    const doc = self.imported_doc orelse return;
+    const count: i32 = @intCast(paletteColorCount(self.imported_palette));
+    self.imported_palette_variant = @intCast(@mod(@as(i32, self.imported_palette_variant) + delta, count));
+    const color = paletteColor(self.imported_palette, self.imported_palette_variant);
+    switch (self.imported_palette) {
+        .skin => doc.skin_color = color,
+        .eyes => doc.eye_color = color,
+        .armor => doc.armor_color = color,
+        .energy => doc.energy_color = color,
+    }
+    self.imported_status = .unsaved;
+}
+
+pub fn adjustImportedColor(self: *Creator, channel: usize, delta: f32) void {
+    const doc = self.imported_doc orelse return;
+    if (channel >= 3) return;
+    const color = switch (self.imported_palette) {
+        .skin => &doc.skin_color,
+        .eyes => &doc.eye_color,
+        .armor => &doc.armor_color,
+        .energy => &doc.energy_color,
+    };
+    color[channel] = std.math.clamp(color[channel] + delta, 0, 1);
+    self.imported_status = .unsaved;
+}
+
+fn paletteColorCount(slot: Modifiers.Palette) usize {
+    return switch (slot) {
+        .skin => Profile.skin_tones.len,
+        .eyes, .energy => Profile.accent_colors.len,
+        .armor => Profile.outfit_colors.len,
+    };
+}
+
+fn paletteColor(slot: Modifiers.Palette, index: usize) [3]f32 {
+    const source = switch (slot) {
+        .skin => Profile.skin_tones[index % Profile.skin_tones.len],
+        .eyes, .energy => Profile.accent_colors[index % Profile.accent_colors.len],
+        .armor => Profile.outfit_colors[index % Profile.outfit_colors.len],
+    };
+    return .{ source[0], source[1], source[2] };
+}
+
+pub fn paintImportedPart(self: *Creator) void {
+    const doc = self.imported_doc orelse return;
+    if (self.imported_selected >= doc.parts.len) return;
+    const part = &doc.parts[self.imported_selected];
+    part.color = if (part.color != null) null else switch (self.imported_palette) {
+        .skin => doc.skin_color,
+        .eyes => doc.eye_color,
+        .armor => doc.armor_color,
+        .energy => doc.energy_color,
+    };
+    self.imported_status = .unsaved;
+}
+
+pub fn toggleImportedPart(self: *Creator) void {
+    const doc = self.imported_doc orelse return;
+    if (self.imported_selected >= doc.parts.len) return;
+    doc.parts[self.imported_selected].enabled = !doc.parts[self.imported_selected].enabled;
+    self.imported_status = .unsaved;
+}
+
+pub fn matchesFilter(self: *const Creator, surface: Modifiers.Surface) bool {
+    return self.imported_filter == 0 or @intFromEnum(surface) + 1 == self.imported_filter;
 }
 
 /// Changes the selected field; clothing skips types not yet owned.

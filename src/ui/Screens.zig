@@ -39,7 +39,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 20, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, creator_imported, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -140,7 +140,9 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     // sizes); the HUD above never moves.
     c.beginScroll(hud.scroll);
     defer c.endScroll();
-    if (sb.creator.open) drawCreator(c, sb, hud.view) else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
+    if (sb.creator.open) {
+        if (sb.creator.imported_open) drawImportedComponents(c, &sb.creator, hud.view) else drawCreator(c, sb, hud.view);
+    } else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
         .upgrades => drawUpgrades(c, sb, shop.row, hud.view),
         .wardrobe => drawWardrobe(c, sb, shop.row, hud.view),
         .fabricate => drawFabricator(c, sb, shop, hud.view),
@@ -851,7 +853,102 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     // The hint shares a line with DONE; the shop notice above has its own.
     const done: Rect = .{ .x = r.x + r.w - 140, .y = r.y + r.h - 38, .w = 120, .h = 28 };
     button(c, done, "DONE", hitId(.creator_done, 0), false);
-    c.text(r.x + 18, done.y + 10, if (cr.confirmed) "TYPE NAME  ENTER DONE  ESC CANCEL" else "TYPE A NAME, THEN ENTER", 0.9, dim);
+    const library: Rect = .{ .x = r.x + 18, .y = done.y, .w = 150, .h = 28 };
+    button(c, library, "IMPORTED PARTS", hitId(.creator_imported, 0), false);
+    c.text(library.x + library.w + 12, done.y + 10, if (cr.confirmed) "ENTER DONE  ESC BACK" else "NAME THEN ENTER", 0.78, dim);
+}
+
+fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
+    const doc = cr.imported_doc orelse return;
+    const w = @min(@as(f32, 920), v.w - 32);
+    const h = @min(@as(f32, 620), v.h - 24);
+    const r: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + (v.h - h) / 2, .w = w, .h = h };
+    panel(c, r, "IMPORTED CHARACTER LIBRARY");
+    const rig_label = if (cr.imported_rig_status_len > 0) cr.imported_rig_status[0..cr.imported_rig_status_len] else "NO EXTERNAL RIG  |  BUNDLED CAPTAIN COMPONENTS";
+    c.text(r.x + 18, r.y + 36, rig_label, 0.82, dim);
+    button(c, .{ .x = r.x + r.w - 150, .y = r.y + 26, .w = 132, .h = 28 }, "IMPORT GLB", hitId(.imported_import_glb, 0), false);
+
+    const filter_names = [_][]const u8{ "ALL", "ARMOR", "SKIN", "EYES", "ENERGY", "NEUTRAL" };
+    const tab_w: f32 = @min(112, (r.w - 40) / @as(f32, @floatFromInt(filter_names.len)));
+    for (filter_names, 0..) |name, i| {
+        const tab: Rect = .{ .x = r.x + 18 + @as(f32, @floatFromInt(i)) * (tab_w + 4), .y = r.y + 56, .w = tab_w, .h = 26 };
+        button(c, tab, name, hitId(.imported_filter, i), cr.imported_filter == i);
+    }
+
+    const list = Rect{ .x = r.x + 18, .y = r.y + 94, .w = 380, .h = h - 160 };
+    c.rect(list, alpha(panel_fill, 0.5));
+    const row_step: f32 = 25;
+    const rows: usize = @min(18, @as(usize, @intFromFloat(@max(list.h / row_step, 1))));
+    var selected_rank: usize = 0;
+    for (doc.parts[0..@min(cr.imported_selected, doc.parts.len)]) |part| if (cr.matchesFilter(part.surface)) {
+        selected_rank += 1;
+    };
+    const first_rank = selected_rank -| (rows / 2);
+    var rank: usize = 0;
+    var row: usize = 0;
+    for (doc.parts, 0..) |part, index| {
+        if (!cr.matchesFilter(part.surface)) continue;
+        if (rank >= first_rank and row < rows) {
+            const item: Rect = .{ .x = list.x + 4, .y = list.y + 4 + @as(f32, @floatFromInt(row)) * row_step, .w = list.w - 8, .h = row_step - 2 };
+            rowBack(c, item, index == cr.imported_selected);
+            c.hit(item, hitId(.imported_part, index));
+            var label: [48]u8 = undefined;
+            const name = pretty(&label, part.label);
+            c.text(item.x + 9, item.y + 7, name, 0.82, if (!part.enabled) bad else if (index == cr.imported_selected) accent else ink);
+            c.text(item.x + item.w - 76, item.y + 7, @tagName(part.surface), 0.72, dim);
+            row += 1;
+        }
+        rank += 1;
+    }
+    const selected = if (cr.imported_selected < doc.parts.len) &doc.parts[cr.imported_selected] else null;
+    const info_x = list.x + list.w + 24;
+    c.text(info_x, list.y + 4, "PALETTE", 0.9, alpha(accent, 0.8));
+    const palette_name = @tagName(cr.imported_palette);
+    const palette_color: Color = switch (cr.imported_palette) {
+        .skin => .{ doc.skin_color[0], doc.skin_color[1], doc.skin_color[2], 1 },
+        .eyes => .{ doc.eye_color[0], doc.eye_color[1], doc.eye_color[2], 1 },
+        .armor => .{ doc.armor_color[0], doc.armor_color[1], doc.armor_color[2], 1 },
+        .energy => .{ doc.energy_color[0], doc.energy_color[1], doc.energy_color[2], 1 },
+    };
+    const palette_row: Rect = .{ .x = info_x, .y = list.y + 22, .w = 350, .h = 30 };
+    button(c, .{ .x = palette_row.x, .y = palette_row.y, .w = 34, .h = 26 }, "<", hitId(.imported_palette_left, 0), false);
+    button(c, .{ .x = palette_row.x + 41, .y = palette_row.y, .w = 34, .h = 26 }, ">", hitId(.imported_palette_right, 0), false);
+    c.rect(.{ .x = palette_row.x + 86, .y = palette_row.y + 4, .w = 24, .h = 18 }, palette_color);
+    var pretty_palette: [20]u8 = undefined;
+    var palette_value: [40]u8 = undefined;
+    const palette_text = std.fmt.bufPrint(&palette_value, "{s}  {d}", .{ pretty(&pretty_palette, palette_name), cr.imported_palette_variant + 1 }) catch "";
+    c.text(palette_row.x + 120, palette_row.y + 8, palette_text, 0.9, ink);
+    const channel_names = [_][]const u8{ "R", "G", "B" };
+    for (0..3) |channel| {
+        const channel_y = palette_row.y + 42 + @as(f32, @floatFromInt(channel)) * 27;
+        c.text(info_x + 2, channel_y + 8, channel_names[channel], 0.85, dim);
+        button(c, .{ .x = info_x + 26, .y = channel_y, .w = 34, .h = 24 }, "-", hitId(.imported_color, channel * 2), false);
+        const channel_value = switch (channel) { 0 => palette_color[0], 1 => palette_color[1], else => palette_color[2] };
+        c.print(info_x + 72, channel_y + 8, 0.8, ink, "{d:.2}", .{channel_value});
+        button(c, .{ .x = info_x + 126, .y = channel_y, .w = 34, .h = 24 }, "+", hitId(.imported_color, channel * 2 + 1), false);
+    }
+
+    if (selected) |part| {
+        c.text(info_x, list.y + 142, "SELECTED COMPONENT", 0.9, alpha(accent, 0.8));
+        var label_buffer: [80]u8 = undefined;
+        c.text(info_x, list.y + 168, pretty(&label_buffer, part.label), 1.05, ink);
+        c.print(info_x, list.y + 194, 0.82, dim, "SOURCE ID {d}  |  {d} VERTICES", .{ part.id, part.vertex_count });
+        c.text(info_x, list.y + 224, "SURFACE ROLE", 0.9, alpha(accent, 0.8));
+        const role_y = list.y + 244;
+        button(c, .{ .x = info_x, .y = role_y, .w = 36, .h = 28 }, "<", hitId(.imported_surface_left, 0), false);
+        button(c, .{ .x = info_x + 44, .y = role_y, .w = 36, .h = 28 }, ">", hitId(.imported_surface_right, 0), false);
+        var role: [20]u8 = undefined;
+        c.text(info_x + 96, role_y + 9, pretty(&role, @tagName(part.surface)), 0.9, gold);
+        const paint: Rect = .{ .x = info_x, .y = role_y + 48, .w = 212, .h = 30 };
+        button(c, paint, if (part.color == null) "PAINT FROM PALETTE" else "CLEAR PART PAINT", hitId(.imported_paint, 0), false);
+        if (part.color) |color| c.rect(.{ .x = paint.x + paint.w + 10, .y = paint.y + 6, .w = 24, .h = 18 }, .{ color[0], color[1], color[2], 1 });
+        const visible: Rect = .{ .x = info_x, .y = paint.y + 38, .w = 160, .h = 28 };
+        button(c, visible, if (part.enabled) "HIDE COMPONENT" else "RESTORE PART", hitId(.imported_toggle, 0), false);
+    }
+    const hint = if (cr.imported_status == .saved) "LIBRARY SAVED  |  UP/DOWN SELECT  P PALETTE  C PAINT  H HIDE" else if (cr.imported_status == .unsaved) "UNSAVED EDITS  |  P PALETTE  C PAINT  H HIDE  ENTER BACK" else "UP/DOWN SELECT  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE";
+    c.text(r.x + 18, r.y + h - 48, hint, 0.72, if (cr.imported_status == .unsaved) gold else dim);
+    button(c, .{ .x = r.x + r.w - 286, .y = r.y + h - 42, .w = 104, .h = 28 }, "BACK", hitId(.imported_back, 0), false);
+    button(c, .{ .x = r.x + r.w - 166, .y = r.y + h - 42, .w = 148, .h = 28 }, "SAVE LIBRARY", hitId(.imported_save, 0), false);
 }
 
 // ---------------------------------------------------------------- shop, upgrades, wardrobe

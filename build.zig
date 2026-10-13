@@ -140,35 +140,6 @@ pub fn build(b: *std.Build) void {
         exe.use_lld = true;
     }
     b.installArtifact(exe);
-    const mesh_editor = b.createModule(.{ .root_source_file = b.path("src/MeshEditor.zig"), .target = target, .optimize = optimize });
-    mesh_editor.addImport("mach", mach.module("mach"));
-    mesh_editor.addImport("enum_compat", enum_compat);
-    mesh_editor.addOptions("options", options);
-    mesh_editor.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
-    mesh_editor.addAnonymousImport("captain.hwmesh", .{ .root_source_file = captain_mesh });
-    mesh_editor.addAnonymousImport("assets.manifest", .{ .root_source_file = manifest_file });
-    for (blueprint_names, blueprints) |name, output| mesh_editor.addAnonymousImport(b.fmt("{s}.blueprint", .{name}), .{ .root_source_file = output });
-    const editor_exe = @import("mach").addExecutable(mach.builder, .{ .name = "heavy-water-mesh-editor", .app = mesh_editor, .target = target, .optimize = optimize });
-    if (target.result.os.tag == .macos) {
-        editor_exe.root_module.addCSourceFile(.{ .file = b.path("src/platform/gamepad.m"), .flags = &.{ "-fno-objc-arc", "-Wno-deprecated-declarations" } });
-        editor_exe.root_module.linkFramework("AppKit", .{});
-        editor_exe.root_module.linkFramework("GameController", .{});
-        editor_exe.root_module.linkFramework("Foundation", .{});
-        editor_exe.root_module.linkFramework("IOKit", .{});
-    }
-    if (target.result.os.tag == .linux) {
-        editor_exe.use_llvm = true;
-        editor_exe.use_lld = true;
-    }
-    b.installArtifact(editor_exe);
-    b.step("mesh-editor-build", "Build the standalone imported-mesh editor").dependOn(&editor_exe.step);
-    const run_mesh_editor = b.addRunArtifact(editor_exe);
-    if (builtin.zig_version.minor >= 17) {
-        run_mesh_editor.addPassthruArgs();
-    } else if (b.args) |args| {
-        run_mesh_editor.addArgs(args);
-    }
-    b.step("mesh-editor", "Launch the standalone imported-mesh editor").dependOn(&run_mesh_editor.step);
     const run = b.addRunArtifact(exe);
     run.step.dependOn(&mods.step);
     if (builtin.zig_version.minor >= 17) {

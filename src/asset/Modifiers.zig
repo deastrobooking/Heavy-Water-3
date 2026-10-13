@@ -13,6 +13,7 @@ pub const Part = struct {
     id: u32,
     label: []const u8,
     surface: Surface = .armor,
+    enabled: bool = true,
     center: [3]f32,
     vertex_count: u32,
     scale: [3]f32 = .{ 1, 1, 1 },
@@ -192,6 +193,8 @@ pub fn apply(allocator: std.mem.Allocator, model: *Model, doc: Document, expecte
         if (!validScale(part.scale) or !validOffset(part.offset)) return error.InvalidPartTransform;
         if (part.color) |color| if (!validColor(color)) return error.InvalidPartColor;
     }
+    const filtered_indices = try filteredIndices(allocator, model, analysis, doc);
+    errdefer if (filtered_indices) |indices| allocator.free(indices);
     for (model.mesh.vertices, analysis.vertex_parts) |*vertex, id| {
         const part = findPart(doc.parts, id).?;
         const color = part.color orelse switch (part.surface) {
@@ -207,9 +210,71 @@ pub fn apply(allocator: std.mem.Allocator, model: *Model, doc: Document, expecte
             vertex.color[axis] = color[axis];
         }
     }
+    if (filtered_indices) |indices| {
+        allocator.free(model.mesh.indices);
+        model.mesh.indices = indices;
+    }
     recalcNormals(model.*);
     model.computeBounds();
     return analysis;
+}
+
+/// Recolors a modifier-baked preview without applying component transforms a second time.
+/// Runtime character customization starts from the build-baked mesh, so palette edits use this
+/// path while the offline importer continues to use `apply` on source geometry.
+pub fn recolor(allocator: std.mem.Allocator, model: *Model, doc: Document) !Analysis {
+    if (doc.format != format_version or !validColor(doc.skin_color) or !validColor(doc.eye_color) or !validColor(doc.armor_color) or !validColor(doc.energy_color)) return error.InvalidModifiers;
+    const analysis = try analyze(allocator, model.*);
+    errdefer {
+        allocator.free(analysis.vertex_parts);
+        allocator.free(analysis.components);
+    }
+    if (doc.parts.len != analysis.components.len) return error.ComponentSetChanged;
+    for (analysis.components) |component| if (findPart(doc.parts, component.id) == null) return error.ComponentSetChanged;
+    const filtered_indices = try filteredIndices(allocator, model, analysis, doc);
+    errdefer if (filtered_indices) |indices| allocator.free(indices);
+    for (model.mesh.vertices, analysis.vertex_parts) |*vertex, id| {
+        const part = findPart(doc.parts, id).?;
+        const color = part.color orelse switch (part.surface) {
+            .armor => doc.armor_color,
+            .skin => doc.skin_color,
+            .eyes => doc.eye_color,
+            .energy => doc.energy_color,
+            .neutral => .{ 1, 1, 1 },
+        };
+        vertex.color = color;
+    }
+    if (filtered_indices) |indices| {
+        allocator.free(model.mesh.indices);
+        model.mesh.indices = indices;
+    }
+    return analysis;
+}
+
+fn filteredIndices(allocator: std.mem.Allocator, model: *Model, analysis: Analysis, doc: Document) !?[]u32 {
+    const indices = model.mesh.indices;
+    var kept: usize = 0;
+    var triangle: usize = 0;
+    while (triangle < indices.len) : (triangle += 3) {
+        const visible = findPart(doc.parts, analysis.vertex_parts[indices[triangle]]).?.enabled;
+        if (visible) kept += 3;
+    }
+    if (kept == indices.len) return null;
+    const result = try allocator.alloc(u32, kept);
+    var out: usize = 0;
+    for (model.submeshes) |*submesh| {
+        const end = @as(usize, submesh.first_index) + submesh.index_count;
+        const first = out;
+        var at: usize = submesh.first_index;
+        while (at < end) : (at += 3) {
+            if (!findPart(doc.parts, analysis.vertex_parts[indices[at]]).?.enabled) continue;
+            @memcpy(result[out .. out + 3], indices[at .. at + 3]);
+            out += 3;
+        }
+        submesh.first_index = @intCast(first);
+        submesh.index_count = @intCast(out - first);
+    }
+    return result;
 }
 
 pub fn triangleSurfaceColor(doc: Document, analysis: Analysis, model: Model, triangle: usize) [3]f32 {
