@@ -164,8 +164,8 @@ pub const Arsenal = struct {
     /// Weapon Mk II/Mk III bonuses, copied from shared party progression.
     weapon_upgrades: [enum_compat.fields(WeaponKind).len]u8 = @splat(0),
     /// Selected weapon (one the party has fabricated), if any.
-    active: ?WeaponKind = .machine_gun,
-    ranged: WeaponKind = .machine_gun,
+    active: ?WeaponKind = .blaster,
+    ranged: WeaponKind = .blaster,
     was_fire: bool = false,
     was_alt: bool = false,
     beam: ?struct { left: f32, dps: f32, width: f32, length: f32 } = null,
@@ -229,6 +229,7 @@ pub const Arsenal = struct {
             .beam_saber => if (self.melee.guard != null) .guard else .none,
             .protective_shield => if (self.system.shield.active) .guard else .none,
             .giant_blast => .cast,
+            .blaster => if (self.system.blaster.is_charging) .cast else .aim,
             else => .aim,
         } };
     }
@@ -365,9 +366,18 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
     if (kind) |k| switch (k) {
         .blaster => {
             if (pressed) s.chargeBlaster(true);
-            if (released) if (s.fireBlaster(muzzle, aim.forward) != null) {
+            if (released) if (s.fireBlaster(muzzle, aim.forward)) |projectile_index| {
+                const projectile = &s.projectiles.items[projectile_index];
+                projectile.homing_target = enemies.nearestUnit(muzzle, 80);
+                projectile.visual_tint = aim.weapon_accent;
+                const damage_boost: f32 = if (aim.dashing) 1.35 else if (aim.airborne) 1.15 else 1;
+                projectile.damage *= damage_boost;
+                projectile.splash_radius *= if (aim.dashing) 1.12 else 1;
+                const flight_speed_boost: f32 = if (aim.dashing) 1.25 else if (aim.airborne) 1.08 else 1;
+                projectile.velocity = R.scale(R.normalize(projectile.velocity), R.length(projectile.velocity) * flight_speed_boost);
+                projectile.homing_speed *= flight_speed_boost;
                 push(out, &n, .{ .fired = .blaster });
-                self.effect(.{ .kind = .muzzle, .position = muzzle, .life = 0.08, .size = 0.5, .color = .{ 0.4, 0.9, 1 } });
+                self.effect(.{ .kind = .muzzle, .position = muzzle, .life = 0.13, .size = 0.55 + @as(f32, @floatFromInt(projectile.charge_level)) * 0.22, .color = aim.weapon_accent });
             };
         },
         .beam_saber => self.stepSaber(arsenal, enemies, aim, pressed, released, dt, out, &n, &hive, &hn),
@@ -422,12 +432,18 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
     // Projectiles: sweep through the Hive first, then the world.
     for (&s.projectiles.items) |*p| {
         if (!p.active) continue;
-        if (p.kind == .tracking_missile) p.homing_target = enemies.nearestUnit(p.position, 60) orelse p.homing_target;
+        if (p.kind == .tracking_missile or p.kind == .homing_energy_blast) p.homing_target = enemies.nearestUnit(p.position, if (p.kind == .homing_energy_blast) 80 else 60) orelse p.homing_target;
         const speed = R.length(p.velocity);
         if (speed < 1e-3) continue;
         const dir = R.scale(p.velocity, 1 / speed);
         if (enemies.strikeThrough(p.position, dir, speed * dt, p.radius, p.damage, 1, &p.hit_units, &hive, &hn)) |t| {
             const at = R.add(p.position, R.scale(dir, t));
+            if (p.kind == .homing_energy_blast) {
+                self.burstEnergyBlast(enemies, at, p, out, &n, &hive, &hn);
+                p.active = false;
+                s.projectiles.active_count -|= 1;
+                continue;
+            }
             if (p.kind == .bazooka_orb) {
                 self.burstOrb(enemies, at, p.damage, out, &n, &hive, &hn);
                 p.active = false;
@@ -452,6 +468,11 @@ pub fn step(self: *Combat, player: u8, physics: *const Physics, enemies: *Enemie
     var hits: [32]Projectile.HitEvent = undefined;
     const world_hits = s.projectiles.step(physics, dt, &hits);
     for (hits[0..@min(world_hits, hits.len)]) |h| {
+        if (h.kind == .homing_energy_blast) {
+            const projectile = &s.projectiles.items[h.projectile_index];
+            self.burstEnergyBlast(enemies, h.position, projectile, out, &n, &hive, &hn);
+            continue;
+        }
         if (h.kind == .bazooka_orb) {
             self.burstOrb(enemies, h.position, h.damage, out, &n, &hive, &hn);
             continue;
@@ -703,6 +724,18 @@ fn fireArm(self: *Combat, arsenal: *Arsenal, kind: WeaponKind, physics: *const P
     };
 }
 
+/// The main ki shot lands with a tight direct hit and an expanding pulse that pushes nearby
+/// Hive units away. Charging increases its core, damage, and blast reach; flight and dash keep
+/// the same lock-on rules so the player can weave around targets while firing.
+fn burstEnergyBlast(self: *Combat, enemies: *Enemies, at: V, projectile: *const Projectile.Projectile, out: []Event, n: *usize, hive: []Enemies.Event, hn: *usize) void {
+    const radius = @max(1.4, projectile.splash_radius);
+    _ = enemies.strikeArea(at, radius, projectile.damage * 0.45, null, hive, hn);
+    _ = enemies.shock(at, radius, 0.42 + @as(f32, @floatFromInt(projectile.charge_level)) * 0.14, 4 + @as(f32, @floatFromInt(projectile.charge_level)) * 2);
+    const tint = projectile.visual_tint orelse .{ 0.18, 0.66, 1.0 };
+    self.effect(.{ .kind = .burst, .position = at, .life = 0.42, .size = radius * 1.45, .color = tint });
+    push(out, n, .{ .blast = at });
+}
+
 /// A bazooka orb bursts: area damage, a shockwave that stuns and throws, a big flash.
 fn burstOrb(self: *Combat, enemies: *Enemies, at: V, damage: f32, out: []Event, n: *usize, hive: []Enemies.Event, hn: *usize) void {
     _ = enemies.strikeArea(at, 6, damage, null, hive, hn);
@@ -939,6 +972,8 @@ test "all four players start rapid fire, quick draw saber, then return to their 
     var events: [32]Event = undefined;
     const dt = 1.0 / 60.0;
     for (0..4) |p| {
+        c.arsenals[p].active = .machine_gun;
+        c.arsenals[p].ranged = .machine_gun;
         var aim: Aim = .{ .eye = .{ 0, 1.6, 0 }, .forward = .{ 0, 0, 1 }, .feet = .{ 0, 0, 0 }, .direct = true, .fire = true };
         var shots: usize = 0;
         for (0..30) |_| {

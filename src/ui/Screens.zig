@@ -25,6 +25,7 @@ const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
 const District = @import("../procedural/District.zig");
 const Enemies = @import("../game/Enemies.zig");
+const EnemyDesign = @import("../game/EnemyDesign.zig");
 pub const Rect = Canvas.Rect;
 const Color = Canvas.Color;
 
@@ -39,7 +40,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, creator_imported, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -141,7 +142,13 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     c.beginScroll(hud.scroll);
     defer c.endScroll();
     if (sb.creator.open) {
-        if (sb.creator.imported_open) drawImportedComponents(c, &sb.creator, hud.view) else drawCreator(c, sb, hud.view);
+        if (sb.creator.imported_open) {
+            drawImportedComponents(c, &sb.creator, hud.view);
+        } else if (sb.creator.enemy_design_open) {
+            drawEnemyDesign(c, &sb.creator, hud.view);
+        } else {
+            drawCreator(c, sb, hud.view);
+        }
     } else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
         .upgrades => drawUpgrades(c, sb, shop.row, hud.view),
         .wardrobe => drawWardrobe(c, sb, shop.row, hud.view),
@@ -669,7 +676,7 @@ fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8) void {
     c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
     var buffer: [24]u8 = undefined;
     const arsenal = &sb.combat.arsenals[player];
-    const name = if (arsenal.active) |w| pretty(&buffer, @tagName(w)) else "NO WEAPON";
+    const name = if (arsenal.active) |w| (if (w == .blaster) "KI BLAST" else pretty(&buffer, @tagName(w))) else "NO WEAPON";
     c.text(r.x + 14, r.y + 9, name, 1, gold);
     if (arsenal.active) |w| {
         var tier_buffer: [8]u8 = undefined;
@@ -855,7 +862,44 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     button(c, done, "DONE", hitId(.creator_done, 0), false);
     const library: Rect = .{ .x = r.x + 18, .y = done.y, .w = 150, .h = 28 };
     button(c, library, "IMPORTED PARTS", hitId(.creator_imported, 0), false);
-    c.text(library.x + library.w + 12, done.y + 10, if (cr.confirmed) "ENTER DONE  ESC BACK" else "NAME THEN ENTER", 0.78, dim);
+    const forge: Rect = .{ .x = library.x + library.w + 8, .y = done.y, .w = 126, .h = 28 };
+    button(c, forge, "HIVE FORGE", hitId(.enemy_forge, 0), false);
+}
+
+fn drawEnemyDesign(c: *Canvas, cr: *const Creator, v: Rect) void {
+    const w = @min(@as(f32, 620), v.w - 32);
+    const h = @min(@as(f32, 520), v.h - 24);
+    const r: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + (v.h - h) / 2, .w = w, .h = h };
+    panel(c, r, "HIVE FRAME FORGE");
+    c.text(r.x + 22, r.y + 38, "SCALARI TITAN  /  MODULAR ENEMY ASSEMBLY", 0.92, alpha(accent, 0.85));
+    c.text(r.x + 22, r.y + 60, "PART MODULES: SELECT A ROW, THEN CYCLE ITS VARIANTS", 0.8, dim);
+    const palette_y = r.y + 82;
+    c.text(r.x + 22, palette_y + 8, "PALETTE", 0.88, dim);
+    button(c, .{ .x = r.x + 115, .y = palette_y, .w = 24, .h = 24 }, "<", hitId(.enemy_palette_left, 0), false);
+    c.rect(.{ .x = r.x + 150, .y = palette_y + 3, .w = 30, .h = 18 }, EnemyDesign.colors[@intFromEnum(cr.enemy_design.palette)].armor);
+    c.rect(.{ .x = r.x + 184, .y = palette_y + 3, .w = 30, .h = 18 }, EnemyDesign.colors[@intFromEnum(cr.enemy_design.palette)].accent);
+    c.rect(.{ .x = r.x + 218, .y = palette_y + 3, .w = 30, .h = 18 }, EnemyDesign.colors[@intFromEnum(cr.enemy_design.palette)].glow);
+    c.text(r.x + 262, palette_y + 8, EnemyDesign.palette_names[@intFromEnum(cr.enemy_design.palette)], 0.9, ink);
+    button(c, .{ .x = r.x + 402, .y = palette_y, .w = 24, .h = 24 }, ">", hitId(.enemy_palette_right, 0), false);
+    c.text(r.x + 22, palette_y + 37, "BLACK / PURPLE / PINK / RED / SILVER  •  COLORWAYS ARE ENCOUNTER READY", 0.76, dim);
+    const labels = [_][]const u8{ "FRAME", "HEAD", "SHOULDERS", "ARMS", "LEGS", "BACK UNIT", "WEAPON" };
+    var y = palette_y + 58;
+    for (labels, 0..) |label, i| {
+        const part: EnemyDesign.Part = @enumFromInt(i);
+        const row: Rect = .{ .x = r.x + 18, .y = y, .w = r.w - 36, .h = 37 };
+        const selected = cr.enemy_part == part;
+        rowBack(c, row, selected);
+        c.hit(row, hitId(.enemy_part, i));
+        c.text(row.x + 12, row.y + 13, label, 0.86, if (selected) accent else dim);
+        const info = EnemyDesign.module(part, cr.enemy_design.value(part));
+        c.text(row.x + 150, row.y + 13, info.name, 0.9, ink);
+        c.text(row.x + 330, row.y + 13, info.description, 0.75, dim);
+        button(c, .{ .x = row.x + row.w - 58, .y = row.y + 5, .w = 22, .h = 26 }, "<", hitId(.enemy_left, i), false);
+        button(c, .{ .x = row.x + row.w - 30, .y = row.y + 5, .w = 22, .h = 26 }, ">", hitId(.enemy_right, i), false);
+        y += 40;
+    }
+    c.text(r.x + 22, r.y + r.h - 35, "SIEGE BODIES JOIN PLAZA RAIDS WITH HIVE INSECT DRONES", 0.8, alpha(accent, 0.85));
+    button(c, .{ .x = r.x + r.w - 134, .y = r.y + r.h - 43, .w = 112, .h = 28 }, "BACK", hitId(.enemy_forge, 0), false);
 }
 
 fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {

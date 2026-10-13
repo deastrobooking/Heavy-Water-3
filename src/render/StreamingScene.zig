@@ -278,6 +278,7 @@ fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
         11 => 70,
         12 => 140,
         13 => 210,
+        14 => 280,
         else => 0,
     };
     // Pull the low flora toward the camera so its forms read beneath the distant giants.

@@ -699,8 +699,8 @@ pub fn setMaxProgressionTest(self: *Sandbox, enabled: bool) void {
         kit.robot_built = true;
         kit.robot_xp = Kit.max_robot_xp;
         self.combat.arsenals[player_index].weapon_upgrades = kit.weapon_upgrades;
-        self.combat.arsenals[player_index].active = WeaponKind.machine_gun;
-        self.combat.arsenals[player_index].ranged = WeaponKind.machine_gun;
+        self.combat.arsenals[player_index].active = WeaponKind.blaster;
+        self.combat.arsenals[player_index].ranged = WeaponKind.blaster;
     }
     @import("Frontier.zig").refresh(self);
     for (&self.combat.arsenals) |*arsenal| arsenal.weapon_upgrades = self.kits[0].weapon_upgrades;
@@ -4187,6 +4187,8 @@ test "P1's controller: the right trigger fires the energy gun and the right bump
     defer catalog.deinit(std.testing.allocator);
     defer sb.deinit();
     sb.tools.tool = .weapon;
+    sb.combat.arsenals[0].active = .machine_gun;
+    sb.combat.arsenals[0].ranged = .machine_gun;
     var pads: Gamepads = .{};
     var samples: [4]Gamepads.Sample = @splat(.{});
     // Settle on the ground first.

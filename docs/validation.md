@@ -2,6 +2,14 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Modular Scalari villain frames and city assault first slice — 2026-10-12
+
+- Added data-driven frame/head/shoulder/arm/leg/back/weapon modules and five black-to-silver colorways in `game/EnemyDesign.zig`. The in-game Character Designer now opens HIVE FORGE to change a Titan's modules and palette; selected changes affect every Scalari siege frame for the current session.
+- Surface nests now have visible workshop blocks, relay pylons and a lit assembly apron around the destructible command spire. The existing spire health, enemy waves, alloy cache and campaign flag still own raid completion.
+- A bomber plaza raid now dispatches a Scalari siege frame and two ground escorts alongside the Hive aircraft attack, using the reserved encounter anchor without changing save indices.
+- **Checked:** `python3 tools/zig.py build check` and `python3 tools/zig.py build -Doptimize=ReleaseFast` passed with the pinned default compiler; the optimized executable was installed; `git diff --check` passed. The existing Metal-validated `-Dshowcase=30` capture completed without Metal validation messages, but its camera showed nearby canopy trees and combatants rather than clearly framing the new base/frame, so it is not a useful art review.
+- **Not checked:** forge layout and input, robot silhouette/color readability, frame visibility at encounter distances, a focused Metal art capture, a full surface nest raid, bomber assault and rewards, balance, save round-trips, headless tests, Zig 0.17, or Linux/Windows targets. Forge choices currently last only for the running session and cannot yet use imported asset-library parts.
+
 ## Smooth GPU-drawn character eyes — 2026-10-12
 
 - Moved eye whites, irises, pupils, highlights and upper eyelid ink from coarse head-vertex color interpolation to SDF drawing in the GPU-skinned character fragment shader. Eye geometry and both iris colors travel with each character's skinned vertices, so the existing eye customization is retained. Brows, nose and mouth remain baked face marks.
@@ -1145,3 +1153,17 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - The imported controller pose is currently baked into the game's static character mesh. Source GLB and appearance sidecar persist under `saves/imported-character.glb` and `saves/imported-character.modifiers.json`, then reload at startup. A new import replaces that one imported-character slot; it does not overwrite the bundled Captain source.
 - **Checked:** default `python3 tools/zig.py build check`, `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check`, and `git diff --check` passed.
 - **Not checked:** no interactive file-picker import, screenshot/capture, restart persistence check, headless tests, Linux/Windows targets, authored glTF animation clips, or live skeletal gameplay playback. The renderer/gameplay asset is still HWMS static geometry; unsupported joint names do not receive locomotion motion, and external-buffer `.gltf` is not accepted by this picker.
+
+## Homing ki blast and aerial combat pass — 2026-10-12
+
+- Promoted the charged blaster to the starting ranged weapon, labeled **KI BLAST** in the HUD, and redesigned its held form as a palm-mounted emitter. Its sphere retargets the nearest Hive unit within 80 m, grows and gains splash reach with charge, and bursts with area damage and knockback/stun.
+- Connected existing flight and dash states to the attack: airborne blasts fly faster and dash-fired blasts also deal more damage and create a stronger impact. The projectile uses the ranger's accent color, a layered luminous core/shell/trail, and the blaster adopts a two-hand cast pose while charging.
+- **Checked:** default `python3 tools/zig.py build check` and `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check` passed. The final showcase adjustment compiled in `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=69 -Dcapture-frame=90`, which completed on the Apple M3 Pro with Metal API validation and saved a 2560×1600 capture. The capture confirms the weapon HUD and showcase load, but the shot is not visible: the camera framing obstructs it and the charge is mid-cycle. This is not visual approval of the projectile. `python3 tools/zig.py build -Doptimize=ReleaseFast` installed the final executable; `git diff --check` passed.
+- **Not checked:** headless combat suite and hands-on flight/aim feel. Splash radius, lock-on turn rate, damage bonus, showcase framing, and projectile visibility still need play tuning.
+
+## Old-growth Arbor and giant pine surface pass — 2026-10-12
+
+- Added layered world-space bark grain, fissures and lichen, plus distance-faded leaf and needle color breakup. The material tags apply to procedural Arbors, the hand-authored test Arbor, and streamed tree species; the test Arbor now carries a redwood crown at canopy height.
+- Promoted variant 14 from a small pine prop to an old-growth pine with descending irregular bough whorls. It now uses the same 96–150 m scatter tier as the other giant trees, while its procedural mesh keeps open gaps between branch fans.
+- **Checked:** `python3 tools/zig.py build check` passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=62 -Dcapture-frame=120 -Daudio=false` completed on Apple M3 Pro / Metal without API validation errors. The final capture was inspected, but its camera showed bare terrain rather than the staged trees, so it does not verify the new tree appearance. `git diff --check` passed.
+- **Not checked:** the tree forms in regular gameplay or at multiple distances, headless tests, the 0.17 channel, Linux/Windows compilation or runtime, and performance. The canopy and pine silhouettes still need a clear in-game visual review.

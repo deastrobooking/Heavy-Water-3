@@ -159,6 +159,8 @@ First playable slice, contained in the existing Frontier:
 3. **Started:** a fabricator recipe, following/combat behavior, health, combat XP levels, and per-player Kit/save fields exist for one field droid. Add a player-facing upgrade interface and review balance.
 4. **Open:** run and inspect a Frontier smoke route that catches an animal, earns automatic takedown salvage, builds the droid, and uses both helpers; add migration and round-trip coverage.
 
+**Hive villains and city assaults — first modular slice:** surface Hive spires now render as field bases with workshops, relay pylons, assembly aprons and a command mast; their existing nest health, waves, rewards and story flags still define the raid objective. The character creator's **HIVE FORGE** panel exposes a modular Scalari siege frame with swappable frame, head, shoulder, arm, leg, back-unit and weapon modules, plus obsidian, amethyst, rose, war-red and silver palettes. Closing the panel applies that design to Scalari titans in the current session. The first three bomber plaza raids now bring one siege frame and two Scalari escorts to ground level alongside the carrier's insect attack. The current design is session-only; named presets, asset-library parts, additional frame roles and invasion aftermath belong to follow-up work. Still needed: build and inspect the forge and robot silhouette, play through a full wild-base raid and a city assault, and tune unit health/damage against the existing player and helper kit.
+
 Defer a broad biome roster, multiple robot chassis, robot programming, and colony-scale production until this first field loop is playable and tuned.
 
 ## Nature: ground, water, foliage and footing — implemented

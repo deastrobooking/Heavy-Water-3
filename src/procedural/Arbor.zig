@@ -169,8 +169,8 @@ const Writer = struct {
     indices: []u32,
     v: usize = 0,
     i: usize = 0,
-    fn vertex(self: *Writer, p: V, n: V, color: V) void {
-        self.vertices[self.v] = .{ .position = p, .normal = n, .uv = .{ (p[0] + p[2]) / 4, p[1] / 4 }, .color = color };
+    fn vertex(self: *Writer, p: V, n: V, color: V, material_tag: f32) void {
+        self.vertices[self.v] = .{ .position = p, .normal = n, .uv = .{ -material_tag, p[1] / 4 }, .color = color };
         self.v += 1;
     }
     fn tri(self: *Writer, a: usize, b: usize, c: usize) void {
@@ -189,10 +189,10 @@ const Writer = struct {
             const angle = @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(sides)) * 2 * std.math.pi;
             const radial = R.add(R.scale(u, @cos(angle)), R.scale(v, @sin(angle)));
             const ridge = 1 - genome.ridging * (0.5 + 0.5 * @sin(angle * 5));
-            self.vertex(R.add(if (ring == 0) a else b, R.scale(radial, if (ring == 0) r0 else r1)), R.normalize(R.add(radial, R.scale(direction, (r0 - r1) / R.length(R.sub(b, a))))), R.scale(genome.bark, ridge));
+            self.vertex(R.add(if (ring == 0) a else b, R.scale(radial, if (ring == 0) r0 else r1)), R.normalize(R.add(radial, R.scale(direction, (r0 - r1) / R.length(R.sub(b, a))))), R.scale(genome.bark, ridge), 20);
         };
-        self.vertex(a, R.scale(direction, -1), genome.bark);
-        self.vertex(b, direction, genome.bark);
+        self.vertex(a, R.scale(direction, -1), genome.bark, 20);
+        self.vertex(b, direction, genome.bark, 20);
         for (0..sides) |j| {
             const next = (j + 1) % sides;
             self.tri(base + j, base + sides + j, base + next);
@@ -221,13 +221,13 @@ const Writer = struct {
             const shade: f32 = if (side == 0) 1.0 else 0.72;
             const facet = R.scale(color, shade * (0.92 + 0.08 * @sin(a0 * 2 + phase)));
             const base = self.v;
-            for ([_]V{ a, first, second }) |point| self.vertex(point, normal, facet);
+            for ([_]V{ a, first, second }) |point| self.vertex(point, normal, facet, 10);
             self.tri(base, base + 1, base + 2);
         };
     }
     fn box(self: *Writer, unit: Mesh, center: V, half: V, color: V) void {
         const base = self.v;
-        for (unit.vertices) |point| self.vertex(R.add(center, .{ point.position[0] * half[0] * 2, point.position[1] * half[1] * 2, point.position[2] * half[2] * 2 }), point.normal, color);
+        for (unit.vertices) |point| self.vertex(R.add(center, .{ point.position[0] * half[0] * 2, point.position[1] * half[1] * 2, point.position[2] * half[2] * 2 }), point.normal, color, 0);
         for (unit.indices) |index| {
             self.indices[self.i] = @intCast(base + index);
             self.i += 1;

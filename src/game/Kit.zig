@@ -31,7 +31,7 @@ pub const info = [upgrade_count]Info{
 };
 const base_scrap = [upgrade_count]u32{ 40, 50, 30, 30, 45, 35 };
 
-pub const starter_weapons: u16 = (1 << @intFromEnum(WeaponKind.machine_gun)) | (1 << @intFromEnum(WeaponKind.beam_saber));
+pub const starter_weapons: u16 = (1 << @intFromEnum(WeaponKind.blaster)) | (1 << @intFromEnum(WeaponKind.machine_gun)) | (1 << @intFromEnum(WeaponKind.beam_saber));
 pub const free_suits: u8 = bit(.undersuit) | bit(.field_jacket);
 pub const free_armors: u16 = armorBit(.none) | armorBit(.scout);
 pub const health_per_cell: f32 = 20;

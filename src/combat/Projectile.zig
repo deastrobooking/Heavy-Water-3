@@ -18,6 +18,8 @@ pub const ProjectileKind = enum(u8) {
     saber_wave,
     saber_boomerang,
     energy_net,
+    /// Charged ki shot: a bright, lightly homing blast that bursts on contact.
+    homing_energy_blast,
 };
 
 pub const Projectile = struct {
@@ -27,7 +29,7 @@ pub const Projectile = struct {
     velocity: V = @splat(0),
     damage: f32 = 0,
     element: Weapon.Element = .kinetic,
-    /// Optional player-selected lumen colour, carried into the world slash rendering.
+    /// Optional player-selected lumen colour, carried into the projectile's in-world rendering.
     visual_tint: ?[3]f32 = null,
     lifetime: f32 = 0,
     max_lifetime: f32 = 3.0,
@@ -43,6 +45,8 @@ pub const Projectile = struct {
     pierce: u8 = 0,
     /// Downward acceleration (m/s²) for arcing shots (bazooka orbs).
     gravity: f32 = 0,
+    splash_radius: f32 = 0,
+    charge_level: u8 = 0,
     /// Units this shot has already passed through (bit per Hive unit slot).
     hit_units: u32 = 0,
 };
@@ -95,6 +99,7 @@ pub const ProjectilePool = struct {
                         .bazooka_orb => 0.7,
                         .saber_wave => 1.3,
                         .energy_net => 2.4,
+                        .homing_energy_blast => 0.42,
                         else => 0.2,
                     },
                     .homing_target = target,
@@ -121,7 +126,7 @@ pub const ProjectilePool = struct {
             }
 
             // Homing steering
-            if (p.kind == .tracking_missile and p.homing_target != null) {
+            if ((p.kind == .tracking_missile or p.kind == .homing_energy_blast) and p.homing_target != null) {
                 const to_target = R.sub(p.homing_target.?, p.position);
                 const dist = R.length(to_target);
                 if (dist > 0.1) {

@@ -215,6 +215,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 38 | Sniper rifle, first person |
 | 39 | Machine gun firing, first person |
 | 40 | A Synthetic channelling the lumen lance |
+| 69 | Main Ki Blast: charged homing shot and impact |
 | 41 | A mountain range from the foothills (the far panorama) |
 | 42 | A cave mouth on a mountainside |
 | 43 | Inside a cave's first chamber |
@@ -228,7 +229,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 57 | The pause menu at 150% interface size, scrolled to its last item |
 | 58, 59 | The four pets on the meadow: in their Hive collars; freed, in the ranger's colours |
 | 60 | The bright, stepped Rootdeep temples and their luminous crowns |
-| 62 | Giant redwoods and native flora under night lighting |
+| 62 | Giant redwoods, old-growth pines and native flora under night lighting |
 | 63 | Locomotion pose reel: sprint (frames 0–89), roll (90–179), dash (180–269), long jump (270–359), backflip (360–449), Superman flight (450 onward) |
 
 Captures need a visible, unlocked screen. macOS stops presenting frames to a hidden window or a locked session, and the app then idles in its event loop without reaching the capture frame; check with `ioreg -n Root -d1 -a | grep -c CGSSessionScreenIsLocked`. Run one capture at a time: two app windows competing can stall both. macOS has no `timeout` command, so don't rely on one in scripts.

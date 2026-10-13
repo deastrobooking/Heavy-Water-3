@@ -141,7 +141,36 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
 
 @fragment fn frag_main(in: VertexOut) -> @location(0) vec4<f32> {
     let texel = textureSample(surface_texture, surface_sampler, in.uv).rgb;
-    let base = in.tint.rgb * mix(vec3<f32>(1.0, 1.0, 1.0), texel, 0.35);
+    // Negative UV sentinels reserve procedural materials without changing the vertex layout.
+    let tag = select(0.0, floor(-in.uv.x + 0.5), in.uv.x < -9.5);
+    let canopy = step(10.0, tag) * (1.0 - step(20.0, tag));
+    let bark = step(20.0, tag);
+    var base = in.tint.rgb * mix(vec3<f32>(1.0, 1.0, 1.0), texel, 0.35);
+    let d = distance(in.world, frame.eye.xyz);
+    let detail = 1.0 - smoothstep(150.0, 720.0, d);
+
+    // Species-tagged canopy surfaces get layered leaf breakup at metre and branch scales.
+    // Keeping it in world space lets giant crowns read as foliage without thousands of leaves.
+    let crown_broad = vnoise(vec2<f32>(in.world.x * 0.045 + in.world.y * 0.017, in.world.z * 0.045 - in.world.y * 0.021));
+    let crown_cluster = vnoise(vec2<f32>(in.world.x * 0.43 + in.world.y * 0.16, in.world.z * 0.43 - in.world.y * 0.11));
+    let crown_fine = vnoise(vec2<f32>(in.world.x * 2.2 + in.world.y * 0.74, in.world.z * 2.2 - in.world.y * 0.61));
+    let crown_mottle = ((crown_broad - 0.5) * 0.28 + (crown_cluster - 0.5) * 0.25 + (crown_fine - 0.5) * 0.12) * detail;
+    let pine = step(16.5, tag) * (1.0 - step(20.0, tag));
+    let needle_sheen = smoothstep(0.70, 0.91, crown_fine) * detail * pine;
+    let leaf_base = in.tint.rgb * (1.0 + crown_mottle + needle_sheen * 0.22);
+
+    // Mature bark gets long grain, shallow fissures, lichen flecks, and a warmer sunward
+    // variation. The pattern follows the trunk in world space and fades before distant shimmer.
+    let bark_axis = dot(in.world.xz, vec2<f32>(0.93, 0.37));
+    let bark_broad = vnoise(vec2<f32>(bark_axis * 0.045, in.world.y * 0.012));
+    let bark_grain = vnoise(vec2<f32>(bark_axis * 0.62, in.world.y * 0.075 + bark_broad * 1.8));
+    let bark_fine = vnoise(vec2<f32>(bark_axis * 2.7, in.world.y * 0.19 + bark_grain));
+    let fissure = smoothstep(0.61, 0.78, bark_grain) * (1.0 - smoothstep(0.12, 0.48, bark_fine));
+    let lichen = smoothstep(0.76, 0.92, vnoise(in.world.xz * 0.31 + vec2<f32>(in.world.y * 0.04, -in.world.y * 0.03))) * detail;
+    let bark_gain = 0.72 + bark_broad * 0.34 + bark_fine * 0.22 - fissure * 0.28;
+    let bark_base = in.tint.rgb * bark_gain + vec3<f32>(0.075, 0.105, 0.052) * lichen * 0.48;
+    base = mix(base, leaf_base, canopy);
+    base = mix(base, bark_base, bark);
     var color = base;
     var emissive = 0.0;
     // Negative tint alpha selects unlit shading without expanding the 64-byte instance record.

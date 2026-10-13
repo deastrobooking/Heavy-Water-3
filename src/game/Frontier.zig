@@ -16,6 +16,7 @@ const Sandbox = @import("Sandbox.zig");
 const Garage = @import("Garage.zig");
 const Collectibles = @import("Collectibles.zig");
 const Enemies = @import("Enemies.zig");
+const EnemyDesign = @import("EnemyDesign.zig");
 const Corruption = @import("Corruption.zig");
 const Combat = @import("Combat.zig");
 const Fabricator = @import("Fabricator.zig");
@@ -1115,7 +1116,10 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sand
             dropBelow(sb, .hive_alloy, at);
             sb.progress.setFlag("wasp_down");
         },
-        .raid_started => |raid| sb.say("beetle bomber inbound: market plaza {d} — defend it", .{raid.plaza + 1}),
+        .raid_started => |raid| {
+            cityInvasion(sb, raid.position);
+            sb.say("market plaza {d} under Hive air attack — Scalari siege frame detected", .{raid.plaza + 1});
+        },
         .raid_bomb => |raid| {
             burst(sb, raid.position, 4 + @as(f32, @floatFromInt(raid.hit)), .{ 0.7, 0.32, 0.08 });
             sb.cue(.boom, raid.position);
@@ -1185,6 +1189,21 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sand
             sb.cue(.vault, null);
         }
     }
+}
+
+/// The bomber's insect escort signals a Scalari ground team to the same plaza. Reuse the private
+/// renewable encounter anchor so the assault adds no new save IDs or persistent world sites.
+fn cityInvasion(sb: *Sandbox, plaza: V) void {
+    const anchor = Enemies.training_nest;
+    for (&sb.enemies.units) |*slot| if (slot.*) |unit| {
+        if (unit.nest == anchor) slot.* = null;
+    };
+    const ground = Terrain.surface(sb.seed, plaza[0], plaza[2]).height;
+    const center: V = .{ plaza[0], ground, plaza[2] };
+    sb.enemies.nests[anchor] = .{ .position = center, .alive = false, .health = 0 };
+    _ = sb.enemies.spawnAt(.scalari_titan, anchor, R.add(center, .{ -12, 0, -10 }), 1);
+    _ = sb.enemies.spawnAt(.scalari_stinger, anchor, R.add(center, .{ 11, 0, -7 }), 1);
+    _ = sb.enemies.spawnAt(.scalari_hybrid, anchor, R.add(center, .{ 2, 0, 13 }), 1);
 }
 
 fn burst(sb: *Sandbox, at: V, size: f32, color: [3]f32) void {
@@ -1380,6 +1399,19 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             out[n] = .{ .mesh = c.spire, .transform = .{ .position = nest.position }, .tint = .{ 1, 1, 1, 1 }, .size = size };
             out[n + 1] = .{ .mesh = c.spire_glow, .transform = .{ .position = nest.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = size };
             n += 2;
+            // A surface spire is the command mast of a field base: low armored workshops,
+            // relay pylons, and a lit assembly apron make the raid objective readable at range.
+            if (!nest.cave and room(out, n, 7)) {
+                const palette = EnemyDesign.colors[@intFromEnum(EnemyDesign.encounter(sb.seed, n, null).palette)];
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 0.18, 0 }) }, .tint = palette.armor, .size = .{ 17, 0.34, 17 } };
+                out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 8, 1.35, 0 }) }, .tint = palette.accent, .size = .{ 2.8, 2.7, 4.8 } };
+                out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ -8, 1.35, 0 }) }, .tint = palette.accent, .size = .{ 2.8, 2.7, 4.8 } };
+                out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 1.25, 8 }) }, .tint = palette.armor, .size = .{ 4.8, 2.5, 2.8 } };
+                out[n + 4] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 1.25, -8 }) }, .tint = palette.armor, .size = .{ 4.8, 2.5, 2.8 } };
+                out[n + 5] = .{ .mesh = c.gem, .transform = .{ .position = R.add(nest.position, .{ 0, 2, 5.2 }) }, .tint = Material.emissive(palette.glow, pulse), .size = .{ 0.65, 1.2, 0.65 } };
+                out[n + 6] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 0.8, 0 }) }, .tint = Material.emissive(palette.accent, pulse * 0.35), .size = .{ 9, 0.12, 9 } };
+                n += 7;
+            }
         } else {
             // A broken stump.
             out[n] = .{ .mesh = c.spire, .transform = .{ .position = R.sub(nest.position, .{ 0, 1, 0 }) }, .tint = .{ 0.45, 0.4, 0.4, 1 }, .size = .{ size[0], 0.22 * size[1], size[2] } };
@@ -1390,6 +1422,11 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     var trooper_id: u8 = 16;
     for (sb.enemies.units) |slot| if (slot) |u| if (Enemies.isGround(u.kind)) {
         if (u.kind == .scalari_scout or u.kind == .scalari_miner) continue;
+        if (u.kind == .scalari_titan) {
+            if (!room(out, n, 20)) break;
+            n += scalariTitan(out[n..], c.block, c.gem, u.position, u.yaw, t, u.flash, sb.creator.enemy_design);
+            continue;
+        }
         if (trooper_id >= hero_first_id or !room(out, n, 1)) break;
         const d = R.sub(u.position, sb.player.feet);
         if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
@@ -1410,13 +1447,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .scalari_hybrid => scalari_hybrid_profile,
             else => trooper_profile,
         };
-        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else switch (u.kind) {
-            .scalari_scout => .{ 0.38, 1.2, 1.35, 1 },
-            .scalari_stinger => .{ 1.15, 0.72, 0.22, 1 },
-            .scalari_titan => .{ 1.2, 0.4, 0.25, 1 },
-            .scalari_hybrid => .{ 0.72, 1.12, 0.28, 1 },
-            else => .{ 1, 1, 1, 1 },
-        };
+        const role_design = EnemyDesign.encounter(sb.seed, u.generation, null);
+        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else if (Enemies.isScalari(u.kind)) EnemyDesign.colors[@intFromEnum(role_design.palette)].accent else .{ 1, 1, 1, 1 };
         out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = tint, .character = .{
             .profile = profile,
             .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t, .action = action, .action_t = action_t },
@@ -1585,6 +1617,22 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
                 out[n + 1] = .{ .mesh = c.saber_core, .transform = .{ .position = p.position }, .tint = Material.emissive(.{ 0.95, 0.99, 1, 1 }, 1.8), .size = .{ 0.9, 0.9, 0.9 }, .rotation = rotation };
                 n += 2;
             }
+            continue;
+        }
+        if (p.kind == .homing_energy_blast) {
+            if (!room(out, n, 3)) continue;
+            const tint = p.visual_tint orelse .{ 0.16, 0.64, 1.0 };
+            const age = p.max_lifetime - p.lifetime;
+            const pulse = 0.88 + 0.12 * @sin(t * 20 + age * 11);
+            const charged = @as(f32, @floatFromInt(p.charge_level));
+            const diameter = (1.2 + 0.42 * charged + p.radius * 0.5) * pulse;
+            const direction = facing(p.velocity);
+            const shell = Material.emissive(.{ tint[0] * 0.52, tint[1] * 0.76, tint[2], 1 }, 0.72);
+            const core = Material.emissive(.{ 0.88, 0.97, 1, 1 }, 1.8 + charged * 0.3);
+            out[n] = .{ .mesh = c.orb, .transform = .{ .position = p.position }, .tint = shell, .size = @splat(diameter) };
+            out[n + 1] = .{ .mesh = c.orb, .transform = .{ .position = p.position }, .tint = core, .size = @splat(diameter * 0.46), .rotation = yawQuat(age * 7) };
+            out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(p.position, R.scale(R.normalize(p.velocity), -diameter * 0.72)) }, .tint = Material.emissive(.{ tint[0] * 0.68, tint[1] * 0.9, tint[2], 1 }, 0.85), .size = .{ diameter * 0.32, diameter * 0.32, diameter * (1.4 + charged * 0.35) }, .rotation = direction };
+            n += 3;
             continue;
         }
         if (!room(out, n, 1)) continue;
@@ -1792,9 +1840,13 @@ fn heldWeapon(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHand
     const parts: []const Part = switch (kind) {
         .beam_saber => unreachable,
         .blaster => &.{
-            .{ .at = .{ 0, 0.03, 0.05 }, .size = .{ 0.08, 0.13, 0.32 }, .color = plate },
-            .{ .at = .{ 0, 0.05, 0.28 }, .size = .{ 0.045, 0.045, 0.2 }, .color = gunmetal },
-            .{ .at = .{ 0.042, 0.05, 0.05 }, .size = .{ 0.01, 0.03, 0.24 }, .color = .{ 0.4, 0.9, 1 }, .glow = 0.8 },
+            // A palm-mounted ki focus: tapered wrist bracer, split emitter fins and a charged gem.
+            .{ .at = .{ 0, -0.015, -0.04 }, .size = .{ 0.105, 0.14, 0.28 }, .color = gunmetal },
+            .{ .at = .{ 0, 0.015, 0.12 }, .size = .{ 0.13, 0.17, 0.27 }, .color = plate, .shape = .spike },
+            .{ .at = .{ -0.105, 0.02, 0.18 }, .size = .{ 0.055, 0.08, 0.21 }, .color = .{ 0.35, 0.52, 0.66 }, .shape = .spike },
+            .{ .at = .{ 0.105, 0.02, 0.18 }, .size = .{ 0.055, 0.08, 0.21 }, .color = .{ 0.35, 0.52, 0.66 }, .shape = .spike },
+            .{ .at = .{ 0, 0.025, 0.235 }, .size = .{ 0.13, 0.13, 0.13 }, .color = .{ 0.3, 0.82, 1 }, .glow = 1.1 + heat * 0.6, .shape = .gem },
+            .{ .at = .{ 0, 0.025, 0.32 }, .size = .{ 0.07 + heat * 0.025, 0.07 + heat * 0.025, 0.11 }, .color = .{ 0.78, 0.96, 1 }, .glow = 1.25 + heat, .shape = .gem },
         },
         .sniper_rifle => &.{
             .{ .at = .{ 0, 0.03, 0.1 }, .size = .{ 0.07, 0.12, 0.55 }, .color = gunmetal },
@@ -2096,6 +2148,67 @@ const scalari_scout_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing 
 const scalari_stinger_profile: @import("Profile.zig") = .{ .outfit = 4, .clothing = .hardsuit, .armor = .sentinel, .helmet = .sealed, .accent = 4, .skin = 6, .build = 0.95, .height = 1.05 };
 const scalari_titan_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 4, .skin = 4, .build = 2.7, .height = 4.8 };
 const scalari_hybrid_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing = .exo_rig, .armor = .sentinel, .helmet = .sealed, .accent = 3, .skin = 6, .build = 1.15, .height = 1.2 };
+
+/// Transformer-scale Scalari siege frame assembled from independent armor modules. Its palette
+/// and part selections are shared with the Character Designer's Hive Forge panel.
+fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, at: V, yaw: f32, t: f32, flash: f32, design: EnemyDesign.Design) usize {
+    const palette = EnemyDesign.colors[@intFromEnum(design.palette)];
+    const frame = EnemyDesign.module(.frame, design.frame);
+    const shoulders = EnemyDesign.module(.shoulders, design.shoulders);
+    const arms = EnemyDesign.module(.arms, design.arms);
+    const legs = EnemyDesign.module(.legs, design.legs);
+    const back = EnemyDesign.module(.back_unit, design.back_unit);
+    const head = EnemyDesign.module(.head, design.head);
+    const weapon = EnemyDesign.module(.weapon, design.weapon);
+    const hot = 0.65 + 0.35 * @sin(t * 3.2);
+    const armor = if (flash > 0) [4]f32{ 1.7, 1.3, 1.3, 1 } else palette.armor;
+    const accent_color = if (flash > 0) [4]f32{ 1.7, 1.3, 1.3, 1 } else palette.accent;
+    const orientation = yawQuat(yaw);
+    const scale = frame.scale * 1.2;
+    var n: usize = 0;
+    out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 2.45, 0 }) }, .tint = armor, .size = .{ 2.6 * scale, 2.3, 1.6 }, .rotation = orientation };
+    n += 1;
+    // Heavy armor plates around the shared powered core.
+    out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 3.35, 0.76 }) }, .tint = accent_color, .size = .{ 2.1 * scale, 1.05, 0.18 }, .rotation = orientation };
+    n += 1;
+    out[n] = .{ .mesh = gem_mesh, .transform = .{ .position = R.add(at, .{ 0, 3.45, 0.91 }) }, .tint = Material.emissive(palette.glow, hot), .size = .{ 0.58, 0.7, 0.16 }, .rotation = orientation };
+    n += 1;
+    out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 1.35, 0 }) }, .tint = armor, .size = .{ 1.65 * scale, 0.95, 1.25 }, .rotation = orientation };
+    n += 1;
+    const leg_w: f32 = if (design.legs == 2) 0.82 else 0.57;
+    for ([_]f32{ -1, 1 }) |side| {
+        out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ side * 0.67, 0.55, 0 }) }, .tint = armor, .size = .{ leg_w * legs.scale, 1.1, 1.25 * legs.scale }, .rotation = orientation };
+        n += 1;
+        out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ side * 0.67, 1.35, 0 }) }, .tint = accent_color, .size = .{ 0.68 * legs.scale, 0.64, 0.9 }, .rotation = orientation };
+        n += 1;
+    }
+    const shoulder_w: f32 = if (design.shoulders == 1) 0.95 else if (design.shoulders == 2) 0.78 else 0.68;
+    for ([_]f32{ -1, 1 }) |side| {
+        out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ side * (1.24 + shoulder_w * (shoulders.scale - 1)), 3.85, 0 }) }, .tint = accent_color, .size = .{ shoulder_w * shoulders.scale, 1.05, 1.35 }, .rotation = orientation };
+        n += 1;
+        out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ side * 1.47, 2.7, 0.06 }) }, .tint = armor, .size = .{ 0.53 * arms.scale, 1.25, 0.64 * arms.scale }, .rotation = orientation };
+        n += 1;
+        out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ side * 1.47, 1.95, 0.2 }) }, .tint = accent_color, .size = .{ 0.67 * arms.scale, 0.55 * arms.scale, 0.76 }, .rotation = orientation };
+        n += 1;
+    }
+    out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 3.2, -0.91 }) }, .tint = armor, .size = .{ 1.25 * back.scale, 1.7, 0.5 }, .rotation = orientation };
+    n += 1;
+    const wing = design.back_unit == 1;
+    for ([_]f32{ -1, 1 }) |side| {
+        out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ side * (if (wing) @as(f32, 1.35) else 0.62), 3.25, -1.12 }) }, .tint = accent_color, .size = .{ if (wing) @as(f32, 0.5) else 0.37, if (wing) @as(f32, 1.9) else 0.95, 0.38 }, .rotation = orientation };
+        n += 1;
+    }
+    // Head and sensor crown cap the silhouette; modular variants change its apparent mass.
+    out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 4.75, 0 }) }, .tint = accent_color, .size = .{ 0.85 * head.scale, 1.02 * head.scale, 0.83 }, .rotation = orientation };
+    n += 1;
+    out[n] = .{ .mesh = gem_mesh, .transform = .{ .position = R.add(at, .{ 0, 4.7, 0.46 }) }, .tint = Material.emissive(palette.glow, hot * 1.2), .size = .{ 0.56, 0.2, 0.12 }, .rotation = orientation };
+    n += 1;
+    // Distinct heavy armament gives each frame a recognizable attack silhouette.
+    const weapon_x: f32 = if (design.arms == 2) 1.72 else 1.48;
+    out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ weapon_x, 2.05, 0.82 }) }, .tint = if (design.weapon == 1) palette.glow else accent_color, .size = .{ if (design.weapon == 2) @as(f32, 0.26) else 0.42, if (design.weapon == 2) @as(f32, 1.45) else 0.5, weapon.scale * 1.2 }, .rotation = orientation };
+    n += 1;
+    return n;
+}
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {
     const color = Collectibles.tint(kind);

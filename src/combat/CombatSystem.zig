@@ -13,7 +13,7 @@ pub const MaxSlots = 4;
 
 slots: [MaxSlots]Weapon.WeaponSlot = .{
     .{ .kind = .beam_saber, .element = .solar_lumen, .core = .plasma_edge, .level = 1 },
-    .{ .kind = .blaster, .element = .kinetic, .core = .accelerator, .level = 1 },
+    .{ .kind = .blaster, .element = .solar_lumen, .core = .accelerator, .level = 1 },
     .{ .kind = .energy_bow, .element = .cryo_deuterium, .core = .quantum_warp, .level = 1 },
     .{ .kind = .tracking_missile, .element = .rootsong, .core = .hydra_swarm, .level = 1 },
 },
@@ -76,9 +76,8 @@ pub fn chargeBlaster(self: *CombatSystem, charging: bool) void {
 
 pub fn fireBlaster(self: *CombatSystem, origin: V, dir: V) ?usize {
     const shot = self.blaster.releaseShot(self.slots[1]) orelse return null;
-    const kind: Projectile.ProjectileKind = if (shot.level >= 2) .charged_plasma else .blaster_bolt;
     const spawned = self.projectiles.spawn(
-        kind,
+        .homing_energy_blast,
         origin,
         dir,
         shot.speed,
@@ -87,7 +86,14 @@ pub fn fireBlaster(self: *CombatSystem, origin: V, dir: V) ?usize {
         2.5,
         null,
     );
-    if (spawned) |i| self.projectiles.items[i].radius = shot.size;
+    if (spawned) |i| {
+        const p = &self.projectiles.items[i];
+        p.radius = shot.size;
+        p.splash_radius = 1.4 + @as(f32, @floatFromInt(shot.level)) * 0.75;
+        p.charge_level = shot.level;
+        p.homing_turn_rate = 3.6 + @as(f32, @floatFromInt(shot.level)) * 0.55;
+        p.homing_speed = shot.speed;
+    }
     return spawned;
 }
 
@@ -191,7 +197,7 @@ test "blaster charge levels and projectile firing" {
 
     const shot_idx = combat.fireBlaster(.{ 0, 10, 0 }, .{ 0, 0, 1 });
     try std.testing.expect(shot_idx != null);
-    try std.testing.expectEqual(Projectile.ProjectileKind.charged_plasma, combat.projectiles.items[shot_idx.?].kind);
+    try std.testing.expectEqual(Projectile.ProjectileKind.homing_energy_blast, combat.projectiles.items[shot_idx.?].kind);
 }
 
 test "energy bow draw, warp arrow firing, and teleport warp strike" {

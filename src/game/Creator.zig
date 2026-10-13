@@ -5,6 +5,7 @@ const enum_compat = @import("enum_compat");
 const Profile = @import("Profile.zig");
 const CharacterContent = @import("CharacterContent.zig");
 const Modifiers = @import("../asset/Modifiers.zig");
+const EnemyDesign = @import("EnemyDesign.zig");
 const Creator = @This();
 
 pub const Key = union(enum) { up, down, left, right, enter, escape, backspace, char: u8 };
@@ -42,15 +43,31 @@ imported_palette_variant: u8 = 0,
 imported_status: enum { ready, unsaved, saved } = .ready,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
+/// In-game villain assembly panel; its chosen kit skins transformer-scale Scalari frames.
+enemy_design_open: bool = false,
+enemy_design: EnemyDesign.Design = .{},
+enemy_part: EnemyDesign.Part = .frame,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry, .imported_doc = self.imported_doc, .imported_selected = self.imported_selected, .imported_filter = self.imported_filter, .imported_palette = self.imported_palette, .imported_palette_variant = self.imported_palette_variant, .imported_status = self.imported_status, .imported_rig_status = self.imported_rig_status, .imported_rig_status_len = self.imported_rig_status_len };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry, .imported_doc = self.imported_doc, .imported_selected = self.imported_selected, .imported_filter = self.imported_filter, .imported_palette = self.imported_palette, .imported_palette_variant = self.imported_palette_variant, .imported_status = self.imported_status, .imported_rig_status = self.imported_rig_status, .imported_rig_status_len = self.imported_rig_status_len, .enemy_design = self.enemy_design, .enemy_part = self.enemy_part };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
 
 pub fn key(self: *Creator, k: Key) Result {
     if (!self.open) return .editing;
+    if (self.enemy_design_open) {
+        switch (k) {
+            .up => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + EnemyDesign.part_count - 1) % EnemyDesign.part_count),
+            .down => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + 1) % EnemyDesign.part_count),
+            .left => self.enemy_design.cycle(self.enemy_part, -1),
+            .right => self.enemy_design.cycle(self.enemy_part, 1),
+            .char => |c| if (std.ascii.toLower(c) == 'p') self.enemy_design.cyclePalette(1),
+            .escape, .enter => self.enemy_design_open = false,
+            else => {},
+        }
+        return .editing;
+    }
     if (self.imported_open) {
         switch (k) {
             .up => self.moveImported(-1),

@@ -5,8 +5,8 @@ const GenMesh = @import("../character/mesh.zig").Mesh;
 const Seed = @import("Seed.zig");
 pub const variant_count = 15;
 pub const tree_first = 3;
-pub const tree_count = 7;
-pub const tree_variants = [_]u8{ 3, 4, 5, 6, 11, 12, 13 };
+pub const tree_count = 8;
+pub const tree_variants = [_]u8{ 3, 4, 5, 6, 11, 12, 13, 14 };
 pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow", "redwood", "manzanita", "ember_blossom", "moonbell", "sunspear", "copper_fan", "moon_cascade", "star_blossom", "pine" };
 /// Material base colours, by variant (scatter tints multiply them).
 pub const colors = [variant_count][4]f32{
@@ -18,7 +18,7 @@ pub const colors = [variant_count][4]f32{
 };
 pub const trunk_colors = [tree_count][4]f32{
     .{ 0.24, 0.15, 0.09, 1 }, .{ 0.21, 0.13, 0.08, 1 }, .{ 0.28, 0.19, 0.12, 1 }, .{ 0.76, 0.44, 0.48, 1 },
-    .{ 0.42, 0.23, 0.11, 1 }, .{ 0.27, 0.19, 0.16, 1 }, .{ 0.34, 0.20, 0.28, 1 },
+    .{ 0.42, 0.23, 0.11, 1 }, .{ 0.27, 0.19, 0.16, 1 }, .{ 0.34, 0.20, 0.28, 1 }, .{ 0.29, 0.20, 0.13, 1 },
 };
 pub fn treeIndex(variant: u8) ?u8 {
     for (tree_variants, 0..) |v, i| if (v == variant) return @intCast(i);
@@ -162,8 +162,8 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
     if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, 1200);
-    try out.indices.ensureTotalCapacity(a, 4500);
+    try out.vertices.ensureTotalCapacity(a, 16000);
+    try out.indices.ensureTotalCapacity(a, 100000);
     switch (species) {
         0 => {
             try ellipsoid(a, &out, .{ 0, 0.68, 0 }, .{ 0.36, 0.31, 0.36 }, 12, 20);
@@ -250,8 +250,39 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
             }
             try ellipsoid(a, &out, .{ 0, 0.78, 0 }, .{ 0.12, 0.30, 0.12 }, 12, 20);
         },
+        7 => {
+            // An old-growth pine with a high leader, descending whorls, and gaps between
+            // its branch fans. The foliage shader adds fine needles and natural color breakup.
+            for (0..9) |tier| {
+                const tf: f32 = @floatFromInt(tier);
+                const y = 0.19 + tf * 0.078;
+                const reach = 0.68 * (1 - tf * 0.075);
+                const boughs: usize = if (tier % 2 == 0) 9 else 8;
+                for (0..boughs) |bough| {
+                    const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(bough)) + @as(f32, @floatFromInt(tier % 2)) * 0.46) / @as(f32, @floatFromInt(boughs));
+                    const jitter = 0.91 + Seed.unit(Seed.mix(tier * 131 + bough)) * 0.18;
+                    const root: [3]f32 = .{ @cos(angle) * 0.025, y, @sin(angle) * 0.025 };
+                    const elbow: [3]f32 = .{ @cos(angle) * reach * 0.55 * jitter, y + 0.025, @sin(angle) * reach * 0.55 * jitter };
+                    const tip: [3]f32 = .{ @cos(angle) * reach * jitter, y - 0.09, @sin(angle) * reach * jitter };
+                    try blade(a, &out, root, elbow, 0.045 * (1 - tf * 0.035), angle);
+                    try blade(a, &out, elbow, tip, 0.025, angle);
+                    for (0..3) |spray| {
+                        const t = 0.32 + @as(f32, @floatFromInt(spray)) * 0.22;
+                        const side: f32 = if ((spray + tier) % 2 == 0) 1 else -1;
+                        const at: [3]f32 = .{ elbow[0] + (tip[0] - elbow[0]) * t, elbow[1] + (tip[1] - elbow[1]) * t, elbow[2] + (tip[2] - elbow[2]) * t };
+                        const twig_angle = angle + side * 0.78;
+                        const twig: [3]f32 = .{ at[0] + @cos(twig_angle) * 0.15, at[1] + 0.09, at[2] + @sin(twig_angle) * 0.15 };
+                        try blade(a, &out, at, twig, 0.018, twig_angle);
+                        try ellipsoid(a, &out, .{ twig[0] * 1.08, twig[1] + 0.035, twig[2] * 1.08 }, .{ 0.055, 0.07, 0.055 }, 6, 9);
+                    }
+                }
+            }
+            try ellipsoid(a, &out, .{ 0, 0.60, 0 }, .{ 0.095, 0.28, 0.095 }, 10, 16);
+            try ellipsoid(a, &out, .{ 0, 0.91, 0 }, .{ 0.035, 0.13, 0.035 }, 8, 12);
+        },
         else => unreachable,
     }
+    for (out.vertices.items) |*v| v.uv = .init(-10 - @as(f32, @floatFromInt(species)), 0);
     const mesh = try finish(a, &out);
     out.deinit(a);
     return mesh;
@@ -312,10 +343,16 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
     if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, 24);
-    try out.indices.ensureTotalCapacity(a, 48);
-    const radius = ([_]f32{ 0.035, 0.05, 0.04, 0.058, 0.046, 0.055, 0.043 })[species];
+    try out.vertices.ensureTotalCapacity(a, 96);
+    try out.indices.ensureTotalCapacity(a, 192);
+    const radius = ([_]f32{ 0.035, 0.05, 0.04, 0.058, 0.046, 0.055, 0.043, 0.052 })[species];
     try cone(a, &out, 0, 1, radius);
+    if (species == 3 or species == 7) for (0..9) |i| {
+        const angle = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
+        const reach: f32 = if (species == 3) 0.22 else 0.17;
+        try blade(a, &out, .{ 0, 0.025, 0 }, .{ @cos(angle) * reach, 0.13, @sin(angle) * reach }, 0.065, angle);
+    };
+    for (out.vertices.items) |*v| v.uv = .init(-20 - @as(f32, @floatFromInt(species)), v.pos.y);
     const mesh = try finish(a, &out);
     out.deinit(a);
     return mesh;

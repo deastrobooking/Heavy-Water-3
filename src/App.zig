@@ -814,6 +814,18 @@ fn pointAt(self: *App, click: bool) void {
         },
         .creator_done => if (click) self.creatorInput(.enter),
         .creator_imported => if (click and sb.creator.open) sb.creator.openImported(),
+        .enemy_forge => if (click and sb.creator.open) {
+            sb.creator.enemy_design_open = !sb.creator.enemy_design_open;
+            self.uiSound(.confirm);
+        },
+        .enemy_part => if (click and sb.creator.enemy_design_open) {
+            sb.creator.enemy_part = @enumFromInt(row);
+        },
+        .enemy_left, .enemy_right => if (click and sb.creator.enemy_design_open) {
+            sb.creator.enemy_part = @enumFromInt(row);
+            sb.creator.enemy_design.cycle(sb.creator.enemy_part, if (Screens.hitArea(hit) == .enemy_left) -1 else 1);
+        },
+        .enemy_palette_left, .enemy_palette_right => if (click and sb.creator.enemy_design_open) sb.creator.enemy_design.cyclePalette(if (Screens.hitArea(hit) == .enemy_palette_left) -1 else 1),
         .imported_import_glb => if (click and sb.creator.imported_open) self.chooseAndImportCharacter(),
         .imported_filter => if (click and sb.creator.imported_open) sb.creator.cycleImportedFilter(@as(i32, row) - @as(i32, sb.creator.imported_filter)),
         .imported_part => if (click and sb.creator.imported_doc != null) {
@@ -1370,7 +1382,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1583,8 +1595,8 @@ fn guiShowcase(self: *App, v: u32) void {
         self.engine.input.fast = true;
         self.engine.input.jump = sb.garage.cars[0] != null and sb.garage.cars[0].?.flyer.ride < 4;
     }
-    // 37–40: combat, held every frame: a trooper (or a squad) stays in front of the player.
-    if (v >= 37 and v <= 40 and self.gui_showcase_ready) {
+    // 37–40 and 69: combat art reviews keep a trooper (or a squad) in front of the player.
+    if (((v >= 37 and v <= 40) or v == 69) and self.gui_showcase_ready) {
         const fwd: [3]f32 = .{ @sin(self.engine.camera.yaw), 0, @cos(self.engine.camera.yaw) };
         sb.player.feet = self.showcase_feet;
         const feet = sb.player.feet;
@@ -1606,6 +1618,7 @@ fn guiShowcase(self: *App, v: u32) void {
             37 => .{ .fire = (f / 8) % 2 == 0 },
             38 => .{ .fire = f % 70 < 2 },
             39 => .{ .fire = true },
+            69 => .{ .fire = f % 90 < 66 },
             else => .{},
         };
         if (v == 40) sb.specials.players[0].lance = 2.5;
@@ -1698,11 +1711,12 @@ fn guiShowcase(self: *App, v: u32) void {
             sb.trigger = .{ .fire = v == 34 };
             for (0..5) |k| sb.skies.wasps[k] = .{ .position = R3.add(c, .{ -60 + @as(f32, @floatFromInt(k)) * 20, -25, -90 + @as(f32, @floatFromInt(k)) * 6 }), .forward = .{ -0.5, 0, -0.85 }, .carrier = 0, .state = .attack };
         },
-        37, 38, 39, 40 => {
+        37, 38, 39, 40, 69 => {
             const kind: @import("game/Combat.zig").WeaponKind = switch (v) {
                 37 => .beam_saber,
                 38 => .sniper_rifle,
                 39 => .machine_gun,
+                69 => .blaster,
                 else => .heavy_rifle,
             };
             sb.kits[0].weapons = @as(u16, 1) << @intCast(@intFromEnum(kind));

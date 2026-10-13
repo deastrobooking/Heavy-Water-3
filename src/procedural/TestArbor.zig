@@ -8,6 +8,7 @@ const Mesh = @import("../render/Mesh.zig");
 const Physics = @import("../physics/Physics.zig");
 const R = Physics.Rotation;
 const Vec3 = Physics.Vec3;
+const Vegetation = @import("Vegetation.zig");
 
 pub const height: f32 = 320;
 /// Trunk and tower extend this far below the origin so uneven terrain never shows a gap.
@@ -103,7 +104,7 @@ fn trunkMesh(allocator: std.mem.Allocator) !Mesh {
             vertices[ring * (segments + 1) + i] = .{
                 .position = .{ @cos(a) * r, y, @sin(a) * r },
                 .normal = R.normalize(.{ @cos(a), (base_radius - top_radius) / height, @sin(a) }),
-                .uv = .{ a * r / 4, y / 4 },
+                .uv = .{ -20, y / 4 },
                 .color = .{ bark[0] * ridge, bark[1] * ridge, bark[2] * ridge },
             };
         }
@@ -189,6 +190,18 @@ pub fn renderMesh(allocator: std.mem.Allocator) !Mesh {
         for (m.indices) |i| try indices.append(allocator, base + i);
     }
     for (boxes()) |box| try appendBox(&vertices, &indices, allocator, box);
+    // The enormous trunk needs a crown at its true scale. Keep the same species mesh used by
+    // the scattered redwoods so the two canopy systems share their leaf material treatment.
+    var crown = try Vegetation.tree(allocator, 3);
+    defer crown.deinit(allocator);
+    const crown_base: u32 = @intCast(vertices.items.len);
+    for (crown.vertices) |source| {
+        var v = source;
+        v.position = .{ source.position[0] * 112, source.position[1] * 138 + 195, source.position[2] * 112 };
+        v.color = .{ 0.78, 0.96, 0.76 };
+        try vertices.append(allocator, v);
+    }
+    for (crown.indices) |i| try indices.append(allocator, crown_base + i);
     const v = try allocator.dupe(Mesh.Vertex, vertices.items);
     errdefer allocator.free(v);
     return .{ .vertices = v, .indices = try allocator.dupe(u32, indices.items) };
@@ -209,7 +222,7 @@ pub fn lodMesh(allocator: std.mem.Allocator) !Mesh {
             vertices[ring * (lod_segments + 1) + i] = .{
                 .position = .{ @cos(a) * r, y, @sin(a) * r },
                 .normal = R.normalize(.{ @cos(a), (base_radius - top_radius) / height, @sin(a) }),
-                .uv = .{ a * r / 4, y / 4 },
+                .uv = .{ -20, y / 4 },
                 .color = bark,
             };
         }
