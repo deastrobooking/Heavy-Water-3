@@ -51,7 +51,7 @@ fn blade(a: std.mem.Allocator, out: *GenMesh, root: [3]f32, tip: [3]f32, width: 
 }
 
 /// Round swept wood keeps scaled giant pine branches from reading as oversized grass blades.
-fn twig(a: std.mem.Allocator, out: *GenMesh, start: [3]f32, end: [3]f32, root_radius: f32, tip_radius: f32) !void {
+fn twig(a: std.mem.Allocator, out: *GenMesh, start: [3]f32, end: [3]f32, root_radius: f32, tip_radius: f32, terminal: bool) !void {
     const sides = 6;
     const axis_raw = [3]f32{ end[0] - start[0], end[1] - start[1], end[2] - start[2] };
     const length = @sqrt(axis_raw[0] * axis_raw[0] + axis_raw[1] * axis_raw[1] + axis_raw[2] * axis_raw[2]);
@@ -75,6 +75,15 @@ fn twig(a: std.mem.Allocator, out: *GenMesh, start: [3]f32, end: [3]f32, root_ra
     for (0..sides) |side| {
         const next = (side + 1) % sides;
         try out.addQuad(a, base + @as(u32, @intCast(side)), base + @as(u32, @intCast(next)), base + sides + @as(u32, @intCast(next)), base + sides + @as(u32, @intCast(side)));
+    }
+    if (terminal) {
+        // Finish exposed twig ends with a short taper so their silhouettes do not end as flat cuts.
+        const point: u32 = @intCast(out.vertices.items.len);
+        _ = try vertex(a, out, .{ end[0] + axis[0] * tip_radius * 1.6, end[1] + axis[1] * tip_radius * 1.6, end[2] + axis[2] * tip_radius * 1.6 }, axis);
+        for (0..sides) |side| {
+            const next = (side + 1) % sides;
+            try out.addTri(a, base + sides + @as(u32, @intCast(side)), base + sides + @as(u32, @intCast(next)), point);
+        }
     }
 }
 
@@ -137,14 +146,14 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
                 const root: [3]f32 = .{ @cos(angle) * 0.035, y, @sin(angle) * 0.035 };
                 const elbow: [3]f32 = .{ @cos(angle) * reach * 0.68, y + 0.025, @sin(angle) * reach * 0.68 };
                 const tip: [3]f32 = .{ @cos(angle) * reach, y - 0.105, @sin(angle) * reach };
-                try twig(a, &out, root, elbow, 0.020 * (1 - tf * 0.045), 0.012);
-                try twig(a, &out, elbow, tip, 0.012, 0.003);
+                try twig(a, &out, root, elbow, 0.020 * (1 - tf * 0.045), 0.012, false);
+                try twig(a, &out, elbow, tip, 0.012, 0.003, true);
                 for (0..2) |spray| {
                     const f = 0.42 + @as(f32, @floatFromInt(spray)) * 0.28;
                     const side = if (spray % 2 == 0) @as(f32, 1) else -1;
                     const start = [3]f32{ elbow[0] * (1 - f), elbow[1] - f * 0.12, elbow[2] * (1 - f) };
                     const spray_tip = [3]f32{ start[0] + @cos(angle + side * 0.85) * 0.10, start[1] + 0.055, start[2] + @sin(angle + side * 0.85) * 0.10 };
-                    try twig(a, &out, start, spray_tip, 0.006, 0.002);
+                    try twig(a, &out, start, spray_tip, 0.006, 0.002, true);
                     try ellipsoid(a, &out, .{ spray_tip[0] * 1.04, spray_tip[1] + 0.02, spray_tip[2] * 1.04 }, .{ 0.022, 0.03, 0.022 }, 5, 8);
                 }
             }
@@ -184,14 +193,48 @@ fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: f32, c
         const v = [3]f32{ (dir[1] * u[2] - dir[2] * u[1]) * 0.6, (dir[2] * u[0] - dir[0] * u[2]) * 0.6, (dir[0] * u[1] - dir[1] * u[0]) * 0.6 };
         // Each leaf is a six-point fan with a rounded outline, not a square card.
         const hub = try vertex(a, out, c, dir);
-        var ring: [6]u32 = undefined;
-        for (&ring, 0..) |*index, k| {
-            const t = 2 * std.math.pi * @as(f32, @floatFromInt(k)) / 6;
-            const cs = @cos(t);
-            const sn = @sin(t);
-            index.* = try vertex(a, out, .{ c[0] + u[0] * cs + v[0] * sn, c[1] + u[1] * cs + v[1] * sn, c[2] + u[2] * cs + v[2] * sn }, dir);
+        // A tapered, ovate six-point leaf with distinct base and tip reads as foliage at close
+        // range while small irregular fans still merge into a canopy silhouette at distance.
+        const outline = [_][2]f32{ .{ 0, -0.62 }, .{ 0.55, -0.22 }, .{ 0.42, 0.30 }, .{ 0, 0.88 }, .{ -0.42, 0.30 }, .{ -0.55, -0.22 } };
+        var ring: [outline.len]u32 = undefined;
+        for (&ring, outline) |*index, point| {
+            index.* = try vertex(a, out, .{ c[0] + u[0] * point[0] * size + v[0] * point[1] * size, c[1] + u[1] * point[0] * size + v[1] * point[1] * size, c[2] + u[2] * point[0] * size + v[2] * point[1] * size }, dir);
         }
-        for (0..6) |k| try out.addTri(a, hub, ring[k], ring[(k + 1) % 6]);
+        for (0..ring.len) |k| try out.addTri(a, hub, ring[k], ring[(k + 1) % ring.len]);
+    }
+}
+
+/// Fine, tapered needle triangles grow in small radial sprays from each pine branch tip.
+/// Both faces are emitted because individual needles are thin enough to turn edge-on to view.
+fn needleSprays(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, direction: [3]f32, radius: f32, count: usize, seed: u64) !void {
+    const d_len = @sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+    if (d_len < 1e-5) return;
+    const axis = [3]f32{ direction[0] / d_len, direction[1] / d_len, direction[2] / d_len };
+    const reference: [3]f32 = if (@abs(axis[1]) < 0.92) .{ 0, 1, 0 } else .{ 1, 0, 0 };
+    const cross = cross3(axis, reference);
+    const cross_len = @sqrt(cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]);
+    const u = [3]f32{ cross[0] / cross_len, cross[1] / cross_len, cross[2] / cross_len };
+    const v = cross3(axis, u);
+    for (0..count) |i| {
+        const key = seed *% 313 +% @as(u64, @intCast(i)) *% 17;
+        const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(@max(count, 1))) + Seed.unit(Seed.mix(key)) * 0.18);
+        const radial = [3]f32{ u[0] * @cos(angle) + v[0] * @sin(angle), u[1] * @cos(angle) + v[1] * @sin(angle), u[2] * @cos(angle) + v[2] * @sin(angle) };
+        const needle_dir_raw = [3]f32{ radial[0] * 0.82 + axis[0] * 0.58, radial[1] * 0.82 + axis[1] * 0.58 + 0.12, radial[2] * 0.82 + axis[2] * 0.58 };
+        const needle_len = @sqrt(needle_dir_raw[0] * needle_dir_raw[0] + needle_dir_raw[1] * needle_dir_raw[1] + needle_dir_raw[2] * needle_dir_raw[2]);
+        const needle_dir = [3]f32{ needle_dir_raw[0] / needle_len, needle_dir_raw[1] / needle_len, needle_dir_raw[2] / needle_len };
+        const side_raw = cross3(needle_dir, radial);
+        const side_len = @sqrt(side_raw[0] * side_raw[0] + side_raw[1] * side_raw[1] + side_raw[2] * side_raw[2]);
+        const half_width = radius * (0.018 + 0.008 * Seed.unit(Seed.mix(key + 1)));
+        const base = [3]f32{ center[0] + radial[0] * radius * 0.18, center[1] + radial[1] * radius * 0.18, center[2] + radial[2] * radius * 0.18 };
+        const tip = [3]f32{ base[0] + needle_dir[0] * radius * 0.52, base[1] + needle_dir[1] * radius * 0.52, base[2] + needle_dir[2] * radius * 0.52 };
+        const left = [3]f32{ base[0] - side_raw[0] / side_len * half_width, base[1] - side_raw[1] / side_len * half_width, base[2] - side_raw[2] / side_len * half_width };
+        const right = [3]f32{ base[0] + side_raw[0] / side_len * half_width, base[1] + side_raw[1] / side_len * half_width, base[2] + side_raw[2] / side_len * half_width };
+        const normal = radial;
+        const l = try vertex(a, out, left, normal);
+        const r = try vertex(a, out, right, normal);
+        const t = try vertex(a, out, tip, normal);
+        try out.addTri(a, l, r, t);
+        try out.addTri(a, t, r, l);
     }
 }
 
@@ -257,7 +300,12 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
     const skeleton = try LSystem.generate(a, species);
     defer skeleton.deinit(a);
     for (skeleton.leaves, 0..) |tip, i| {
-        try leafCards(a, &out, tip.position, LSystem.grammars[species].leaf_radius, LSystem.grammars[species].leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
+        const grammar = LSystem.grammars[species];
+        if (grammar.needles) {
+            try needleSprays(a, &out, tip.position, tip.direction, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
+        } else {
+            try leafCards(a, &out, tip.position, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
+        }
     }
     for (out.vertices.items) |*v| v.uv = .init(-10 - @as(f32, @floatFromInt(species)), 0);
     const mesh = try finish(a, &out);
@@ -326,7 +374,7 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
     try bole(a, &out, radius, 8, 6);
     const skeleton = try LSystem.generate(a, species);
     defer skeleton.deinit(a);
-    for (skeleton.branches) |branch| try twig(a, &out, branch.start, branch.end, branch.root_radius, branch.tip_radius);
+    for (skeleton.branches) |branch| try twig(a, &out, branch.start, branch.end, branch.root_radius, branch.tip_radius, branch.terminal);
     for (out.vertices.items) |*v| v.uv = .init(-20 - @as(f32, @floatFromInt(species)), v.pos.y);
     const mesh = try finish(a, &out);
     const bark = trunk_colors[species];

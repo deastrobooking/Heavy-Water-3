@@ -8,6 +8,7 @@ pub const Branch = struct {
     end: [3]f32,
     root_radius: f32,
     tip_radius: f32,
+    terminal: bool,
 };
 
 pub const LeafAnchor = struct {
@@ -26,19 +27,20 @@ pub const Grammar = struct {
     start_height: f32,
     leaf_radius: f32,
     leaves_per_tip: usize,
+    needles: bool = false,
 };
 
 // All grammars use the same symbols and interpreter. Production choices alter crown structure,
 // while the dimensional parameters distinguish deciduous, conifer, drooping, and fan species.
 pub const grammars = [8]Grammar{
     .{ .production = "F[&+F]F[&-F]", .iterations = 4, .turn = 0.62, .base_length = 0.047, .branch_decay = 0.68, .base_radius = 0.016, .starting_pitch = 1.43, .start_height = 0.08, .leaf_radius = 0.016, .leaves_per_tip = 32 },
-    .{ .production = "F[&+F]F", .iterations = 4, .turn = 0.52, .base_length = 0.062, .branch_decay = 0.72, .base_radius = 0.013, .starting_pitch = 1.48, .start_height = 0.08, .leaf_radius = 0.014, .leaves_per_tip = 28 },
+    .{ .production = "F[+&-F][&-F][-&-F]F", .iterations = 3, .turn = 0.62, .base_length = 0.064, .branch_decay = 0.72, .base_radius = 0.014, .starting_pitch = 1.48, .start_height = 0.08, .leaf_radius = 0.014, .leaves_per_tip = 28, .needles = true },
     .{ .production = "F[&-F]F[&+F]", .iterations = 3, .turn = 0.86, .base_length = 0.098, .branch_decay = 0.70, .base_radius = 0.012, .starting_pitch = 1.34, .start_height = 0.14, .leaf_radius = 0.020, .leaves_per_tip = 34 },
     .{ .production = "F[&+F]F", .iterations = 4, .turn = 0.44, .base_length = 0.021, .branch_decay = 0.76, .base_radius = 0.018, .starting_pitch = 1.52, .start_height = 0.62, .leaf_radius = 0.014, .leaves_per_tip = 30 },
     .{ .production = "F[&+F][&-F]F", .iterations = 3, .turn = 0.72, .base_length = 0.090, .branch_decay = 0.66, .base_radius = 0.015, .starting_pitch = 1.43, .start_height = 0.28, .leaf_radius = 0.018, .leaves_per_tip = 32 },
     .{ .production = "F[&-F]F[&-F]", .iterations = 3, .turn = 0.77, .base_length = 0.070, .branch_decay = 0.68, .base_radius = 0.014, .starting_pitch = 1.44, .start_height = 0.34, .leaf_radius = 0.015, .leaves_per_tip = 32 },
     .{ .production = "F[&+F][&-F]F", .iterations = 3, .turn = 0.68, .base_length = 0.085, .branch_decay = 0.67, .base_radius = 0.012, .starting_pitch = 1.41, .start_height = 0.30, .leaf_radius = 0.012, .leaves_per_tip = 34 },
-    .{ .production = "F[&+F]F[&-F]F", .iterations = 3, .turn = 0.55, .base_length = 0.027, .branch_decay = 0.69, .base_radius = 0.013, .starting_pitch = 1.51, .start_height = 0.16, .leaf_radius = 0.014, .leaves_per_tip = 28 },
+    .{ .production = "F[+&-F][&-F][-&-F]F", .iterations = 3, .turn = 0.98, .base_length = 0.11, .branch_decay = 0.77, .base_radius = 0.014, .starting_pitch = 1.48, .start_height = 0.10, .leaf_radius = 0.032, .leaves_per_tip = 48, .needles = true },
 };
 
 pub const Skeleton = struct {
@@ -94,16 +96,19 @@ pub fn generate(allocator: std.mem.Allocator, species: u8) !Skeleton {
             const length = grammar.base_length * branch_scale * variation;
             const horizontal = @cos(state.pitch);
             const direction = [3]f32{ @sin(state.yaw) * horizontal, @sin(state.pitch), @cos(state.yaw) * horizontal };
-            const end = [3]f32{ state.position[0] + direction[0] * length, state.position[1] + direction[1] * length, state.position[2] + direction[2] * length };
+            const start = state.position;
+            const end = [3]f32{ start[0] + direction[0] * length, start[1] + direction[1] * length, start[2] + direction[2] * length };
             const taper = @max(0.28, 1 - state.position[1] * 0.5);
             const root_radius = grammar.base_radius * branch_scale * taper;
-            try branches.append(allocator, .{ .start = state.position, .end = end, .root_radius = root_radius, .tip_radius = root_radius * 0.72 });
-            state.position = end;
             const terminal = i + 1 == symbol_count or current[i + 1] == ']';
+            try branches.append(allocator, .{ .start = start, .end = end, .root_radius = root_radius, .tip_radius = root_radius * 0.72, .terminal = terminal });
+            state.position = end;
             // Carry foliage down the smaller branch tiers as well as out to twig tips. This
             // fills the crown's silhouette without adding a large continuous leaf blob.
             const inner_cluster = state.depth >= 2 and i % 6 == 0;
-            if (terminal or inner_cluster) try leaves.append(allocator, .{ .position = end, .direction = direction });
+            const conifer_bough = grammar.needles and state.depth > 0;
+            if (conifer_bough) try leaves.append(allocator, .{ .position = .{ (start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5, (start[2] + end[2]) * 0.5 }, .direction = direction });
+            if (terminal or inner_cluster or conifer_bough) try leaves.append(allocator, .{ .position = end, .direction = direction });
         },
         '[' => {
             if (stack_len == stack.len) return error.GrammarLimit;

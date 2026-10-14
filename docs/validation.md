@@ -1226,6 +1226,13 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** default `python3 tools/zig.py build check`, ReleaseFast `python3 tools/zig.py build -Doptimize=ReleaseFast` (rebuilt the installed executable), and `git diff --check` passed.
 - **Not checked:** Metal capture/visual inspection, headless tests, gameplay across seeds, Zig 0.17, Linux/Windows, or performance.
 
+## Conifer branch and needle pass — 2026-10-14
+
+- Gave the shared L-system explicit conifer grammars for needleleaf and giant pine. The pine now grows three-direction branch whorls around the trunk, with longer outward boughs and downward secondary growth. Fine radial needle sprays attach along boughs as well as at their tips. Broadleaf leaf fans retain their ovate shape, and exposed branch ends taper rather than stopping flat.
+- Added `-Dshowcase=74` for a fixed-midday close view of the giant pine; showcase 62 now also holds midday light for species comparisons. The close view makes branch and needle tuning repeatable.
+- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=74 -Dcapture-frame=120 -Daudio=false` completed on Apple M3 Pro with Metal API Validation enabled and no reported API errors. The final capture was inspected: pine boughs form a wider, tiered crown and carry needle clusters along their length.
+- **Not checked:** headless tests (not run), gameplay across seeds, triangle/performance benchmarks, Zig 0.17, Linux/Windows compilation or runtime, or hands-on traversal among the trees. The pine crown remains deliberately open enough to read individual bough tiers; branch spread and canopy density need a gameplay-distance review.
+
 ## Imported GLB type visibility, preview, and armor RGB — 2026-10-12
 
 - Added a distinct **IMPORTED GLB** character model choice separate from the bundled Captain. Import selects it immediately, and the in-world Creator avatar is the live preview while editing the imported component document; the panel now identifies preview state and component count. The importer and startup loader continue using the same source-hash-backed generation path and single replaceable saved slot.

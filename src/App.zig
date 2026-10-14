@@ -1514,7 +1514,7 @@ fn showcase(self: *App) void {
         const water = Hydrology.level(self.sandbox.seed, lane, fall_x + 0.02);
         target = .{ fall_x, water - 1.2, fall_z };
         eye = .{ fall_x + 130, water + 105, fall_z - 180 };
-    } else if (v == 71 or v == 72 or v == 73) {
+    } else if (v == 71 or v == 72 or v == 73 or v == 74) {
         // Nature upgrade baselines: sparse floor cover, connected forest silhouettes, and
         // terrain relief at a fixed seed and location. Keep the player grounded at the stage
         // origin so streamed scatter and the camera use the same terrain samples each run.
@@ -1530,9 +1530,12 @@ fn showcase(self: *App) void {
         } else if (v == 72) {
             target = .{ stage[0], ground + 18, stage[2] - 80 };
             eye = .{ stage[0] + 150, ground + 160, stage[2] + 220 };
-        } else {
+        } else if (v == 73) {
             target = .{ stage[0], ground + 10, stage[2] };
             eye = .{ stage[0] + 220, ground + 240, stage[2] + 220 };
+        } else {
+            target = .{ stage[0], ground + 65, stage[2] };
+            eye = .{ stage[0] + 95, ground + 82, stage[2] + 185 };
         }
     } else if (v == 62) {
         const Terrain = @import("procedural/Terrain.zig");
@@ -2804,9 +2807,14 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
     if (options.showcase == 66 or options.showcase == 67) renderer.prop_count = 0;
-    renderer.scene.flora_review = options.showcase == 62;
+    renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74;
+    renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else null;
     renderer.scene.flora_review_seed = self.sandbox.seed;
-    renderer.scene.flora_review_origin = floraReviewOrigin();
+    renderer.scene.flora_review_origin = if (options.showcase == 74) blk: {
+        var origin = floraReviewOrigin();
+        origin[0] -= 280;
+        break :blk origin;
+    } else floraReviewOrigin();
     renderer.scene.space_review = options.showcase == 66;
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
         const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{

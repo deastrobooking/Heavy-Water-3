@@ -67,6 +67,7 @@ center_changes: u64 = 0,
 last_center: ?Key = null,
 /// Deterministic art-review lineup for the giant flora and night pigment pass.
 flora_review: bool = false,
+flora_review_variant: ?u8 = null,
 flora_review_seed: u64 = 0,
 flora_review_origin: [3]f32 = .{ 0, 0, 0 },
 /// Isolated backdrop for orbital vehicle art-review captures.
@@ -255,6 +256,7 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
         }
     }
     if (kind == .vegetation and self.flora_review) if (variant) |v| {
+        if (self.flora_review_variant) |review_variant| if (v != review_variant) return self.instance_count - first;
         if (self.instance_count < self.instances.len) {
             const position = floraReviewPosition(self.flora_review_seed, self.flora_review_origin, v);
             const scale: f32 = if (Vegetation.isRedwood(v)) 150 else if (Vegetation.isTree(v)) 132 else if (v == 7) 2.5 else 2.2;

@@ -1,5 +1,7 @@
 # In-Game Imported Character Editor
 
+Engineering design, defect review and milestone plan for this editor: [mesheditor](mesheditor.md).
+
 ## Product boundary
 
 Keep routine imported-character customization in the game's Character Designer. The offline
