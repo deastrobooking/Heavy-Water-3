@@ -176,6 +176,33 @@ fn ellipsoid(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: [3]f32
         try out.addQuad(a, x, y, y + @as(u32, @intCast(cols)), x + @as(u32, @intCast(cols)));
     };
 }
+/// Stem width at height `t` (0 at the ground, 1 at the crown): a root flare that sinks into the
+/// soil, then a steady taper, so the bole reads as wood rather than a spike.
+fn boleRadius(radius: f32, t: f32) f32 {
+    return radius * (1 - 0.85 * t) + radius * 0.6 * @exp(-t * 14);
+}
+
+/// A tapered, flared bole from the ground to unit height. Rings share one profile, so bark
+/// grain runs up the stem along its height.
+fn bole(a: std.mem.Allocator, out: *GenMesh, radius: f32, sides: usize, rings: usize) !void {
+    const base: u32 = @intCast(out.vertices.items.len);
+    for (0..rings + 1) |r| {
+        const t = @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(rings));
+        const profile = boleRadius(radius, t);
+        for (0..sides) |s| {
+            const angle = 2 * std.math.pi * @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(sides));
+            const n: [3]f32 = .{ @cos(angle), 0, @sin(angle) };
+            _ = try vertex(a, out, .{ n[0] * profile, t, n[2] * profile }, n);
+        }
+    }
+    for (0..rings) |r| for (0..sides) |s| {
+        const next = (s + 1) % sides;
+        const r0 = base + @as(u32, @intCast(r * sides));
+        const r1 = r0 + @as(u32, @intCast(sides));
+        try out.addQuad(a, r0 + @as(u32, @intCast(s)), r0 + @as(u32, @intCast(next)), r1 + @as(u32, @intCast(next)), r1 + @as(u32, @intCast(s)));
+    };
+}
+
 fn cone(a: std.mem.Allocator, out: *GenMesh, base: f32, height: f32, radius: f32) !void {
     const start: u32 = @intCast(out.vertices.items.len);
     const sides = 24;
@@ -378,7 +405,16 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
     try out.vertices.ensureTotalCapacity(a, 96);
     try out.indices.ensureTotalCapacity(a, 192);
     const radius = ([_]f32{ 0.035, 0.05, 0.04, 0.058, 0.046, 0.055, 0.043, 0.052 })[species];
-    try cone(a, &out, 0, 1, radius);
+    try bole(a, &out, radius, 8, 6);
+    // Deciduous species fork into three limbs under the crown; conifers keep a single stem.
+    if (species == 0 or species == 2 or species == 4 or species == 5 or species == 6) for (0..3) |i| {
+        const t = 0.42 + 0.17 * @as(f32, @floatFromInt(i));
+        const angle = @as(f32, @floatFromInt(i)) * 2.1 + @as(f32, @floatFromInt(species)) * 0.7;
+        const root = boleRadius(radius, t);
+        const start: [3]f32 = .{ @cos(angle) * root * 0.6, t, @sin(angle) * root * 0.6 };
+        const end: [3]f32 = .{ @cos(angle) * 0.26, t + 0.14, @sin(angle) * 0.26 };
+        try twig(a, &out, start, end, root * 0.85, root * 0.4);
+    };
     if (species == 3 or species == 7) for (0..9) |i| {
         const angle = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
         const reach: f32 = if (species == 3) 0.22 else 0.17;
@@ -395,23 +431,23 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
 pub fn sapling(a: std.mem.Allocator) !Mesh {
     var crown = try tree(a, 0);
     defer crown.deinit(a);
-    var bole = try trunk(a, 0);
-    defer bole.deinit(a);
+    var stem = try trunk(a, 0);
+    defer stem.deinit(a);
 
-    const vertices = try a.alloc(Mesh.Vertex, crown.vertices.len + bole.vertices.len);
+    const vertices = try a.alloc(Mesh.Vertex, crown.vertices.len + stem.vertices.len);
     errdefer a.free(vertices);
-    const indices = try a.alloc(u32, crown.indices.len + bole.indices.len);
+    const indices = try a.alloc(u32, crown.indices.len + stem.indices.len);
     errdefer a.free(indices);
     for (crown.vertices, 0..) |source, i| {
         vertices[i] = source;
         vertices[i].color = .{ 0.34, 0.68, 0.29 };
     }
-    for (bole.vertices, 0..) |source, i| {
+    for (stem.vertices, 0..) |source, i| {
         vertices[crown.vertices.len + i] = source;
         vertices[crown.vertices.len + i].color = .{ 0.34, 0.20, 0.11 };
     }
     @memcpy(indices[0..crown.indices.len], crown.indices);
-    for (bole.indices, 0..) |index, i| indices[crown.indices.len + i] = @intCast(crown.vertices.len + index);
+    for (stem.indices, 0..) |index, i| indices[crown.indices.len + i] = @intCast(crown.vertices.len + index);
     return .{ .vertices = vertices, .indices = indices };
 }
 

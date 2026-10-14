@@ -143,7 +143,17 @@ pub fn grow(seed: u64, genome: Genome) !Tree {
             const shelf = parent.depth > 0 and random(seed, tree.count + 500) < genome.platform_tendency * 0.3;
             if (shelf) direction[1] *= 0.08;
             if (R.length(direction) < 0.01) continue;
-            const position = R.add(parent.position, R.scale(R.normalize(direction), step));
+            // Branches keep part of their parent's heading, so limbs curve instead of kinking
+            // at every colonization step.
+            var heading = R.normalize(direction);
+            if (parent.depth > 0) {
+                const incoming = R.normalize(R.sub(parent.position, tree.nodes[parent.parent].position));
+                // A step that doubles back on its limb would hook; the attractor is left for a
+                // later step or another branch to reach.
+                if (R.dot(heading, incoming) < 0.25) continue;
+                heading = R.normalize(R.add(R.scale(heading, 0.55), R.scale(incoming, 0.45)));
+            }
+            const position = R.add(parent.position, R.scale(heading, step));
             if (position[1] > genome.height or position[1] < genome.height * 0.25) continue;
             var duplicate = false;
             for (tree.nodes[0..tree.count]) |node| if (R.length(R.sub(position, node.position)) < step * 0.35) {
@@ -249,8 +259,10 @@ pub fn mesh(allocator: std.mem.Allocator, tree: *const Tree, detail: Detail) !Me
     const platforms = if (detail == .proxy) 0 else tree.platform_count;
     const unit = try Mesh.block(allocator);
     defer unit.deinit(allocator);
-    const leaf_vertices = 7 * 12;
-    const leaf_indices = 6 * 12 * 6;
+    // Each branch tip carries three overlapping, rounder clusters instead of one flat pad.
+    const lobes = 3;
+    const leaf_vertices = 7 * 12 * lobes;
+    const leaf_indices = 6 * 12 * 6 * lobes;
     const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + leaves * leaf_vertices);
     errdefer allocator.free(vertices);
     const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + leaves * leaf_indices);
@@ -258,8 +270,14 @@ pub fn mesh(allocator: std.mem.Allocator, tree: *const Tree, detail: Detail) !Me
     for (tree.nodes[1..tree.count], 1..) |node, i| {
         if (detail != .proxy or node.depth < 3) writer.tube(tree.nodes[node.parent].position, node.position, tree.edgeStartRadius(i), node.radius, sides, tree.genome);
         if (detail != .collision and node.depth > 0 and children[i] == 0) {
-            const r = (13 + 10 * (1 - tree.genome.apical_dominance)) * (0.9 + random(tree.seed, i + 700) * 0.2);
-            writer.foliage(node.position, .{ r, r * 0.48, r }, .{ 0.16, 0.34 + random(tree.seed, i) * 0.12, 0.20 }, random(tree.seed, i + 900) * 2 * std.math.pi);
+            const r = (13 + 10 * (1 - tree.genome.apical_dominance)) * (0.9 + random(tree.seed, i + 700) * 0.2) * 0.62;
+            for (0..lobes) |lobe| {
+                const angle = (random(tree.seed, i + 1100) + @as(f32, @floatFromInt(lobe)) / lobes) * 2 * std.math.pi;
+                const size = r * (0.8 + 0.4 * random(tree.seed, i * 3 + lobe + 1300));
+                const offset: V = .{ @cos(angle) * r * 0.7, r * 0.25 * @as(f32, @floatFromInt(lobe)) - r * 0.1, @sin(angle) * r * 0.7 };
+                const shade = random(tree.seed, i) * 0.12 + 0.03 * @as(f32, @floatFromInt(lobe));
+                writer.foliage(R.add(node.position, offset), .{ size, size * 0.72, size }, .{ 0.16, 0.30 + shade, 0.20 }, random(tree.seed, i + 900) * 2 * std.math.pi + @as(f32, @floatFromInt(lobe)));
+            }
         }
     }
     for (tree.platforms[0..platforms]) |p| writer.box(unit, p.center, p.half, .{ 0.38, 0.48, 0.26 });

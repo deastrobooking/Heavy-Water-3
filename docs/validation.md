@@ -2,6 +2,10 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Arbor branching and flora trunks — 2026-10-13
+
+Arbor limbs now keep 45% of their parent's heading and reject steps that turn more than about 75 degrees back on their limb, so branches curve instead of zig-zagging and hooking. Each branch tip carries three rounder foliage lobes instead of one flat pad. Flora trunks are a tapered, flared bole, and the deciduous species fork into three limbs under the crown. Checked: `build check`, the headless suite (419 of 423 pass; the same four failures occur on HEAD: Catalog deferred meshes, Save round-trip, Creator draft, Screens layout), the Metal smoke run (clean), and captures of showcases 62 and 70 at frame 480. Captures at frame 120 can show a blank scene because changed meshes load late, so use a later frame. Not done: one large looping limb remained in showcase 70; a rounded-leaf crown for the broadleaf rendered blank even at frame 480 and was left out; no Linux or Windows check. Arbor trees grow differently, so tap and graft positions saved against the old node layout may not line up; `Arbor.generator_version` was not bumped, which needs a decision.
+
 ## Launch from outside the checkout — 2026-10-12
 
 - Startup now checks for the game marker in the current directory and then walks upward from the executable's resolved path. Once found, it sets the process working directory to the checkout so all existing relative asset, mod and save paths stay consistent.
