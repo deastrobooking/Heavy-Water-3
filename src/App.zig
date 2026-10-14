@@ -1514,7 +1514,7 @@ fn showcase(self: *App) void {
         const water = Hydrology.level(self.sandbox.seed, lane, fall_x + 0.02);
         target = .{ fall_x, water - 1.2, fall_z };
         eye = .{ fall_x + 130, water + 105, fall_z - 180 };
-    } else if (v == 71 or v == 72 or v == 73 or v == 74) {
+    } else if (v == 71 or v == 72 or v == 73 or v == 74 or v == 75) {
         // Nature upgrade baselines: sparse floor cover, connected forest silhouettes, and
         // terrain relief at a fixed seed and location. Keep the player grounded at the stage
         // origin so streamed scatter and the camera use the same terrain samples each run.
@@ -2807,12 +2807,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
     if (options.showcase == 66 or options.showcase == 67) renderer.prop_count = 0;
-    renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74;
-    renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else null;
+    renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74 or options.showcase == 75;
+    renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else if (options.showcase == 75) 12 else null;
     renderer.scene.flora_review_seed = self.sandbox.seed;
-    renderer.scene.flora_review_origin = if (options.showcase == 74) blk: {
+    renderer.scene.flora_review_origin = if (options.showcase == 74 or options.showcase == 75) blk: {
         var origin = floraReviewOrigin();
-        origin[0] -= 280;
+        origin[0] -= if (options.showcase == 74) 280 else 140;
         break :blk origin;
     } else floraReviewOrigin();
     renderer.scene.space_review = options.showcase == 66;

@@ -501,7 +501,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const elapsed = self.timer.lap();
     self.frame_ms = if (self.frames == 0) elapsed * 1000 else self.frame_ms * 0.95 + elapsed * 50;
     // Unattended smoke covers a complete lighting cycle, independent of presentation speed.
-    const sky_time = if (options.showcase == 62 or options.showcase == 74)
+    const sky_time = if (options.showcase == 62 or options.showcase == 74 or options.showcase == 75)
         0.5
     else if (options.smoke_frames > 0 and options.benchmark_frames == 0)
         @as(f32, @floatFromInt(self.frames)) / @as(f32, @floatFromInt(options.smoke_frames))

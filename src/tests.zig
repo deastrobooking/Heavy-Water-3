@@ -49,6 +49,8 @@ test {
     _ = @import("world/Streamer.zig");
     _ = @import("procedural/Biome.zig");
     _ = @import("procedural/Scatter.zig");
+    _ = @import("procedural/LSystem.zig");
+    _ = @import("procedural/Vegetation.zig");
     _ = @import("engine/FrameStats.zig");
     _ = @import("engine/Flythrough.zig");
     _ = @import("engine/Handle.zig");

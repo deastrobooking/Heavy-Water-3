@@ -174,7 +174,16 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
 }
 /// Scattered leaf cards around `center`, each facing outward, so a crown has a ragged edge and
 /// light and wood show between the leaves. Counter-clockwise corners match the outward normal.
-fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: f32, count: usize, seed: u64) !void {
+fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, direction: [3]f32, radius: f32, count: usize, seed: u64, form: LSystem.LeafForm) !void {
+    const outline: [8][2]f32 = switch (form) {
+        .ovate => .{ .{ 0, -0.62 }, .{ 0.38, -0.48 }, .{ 0.58, -0.08 }, .{ 0.48, 0.35 }, .{ 0.22, 0.72 }, .{ 0, 0.92 }, .{ -0.22, 0.72 }, .{ -0.48, 0.35 } },
+        .lanceolate => .{ .{ 0, -0.75 }, .{ 0.22, -0.42 }, .{ 0.28, -0.02 }, .{ 0.20, 0.38 }, .{ 0.08, 0.76 }, .{ 0, 1.0 }, .{ -0.08, 0.76 }, .{ -0.20, 0.38 } },
+        .scale => .{ .{ 0, -0.5 }, .{ 0.40, -0.34 }, .{ 0.62, -0.02 }, .{ 0.50, 0.30 }, .{ 0.20, 0.48 }, .{ 0, 0.54 }, .{ -0.20, 0.48 }, .{ -0.50, 0.30 } },
+        .fan => .{ .{ 0, -0.38 }, .{ 0.48, -0.34 }, .{ 0.82, -0.08 }, .{ 0.92, 0.24 }, .{ 0.68, 0.58 }, .{ 0, 0.72 }, .{ -0.68, 0.58 }, .{ -0.92, 0.24 } },
+        .cascade => .{ .{ 0, -0.82 }, .{ 0.30, -0.56 }, .{ 0.38, -0.08 }, .{ 0.28, 0.38 }, .{ 0.12, 0.78 }, .{ 0, 1.0 }, .{ -0.12, 0.78 }, .{ -0.28, 0.38 } },
+        .blossom => .{ .{ 0, -0.56 }, .{ 0.30, -0.42 }, .{ 0.32, -0.10 }, .{ 0.76, 0.06 }, .{ 0.40, 0.34 }, .{ 0.32, 0.72 }, .{ 0, 0.48 }, .{ -0.32, 0.72 } },
+    };
+    const size_scale: f32 = switch (form) { .scale => 0.90, .fan => 1.18, .cascade => 1.10, .blossom => 0.82, else => 1.0 };
     for (0..count) |i| {
         const key = seed *% 1000 +% @as(u64, @intCast(i)) *% 7;
         const angle = Seed.unit(Seed.mix(key)) * 2 * std.math.pi;
@@ -185,20 +194,24 @@ fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: f32, c
         const c = [3]f32{ center[0] + dir[0] * reach, center[1] + dir[1] * reach, center[2] + dir[2] * reach };
         // Leaf width follows tree height, while this radius controls only the twig-tip cluster.
         // Tying both to one value made sparse leaves scatter several metres apart on giant trees.
-        const size = 0.0046 + 0.0014 * Seed.unit(Seed.mix(key + 3));
-        const reference: [3]f32 = if (@abs(dir[1]) < 0.9) .{ 0, 1, 0 } else .{ 1, 0, 0 };
-        const cu = cross3(dir, reference);
-        const cu_length = @sqrt(cu[0] * cu[0] + cu[1] * cu[1] + cu[2] * cu[2]);
-        const u = [3]f32{ cu[0] / cu_length * size, cu[1] / cu_length * size, cu[2] / cu_length * size };
-        const v = [3]f32{ (dir[1] * u[2] - dir[2] * u[1]) * 0.6, (dir[2] * u[0] - dir[0] * u[2]) * 0.6, (dir[0] * u[1] - dir[1] * u[0]) * 0.6 };
-        // Each leaf is a six-point fan with a rounded outline, not a square card.
-        const hub = try vertex(a, out, c, dir);
-        // A tapered, ovate six-point leaf with distinct base and tip reads as foliage at close
-        // range while small irregular fans still merge into a canopy silhouette at distance.
-        const outline = [_][2]f32{ .{ 0, -0.62 }, .{ 0.55, -0.22 }, .{ 0.42, 0.30 }, .{ 0, 0.88 }, .{ -0.42, 0.30 }, .{ -0.55, -0.22 } };
+        const size = (0.0046 + 0.0014 * Seed.unit(Seed.mix(key + 3))) * size_scale;
+        const axis_length = @sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+        const axis = if (axis_length > 1e-5) [3]f32{ direction[0] / axis_length, direction[1] / axis_length, direction[2] / axis_length } else [3]f32{ 0, 1, 0 };
+        // A leaf's blade follows its twig. Pick an outward-facing plane around that axis; using
+        // the twig tangent as the face normal made upright species read as edge-on green shelves.
+        const face_hint = [3]f32{ @cos(angle), 0.25, @sin(angle) };
+        const side_raw = cross3(face_hint, axis);
+        const side_length = @sqrt(side_raw[0] * side_raw[0] + side_raw[1] * side_raw[1] + side_raw[2] * side_raw[2]);
+        if (side_length < 1e-5) continue;
+        const u = [3]f32{ side_raw[0] / side_length * size, side_raw[1] / side_length * size, side_raw[2] / side_length * size };
+        const v = [3]f32{ axis[0] * size * 0.6, axis[1] * size * 0.6, axis[2] * size * 0.6 };
+        const normal_raw = cross3(u, v);
+        const normal_length = @sqrt(normal_raw[0] * normal_raw[0] + normal_raw[1] * normal_raw[1] + normal_raw[2] * normal_raw[2]);
+        const normal = [3]f32{ normal_raw[0] / normal_length, normal_raw[1] / normal_length, normal_raw[2] / normal_length };
+        const hub = try vertex(a, out, c, normal);
         var ring: [outline.len]u32 = undefined;
         for (&ring, outline) |*index, point| {
-            index.* = try vertex(a, out, .{ c[0] + u[0] * point[0] * size + v[0] * point[1] * size, c[1] + u[1] * point[0] * size + v[1] * point[1] * size, c[2] + u[2] * point[0] * size + v[2] * point[1] * size }, dir);
+            index.* = try vertex(a, out, .{ c[0] + u[0] * point[0] + v[0] * point[1], c[1] + u[1] * point[0] + v[1] * point[1], c[2] + u[2] * point[0] + v[2] * point[1] }, normal);
         }
         for (0..ring.len) |k| try out.addTri(a, hub, ring[k], ring[(k + 1) % ring.len]);
     }
@@ -224,17 +237,22 @@ fn needleSprays(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, direction: 
         const needle_dir = [3]f32{ needle_dir_raw[0] / needle_len, needle_dir_raw[1] / needle_len, needle_dir_raw[2] / needle_len };
         const side_raw = cross3(needle_dir, radial);
         const side_len = @sqrt(side_raw[0] * side_raw[0] + side_raw[1] * side_raw[1] + side_raw[2] * side_raw[2]);
-        const half_width = radius * (0.018 + 0.008 * Seed.unit(Seed.mix(key + 1)));
+        if (side_len < 1e-5) continue;
+        const side = [3]f32{ side_raw[0] / side_len, side_raw[1] / side_len, side_raw[2] / side_len };
+        const half_width = radius * (0.026 + 0.008 * Seed.unit(Seed.mix(key + 1)));
         const base = [3]f32{ center[0] + radial[0] * radius * 0.18, center[1] + radial[1] * radius * 0.18, center[2] + radial[2] * radius * 0.18 };
         const tip = [3]f32{ base[0] + needle_dir[0] * radius * 0.52, base[1] + needle_dir[1] * radius * 0.52, base[2] + needle_dir[2] * radius * 0.52 };
-        const left = [3]f32{ base[0] - side_raw[0] / side_len * half_width, base[1] - side_raw[1] / side_len * half_width, base[2] - side_raw[2] / side_len * half_width };
-        const right = [3]f32{ base[0] + side_raw[0] / side_len * half_width, base[1] + side_raw[1] / side_len * half_width, base[2] + side_raw[2] / side_len * half_width };
-        const normal = radial;
-        const l = try vertex(a, out, left, normal);
-        const r = try vertex(a, out, right, normal);
-        const t = try vertex(a, out, tip, normal);
-        try out.addTri(a, l, r, t);
-        try out.addTri(a, t, r, l);
+        const cross_side = cross3(needle_dir, side);
+        for ([2][3]f32{ side, cross_side }) |blade_side| {
+            const left = [3]f32{ base[0] - blade_side[0] * half_width, base[1] - blade_side[1] * half_width, base[2] - blade_side[2] * half_width };
+            const right = [3]f32{ base[0] + blade_side[0] * half_width, base[1] + blade_side[1] * half_width, base[2] + blade_side[2] * half_width };
+            const normal = cross3(blade_side, needle_dir);
+            const l = try vertex(a, out, left, normal);
+            const r = try vertex(a, out, right, normal);
+            const t = try vertex(a, out, tip, normal);
+            try out.addTri(a, l, r, t);
+            try out.addTri(a, t, r, l);
+        }
     }
 }
 
@@ -258,25 +276,59 @@ fn boleRadius(radius: f32, t: f32) f32 {
     return radius * (1 - 0.85 * t) + radius * 0.6 * @exp(-t * 14);
 }
 
-/// A tapered, flared bole from the ground to unit height. Rings share one profile, so bark
-/// grain runs up the stem along its height.
-fn bole(a: std.mem.Allocator, out: *GenMesh, radius: f32, sides: usize, rings: usize) !void {
-    const base: u32 = @intCast(out.vertices.items.len);
-    for (0..rings + 1) |r| {
-        const t = @as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(rings));
-        const profile = boleRadius(radius, t);
-        for (0..sides) |s| {
-            const angle = 2 * std.math.pi * @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(sides));
-            const n: [3]f32 = .{ @cos(angle), 0, @sin(angle) };
-            _ = try vertex(a, out, .{ n[0] * profile, t, n[2] * profile }, n);
-        }
+const StemNode = struct { position: [3]f32, radius: f32 };
+
+fn mainStem(a: std.mem.Allocator, out: *GenMesh, branches: []const LSystem.Branch, radius: f32, start_height: f32) !void {
+    var axis: std.ArrayList(StemNode) = .empty;
+    defer axis.deinit(a);
+    for ([_]f32{ 0, 0.12, 0.30, 0.52, 0.76 }) |fraction| {
+        const y = start_height * fraction;
+        try axis.append(a, .{ .position = .{ 0, y, 0 }, .radius = boleRadius(radius, y) });
     }
-    for (0..rings) |r| for (0..sides) |s| {
-        const next = (s + 1) % sides;
-        const r0 = base + @as(u32, @intCast(r * sides));
-        const r1 = r0 + @as(u32, @intCast(sides));
-        try out.addQuad(a, r0 + @as(u32, @intCast(s)), r0 + @as(u32, @intCast(next)), r1 + @as(u32, @intCast(next)), r1 + @as(u32, @intCast(s)));
-    };
+    for (branches) |branch| {
+        if (branch.depth != 0) continue;
+        if (axis.items.len == 5) try axis.append(a, .{ .position = branch.start, .radius = @max(branch.root_radius, boleRadius(radius, branch.start[1])) });
+        try axis.append(a, .{ .position = branch.end, .radius = @max(branch.tip_radius, boleRadius(radius, branch.end[1])) });
+    }
+    if (axis.items.len < 7) return error.EmptyTreeStem;
+
+    const sides = 10;
+    const base: u32 = @intCast(out.vertices.items.len);
+    var previous_u: [3]f32 = undefined;
+    var last_tangent: [3]f32 = undefined;
+    for (axis.items, 0..) |node, i| {
+        const before = axis.items[if (i == 0) 0 else i - 1].position;
+        const after = axis.items[if (i + 1 == axis.items.len) i else i + 1].position;
+        const delta = [3]f32{ after[0] - before[0], after[1] - before[1], after[2] - before[2] };
+        const delta_length = @sqrt(delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]);
+        if (delta_length < 1e-5) return error.InvalidTreeStem;
+        const tangent = [3]f32{ delta[0] / delta_length, delta[1] / delta_length, delta[2] / delta_length };
+        const projected = if (i == 0) cross3(tangent, .{ 1, 0, 0 }) else blk: {
+            const along = previous_u[0] * tangent[0] + previous_u[1] * tangent[1] + previous_u[2] * tangent[2];
+            break :blk [3]f32{ previous_u[0] - tangent[0] * along, previous_u[1] - tangent[1] * along, previous_u[2] - tangent[2] * along };
+        };
+        const projected_length = @sqrt(projected[0] * projected[0] + projected[1] * projected[1] + projected[2] * projected[2]);
+        if (projected_length < 1e-5) return error.InvalidTreeStem;
+        const u = [3]f32{ projected[0] / projected_length, projected[1] / projected_length, projected[2] / projected_length };
+        const v = cross3(tangent, u);
+        previous_u = u;
+        last_tangent = tangent;
+        for (0..sides) |side| {
+            const angle = 2 * std.math.pi * @as(f32, @floatFromInt(side)) / sides;
+            const normal = [3]f32{ u[0] * @cos(angle) + v[0] * @sin(angle), u[1] * @cos(angle) + v[1] * @sin(angle), u[2] * @cos(angle) + v[2] * @sin(angle) };
+            const root_lobe = 1 + 0.12 * @exp(-node.position[1] * 18) * @sin(angle * 4) * @sin(angle * 4);
+            _ = try vertex(a, out, .{ node.position[0] + normal[0] * node.radius * root_lobe, node.position[1] + normal[1] * node.radius * root_lobe, node.position[2] + normal[2] * node.radius * root_lobe }, normal);
+        }
+        if (i > 0) for (0..sides) |side| {
+            const next = (side + 1) % sides;
+            const ring = base + @as(u32, @intCast((i - 1) * sides));
+            try out.addQuad(a, ring + @as(u32, @intCast(side)), ring + @as(u32, @intCast(next)), ring + sides + @as(u32, @intCast(next)), ring + sides + @as(u32, @intCast(side)));
+        };
+    }
+    const end = axis.items[axis.items.len - 1];
+    const point = try vertex(a, out, .{ end.position[0] + last_tangent[0] * end.radius * 1.6, end.position[1] + last_tangent[1] * end.radius * 1.6, end.position[2] + last_tangent[2] * end.radius * 1.6 }, last_tangent);
+    const ring = base + @as(u32, @intCast((axis.items.len - 1) * sides));
+    for (0..sides) |side| try out.addTri(a, ring + @as(u32, @intCast(side)), ring + @as(u32, @intCast((side + 1) % sides)), point);
 }
 
 fn cone(a: std.mem.Allocator, out: *GenMesh, base: f32, height: f32, radius: f32) !void {
@@ -304,7 +356,7 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
         if (grammar.needles) {
             try needleSprays(a, &out, tip.position, tip.direction, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
         } else {
-            try leafCards(a, &out, tip.position, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
+            try leafCards(a, &out, tip.position, tip.direction, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)), grammar.leaf_form);
         }
     }
     for (out.vertices.items) |*v| v.uv = .init(-10 - @as(f32, @floatFromInt(species)), 0);
@@ -371,10 +423,13 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
     try out.vertices.ensureTotalCapacity(a, 8192);
     try out.indices.ensureTotalCapacity(a, 16384);
     const radius = ([_]f32{ 0.035, 0.05, 0.04, 0.058, 0.046, 0.055, 0.043, 0.052 })[species];
-    try bole(a, &out, radius, 8, 6);
+    const grammar = LSystem.grammars[species];
     const skeleton = try LSystem.generate(a, species);
     defer skeleton.deinit(a);
-    for (skeleton.branches) |branch| try twig(a, &out, branch.start, branch.end, branch.root_radius, branch.tip_radius, branch.terminal);
+    try mainStem(a, &out, skeleton.branches, radius, grammar.start_height);
+    for (skeleton.branches) |branch| {
+        if (branch.depth > 0) try twig(a, &out, branch.start, branch.end, branch.root_radius, branch.tip_radius, branch.terminal);
+    }
     for (out.vertices.items) |*v| v.uv = .init(-20 - @as(f32, @floatFromInt(species)), v.pos.y);
     const mesh = try finish(a, &out);
     const bark = trunk_colors[species];
@@ -447,6 +502,23 @@ test "tree meshes are finite, bounded and index in range" {
             for (v.position) |f| try std.testing.expect(@abs(f) < 3);
         }
         for (m.indices) |i| try std.testing.expect(i < m.vertices.len);
+        try std.testing.expect(m.indices.len % 3 == 0);
+    }
+}
+
+test "tree trunks reach the crown with finite connected stem geometry" {
+    const a = std.testing.allocator;
+    for (0..tree_count) |species| {
+        const m = try trunk(a, @intCast(species));
+        defer m.deinit(a);
+        var highest: f32 = 0;
+        for (m.vertices) |v| {
+            highest = @max(highest, v.position[1]);
+            for (v.position ++ v.normal) |f| try std.testing.expect(std.math.isFinite(f));
+            for (v.position) |f| try std.testing.expect(@abs(f) < 3);
+        }
+        try std.testing.expect(highest > 0.90);
+        for (m.indices) |index| try std.testing.expect(index < m.vertices.len);
         try std.testing.expect(m.indices.len % 3 == 0);
     }
 }
