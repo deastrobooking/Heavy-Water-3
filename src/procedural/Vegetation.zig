@@ -162,6 +162,36 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     out.deinit(a);
     return mesh;
 }
+/// Scattered leaf cards around `center`, each facing outward, so a crown has a ragged edge and
+/// light and wood show between the leaves. Counter-clockwise corners match the outward normal.
+fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: f32, count: usize, seed: u64) !void {
+    for (0..count) |i| {
+        const key = seed *% 1000 +% @as(u64, @intCast(i)) *% 7;
+        const angle = Seed.unit(Seed.mix(key)) * 2 * std.math.pi;
+        const lift = Seed.unit(Seed.mix(key + 1)) * 2 - 1;
+        const band = @sqrt(1 - lift * lift);
+        const dir = [3]f32{ @cos(angle) * band, lift, @sin(angle) * band };
+        const reach = radius * (0.7 + 0.3 * Seed.unit(Seed.mix(key + 2)));
+        const c = [3]f32{ center[0] + dir[0] * reach, center[1] + dir[1] * reach, center[2] + dir[2] * reach };
+        const size = radius * (0.12 + 0.07 * Seed.unit(Seed.mix(key + 3)));
+        const reference: [3]f32 = if (@abs(dir[1]) < 0.9) .{ 0, 1, 0 } else .{ 1, 0, 0 };
+        const cu = cross3(dir, reference);
+        const cu_length = @sqrt(cu[0] * cu[0] + cu[1] * cu[1] + cu[2] * cu[2]);
+        const u = [3]f32{ cu[0] / cu_length * size, cu[1] / cu_length * size, cu[2] / cu_length * size };
+        const v = [3]f32{ (dir[1] * u[2] - dir[2] * u[1]) * 0.6, (dir[2] * u[0] - dir[0] * u[2]) * 0.6, (dir[0] * u[1] - dir[1] * u[0]) * 0.6 };
+        // Each leaf is a six-point fan with a rounded outline, not a square card.
+        const hub = try vertex(a, out, c, dir);
+        var ring: [6]u32 = undefined;
+        for (&ring, 0..) |*index, k| {
+            const t = 2 * std.math.pi * @as(f32, @floatFromInt(k)) / 6;
+            const cs = @cos(t);
+            const sn = @sin(t);
+            index.* = try vertex(a, out, .{ c[0] + u[0] * cs + v[0] * sn, c[1] + u[1] * cs + v[1] * sn, c[2] + u[2] * cs + v[2] * sn }, dir);
+        }
+        for (0..6) |k| try out.addTri(a, hub, ring[k], ring[(k + 1) % 6]);
+    }
+}
+
 fn ellipsoid(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: [3]f32, rows: usize, cols: usize) !void {
     const start: u32 = @intCast(out.vertices.items.len);
     for (0..rows + 1) |r| for (0..cols) |c| {
@@ -225,9 +255,11 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
     try out.indices.ensureTotalCapacity(a, 100000);
     switch (species) {
         0 => {
-            try ellipsoid(a, &out, .{ 0, 0.68, 0 }, .{ 0.36, 0.31, 0.36 }, 12, 20);
-            try ellipsoid(a, &out, .{ 0.23, 0.72, 0.02 }, .{ 0.24, 0.22, 0.25 }, 12, 20);
-            try ellipsoid(a, &out, .{ -0.23, 0.68, -0.04 }, .{ 0.24, 0.22, 0.24 }, 12, 20);
+            // Broadleaf crown: loose leaf cards in three uneven clumps, so the outline is ragged
+            // and the crown reads as foliage rather than a smooth balloon.
+            try leafCards(a, &out, .{ 0, 0.68, 0 }, 0.36, 220, 1);
+            try leafCards(a, &out, .{ 0.23, 0.72, 0.02 }, 0.24, 120, 2);
+            try leafCards(a, &out, .{ -0.23, 0.68, -0.04 }, 0.24, 120, 3);
         },
         1 => {
             try cone(a, &out, 0.28, 0.7, 0.38);
@@ -478,4 +510,18 @@ test "boulders are closed faceted stones with outward flat normals, sunk into th
         try std.testing.expect(lowest < 0 and highest > 0.4);
     }
     try std.testing.expectError(error.InvalidBoulder, boulder(a, boulder_count));
+}
+
+test "tree meshes are finite, bounded and index in range" {
+    const a = std.testing.allocator;
+    for (0..tree_count) |species| {
+        const m = try tree(a, @intCast(species));
+        defer m.deinit(a);
+        for (m.vertices) |v| {
+            for (v.position ++ v.normal) |f| try std.testing.expect(std.math.isFinite(f));
+            for (v.position) |f| try std.testing.expect(@abs(f) < 3);
+        }
+        for (m.indices) |i| try std.testing.expect(i < m.vertices.len);
+        try std.testing.expect(m.indices.len % 3 == 0);
+    }
 }

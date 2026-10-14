@@ -175,6 +175,10 @@ The terrain, rivers and plants get their own shading stages over the cel shader,
 
 Acceptance: tests for ground cover and footing, the river surface, boulder meshes and placement, runner speed and stopping on each ground, the wade-to-swim transition, and ground-voiced footsteps; a clean Metal-validated smoke; captures `-Dshowcase=36` (river and waterfall), `41` (a range from the foothills) and `48` (meadow).
 
+Nature review cameras are also available: `-Dshowcase=71` ground cover at player height, `72` forest silhouettes from mid-distance, and `73` a dusk terrain overview. These are fixed-seed visual baselines for the [nature upgrade plan](plans/nature-upgrade.md); they do not replace its benchmark or regression-test gates.
+
+Detailed upgrade plan for terrain, ground cover, grass and trees: [nature upgrade](plans/nature-upgrade.md).
+
 Next:
 - footprints and wakes;
 - shoreline wetness and reeds;

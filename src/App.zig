@@ -138,6 +138,8 @@ showcase_frame: u32 = 0,
 /// Where a combat showcase holds the player (saber lunges would carry them off).
 showcase_feet: [3]f32 = @splat(0),
 gui_showcase_ready: bool = false,
+/// The camera a fixed-view showcase set this frame, re-applied after the simulation steps.
+showcase_pose: ?struct { eye: [3]f32, yaw: f32, pitch: f32 } = null,
 settings_dirty: bool = false,
 /// Sound output; null when disabled (`-Daudio=false`), benchmarking, or without a device.
 audio: ?*Audio = null,
@@ -1228,6 +1230,13 @@ pub fn update(self: *App, core: *mach.Core) void {
         self.engine.input.clearEdges();
         self.pads.consume();
     }
+    // Every sim step moves the camera to the player's eye; a fixed showcase view must survive
+    // that, or a capture depends on whether its frame happened to step the simulation.
+    if (options.showcase > 0) if (self.showcase_pose) |pose| {
+        self.engine.camera.position = mach.math.vec3(pose.eye[0], pose.eye[1], pose.eye[2]);
+        self.engine.camera.yaw = pose.yaw;
+        self.engine.camera.pitch = pose.pitch;
+    };
     if (self.audio) |a| {
         const snap = Audio.Director.snapshot(&self.sandbox, self.engine.camera, paused);
         a.director.update(a, snap);
@@ -1505,6 +1514,25 @@ fn showcase(self: *App) void {
         const water = Hydrology.level(self.sandbox.seed, lane, fall_x + 0.02);
         target = .{ fall_x, water - 1.2, fall_z };
         eye = .{ fall_x + 130, water + 105, fall_z - 180 };
+    } else if (v == 71 or v == 72 or v == 73) {
+        // Nature upgrade baselines: sparse floor cover, connected forest silhouettes, and
+        // terrain relief at a fixed seed and location. Keep the player grounded at the stage
+        // origin so streamed scatter and the camera use the same terrain samples each run.
+        const Terrain = @import("procedural/Terrain.zig");
+        const stage = floraReviewOrigin();
+        const ground = Terrain.surface(self.sandbox.seed, stage[0], stage[2]).height;
+        self.sandbox.player.feet = .{ stage[0], ground, stage[2] };
+        self.sandbox.player.velocity = @splat(0);
+        if (v == 71) {
+            target = .{ stage[0], ground + 0.35, stage[2] - 30 };
+            eye = .{ stage[0] + 1.5, ground + 1.7, stage[2] + 2.5 };
+        } else if (v == 72) {
+            target = .{ stage[0], ground + 55, stage[2] - 150 };
+            eye = .{ stage[0] + 12, ground + 67, stage[2] + 150 };
+        } else {
+            target = .{ stage[0], ground + 8, stage[2] - 100 };
+            eye = .{ stage[0] + 360, ground + 300, stage[2] + 420 };
+        }
     } else if (v == 62) {
         const Terrain = @import("procedural/Terrain.zig");
         const stage = floraReviewOrigin();
@@ -1565,13 +1593,14 @@ fn showcase(self: *App) void {
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
-    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65;
+    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65 or v == 73;
     self.sandbox.tick = if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
     const dz = target[2] - eye[2];
     camera.yaw = std.math.atan2(dx, dz);
     camera.pitch = std.math.atan2(target[1] - eye[1], @sqrt(dx * dx + dz * dz));
+    self.showcase_pose = .{ .eye = eye, .yaw = camera.yaw, .pitch = camera.pitch };
 }
 
 /// `-Dshowcase=18..26`: GUI screens for review. 18 title, 19 conversation, 20 upgrades,

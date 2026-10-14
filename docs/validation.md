@@ -2,9 +2,19 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Nature review camera baselines — 2026-10-13
+
+- Added fixed-seed showcases `-Dshowcase=71` (ground cover), `72` (mid-distance forest) and `73` (dusk terrain overview), positioned against the shared terrain surface. Updated the build option help and roadmap capture list.
+- **Checked:** `python3 tools/zig.py build check` passed on the default pinned compiler.
+- **Not checked:** visual captures, showcase 71–73 camera framing, tests, benchmarks, Zig 0.17, cross-compiles, Linux/Windows runtime. These are camera hooks only; Phase 0's measurements and tests in [nature upgrade](plans/nature-upgrade.md) remain open.
+
+## Fixed-view showcase camera and broadleaf leaf crown — 2026-10-13
+
+Fixed-view showcases (such as 62 and 70) set their camera before the simulation step, and every sim step moves the camera to the player's eye, so a capture showed the showcase view only if its frame happened to run no sim steps. That timing luck made some captures render a dark close-up of the ground instead, which earlier looked like broken tree meshes. `App.zig` now remembers the pose a showcase sets and re-applies it after the simulation steps. Verified: showcase 62 at frame 120 now reports the camera at the stage plus (28, 98, 430). The broadleaf crown is now 460 small six-point leaves in three clumps (`leafCards` in `Vegetation.zig`) instead of three smooth ellipsoids; at review distance the leaves read slightly hexagonal. A new test checks every tree mesh for finite values, bounded coordinates and valid indices. Checked: `build check`, the headless suite (420 of 424; the same four failures occur on HEAD), the Metal smoke run (clean), and the showcase 62 capture. Not done: the other species keep their ellipsoid crowns; GUI showcases that return early are unchanged; no Linux or Windows check.
+
 ## Arbor branching and flora trunks — 2026-10-13
 
-Arbor limbs now keep 45% of their parent's heading and reject steps that turn more than about 75 degrees back on their limb, so branches curve instead of zig-zagging and hooking. Each branch tip carries three rounder foliage lobes instead of one flat pad. Flora trunks are a tapered, flared bole, and the deciduous species fork into three limbs under the crown. Checked: `build check`, the headless suite (419 of 423 pass; the same four failures occur on HEAD: Catalog deferred meshes, Save round-trip, Creator draft, Screens layout), the Metal smoke run (clean), and captures of showcases 62 and 70 at frame 480. Captures at frame 120 can show a blank scene because changed meshes load late, so use a later frame. Not done: one large looping limb remained in showcase 70; a rounded-leaf crown for the broadleaf rendered blank even at frame 480 and was left out; no Linux or Windows check. Arbor trees grow differently, so tap and graft positions saved against the old node layout may not line up; `Arbor.generator_version` was not bumped, which needs a decision.
+Arbor limbs now keep 45% of their parent's heading and reject steps that turn more than about 75 degrees back on their limb, so branches curve instead of zig-zagging and hooking. Each branch tip carries three rounder foliage lobes instead of one flat pad. Flora trunks are a tapered, flared bole, and the deciduous species fork into three limbs under the crown. Checked: `build check`, the headless suite (419 of 423 pass; the same four failures occur on HEAD: Catalog deferred meshes, Save round-trip, Creator draft, Screens layout), the Metal smoke run (clean), and captures of showcases 62 and 70 at frame 480. Not done: one large looping limb remained in showcase 70; no Linux or Windows check. Arbor trees grow differently, so tap and graft positions saved against the old node layout may not line up; `Arbor.generator_version` was not bumped, which needs a decision.
 
 ## Launch from outside the checkout — 2026-10-12
 
