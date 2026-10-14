@@ -46,8 +46,8 @@ def main():
         parser.error("--scale must be 0..4000000")
     if not 120 <= args.frames <= 4096:
         parser.error("--frames must be 120..4096 so the complete measured run fits the percentile sample buffer")
-    if args.upload_budget_kib < 278:
-        parser.error("--upload-budget-kib must be at least 278")
+    if args.upload_budget_kib < 322:
+        parser.error("--upload-budget-kib must be at least 322")
     command = [sys.executable, str(ROOT / "tools/zig.py"), "build", "run", "-Doptimize=ReleaseFast",
                f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-frontier={str(args.frontier).lower()}", f"-Dnature-benchmark={str(args.nature).lower()}", f"-Daudio={str(not args.silent).lower()}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dcel-debug={args.cel_debug}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}", f"-Dpack-stress={args.pack}", f"-Dasset-upload-kib={args.asset_upload_kib}"]
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
