@@ -1,6 +1,6 @@
 # Nature upgrade: terrain, ground cover, grass and trees
 
-**Status:** proposed, 2026-10-13. Nothing in this plan is built yet. It is a review of what exists plus an ordered, testable path to a best-in-class natural environment for Heavy Water's cel-shaded, fantasy-anime look. [Roadmap](../roadmap.md) stays the single plan; this document is the detailed breakdown behind its "Nature" section.
+**Status:** in progress, 2026-10-14. Phase 0 review cameras and benchmark instrumentation are implemented; the 600-frame benchmark passes. A first L-system slice drives the eight streamed tree species and separates bark branches from foliage. A second pass fits crowns to bole height, adds foliage clusters along secondary branches, and improves the nature review views. Frame-120 captures of 71–73 are now daylight-visible; 71 cleanly frames open ground and low plants, while 72/73 show more connected branching but still reveal spindly giant silhouettes at distance. The 62/70 capture set, frame-480 captures, regression guards and Arbor integration remain open. [Roadmap](../roadmap.md) stays the single plan; this document is the detailed breakdown behind its "Nature" section.
 
 **Audience:** engineers and coding agents working in this repository. Every step names the files it touches, the tests that must exist, and the capture or measurement that proves it.
 
@@ -81,7 +81,7 @@ Two systems:
 ### 3.6 Verification tooling
 
 - Showcases 62 (flora review), 70 (test Arbor), 36, 41 and 48 cover nature. Until 2026-10-13 a fixed-view showcase could be overwritten by the simulation step and capture a dark close-up depending on frame timing; `App.zig` now re-applies the showcase pose after the sim steps. Phase 0 builds on that.
-- No benchmark currently isolates terrain generation cost, grass cost or tree cost.
+- The nature benchmark isolates terrain chunk fill and scatter generation CPU costs, and reports visible instances, submitted triangles and CPU frame percentiles. It does not isolate grass or tree mesh generation, and the GPU has no timestamp-query support.
 
 ## 4. Principles for the upgrade
 
@@ -115,7 +115,7 @@ Purpose: make every later claim measurable.
 3. Add tests that pin current behaviour so later phases show intent: scatter density per kind over 25 chunks, terrain height bounds, chunk-edge seam equality for height, normal and colour.
 4. Capture 71, 72, 73 and the existing 62, 70 at frame 120 and 480; store the PNGs outside the repo and record dimensions, build mode and numbers in [validation](../validation.md).
 
-Status: showcases and benchmark instrumentation are implemented. Captures, measured results and regression tests remain open.
+Status (2026-10-14): showcases and benchmark instrumentation are implemented. The 600-frame benchmark passes and its measurements are recorded in [validation](../validation.md). Review found showcase 71 inside a giant trunk/canopy and the original 72 dominated by oversized oval foliage. The eight streamed species now share bounded L-system skeletons; the branch/foliage split fixes green-tinted bark. The follow-up fits each species' crown to the one-unit bole, adds small foliage clusters along secondary branch tiers and terminal twigs, and moves the 72 camera farther back with a steeper view. Daylight frame-120 captures now exist for 71–73: 71 clearly shows open ground and low plants, 72 shows fuller connected crowns at mid distance, and 73 shows the terrain in daylight. The 72/73 views still show spindly giant silhouettes at distance; species shape and LOD work remain. A current 62 review, both 70 captures, frame-480 captures for 71–73, and the requested scatter-density, terrain-bounds and chunk-seam regression guards remain open.
 
 Acceptance: numbers recorded; the new tests pass on the default pair and the 0.17 channel.
 
@@ -196,12 +196,11 @@ Risks: vertex-bound cost on the M3 Pro (**GPU time is unavailable**, so judge by
 
 Purpose: trees whose silhouette, branching and foliage clustering look grown, at three levels of detail.
 
-**5a. Skeleton generator** (shared by forest trees and Arbors):
-1. Extract a reusable `Skeleton` from [Arbor.zig](../../src/procedural/Arbor.zig) with the same parent-before-child contract (`Node.parent < index`, `radius > 0`) so sap, grafting, attachment and physics keep working.
-2. Improve space colonization: per-attractor **kill distance** and **influence radius** (a node only senses attractors within a radius, with a minimum angle gate), per-iteration normalized growth direction, **inertia** (already added for Arbors; make it a genome parameter, `branch_inertia`), and a **gravitropism sag** that bends long limbs down then up. Replace the fixed 13 m step with a step that scales with depth (long trunk segments, short twigs), which reduces kinks and node count together.
-3. **Pipe-model radii**: after growth, walk children to parents and set `r_parent = sqrt(Σ r_child²)` with tip radius from a genome `tip_radius`. This gives the correct trunk-to-twig taper and visible junction swelling.
-4. Raise `max_nodes` with detail tiers (for example 192 for gameplay Arbors, 512 allowed for hero trees) and keep the arrays fixed-size and heap-allocated where large. Keep `max_platforms`.
-5. Add genome fields for `branch_inertia`, `tip_radius`, `crown_density` and `bark_roughness`; extend `Genome.validate`. Bump `Arbor.generator_version` with a Save migration decision (see section 8).
+**5a. Bounded L-system foundation — first slice implemented (2026-10-14):**
+1. [LSystem.zig](../../src/procedural/LSystem.zig) defines one turtle interpreter and eight species grammars. Expansion is deterministic and capped at 4,096 symbols and 32 nested pushes; branch segments and terminal leaf anchors come from the same skeleton.
+2. [Vegetation.zig](../../src/procedural/Vegetation.zig) builds each streamed tree's branches into its bark-tagged trunk mesh and emits small leaf fans around selected secondary-branch and terminal anchors. Crown height is normalized against the one-unit bole, while the six-lobed leaves remain individual geometry rather than oversized continuous blobs. The generator runs while catalog meshes are built, never on the frame path.
+3. Species-specific grammar, taper, droop, foliage density, branch spread and distance silhouettes remain tuning work. The daylight 72 capture confirms denser attached foliage at mid distance; the current 62 capture is dusk and too dark for art approval.
+4. **Next:** adapt the shared branch representation to gameplay Arbors only after verifying sap/graft node identity and platform attachment behavior. Arbor remains on its current space-colonization generator until a migration and gameplay-preservation pass is planned.
 
 **5b. Smooth sweep meshing:**
 1. Replace the per-edge straight tube with a **per-branch sweep**: build a Catmull-Rom spline through the branch's node positions (a branch = a node chain until the next fork), generate rings with parallel-transport frames, taper along the spline, 5 to 12 radial segments by LOD.
@@ -211,18 +210,20 @@ Purpose: trees whose silhouette, branching and foliage clustering look grown, at
 5. Keep the collision detail as the current low-poly tube (`Detail.collision`) so physics tests and walkable surfaces do not change; the visual mesh and collision mesh may diverge slightly within a stated tolerance, and a test asserts the maximum deviation.
 
 **5c. Foliage v2:**
-1. Use **leaf clusters** (a small fan or card of 7 vertices each) distributed on terminal and sub-terminal nodes along the crown surface, not at node centres. This approach already renders correctly (the broadleaf crown uses it); extend it to a `foliageCluster` helper in [Vegetation.zig](../../src/procedural/Vegetation.zig) used by both forest species and Arbors.
+1. **Current:** compact six-lobed leaf fans (hub plus six vertices) are grouped around terminal and selected sub-terminal anchors from the shared skeleton. The anchor clusters fill branch tiers without replacing leaves with large slabs. Next: tune cluster form per species and add an explicit distance LOD so the forest silhouette holds at 1 km. Share this with Arbors only after the branch-attachment/save review in 5a.
 2. **Soft cel lighting with cluster normals:** set every vertex normal in a cluster to a blend of the cluster's outward direction and the leaf plane normal (about 70% outward), so a crown shades as a few large volumes with a ragged edge, not as thousands of lit facets. This is the main way to get a painted-crown look under a three-band ramp.
 3. **Per-cluster colour** from height in the crown, sun side and a hashed hue shift; add a subtle **interior darkening** (cheap ambient occlusion) by darkening clusters whose centre is closer to the crown centroid.
 4. If S2 passes, optionally use alpha-cutout leaf textures procedurally generated in the shader (leaf outline from the fan's UV); otherwise keep geometry-only clusters.
 5. Make the crowns **connected to the skeleton**: every cluster's anchor is a node position with a short stalk limb (the "avoid isolated green caps" rule in [world](../world.md)).
 
 **5d. Forest tree species and variants:**
-1. Re-implement the eight scattered species using the same skeleton at small scale (24 to 80 nodes) with species genomes (broadleaf, needleleaf conifer with whorls, willow with drooping sprays, redwood with a long bole, copper-fan, moon-cascade, star-blossom, pine). Keep names, palette and night-flora behaviour (`Vegetation.colors`, `trunk_colors`, `tree_variants`).
+1. The eight scattered species now share the L-system turtle and branch/leaf output contract, with species grammars for broadleaf, needleleaf, willow, redwood, copper-fan, moon-cascade, star-blossom and pine. Tune the rules toward distinct biological silhouettes while preserving names, palette and night-flora behaviour (`Vegetation.colors`, `trunk_colors`, `tree_variants`).
 2. Build **four variants per species** at catalog load from different seeds (a fixed `variant_seed` table, deterministic). Scatter picks a variant by hash; the instance `variant` field already exists, so extend `tree_variants` into `(species, shape)` indexing with stable ids. Saves record `variant`, so keep old ids valid and append new ones.
 3. Build **three LODs** per variant: `near` (full detail, 12,000 triangles or fewer for a giant), `mid` (about 25%, simplified sweeps and 40% fewer clusters, with clusters enlarged), `far` (about 300 triangles: trunk as a 4-sided taper and the crown as 6 to 10 large lobes). If S3 passes, add an impostor card ring beyond 700 m.
 4. LOD selection by distance per **chunk cell**, as `Field.zig` does, so selection costs one test per cell, with a hysteresis band to avoid popping. Use the instance `stretch.w` radius so the vertex stage culls individual instances.
 5. Retire the ellipsoid-stack crowns. Keep the old meshes behind a debug option for one release to compare captures.
+
+**5f. Skeleton-driven rendering (optional, after 5a and 5b).** Instead of baking every tree to a mesh, ship the skeleton: one 64-byte instance per branch segment (about 12 KB for a full Arbor, against roughly 1 MB baked) and expand the tubes in a spliced vertex stage, with ring sides chosen per segment from distance and a frame-time governor. This reaches the memory and continuous-level-of-detail goals of a GPU work-graph pipeline without work graphs, which Mach does not expose; the evaluation, measurements, compiled reference code and milestone (M9) are in [mesheditor.md](mesheditor.md#414-procedural-recipe-meshes-evaluating-a-gpu-work-graph-pipeline). Keep baked meshes for the far level of detail.
 
 **5e. Tests for Phase 5:** skeleton validity (acyclic, bounded, finite, parent-first) for every genome in a table; pipe-model radius monotonicity (parent radius is at least each child's); mesh finite and index-in-range for every species, variant and LOD (the test added on 2026-10-13 for broadleaf generalizes); triangle budgets per LOD; reproducibility; attachment queries return the same nodes after the generator change for a fixed fixture; collision mesh deviation bound; allocation-failure test for every mesh builder (`checkAllAllocationFailures`, as `Arbor.mesh` already does).
 

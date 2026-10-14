@@ -168,18 +168,20 @@ Defer a broad biome roster, multiple robot chassis, robot programming, and colon
 The terrain, rivers and plants get their own shading stages over the cel shader, and the ground now matters underfoot.
 - **Ground:** world-space grass drift and tufts, stone strata on steep faces (and on the mountain panorama and cave walls), snow on the flats with blue shadows and sun glints. No textures, no chunk seams.
 - **Water:** rivers ripple downstream, mirror the sky, glint, and foam along the banks; waterfalls streak white. Blended, drawn last.
-- **Foliage:** grass, native shrubs and three luminous wildflowers join grassland ferns; broadleaf, needleleaf, willow, engineered redwood, copper-fan, moon-cascade and star-blossom trees sway in gusting wind. Redwood tops reach 152.4 m (500 ft), and the other giant forms rise roughly 96–150 m. Higher resolution leaf meshes soften the silhouettes, with fan whorls, hanging sprays and open flower tiers separating the new species.
+- **Foliage:** grass, native shrubs and three luminous wildflowers join grassland ferns; broadleaf, needleleaf, willow, engineered redwood, copper-fan, moon-cascade and star-blossom trees sway in gusting wind. Redwood tops reach 152.4 m (500 ft), and the other giant forms rise roughly 96–150 m. The eight forest species now use bounded, deterministic L-system grammars to build one shared branch skeleton. Bark-colored structure and terminal foliage are separate meshes, removing the green-branch tint issue. This is the first standardization slice; species silhouettes and daylight appearance still need review.
 - **Night flora:** leaf flecks retain each species' pigment as they emit light: crimson redwood, red ember blossom, blue moonbell, gold sunspear, and the violet, teal, green and cyan tree and plant palettes.
 - **Scatter:** faceted boulders on high, steep and dry ground; snow thins the flora and frosts trees and stones. Towering tree forms are deliberately rare beside low native ground cover. Former blue cube salvage nodes are now harvestable broadleaf saplings, 6.1–18.3 m (20–60 ft) tall. Candidate IDs remain stable; scatter generator version 8 migrates generator-5 through generator-7 saves without moving saved object IDs.
 - **Footing:** rivers can be waded and swum; snow is slow and slides, marsh and sand drag, the hoverboard is quicker on snow. Footsteps crunch on snow and splash in water; falling in splashes.
 
 Acceptance: tests for ground cover and footing, the river surface, boulder meshes and placement, runner speed and stopping on each ground, the wade-to-swim transition, and ground-voiced footsteps; a clean Metal-validated smoke; captures `-Dshowcase=36` (river and waterfall), `41` (a range from the foothills) and `48` (meadow).
 
-Nature review cameras are also available: `-Dshowcase=71` ground cover at player height, `72` forest silhouettes from mid-distance, and `73` a dusk terrain overview. `python3 tools/benchmark.py --nature` records terrain and scatter generation percentiles, visible nature counts, submitted triangles and CPU frame percentiles. These are baselines for the [nature upgrade plan](plans/nature-upgrade.md); regression tests and visual captures remain to be run.
+Nature review cameras are also available: `-Dshowcase=71` ground cover, `72` forest silhouettes, and `73` terrain overview. The bounded L-system forest now fits each crown to the trunk height and adds compact foliage clusters along secondary branches as well as at twig tips. A daylight Metal capture shows fuller, connected crowns; the distant silhouette still needs species-level art tuning and an Arbor pass. Showcase 71 has been moved off the tree at the stage origin, and 73 now uses daylight for terrain review; both still need capture review. `python3 tools/benchmark.py --nature` records terrain and scatter generation percentiles, visible nature counts, submitted triangles and CPU frame percentiles. The 600-frame baseline passes and is recorded in [validation](validation.md). Nature-specific review and regression guards are tracked in the [nature upgrade plan](plans/nature-upgrade.md).
 
 Detailed upgrade plan for terrain, ground cover, grass and trees: [nature upgrade](plans/nature-upgrade.md).
 
 Next:
+- daylight review and tune of L-system forest silhouettes; apply the shared skeleton to canopy Arbors only after branch attachments stay stable;
+- complete frame-480 captures for showcases 71–73 and capture the 62/70 nature baseline set;
 - footprints and wakes;
 - shoreline wetness and reeds;
 - snowfall and rain with the day cycle;

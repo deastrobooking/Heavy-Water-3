@@ -1524,14 +1524,15 @@ fn showcase(self: *App) void {
         self.sandbox.player.feet = .{ stage[0], ground, stage[2] };
         self.sandbox.player.velocity = @splat(0);
         if (v == 71) {
-            target = .{ stage[0], ground + 0.35, stage[2] - 30 };
-            eye = .{ stage[0] + 1.5, ground + 1.7, stage[2] + 2.5 };
+            // Stand back from the random canopy scatter and look down across the floor plants.
+            target = .{ stage[0] + 124, ground + 0.2, stage[2] - 24 };
+            eye = .{ stage[0] + 124, ground + 11, stage[2] + 4 };
         } else if (v == 72) {
-            target = .{ stage[0], ground + 55, stage[2] - 150 };
-            eye = .{ stage[0] + 12, ground + 67, stage[2] + 150 };
+            target = .{ stage[0], ground + 18, stage[2] - 80 };
+            eye = .{ stage[0] + 150, ground + 160, stage[2] + 220 };
         } else {
-            target = .{ stage[0], ground + 8, stage[2] - 100 };
-            eye = .{ stage[0] + 360, ground + 300, stage[2] + 420 };
+            target = .{ stage[0], ground + 10, stage[2] };
+            eye = .{ stage[0] + 220, ground + 240, stage[2] + 220 };
         }
     } else if (v == 62) {
         const Terrain = @import("procedural/Terrain.zig");
@@ -1593,7 +1594,7 @@ fn showcase(self: *App) void {
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
-    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65 or v == 73;
+    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65;
     self.sandbox.tick = if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];

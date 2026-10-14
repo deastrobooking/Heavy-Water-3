@@ -3,6 +3,7 @@ const std = @import("std");
 const Mesh = @import("../render/Mesh.zig");
 const GenMesh = @import("../character/mesh.zig").Mesh;
 const Seed = @import("Seed.zig");
+const LSystem = @import("LSystem.zig");
 pub const variant_count = 15;
 pub const tree_first = 3;
 pub const tree_count = 8;
@@ -94,12 +95,12 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     } else if (variant == 1) {
         for (0..6) |i| {
             const t = @as(f32, @floatFromInt(i)) * std.math.pi / 3;
-            const y = 0.65 + @as(f32, @floatFromInt(i % 3)) * 0.1;
-            try blade(a, &out, .{ 0, 0, 0 }, .{ @cos(t) * 0.05, y, @sin(t) * 0.05 }, 0.035, t);
+            const y = 0.52 + @as(f32, @floatFromInt(i % 3)) * 0.07;
+            try blade(a, &out, .{ 0, 0, 0 }, .{ @cos(t) * 0.04, y, @sin(t) * 0.04 }, 0.028, t);
             for (0..4) |j| {
-                const h = 0.2 + @as(f32, @floatFromInt(j)) * 0.16;
+                const h = 0.16 + @as(f32, @floatFromInt(j)) * 0.12;
                 const side: f32 = if (j % 2 == 0) 1 else -1;
-                try blade(a, &out, .{ @cos(t) * 0.03, h, @sin(t) * 0.03 }, .{ @cos(t) * 0.03 + side * 0.15, h + 0.06, @sin(t) * 0.03 + 0.06 }, 0.08, t);
+                try blade(a, &out, .{ @cos(t) * 0.025, h, @sin(t) * 0.025 }, .{ @cos(t) * 0.025 + side * 0.09, h + 0.035, @sin(t) * 0.025 + 0.035 }, 0.045, t);
             }
         }
     } else if (variant == 2) {
@@ -173,7 +174,9 @@ fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, radius: f32, c
         const dir = [3]f32{ @cos(angle) * band, lift, @sin(angle) * band };
         const reach = radius * (0.7 + 0.3 * Seed.unit(Seed.mix(key + 2)));
         const c = [3]f32{ center[0] + dir[0] * reach, center[1] + dir[1] * reach, center[2] + dir[2] * reach };
-        const size = radius * (0.12 + 0.07 * Seed.unit(Seed.mix(key + 3)));
+        // Leaf width follows tree height, while this radius controls only the twig-tip cluster.
+        // Tying both to one value made sparse leaves scatter several metres apart on giant trees.
+        const size = 0.0046 + 0.0014 * Seed.unit(Seed.mix(key + 3));
         const reference: [3]f32 = if (@abs(dir[1]) < 0.9) .{ 0, 1, 0 } else .{ 1, 0, 0 };
         const cu = cross3(dir, reference);
         const cu_length = @sqrt(cu[0] * cu[0] + cu[1] * cu[1] + cu[2] * cu[2]);
@@ -251,127 +254,10 @@ pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
     if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, 16000);
-    try out.indices.ensureTotalCapacity(a, 100000);
-    switch (species) {
-        0 => {
-            // Broadleaf crown: loose leaf cards in three uneven clumps, so the outline is ragged
-            // and the crown reads as foliage rather than a smooth balloon.
-            try leafCards(a, &out, .{ 0, 0.68, 0 }, 0.36, 220, 1);
-            try leafCards(a, &out, .{ 0.23, 0.72, 0.02 }, 0.24, 120, 2);
-            try leafCards(a, &out, .{ -0.23, 0.68, -0.04 }, 0.24, 120, 3);
-        },
-        1 => {
-            try cone(a, &out, 0.28, 0.7, 0.38);
-            try cone(a, &out, 0.08, 0.66, 0.29);
-            try cone(a, &out, 0, 0.55, 0.2);
-        },
-        2 => {
-            try ellipsoid(a, &out, .{ 0, 0.77, 0 }, .{ 0.31, 0.18, 0.31 }, 12, 20);
-            for (0..7) |i| {
-                const t = 2 * std.math.pi * @as(f32, @floatFromInt(i)) / 7;
-                const x = @cos(t) * 0.34;
-                const z = @sin(t) * 0.34;
-                try ellipsoid(a, &out, .{ x, 0.43, z }, .{ 0.09, 0.27, 0.09 }, 10, 16);
-                try ellipsoid(a, &out, .{ x * 1.18, 0.20, z * 1.18 }, .{ 0.07, 0.18, 0.07 }, 10, 16);
-            }
-        },
-        3 => {
-            // A narrow crown above a long bare bole, built in irregular whorls like a redwood.
-            for (0..6) |tier| {
-                const y = 0.34 + @as(f32, @floatFromInt(tier)) * 0.105;
-                const spread = 0.21 * (1 - @as(f32, @floatFromInt(tier)) * 0.12);
-                const limbs: usize = if (tier < 2) 9 else 7;
-                for (0..limbs) |j| {
-                    const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(j)) + @as(f32, @floatFromInt(tier % 2)) * 0.42) / @as(f32, @floatFromInt(limbs));
-                    const wobble = 0.84 + Seed.unit(Seed.mix(tier * 17 + j)) * 0.28;
-                    const center = .{ @cos(angle) * spread * wobble, y + 0.012 * @sin(angle * 3), @sin(angle) * spread * wobble };
-                    const radius = 0.05 + spread * 0.4;
-                    try ellipsoid(a, &out, center, .{ radius, radius * 0.62, radius * 0.78 }, 10, 16);
-                }
-            }
-            // Close the whorls into the tall, continuous crown of a mature redwood.
-            try ellipsoid(a, &out, .{ 0, 0.68, 0 }, .{ 0.12, 0.31, 0.12 }, 12, 20);
-            try ellipsoid(a, &out, .{ 0, 0.91, 0 }, .{ 0.055, 0.13, 0.055 }, 10, 16);
-        },
-        4 => {
-            // A copper fan crown: broad, overlapping leaves sit on distinct rising whorls.
-            for (0..5) |tier| {
-                const tf: f32 = @floatFromInt(tier);
-                const y = 0.40 + tf * 0.105;
-                const spread = 0.36 - tf * 0.045;
-                for (0..7) |j| {
-                    const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(j)) + tf * 0.31) / 7;
-                    const wobble = 0.90 + 0.12 * @sin(angle * 3 + tf);
-                    const center = .{ @cos(angle) * spread * wobble, y + 0.04 * @sin(angle * 2), @sin(angle) * spread * wobble };
-                    try ellipsoid(a, &out, center, .{ 0.19 - tf * 0.012, 0.075, 0.13 - tf * 0.008 }, 12, 20);
-                }
-            }
-            try ellipsoid(a, &out, .{ 0, 0.78, 0 }, .{ 0.13, 0.29, 0.13 }, 12, 20);
-        },
-        5 => {
-            // Moon cascade: a soft central crown with tiered hanging branch sprays.
-            try ellipsoid(a, &out, .{ 0, 0.78, 0 }, .{ 0.38, 0.25, 0.36 }, 14, 24);
-            for (0..9) |branch| {
-                const angle = 2 * std.math.pi * @as(f32, @floatFromInt(branch)) / 9;
-                const reach = 0.38 + 0.05 * @sin(angle * 2);
-                for (0..4) |leaf| {
-                    const t = @as(f32, @floatFromInt(leaf)) / 3;
-                    const y = 0.68 - t * (0.42 + 0.05 * @sin(angle * 3));
-                    const x = @cos(angle) * reach * t;
-                    const z = @sin(angle) * reach * t;
-                    const radius = 0.12 - t * 0.035;
-                    try ellipsoid(a, &out, .{ x, y, z }, .{ radius, radius * 0.82, radius }, 12, 20);
-                }
-            }
-        },
-        6 => {
-            // Star blossom: layered, open crowns of luminous petal clusters leave sky between them.
-            for (0..4) |tier| {
-                const tf: f32 = @floatFromInt(tier);
-                const y = 0.47 + tf * 0.13;
-                const spread = 0.33 - tf * 0.055;
-                for (0..6) |j| {
-                    const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(j)) + tf * 0.5) / 6;
-                    const x = @cos(angle) * spread;
-                    const z = @sin(angle) * spread;
-                    try ellipsoid(a, &out, .{ x, y, z }, .{ 0.14, 0.095, 0.14 }, 12, 20);
-                    try ellipsoid(a, &out, .{ x * 1.2, y + 0.035, z * 1.2 }, .{ 0.075, 0.045, 0.075 }, 10, 16);
-                }
-            }
-            try ellipsoid(a, &out, .{ 0, 0.78, 0 }, .{ 0.12, 0.30, 0.12 }, 12, 20);
-        },
-        7 => {
-            // An old-growth pine with a high leader, descending whorls, and gaps between
-            // its branch fans. The foliage shader adds fine needles and natural color breakup.
-            for (0..9) |tier| {
-                const tf: f32 = @floatFromInt(tier);
-                const y = 0.19 + tf * 0.078;
-                const reach = 0.68 * (1 - tf * 0.075);
-                const boughs: usize = if (tier % 2 == 0) 9 else 8;
-                for (0..boughs) |bough| {
-                    const angle = 2 * std.math.pi * (@as(f32, @floatFromInt(bough)) + @as(f32, @floatFromInt(tier % 2)) * 0.46) / @as(f32, @floatFromInt(boughs));
-                    const jitter = 0.91 + Seed.unit(Seed.mix(tier * 131 + bough)) * 0.18;
-                    const root: [3]f32 = .{ @cos(angle) * 0.025, y, @sin(angle) * 0.025 };
-                    const elbow: [3]f32 = .{ @cos(angle) * reach * 0.55 * jitter, y + 0.025, @sin(angle) * reach * 0.55 * jitter };
-                    const tip: [3]f32 = .{ @cos(angle) * reach * jitter, y - 0.09, @sin(angle) * reach * jitter };
-                    try twig(a, &out, root, elbow, 0.027 * (1 - tf * 0.035), 0.017);
-                    try twig(a, &out, elbow, tip, 0.017, 0.004);
-                    for (0..2) |spray| {
-                        const t = 0.40 + @as(f32, @floatFromInt(spray)) * 0.28;
-                        const side: f32 = if ((spray + tier) % 2 == 0) 1 else -1;
-                        const at: [3]f32 = .{ elbow[0] + (tip[0] - elbow[0]) * t, elbow[1] + (tip[1] - elbow[1]) * t, elbow[2] + (tip[2] - elbow[2]) * t };
-                        const twig_angle = angle + side * 0.78;
-                        const spray_tip: [3]f32 = .{ at[0] + @cos(twig_angle) * 0.10, at[1] + 0.055, at[2] + @sin(twig_angle) * 0.10 };
-                        try twig(a, &out, at, spray_tip, 0.008, 0.002);
-                        try ellipsoid(a, &out, .{ spray_tip[0] * 1.04, spray_tip[1] + 0.025, spray_tip[2] * 1.04 }, .{ 0.027, 0.038, 0.027 }, 6, 9);
-                    }
-                }
-            }
-            try ellipsoid(a, &out, .{ 0, 0.60, 0 }, .{ 0.095, 0.28, 0.095 }, 10, 16);
-            try ellipsoid(a, &out, .{ 0, 0.91, 0 }, .{ 0.035, 0.13, 0.035 }, 8, 12);
-        },
-        else => unreachable,
+    const skeleton = try LSystem.generate(a, species);
+    defer skeleton.deinit(a);
+    for (skeleton.leaves, 0..) |tip, i| {
+        try leafCards(a, &out, tip.position, LSystem.grammars[species].leaf_radius, LSystem.grammars[species].leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
     }
     for (out.vertices.items) |*v| v.uv = .init(-10 - @as(f32, @floatFromInt(species)), 0);
     const mesh = try finish(a, &out);
@@ -434,26 +320,17 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
     if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, 96);
-    try out.indices.ensureTotalCapacity(a, 192);
+    try out.vertices.ensureTotalCapacity(a, 8192);
+    try out.indices.ensureTotalCapacity(a, 16384);
     const radius = ([_]f32{ 0.035, 0.05, 0.04, 0.058, 0.046, 0.055, 0.043, 0.052 })[species];
     try bole(a, &out, radius, 8, 6);
-    // Deciduous species fork into three limbs under the crown; conifers keep a single stem.
-    if (species == 0 or species == 2 or species == 4 or species == 5 or species == 6) for (0..3) |i| {
-        const t = 0.42 + 0.17 * @as(f32, @floatFromInt(i));
-        const angle = @as(f32, @floatFromInt(i)) * 2.1 + @as(f32, @floatFromInt(species)) * 0.7;
-        const root = boleRadius(radius, t);
-        const start: [3]f32 = .{ @cos(angle) * root * 0.6, t, @sin(angle) * root * 0.6 };
-        const end: [3]f32 = .{ @cos(angle) * 0.26, t + 0.14, @sin(angle) * 0.26 };
-        try twig(a, &out, start, end, root * 0.85, root * 0.4);
-    };
-    if (species == 3 or species == 7) for (0..9) |i| {
-        const angle = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
-        const reach: f32 = if (species == 3) 0.22 else 0.17;
-        try blade(a, &out, .{ 0, 0.025, 0 }, .{ @cos(angle) * reach, 0.13, @sin(angle) * reach }, 0.065, angle);
-    };
+    const skeleton = try LSystem.generate(a, species);
+    defer skeleton.deinit(a);
+    for (skeleton.branches) |branch| try twig(a, &out, branch.start, branch.end, branch.root_radius, branch.tip_radius);
     for (out.vertices.items) |*v| v.uv = .init(-20 - @as(f32, @floatFromInt(species)), v.pos.y);
     const mesh = try finish(a, &out);
+    const bark = trunk_colors[species];
+    for (mesh.vertices) |*v| v.color = .{ bark[0], bark[1], bark[2] };
     out.deinit(a);
     return mesh;
 }

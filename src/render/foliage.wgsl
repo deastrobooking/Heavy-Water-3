@@ -39,8 +39,13 @@
     let flecks = smoothstep(0.52, 0.78, fleck_hash);
     let pulse = 0.82 + 0.18 * sin(t * 1.25 + phase * 1.7 + fleck_hash * 6.28);
     let bio = crown * flecks * pulse * frame.horizon.a * 0.82;
-    let leaf_color = tint.rgb * color;
-    out.tint = vec4<f32>(leaf_color * (1.0 + bio * 0.48), tint.a + bio);
+    // Trunks and L-system branches share the foliage draw for wind motion, but carry a distinct
+    // negative-UV material tag and bark vertex color. Do not multiply bark by the tree's leaf tint.
+    // Leaf tags occupy -10..-17; bark tags occupy -20..-27. Keep a gap between ranges.
+    let bark = step(19.0, -uv.x);
+    let surface_color = mix(tint.rgb * color, color, bark);
+    let surface_bio = bio * (1.0 - bark);
+    out.tint = vec4<f32>(surface_color * (1.0 + surface_bio * 0.48), tint.a + surface_bio);
     out.world = world;
     return out;
 }
