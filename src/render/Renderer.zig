@@ -872,6 +872,15 @@ fn reportBenchmark(self: *Renderer) void {
         self.seed,                  Seed.generator_version,    self.intervals.total, self.view_count,      if (options.benchmark_frontier) "true" else "false", interval.p50,                 interval.p95,          interval.p99,               cpu.p50,              cpu.p95,                           cpu.p99,                         character.p50,                  character.p95,           character.p99,            skin.p50,                skin.p95, skin.p99,
         self.scene.stats.generated, self.scene.stats.canceled, self.scene.uploads,   self.scene.evictions, self.scene.center_changes,                           self.scene.peak_upload_bytes, options.upload_budget, self.scene.stats.cpu_bytes, Scene.gpu_pool_bytes, self.scene.stats.pool_allocations, self.scene.gpu_pool_allocations, self.scene.peak_resident_count, self.underfilled_frames, self.arbor_detail_frames, self.arbor_proxy_frames,
     });
+    if (options.benchmark_nature) {
+        var visible_boulders: u64 = 0;
+        for (self.scene.boulder_counts) |count| visible_boulders += count;
+        std.log.info("NATURE {{\"chunk_fill_p50_ms\":{d:.3},\"chunk_fill_p99_ms\":{d:.3},\"scatter_p50_ms\":{d:.3},\"scatter_p99_ms\":{d:.3},\"generated_relics\":{d},\"generated_vegetation\":{d},\"generated_boulders\":{d},\"visible_relics\":{d},\"visible_vegetation\":{d},\"visible_boulders\":{d},\"submitted_triangles\":{d}}}", .{
+            self.scene.stats.chunk_fill_p50_ms, self.scene.stats.chunk_fill_p99_ms, self.scene.stats.scatter_p50_ms, self.scene.stats.scatter_p99_ms,
+            self.scene.stats.generated_relics, self.scene.stats.generated_vegetation, self.scene.stats.generated_boulders,
+            self.scene.relic_count, self.scene.plant_count, visible_boulders, self.scene.submittedTriangles(),
+        });
+    }
 }
 
 pub fn deinit(self: *Renderer) void {

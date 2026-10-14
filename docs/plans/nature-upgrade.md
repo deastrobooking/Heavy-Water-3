@@ -111,9 +111,11 @@ Order is chosen so each phase is shippable alone and unlocks the next. Sizes: S 
 Purpose: make every later claim measurable.
 
 1. Add showcases to [App.zig](../../src/App.zig) `showcase()`: **71** ground-level grass view (eye at 1.7 m, target 30 m ahead), **72** forest mid-distance (eye 12 m up, 150 m back), **73** terrain overview over 5×5 chunks at dusk. Keep each edit to a few lines and place the stage via `Terrain.surface`.
-2. Add a `-Dnature-benchmark` route to the benchmark flythrough that reports: terrain `Chunk.fill` p50/p99 ms, scatter `generate` ms, visible instance counts by kind, triangles submitted, and CPU frame p99. The report writer in [Renderer.zig](../../src/render/Renderer.zig) already emits JSON; add keys, do not reformat existing ones.
+2. Add a `-Dnature-benchmark` route to the benchmark flythrough that reports: terrain `Chunk.fill` p50/p99 ms, scatter `generate` p50/p99 ms, visible instance counts by kind, triangles submitted, and CPU frame p99. The report writer in [Renderer.zig](../../src/render/Renderer.zig) already emits JSON; add keys, do not reformat existing ones.
 3. Add tests that pin current behaviour so later phases show intent: scatter density per kind over 25 chunks, terrain height bounds, chunk-edge seam equality for height, normal and colour.
 4. Capture 71, 72, 73 and the existing 62, 70 at frame 120 and 480; store the PNGs outside the repo and record dimensions, build mode and numbers in [validation](../validation.md).
+
+Status: showcases and benchmark instrumentation are implemented. Captures, measured results and regression tests remain open.
 
 Acceptance: numbers recorded; the new tests pass on the default pair and the 0.17 channel.
 

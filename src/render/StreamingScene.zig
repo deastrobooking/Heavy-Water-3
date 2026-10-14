@@ -337,6 +337,26 @@ pub fn drawWater(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
     for (self.residents) |resident| if (resident.visible) resident.mesh.drawRange(pass, Chunk.terrain_index_count, Chunk.index_count - Chunk.terrain_index_count, 1, 0);
 }
 
+/// Exact indexed triangle count for the draw set prepared for the current view.
+pub fn submittedTriangles(self: *const Scene) u64 {
+    var indices: u64 = @as(u64, self.terrain_draws) * Chunk.index_count;
+    if (self.relic_count > 0) if (self.gpuMesh(self.catalog.content.relic)) |mesh| {
+        indices += @as(u64, mesh.index_count) * self.relic_count;
+    };
+    for (self.flora_counts, 0..) |count, variant| {
+        if (count == 0) continue;
+        if (self.gpuMesh(self.catalog.content.flora[variant])) |mesh| indices += @as(u64, mesh.index_count) * count;
+        if (Vegetation.treeIndex(@intCast(variant))) |species| if (self.gpuMesh(self.catalog.content.tree_trunks[species])) |mesh| {
+            indices += @as(u64, mesh.index_count) * count;
+        };
+    }
+    for (self.boulder_counts, 0..) |count, variant| if (count > 0) {
+        if (self.gpuMesh(self.catalog.content.boulders[variant])) |mesh| indices += @as(u64, mesh.index_count) * count;
+    };
+    for (self.draws) |draw| indices += @as(u64, draw.index_count) * draw.instances;
+    return indices / 3;
+}
+
 /// Scattered plants and trees (with their trunks), for the swaying foliage pipeline.
 pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
     var next: u32 = 1 + self.relic_count;

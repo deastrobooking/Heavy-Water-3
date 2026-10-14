@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frames", type=int, default=600)
     parser.add_argument("--canopy", action="store_true", help="View an Arbor up close, at 1 km, and back; check both LODs and render CPU budget")
+    parser.add_argument("--nature", action="store_true", help="Record terrain and scatter generation, visible nature counts, and submitted triangles")
     parser.add_argument("--frontier", action="store_true", help="Benchmark the live simulation and four-player split-screen renderer")
     parser.add_argument("--silent", action="store_true", help="Disable audio (frontier runs measure callback timing by default)")
     parser.add_argument("--arbor", type=int, choices=(0, 1, 2), default=0, help="Arbor on canopy route: 0 test, 1 narrow, 2 spreading (nonzero enables canopy)")
@@ -26,15 +27,17 @@ def main():
     parser.add_argument("--field-upload-kib", type=int, default=2048, help="Scale workload instance upload budget per frame")
     parser.add_argument("--cel-debug", type=int, default=0, help="Character look-dev debug bits (1 hides the ink hull) for ink on/off comparisons")
     parser.add_argument("--seed", type=int, default=310399555161)
-    parser.add_argument("--upload-budget-kib", type=int, default=320)
+    parser.add_argument("--upload-budget-kib", type=int, default=384)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     args.canopy = args.canopy or args.arbor != 0
     if args.output is None:
-        args.output = ROOT / ".tools" / ("frontier-benchmark.json" if args.frontier else f"pack-{args.pack}-benchmark.json" if args.pack else f"scale-{args.scale}-benchmark.json" if args.scale else f"canopy-{args.arbor}-benchmark.json" if args.canopy and args.arbor else "canopy-benchmark.json" if args.canopy else "streaming-benchmark.json")
-    if args.frontier and (args.canopy or args.arbor or args.scale or args.pack):
-        parser.error("--frontier cannot be combined with --canopy, --arbor, --scale, or --pack")
+        args.output = ROOT / ".tools" / ("frontier-benchmark.json" if args.frontier else "nature-benchmark.json" if args.nature else f"pack-{args.pack}-benchmark.json" if args.pack else f"scale-{args.scale}-benchmark.json" if args.scale else f"canopy-{args.arbor}-benchmark.json" if args.canopy and args.arbor else "canopy-benchmark.json" if args.canopy else "streaming-benchmark.json")
+    if args.frontier and (args.canopy or args.nature or args.arbor or args.scale or args.pack):
+        parser.error("--frontier cannot be combined with --canopy, --nature, --arbor, --scale, or --pack")
+    if args.nature and (args.canopy or args.arbor or args.scale or args.pack):
+        parser.error("--nature cannot be combined with --canopy, --arbor, --scale, or --pack")
     if args.scale and args.canopy:
         parser.error("--scale runs on the streaming route; do not combine it with --canopy or --arbor")
     if not 0 <= args.pack <= 64:
@@ -46,7 +49,7 @@ def main():
     if args.upload_budget_kib < 278:
         parser.error("--upload-budget-kib must be at least 278")
     command = [sys.executable, str(ROOT / "tools/zig.py"), "build", "run", "-Doptimize=ReleaseFast",
-               f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-frontier={str(args.frontier).lower()}", f"-Daudio={str(not args.silent).lower()}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dcel-debug={args.cel_debug}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}", f"-Dpack-stress={args.pack}", f"-Dasset-upload-kib={args.asset_upload_kib}"]
+               f"-Dbenchmark-frames={args.frames}", f"-Dbenchmark-frontier={str(args.frontier).lower()}", f"-Dnature-benchmark={str(args.nature).lower()}", f"-Daudio={str(not args.silent).lower()}", f"-Dbenchmark-canopy={str(args.canopy).lower()}", f"-Dbenchmark-arbor={args.arbor}", f"-Dseed={args.seed}", f"-Dcel-debug={args.cel_debug}", f"-Dupload-budget-kib={args.upload_budget_kib}", f"-Dscale-objects={args.scale}", f"-Dfield-upload-kib={args.field_upload_kib}", f"-Dpack-stress={args.pack}", f"-Dasset-upload-kib={args.asset_upload_kib}"]
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, start_new_session=os.name != "nt")
     try:
@@ -76,6 +79,11 @@ def main():
     extra = [json.loads(line.split("REPORT ", 1)[1]) for line in output.splitlines() if "REPORT {" in line]
     if extra:
         result.update(extra[0])
+    nature_stats = [json.loads(line.split("NATURE ", 1)[1]) for line in output.splitlines() if "NATURE {" in line]
+    if len(nature_stats) > 1:
+        raise SystemExit("Expected at most one nature benchmark result")
+    if nature_stats:
+        result.update(nature_stats[0])
     app_stats = [json.loads(line.split("APPBENCH ", 1)[1]) for line in output.splitlines() if "APPBENCH {" in line]
     audio_stats = [json.loads(line.split("AUDIOBENCH ", 1)[1]) for line in output.splitlines() if "AUDIOBENCH {" in line]
     sim_stages = [json.loads(line.split("SIMSTAGE ", 1)[1]) for line in output.splitlines() if "SIMSTAGE {" in line]
@@ -108,6 +116,9 @@ def main():
             checks["audio_callback_budget"] = result.get("budget_utilization_p99_pct", float("inf")) < 100
     else:
         checks["streaming_exercised"] = result["chunk_crossings"] >= (12 if args.canopy else 30) and result["evictions"] > 0 and result["uploads"] > 25
+    if args.nature:
+        checks["nature_generation_measured"] = result.get("generated", 0) > 0 and result.get("chunk_fill_p99_ms", 0) > 0 and result.get("scatter_p99_ms", 0) > 0
+        checks["nature_draw_counts_measured"] = result.get("submitted_triangles", 0) > 0 and result.get("visible_vegetation", 0) > 0
     if args.canopy:
         checks["arbor_lods_exercised"] = result["arbor_detail_frames"] > 0 and result["arbor_proxy_frames"] > 0
         checks["render_cpu_budget"] = result["cpu_p99_ms"] < 16.667

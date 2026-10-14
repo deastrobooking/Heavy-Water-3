@@ -6,7 +6,14 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 
 - Added fixed-seed showcases `-Dshowcase=71` (ground cover), `72` (mid-distance forest) and `73` (dusk terrain overview), positioned against the shared terrain surface. Updated the build option help and roadmap capture list.
 - **Checked:** `python3 tools/zig.py build check` passed on the default pinned compiler.
-- **Not checked:** visual captures, showcase 71–73 camera framing, tests, benchmarks, Zig 0.17, cross-compiles, Linux/Windows runtime. These are camera hooks only; Phase 0's measurements and tests in [nature upgrade](plans/nature-upgrade.md) remain open.
+- **Not checked:** visual captures, showcase 71–73 camera framing, tests, Zig 0.17, cross-compiles, Linux/Windows runtime. The nature benchmark now has a separate entry below; Phase 0 regression tests and visual review remain open.
+
+## Nature benchmark instrumentation — 2026-10-13
+
+- Added `python3 tools/benchmark.py --nature` and report fields for `Chunk.fill` p50/p99, scatter generation p50/p99, generated and visible object counts by kind, submitted scene triangles, and CPU frame p50/p95/p99. Chunk and scatter timings are sampled on the existing streaming worker; there is no new frame-path allocation.
+- **Checked:** default `python3 tools/zig.py build check`, Python syntax compilation and `git diff --check`. `python3 tools/benchmark.py --nature --frames 600 --silent` passed all benchmark checks on Apple M3 Pro / Metal: CPU p99 2.856 ms, presentation p99 20.985 ms, `Chunk.fill` p50/p99 3.045/8.150 ms, scatter p50/p99 0.228/0.583 ms, 551 visible vegetation instances and 1,855,985 submitted triangles. The measured run generated 329 chunks, had no underfilled active-ring frames, and used the 384 KiB terrain upload budget. Timings cover the most recent 256 generated chunks; visible counts and triangles are the final measured frame.
+- A 120-frame trial collected metrics but failed the existing `active_ring_covered` gate (68 frames underfilled), so it is not treated as a passing benchmark. The 600-frame run passed.
+- **Not checked:** captures, tests, Zig 0.17, cross-compiles, Linux/Windows runtime. GPU timing is unavailable on this Mach path.
 
 ## Fixed-view showcase camera and broadleaf leaf crown — 2026-10-13
 

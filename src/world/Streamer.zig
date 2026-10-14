@@ -44,6 +44,13 @@ pub const Stats = struct {
     evicted: u64 = 0,
     generation_ms: f32 = 0,
     max_generation_ms: f32 = 0,
+    chunk_fill_p50_ms: f32 = 0,
+    chunk_fill_p99_ms: f32 = 0,
+    scatter_p50_ms: f32 = 0,
+    scatter_p99_ms: f32 = 0,
+    generated_relics: u64 = 0,
+    generated_vegetation: u64 = 0,
+    generated_boulders: u64 = 0,
     pool_allocations: u32 = 2,
     cpu_bytes: usize = @sizeOf(Streamer) + capacity * @sizeOf(Payload),
 };
@@ -60,6 +67,12 @@ condition: std.Io.Condition = .init,
 thread: ?std.Thread = null,
 stopping: bool = false,
 stats: Stats = .{},
+fill_samples: [256]f32 = undefined,
+scatter_samples: [256]f32 = undefined,
+sample_len: usize = 0,
+sample_next: usize = 0,
+scatter_sample_len: usize = 0,
+scatter_sample_next: usize = 0,
 
 /// Two persistent allocations, no allocations for generation or per-frame planning.
 /// Keep the returned pointer stable until destroy joins the worker.
@@ -195,11 +208,14 @@ fn worker(self: *Streamer) void {
         slot.state = .generating;
         self.mutex.unlock(self.io);
 
-        const begin = std.Io.Timestamp.now(self.io, .awake);
+        const fill_begin = std.Io.Timestamp.now(self.io, .awake);
         const data = &self.payloads[i];
         const complete = Chunk.fill(self.seed, key.x, key.z, &data.vertices, &data.indices, .{ .token = &slot.token, .expected = token });
+        const fill_ms = @as(f32, @floatFromInt(fill_begin.durationTo(std.Io.Timestamp.now(self.io, .awake)).nanoseconds)) / 1e6;
+        const scatter_begin = std.Io.Timestamp.now(self.io, .awake);
         if (complete and slot.token.load(.acquire) == token) data.object_count = Scatter.generate(self.seed, key, &data.objects);
-        const ms = @as(f32, @floatFromInt(begin.durationTo(std.Io.Timestamp.now(self.io, .awake)).nanoseconds)) / 1e6;
+        const scatter_ms = @as(f32, @floatFromInt(scatter_begin.durationTo(std.Io.Timestamp.now(self.io, .awake)).nanoseconds)) / 1e6;
+        const ms = fill_ms + scatter_ms;
 
         self.mutex.lockUncancelable(self.io);
         if (complete and slot.token.load(.acquire) == token) {
@@ -207,12 +223,30 @@ fn worker(self: *Streamer) void {
             self.stats.generated += 1;
             self.stats.generation_ms = ms;
             self.stats.max_generation_ms = @max(self.stats.max_generation_ms, ms);
+            recordSample(&self.fill_samples, &self.sample_len, &self.sample_next, fill_ms, &self.stats.chunk_fill_p50_ms, &self.stats.chunk_fill_p99_ms);
+            recordSample(&self.scatter_samples, &self.scatter_sample_len, &self.scatter_sample_next, scatter_ms, &self.stats.scatter_p50_ms, &self.stats.scatter_p99_ms);
+            for (data.objects[0..data.object_count]) |object| switch (object.kind) {
+                .relic => self.stats.generated_relics += 1,
+                .vegetation => self.stats.generated_vegetation += 1,
+                .boulder => self.stats.generated_boulders += 1,
+            };
         } else {
             slot.state = .empty;
             self.stats.canceled += 1;
         }
         self.mutex.unlock(self.io);
     }
+}
+
+fn recordSample(samples: *[256]f32, len: *usize, next: *usize, value: f32, p50: *f32, p99: *f32) void {
+    samples[next.*] = value;
+    next.* = (next.* + 1) % samples.len;
+    len.* = @min(len.* + 1, samples.len);
+    var ordered: [256]f32 = undefined;
+    @memcpy(ordered[0..len.*], samples[0..len.*]);
+    std.mem.sort(f32, ordered[0..len.*], {}, std.sort.asc(f32));
+    p50.* = ordered[(len.* * 50 + 99) / 100 - 1];
+    p99.* = ordered[(len.* * 99 + 99) / 100 - 1];
 }
 
 test "planner bounds work, prioritizes center and invalidates recycled handles" {
