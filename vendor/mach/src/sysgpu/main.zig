@@ -820,6 +820,12 @@ pub const Impl = sysgpu.Interface(struct {
         @panic("unimplemented");
     }
 
+    pub inline fn queueGpuTime(queue_raw: *sysgpu.Queue) ?sysgpu.Queue.GpuTime {
+        if (!@hasDecl(impl.Queue, "gpuTime")) return null;
+        const queue: *impl.Queue = @ptrCast(@alignCast(queue_raw));
+        return queue.gpuTime();
+    }
+
     pub inline fn queueSubmit(queue_raw: *sysgpu.Queue, command_count: usize, commands_raw: [*]const *const sysgpu.CommandBuffer) void {
         const queue: *impl.Queue = @ptrCast(@alignCast(queue_raw));
         const commands: []const *impl.CommandBuffer = @ptrCast(commands_raw[0..command_count]);

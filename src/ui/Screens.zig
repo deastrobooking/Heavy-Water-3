@@ -40,7 +40,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -759,6 +759,10 @@ const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "RENDER STYLE", .first = .cel_style },
 };
 
+pub const creator_tab_starts = [_]Profile.Field{ .name, .hair_style, .outfit, .armor_metal_r, .cel_style };
+pub const creator_tab_ends = [_]usize{ 11, 17, 25, 34, 35 };
+const creator_tab_labels = [_][]const u8{ "BASICS", "HAIR", "GEAR", "ARMOR RGB", "STYLE" };
+
 fn swatch(field: Profile.Field, p: Profile) ?Color {
     return switch (field) {
         .skin => Profile.skin_tones[p.skin],
@@ -795,10 +799,8 @@ fn armorSwatch(p: Profile, slot: u8) Color {
     return .{ rgb[0], rgb[1], rgb[2], 1 };
 }
 
-/// Height of a section title row in the creator; compact so the whole list fits a 720p window.
+/// Height of a section title row in the creator.
 const creator_header: f32 = 16;
-/// Narrowest row the creator uses before it scrolls to keep the selected field in view.
-const creator_min_step: f32 = 19;
 
 fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     const cr = &sb.creator;
@@ -806,37 +808,31 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     const clothing_count = enum_compat.fields(Profile.Clothing).len;
     const all: u8 = @intCast((@as(u16, 1) << clothing_count) - 1);
     const locked = clothing_count - @popCount(cr.owned & all);
-    // Title above, below: an optional shop notice, then the hint line beside the DONE button.
-    const top: f32 = 46;
+    // Title and tabs above, below: an optional shop notice, then actions and hints.
+    const top: f32 = 66;
     const bottom: f32 = 50 + @as(f32, if (locked > 0) 16 else 0);
-    const avail = v.h - 16 - top - bottom;
-    const n: f32 = @floatFromInt(fields.len);
-    const headers: f32 = @floatFromInt(sections.len);
-    // Every row at a comfortable height when it fits; otherwise a window of rows follows the cursor.
-    var first: usize = 0;
-    var last: usize = fields.len;
-    var step: f32 = row_height;
-    var visible_headers: f32 = headers;
-    if (avail >= n * creator_min_step + headers * creator_header) {
-        step = std.math.clamp((avail - headers * creator_header) / n, creator_min_step, row_height);
-    } else {
-        step = creator_min_step;
-        // Shrink the window until its rows and the section titles inside it fit.
-        var room: usize = fields.len;
-        while (room > 3) : (room -= 1) {
-            first = @min(@as(usize, @intFromEnum(cr.field)) -| room / 2, fields.len - room);
-            last = first + room;
-            visible_headers = 0;
-            for (sections) |s| {
-                const at: usize = @intFromEnum(s.first);
-                if (at >= first and at < last) visible_headers += 1;
-            }
-            if (@as(f32, @floatFromInt(room)) * step + visible_headers * creator_header <= avail) break;
-        }
+    const tab = creatorTab(cr.field);
+    const first = @intFromEnum(creator_tab_starts[tab]);
+    const last = creator_tab_ends[tab];
+    const field_count = last - first;
+    var visible_headers: usize = 0;
+    for (sections) |s| {
+        const at: usize = @intFromEnum(s.first);
+        if (at >= first and at < last) visible_headers += 1;
     }
-    const h = top + @as(f32, @floatFromInt(last - first)) * step + visible_headers * creator_header + bottom;
+    const avail = v.h - 16 - top - bottom;
+    const rows_height = @as(f32, @floatFromInt(field_count));
+    const header_height = @as(f32, @floatFromInt(visible_headers)) * creator_header;
+    const step = @min(row_height, @max(14, (avail - header_height) / rows_height));
+    const h = top + rows_height * step + header_height + bottom;
     const r: Rect = .{ .x = v.x + 24, .y = v.y + @max(8, (v.h - h) / 2), .w = 460, .h = h };
     panel(c, r, if (cr.confirmed) "CUSTOMIZE RANGER" else "CREATE YOUR RANGER");
+    const tab_gap: f32 = 3;
+    const tab_width = (r.w - 20 - tab_gap * @as(f32, @floatFromInt(creator_tab_labels.len - 1))) / @as(f32, @floatFromInt(creator_tab_labels.len));
+    for (creator_tab_labels, 0..) |label, i| {
+        const tab_rect: Rect = .{ .x = r.x + 10 + @as(f32, @floatFromInt(i)) * (tab_width + tab_gap), .y = r.y + 34, .w = tab_width, .h = 24 };
+        button(c, tab_rect, label, hitId(.creator_tab, i), tab == i);
+    }
     var y = r.y + top;
     inline for (fields, 0..) |f, i| {
         const field: Profile.Field = @enumFromInt(f.value);
@@ -880,6 +876,12 @@ fn drawCreator(c: *Canvas, sb: *const Sandbox, v: Rect) void {
     button(c, library, "IMPORTED PARTS", hitId(.creator_imported, 0), false);
     const forge: Rect = .{ .x = library.x + library.w + 8, .y = done.y, .w = 126, .h = 28 };
     button(c, forge, "HIVE FORGE", hitId(.enemy_forge, 0), false);
+}
+
+fn creatorTab(field: Profile.Field) usize {
+    const index = @intFromEnum(field);
+    for (creator_tab_ends, 0..) |end, i| if (index < end) return i;
+    return creator_tab_ends.len - 1;
 }
 
 fn drawEnemyDesign(c: *Canvas, cr: *const Creator, v: Rect) void {
@@ -1359,40 +1361,35 @@ test "every screen lays out inside the window and records hits" {
     c.reset(1280, 720);
     draw(&c, &m, &sb, hud);
     try expectInside(&c);
-    try std.testing.expect(c.hit_len >= enum_compat.fields(Profile.Field).len);
-    // The whole list fits at 720p and up, with the hint clear of the DONE button and the
-    // notice line above it.
-    for ([_][2]f32{ .{ 1280, 720 }, .{ 1920, 1080 }, .{ 2560, 1600 } }) |size| {
-        c.reset(size[0], size[1]);
-        draw(&c, &m, &sb, .{ .view = .{ .x = 0, .y = 0, .w = size[0], .h = size[1] }, .clock = "", .prompt = "", .toast = "" });
-        try expectInside(&c);
-        var rows: usize = 0;
-        for (c.hits[0..c.hit_len]) |h| if (hitArea(h.id) == .creator_field) {
-            rows += 1;
-        };
-        try std.testing.expectEqual(enum_compat.fields(Profile.Field).len, rows);
-    }
-    // A window too short for every row scrolls: the selected field stays on screen, the panel
-    // stays inside the window, and DONE is still reachable.
-    for ([_]Profile.Field{ .name, .helmet, .cel_style }) |field| {
-        sb.creator.field = field;
-        c.reset(640, 480);
-        draw(&c, &m, &sb, .{ .view = .{ .x = 0, .y = 0, .w = 640, .h = 480 }, .clock = "", .prompt = "", .toast = "" });
-        try expectInside(&c);
-        var selected = false;
-        var done = false;
-        var rows: usize = 0;
-        for (c.hits[0..c.hit_len]) |h| switch (hitArea(h.id)) {
-            .creator_field => {
-                rows += 1;
-                if ((h.id & 0xff) == @intFromEnum(field)) selected = true;
-                try std.testing.expect(h.rect.y >= 0 and h.rect.y + h.rect.h <= 480);
-            },
-            .creator_done => done = true,
-            else => {},
-        };
-        try std.testing.expect(selected and done);
-        try std.testing.expect(rows < enum_compat.fields(Profile.Field).len);
+    // Every field remains reachable, but each tab shows only its own rows. Check the full
+    // tab contract at 720p and the smaller 640x480 window, including selectable tab hits.
+    for ([_][2]f32{ .{ 1280, 720 }, .{ 640, 480 } }) |size| {
+        for (creator_tab_starts, 0..) |start, tab| {
+            sb.creator.field = start;
+            c.reset(size[0], size[1]);
+            draw(&c, &m, &sb, .{ .view = .{ .x = 0, .y = 0, .w = size[0], .h = size[1] }, .clock = "", .prompt = "", .toast = "" });
+            try expectInside(&c);
+            var rows: usize = 0;
+            var selected = false;
+            var tab_hit = false;
+            var done = false;
+            for (c.hits[0..c.hit_len]) |h| switch (hitArea(h.id)) {
+                .creator_field => {
+                    rows += 1;
+                    const field_index: usize = h.id & 0xff;
+                    try std.testing.expect(field_index >= @intFromEnum(start) and field_index < creator_tab_ends[tab]);
+                    try std.testing.expect(h.rect.y >= 0 and h.rect.y + h.rect.h <= size[1]);
+                    if (field_index == @intFromEnum(start)) selected = true;
+                },
+                .creator_tab => {
+                    if (hitRow(h.id) == tab) tab_hit = true;
+                },
+                .creator_done => done = true,
+                else => {},
+            };
+            try std.testing.expectEqual(creator_tab_ends[tab] - @intFromEnum(start), rows);
+            try std.testing.expect(selected and tab_hit and done);
+        }
     }
     sb.creator.field = .name;
     sb.creator.open = false;

@@ -51,7 +51,7 @@ The roadmap's full scale target is GPU-driven culling with indirect submission a
 
 - **Indirect draws:** `drawIndexedIndirect` and `drawIndirect` panic `unimplemented` in sysgpu, so a GPU-compacted instance list cannot set its own draw count.
 - **Shader atomics:** `atomicAdd`, `atomicLoad`, and `atomicStore` are unimplemented in Mach's WGSL compiler, so a compute pass cannot compact visible instances.
-- **Timestamp queries:** these are a TODO in the Metal backend, so reports say `"gpu_time": "unavailable"` instead of estimating.
+- **GPU timing:** Metal benchmark reports sample whole-command-buffer GPU duration after completion. Per-pass timestamp queries remain a TODO; non-Metal backends report no GPU sample.
 
 The cell grid with vertex-stage culling is the strongest design possible without them. With the 1M field it keeps CPU cost flat, but submits about 400K instances per frame; compaction would cut both the vertex work and the driver geometry memory. Lifting these limits means updating or forking Mach, a deliberate decision recorded in the [roadmap](roadmap.md).
 

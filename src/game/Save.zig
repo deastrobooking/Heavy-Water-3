@@ -31,9 +31,10 @@ const District = @import("../procedural/District.zig");
 /// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities;
 /// v24 corrects Rootway gallery geometry while retaining district and bridge identities;
 /// v25 adds the selectable Captain test-mesh body style to saved player profiles.
-/// v12 saves migrate: their one wallet and the personal fields of `progress` become P1's kit.
-/// Older saves are rejected.
+/// Format 13 is the oldest supported save; its four-player kits default combat XP to zero.
+/// Older saves are rejected deliberately. Bumping the current format does not move this floor.
 pub const format_version: u32 = 25;
+pub const min_supported_format: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
 
@@ -79,7 +80,7 @@ pub const Document = struct {
     collected: []const Modifications.ObjectRef,
     machines: []const MachineState,
     prefabs: []const Blueprint.Doc,
-    /// Format 12's one shared wallet (P1's after migration); format 13 keeps wallets in `members`.
+    /// Legacy format 12's shared wallet; format 13 and newer keep wallets in `members`.
     wallet: Market.Wallet = .{},
     /// Every player on the team (format 13).
     members: []const MemberState = &.{},
@@ -109,7 +110,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     var parsed = std.json.parseFromSlice(Document, allocator, bytes, .{ .ignore_unknown_fields = true }) catch return error.InvalidSave;
     errdefer parsed.deinit();
     const doc = parsed.value;
-    if (doc.format > format_version or doc.format < format_version - 12) return error.UnsupportedSaveFormat;
+    if (doc.format > format_version or doc.format < min_supported_format) return error.UnsupportedSaveFormat;
     if (doc.seed != seed) return error.SeedMismatch;
     if (doc.generator != Seed.generator_version) {
         if ((doc.generator == 5 or doc.generator == 6 or doc.generator == 7 or doc.generator == 8) and doc.format < format_version) {
@@ -260,16 +261,12 @@ test "save documents round-trip and reject mismatched or malformed input" {
     defer allocator.free(invalid_best);
     try std.testing.expectError(error.InvalidSave, decode(allocator, invalid_best, doc.seed, 4, 8));
 
-    // A format 12 save (one wallet, no members) still loads; the caller migrates it to P1's kit.
+    // Format 12 predates per-player kits and is deliberately outside the supported floor.
     var v12_doc = doc;
-    v12_doc.format = 12;
-    v12_doc.members = &.{};
-    v12_doc.wallet = .{ .scrap = 55 };
+    v12_doc.format = min_supported_format - 1;
     const v12 = try encode(allocator, v12_doc);
     defer allocator.free(v12);
-    const migrated = try decode(allocator, v12, doc.seed, 4, 8);
-    defer migrated.deinit();
-    try std.testing.expectEqual(@as(u32, 55), migrated.value.wallet.scrap);
+    try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, v12, doc.seed, 4, 8));
     // Format 16 adds droid progression; format 15 modded profiles still load unchanged.
     var modded = doc;
     var modded_profile = Profile{};
@@ -287,11 +284,6 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const v14_back = try decode(allocator, v14, doc.seed, 4, 8);
     defer v14_back.deinit();
     try std.testing.expect((try Profile.fromDoc(v14_back.value.profile)).mod.get(.hair_style) == null);
-    var v11_doc = doc;
-    v11_doc.format = 11;
-    const v11 = try encode(allocator, v11_doc);
-    defer allocator.free(v11);
-    try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, v11, doc.seed, 4, 8));
     var future_doc = doc;
     future_doc.format = format_version + 1;
     const future = try encode(allocator, future_doc);
@@ -312,6 +304,24 @@ test "save documents round-trip and reject mismatched or malformed input" {
     const old_format = try std.mem.replaceOwned(u8, allocator, bytes, std.fmt.comptimePrint("\"format\": {d}", .{format_version}), "\"format\": 11");
     defer allocator.free(old_format);
     try std.testing.expectError(error.UnsupportedSaveFormat, decode(allocator, old_format, doc.seed, 4, 8));
+}
+
+test "every supported save format has a checked-in round-trip fixture" {
+    const allocator = std.testing.allocator;
+    inline for (min_supported_format..format_version + 1) |version| {
+        const fixture = @embedFile(std.fmt.comptimePrint("fixtures/save-v{d}.json", .{version}));
+        {
+            const parsed = try decode(allocator, fixture, 42, 4, 8);
+            defer parsed.deinit();
+            try std.testing.expectEqual(version, parsed.value.format);
+            try std.testing.expectEqual(@as(usize, 1), parsed.value.members.len);
+            const bytes = try encode(allocator, parsed.value);
+            defer allocator.free(bytes);
+            const round_trip = try decode(allocator, bytes, 42, 4, 8);
+            defer round_trip.deinit();
+            try std.testing.expectEqualDeep(parsed.value, round_trip.value);
+        }
+    }
 }
 
 test "save files are written atomically and read back" {

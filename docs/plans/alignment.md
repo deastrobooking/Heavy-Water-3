@@ -27,6 +27,8 @@ Two outside summaries proposed "Unreal-like" upgrades for a Mach game. Each poin
 | Don't build an editor or visual scripting yet | Agreed. JSON scenes, hot reload, and the showcase/capture tools stand in for an editor. | Agreed |
 | Forward renderer with shadow mapping and instancing | Cel-shaded forward renderer with instancing, culling, and LOD exists; there are no shadows yet. | Lighting work continues alongside content |
 
+A second review, of Unreal-style gameplay, rendering, tooling, physics, animation and networking features, is in [engine features](engine-features.md) (2026-10-14): adopt a small ability core, behavior trees, compiled logic graphs, cinematic tracks and ragdolls; reject virtualized geometry, global illumination and dynamic-library live coding.
+
 ## Mach tracking
 
 ### Zig 0.17 and 0.18 toolchain gate (2026-10-10)
@@ -68,6 +70,29 @@ The pinned Mach lacks capabilities measured or needed during development:
 3. Record any API breakage.
 
 Adopt upstream changes only if everything passes and preserve Heavy Water's engine patches. Draft focused maintainer proposals for features or compatibility fixes that belong in Mach or Zig; record links and remove corresponding local patches when upstream includes them. The ignored dependency cache remains off-limits; engine work belongs in `vendor/mach`. Phases 13–16 are designed to work on the current pin.
+
+### Re-gate on main 1eac838 (2026-10-14)
+
+Re-run after the nature, L-system forest and mesh-editor commits (macOS aarch64, Apple M3 Pro, Metal; the fork unchanged).
+
+| Gate | Default pair | 0.17.0 |
+| --- | --- | --- |
+| `build check` | pass | pass |
+| Headless tests | 435 of 439 | 435 of 439 |
+| Metal-validated smoke (300 frames) | clean | not run |
+| Nature benchmark (600 frames, ReleaseFast) | pass; CPU p99 2.976 ms; 12,248,988 submitted triangles | not run |
+| Frontier benchmark (600 frames, ReleaseFast) | pass; simulation p99 2.815 ms, skinning p99 0.101 ms, render CPU p99 4.879 ms | not run |
+| Cross compiles, Linux and Windows | not re-run | not re-run |
+
+The same four tests fail on both channels, so they are not migration regressions: `asset.Catalog` deferred meshes (expects 5 pending, finds 6), `game.Save` round trip (a format 12 document, below the loader's current minimum of 13), `game.Creator` draft edit (`body_style` moved the field order) and `ui.Screens` layout (35 fields, a 25-row window). Causes and fixes are in the [technical review](next-steps.md#technical-review--2026-10-14). GPU time was unavailable at this re-gate; the later Metal command-buffer timing follow-up is below. Adoption still needs the full matrix: 0.17 smoke and benchmarks, the cross compiles, and the adoption change itself.
+
+### Validation gate after suite and save fixes (2026-10-14)
+
+The new `python3 tools/validation_gate.py` passed: default and Zig 0.17 `build check`, **440/440 headless tests on both**, and the default 300-frame Metal-validated smoke. The smoke and Linux/Windows cross-compiles were not run on Zig 0.17. The 2026-10-10 candidate matrix above remains the latest 0.17 asset-build, smoke and cross-compile evidence.
+
+### Metal command-buffer GPU timing (2026-10-14)
+
+Added completed-command-buffer GPU duration sampling to the vendored Metal queue using `GPUStartTime` and `GPUEndTime`, and exposed the latest sample count and duration to the benchmark. This reports whole-command-buffer time, not per-pass timings; non-Metal backends return no sample. Four 600-frame nature runs recorded 596–598 samples each; median run-level GPU p50/p95/p99 were **12.199/17.969/19.729 ms**, with p99 ranging **19.354–20.009 ms**. The nature route's p99 exceeds the 16.7 ms budget, so tree LOD remains the next rendering task. Default and 0.17 checks, 440/440 tests on each, default Metal smoke, and 0.17 Linux Vulkan/OpenGL plus Windows D3D12 cross-compiles passed; Linux and Windows were compile-only. See [validation](../validation.md#metal-command-buffer-gpu-timing--2026-10-14).
 
 ### Post-overhaul gate on main 1fe9e13 (2026-10-11)
 

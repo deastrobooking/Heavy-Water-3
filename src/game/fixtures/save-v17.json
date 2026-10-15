@@ -1,0 +1,79 @@
+{
+  "format": 17,
+  "seed": 42,
+  "tick": 0,
+  "player": {
+    "feet": [
+      0,
+      0,
+      0
+    ],
+    "yaw": 0,
+    "pitch": 0,
+    "mode": "walk"
+  },
+  "profile": {
+    "name": "FORMAT FIXTURE",
+    "height": 1.0,
+    "build": 1.0,
+    "skin": 0,
+    "hair_style": "short",
+    "hair_color": 0,
+    "outfit": 0,
+    "accent": 0,
+    "mod": {}
+  },
+  "props": [],
+  "collected": [],
+  "machines": [],
+  "prefabs": [],
+  "members": [
+    {
+      "slot": 0,
+      "profile": {
+        "name": "FORMAT FIXTURE",
+        "height": 1.0,
+        "build": 1.0,
+        "skin": 0,
+        "hair_style": "short",
+        "hair_color": 0,
+        "outfit": 0,
+        "accent": 0,
+        "mod": {}
+      },
+      "kit": {
+        "wallet": {
+          "scrap": 55
+        },
+        "levels": [],
+        "inventory": [],
+        "armors": [],
+        "weapons": [],
+        "weapon_upgrades": [],
+        "suits": [],
+        "pets": [],
+        "combat_xp": 0,
+        "robot_built": false,
+        "robot_xp": 0
+      }
+    }
+  ],
+  "market_day": 0,
+  "market_stock": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ]
+  ]
+}

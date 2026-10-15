@@ -85,6 +85,8 @@ io: std.Io = undefined,
 seed: u64 = 0,
 intervals: FrameStats = .{},
 cpu_times: FrameStats = .{},
+gpu_times: FrameStats = .{},
+gpu_samples_seen: u64 = 0,
 character_prepare_times: FrameStats = .{},
 character_skin_times: FrameStats = .{},
 percentiles: FrameStats.Summary = .{ .p50 = 0, .p95 = 0, .p99 = 0, .worst = 0, .mean = 0 },
@@ -509,6 +511,9 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     }
     const window = core.windows.getValue(core.window);
     if (window.framebuffer_width == 0 or window.framebuffer_height == 0) return;
+    if (options.benchmark_frames > 0 and self.frames == warmup_frames) {
+        if (window.queue.gpuTime()) |sample| self.gpu_samples_seen = sample.sample_count;
+    }
     const swap_view = window.swap_chain.getCurrentTextureView() orelse return;
     defer swap_view.release();
     self.resize(window.device, window.framebuffer_width, window.framebuffer_height);
@@ -703,6 +708,14 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const command = encoder.finish(&.{});
     defer command.release();
     window.queue.submit(&.{command});
+    if (options.benchmark_frames > 0 and self.frames >= warmup_frames) {
+        if (window.queue.gpuTime()) |sample| {
+            if (sample.sample_count > self.gpu_samples_seen) {
+                self.gpu_samples_seen = sample.sample_count;
+                self.gpu_times.record(@as(f32, @floatFromInt(sample.latest_ns)) / 1_000_000);
+            }
+        }
+    }
     if (capturing) {
         self.capture_requested = true;
         self.capture_buffer.?.mapAsync(.{ .read = true }, 0, @as(usize, self.capture_size[0]) * self.capture_size[1] * 4, self, struct {
@@ -856,13 +869,12 @@ fn finishCapture(self: *Renderer, core: *mach.Core) void {
 fn reportBenchmark(self: *Renderer) void {
     const interval = self.intervals.summary();
     const cpu = self.cpu_times.summary();
-    // Scale workload and memory. GPU execution time needs timestamp queries, which the pinned
-    // Mach Metal backend does not implement, so it is reported as unavailable, not estimated.
+    const gpu_time = self.gpu_times.summary();
     const submitted = self.field_submitted.summary();
     const runs = self.field_runs.summary();
     const cells = self.field_cells.summary();
     if (Memory.footprint()) |bytes| self.peak_footprint = @max(self.peak_footprint, bytes);
-    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"asset_upload_budget_bytes\":{d},\"peak_late_upload_bytes\":{d},\"largest_single_late_upload_bytes\":{d},\"late_uploads\":{d},\"pack_assets\":{d},\"pack_bytes\":{d},\"pack_requested_frame\":{d},\"pack_installed\":{d},\"pack_ready_frame\":{d},\"gpu_time\":\"unavailable\"}}", .{
+    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"asset_upload_budget_bytes\":{d},\"peak_late_upload_bytes\":{d},\"largest_single_late_upload_bytes\":{d},\"late_uploads\":{d},\"pack_assets\":{d},\"pack_bytes\":{d},\"pack_requested_frame\":{d},\"pack_installed\":{d},\"pack_ready_frame\":{d},\"gpu_time_available\":{s},\"gpu_time_samples\":{d},\"gpu_time_p50_ms\":{d:.3},\"gpu_time_p95_ms\":{d:.3},\"gpu_time_p99_ms\":{d:.3}}}", .{
         options.scale_objects,
         if (self.field) |f| f.generation_ms else 0,
         if (self.field) |f| f.gpuBytes() else 0,
@@ -887,6 +899,11 @@ fn reportBenchmark(self: *Renderer) void {
         self.pack_requested_frame,
         self.pack_installed,
         self.pack_ready_frame,
+        if (self.gpu_times.len > 0) "true" else "false",
+        self.gpu_times.total,
+        gpu_time.p50,
+        gpu_time.p95,
+        gpu_time.p99,
     });
     const character = self.character_prepare_times.summary();
     const skin = self.character_skin_times.summary();

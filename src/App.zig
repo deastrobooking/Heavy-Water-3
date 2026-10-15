@@ -847,6 +847,9 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.field = @enumFromInt(row);
             sb.creator.adjust(if (Screens.hitArea(hit) == .creator_left) -1 else 1);
         },
+        .creator_tab => if (click and sb.creator.open and row < Screens.creator_tab_starts.len) {
+            sb.creator.field = Screens.creator_tab_starts[row];
+        },
         .creator_done => if (click) self.creatorInput(.enter),
         .creator_imported => if (click and sb.creator.open) {
             sb.creator.openImported();

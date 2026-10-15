@@ -1,6 +1,6 @@
 # Nature upgrade: terrain, ground cover, grass and trees
 
-**Status:** in progress, 2026-10-14. Phase 0 review cameras and benchmark instrumentation are implemented; the 600-frame benchmark passes. A first L-system slice drives the eight streamed tree species and separates bark branches from foliage. A second pass fits crowns to bole height, adds foliage clusters along secondary branches, and improves the nature review views. Frame-120 captures of 71–73 are now daylight-visible; 71 cleanly frames open ground and low plants, while 72/73 show more connected branching but still reveal spindly giant silhouettes at distance. The 62/70 capture set, frame-480 captures, regression guards and Arbor integration remain open. [Roadmap](../roadmap.md) stays the single plan; this document is the detailed breakdown behind its "Nature" section.
+**Status:** in progress, 2026-10-14. Phase 0 review cameras and benchmark instrumentation are implemented; the 600-frame benchmark passes. A first L-system slice drives the eight streamed tree species and separates bark branches from foliage. A second pass fits crowns to bole height, adds foliage clusters along secondary branches, and improves the nature review views. Frame-120 captures of 71–73 are now daylight-visible; 71 cleanly frames open ground and low plants, while 72/73 show more connected branching but still reveal spindly giant silhouettes at distance. The 62/70 capture set, frame-480 captures, regression guards and Arbor integration remain open. Re-measured 2026-10-14: the nature route submits 12,248,988 triangles (1,855,985 on 2026-10-13) with the same 551 visible vegetation instances and unchanged CPU time. Benchmark GPU p99 is 19.690 ms, so forest level of detail (phases 5d and 5f) now comes before further crown detail ([technical review](next-steps.md#technical-review--2026-10-14)). [Roadmap](../roadmap.md) stays the single plan; this document is the detailed breakdown behind its "Nature" section.
 
 **Audience:** engineers and coding agents working in this repository. Every step names the files it touches, the tests that must exist, and the capture or measurement that proves it.
 
@@ -20,7 +20,7 @@ These come from [AGENTS.md](../../AGENTS.md) and the code; the plan does not bre
 
 - **Native Zig only.** No C/C++ terrain, foliage or noise libraries. Shaders are WGSL through Mach's compiler.
 - **Mach WGSL limits.** No `cross`, `pow` or `reflect` (substitutes live in the shared prelude of [scene.wgsl](../../src/render/scene.wgsl)), no negated swizzles, one entry point per stage per module, `patch` is reserved. New stages are spliced onto the prelude the way [Renderer.zig](../../src/render/Renderer.zig) already does for foliage, water and terrain.
-- **Mach engine gaps.** No shader atomics (so no GPU-compacted culling), no timestamp queries (GPU time is "unavailable"), no texture-to-buffer readback. Indirect draws exist. See [scale](../scale.md). Plan around CPU cell planning plus shader-side per-instance rejection, which is what [Field.zig](../../src/render/Field.zig) already does.
+- **Mach engine gaps.** No shader atomics (so no GPU-compacted culling), per-pass timestamp queries, or texture-to-buffer readback. Metal benchmark reports now include whole-command-buffer GPU duration; other backends do not. Indirect draws exist. See [scale](../scale.md). Plan around CPU cell planning plus shader-side per-instance rejection, which is what [Field.zig](../../src/render/Field.zig) already does.
 - **Module state is small.** Mach copies module state on the 8 MB main-thread stack. Large arrays go on the heap, and every phase that adds state runs one Debug launch.
 - **Frame path never allocates.** Fixed-capacity storage or arenas only.
 - **Saves are contracts.** Anything that changes what a seed produces bumps `Seed.generator_version`; anything that changes a grown tree bumps `Arbor.generator_version`. Both are recorded in saves ([Save.zig](../../src/game/Save.zig)). Each phase below states its save impact.
@@ -150,7 +150,7 @@ Purpose: ground that reads as soil, grass, moss, scree, sand, rock and snow in b
 7. Tests: weight normalization with four axes, curvature continuity across chunk seams, river carve identical on both sides of a chunk edge, footing kind unchanged where gameplay depends on it (`Biome.Kind` tests).
 8. Save impact: footing may change where biome changes; covered by the Phase 1 generator bump if both phases ship before release. If Phase 2 ships alone, bump again.
 
-Acceptance: capture 73, 36 (river) and 48 (meadow) show visible soil, moss, scree and wet banks; the shader stays within the current terrain fragment cost (report CPU p99 and check the capture frame rate by eye; GPU time is unavailable).
+Acceptance: capture 73, 36 (river) and 48 (meadow) show visible soil, moss, scree and wet banks; the shader stays within the current terrain fragment cost (report CPU and whole-command-buffer GPU p99, and check the capture frame rate by eye).
 
 ### Phase 3. Ecology-driven scatter (M)
 
@@ -190,7 +190,7 @@ Design: a **GPU-generated patch** system. One small grass-patch mesh is drawn in
 
 Acceptance: ground-level capture shows continuous grass with wind and trample; far field transitions without a visible band; budgets hold.
 
-Risks: vertex-bound cost on the M3 Pro (**GPU time is unavailable**, so judge by CPU p99, frame intervals and by-eye smoothness). Mitigation: density and blade-count levers are constants.
+Risks: vertex-bound cost on the M3 Pro; the benchmark reports whole-command-buffer GPU time but cannot isolate grass. Mitigation: density and blade-count levers are constants, and compare fixed-seed GPU percentiles before and after.
 
 ### Phase 5. Trees v2 (L)
 
@@ -284,9 +284,9 @@ Acceptance: capture 73 and 41 show continuous terrain to the far panorama; the b
 | Grass | ≤ 6,000 patch instances, ≤ 48 blades per near patch | draw plan assertion |
 | Trees | triangle caps per LOD (near 12k, mid 3k, far 300) | mesh tests |
 | Terrain | 25 near chunks plus far rings within the declared pool sizes | streamer tests |
-| GPU time | unavailable (no timestamp queries); report CPU p99 and presentation intervals separately | existing report |
+| GPU time | Metal whole-command-buffer duration p50/p95/p99 from completed command buffers; per-pass timing unavailable | benchmark report |
 
-Upstream candidate: implement timestamp queries on the Metal backend in the fork, as already noted in [alignment](alignment.md#mach-tracking), so grass and shadow costs can be measured instead of inferred.
+Upstream candidate: implement per-pass timestamp queries on the Metal backend in the fork, as already noted in [alignment](alignment.md#mach-tracking), so grass and shadow costs can be isolated instead of inferred from whole-command-buffer duration.
 
 ### 7.2 Save and generator versioning
 

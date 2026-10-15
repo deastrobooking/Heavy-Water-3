@@ -28,12 +28,16 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `zig-out/bin/asset-compiler modifier-edit <input.json> <output.json> palette <skin|eyes|armor|energy> <r> <g> <b>` | Changes one shared palette color while retaining explicit per-part color overrides. |
 | `zig-out/bin/asset-compiler preview-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.png> [bind|run]` | Applies palette and per-part edits and renders a review image. A stale source or changed mesh-island set is rejected. |
 | `zig-out/bin/asset-compiler compile-modified <source.glb|source.gltf> <source.meta> <modifiers.json> <output.hwmesh> [bind|run]` | Validates the GLB and modifier sidecar, bakes a selected static pose plus edits into a runtime HWMS mesh. |
+| `python3 tools/zig.py build modifier-bench` | Times the mesh modifier operations (`analyze`, full `apply` and `recolor`, and the incremental `Bake.updatePart`) on synthetic meshes of 100k and 1M vertices; use it before and after changes to `asset/Modifiers.zig`. |
+| `python3 tools/validation_gate.py` | Runs default `build check`, all headless tests, a 300-frame Metal-validated smoke, then Zig 0.17 `build check` and all headless tests. It prints the test counts and requires the suite to be green. Run on macOS. |
 | `python3 tools/zig.py build mods` | Builds the example WebAssembly mod's scripts into `mods/`. |
 | `python3 tools/zig.py build validate-mods [-- <dir>]` | Loads every mod under `mods/` (or one directory) as the game does and prints `file: key: reason` for each problem; non-zero exit on any rejection ([character content](mods.md#character-content)). |
 | `python3 tools/zig.py build sounds` | Writes every synthesized sound to `zig-out/sounds/*.wav` for listening. |
 | `python3 tools/zig.py build heightmap -- <in.pgm> <out.hwmh> [width depth elevation base]` | Imports a PGM heightmap to the runtime terrain format. |
 
 In the Character Designer, choose **IMPORTED PARTS** to browse the bundled Captain or use **IMPORT GLB** to select a binary `.glb` character. The importer maps supported humanoid bone names to the game's run tracks and shows the retargeted preview pose. This pose is baked into a static mesh for gameplay; live imported skeletal animation is not implemented yet. Select a component to hide/restore it, assign or clear a palette paint, switch its surface role, and adjust the selected skin, eye, armor, or energy color with the RGB controls. **SAVE LIBRARY** saves the matching modifier sidecar. The bundled Captain override uses `saves/captain.modifiers.json`; a user import and its sidecar are stored as `saves/imported-character.glb` and `saves/imported-character.modifiers.json` and reload on later launches.
+
+The main Character Designer groups its 35 profile fields into Basics, Hair, Gear, Armor RGB, and Style tabs so all fields remain reachable at 720p. Field navigation remains continuous across tabs; clicking a tab selects its first field.
 
 To capture the imported-component window on Metal for visual review:
 
@@ -45,7 +49,7 @@ The modifier commands remain useful for batch import and offline GLB preview. Th
 
 For backend-specific development builds, pass `-Dmach_gpu_backend=metal`, `vulkan`, `opengl`, or `d3d12`. The default selects the platform backend. Each backend requires a supported target and its native platform libraries.
 
-The fork carries compatibility paths for newer compilers. `HEAVYWATER_ZIG_CHANNEL=0.17` passes `build check`, `build assets`, `build test` and the Metal smoke run, and the Linux (Vulkan, OpenGL) and Windows (D3D12) targets cross-compile (`-Dtarget=x86_64-linux-gnu -Dmach_gpu_backend=vulkan`, `-Dtarget=x86_64-windows -Dmach_gpu_backend=d3d12`); the 0.18 snapshot passes on macOS and Linux Vulkan. The default stays on the proven Mach compiler until the adoption change lands; see the [Mach and Zig update process](plans/engine-update-process.md) and the candidate matrix in [engine alignment](plans/alignment.md#mach-tracking).
+The fork carries compatibility paths for newer compilers. The 2026-10-14 validation gate passes `build check` and all 440 headless tests on both the default and Zig 0.17 channels; the default Metal smoke is clean. Zig 0.17's asset build, Metal smoke and Linux (Vulkan, OpenGL) and Windows (D3D12) cross-compiles last passed in the 2026-10-10 candidate matrix and were not rerun in this gate. The 0.18 snapshot passes on macOS and Linux Vulkan. The default stays on the proven Mach compiler until the adoption change lands; see the [Mach and Zig update process](plans/engine-update-process.md) and the candidate matrix in [engine alignment](plans/alignment.md#mach-tracking).
 
 ### Optimization modes
 
@@ -77,6 +81,8 @@ Options are compiled in, so changing one rebuilds.
 | `-Dsmoke-frames=N` | 0 | Scripted smoke run: exits after N rendered frames (see below). |
 | `-Dbenchmark-frames=N` | 0 | Streaming benchmark route for N measured frames after 60 warm-up frames (use `tools/benchmark.py`). |
 | `-Dbenchmark-canopy`, `-Dbenchmark-arbor=0..2` | off, 0 | Benchmark route aimed at an Arbor, close up to 1 km and back. |
+| `-Dbenchmark-frontier` | off | Benchmark four-player split screen with the live frontier simulation (use `tools/benchmark.py --frontier`). |
+| `-Dnature-benchmark` | off | Add terrain, scatter, visible-flora and submitted-triangle metrics to the benchmark report (use `tools/benchmark.py --nature`). |
 | `-Dscale-objects=N` | 0 | Scale workload of N field objects. |
 | `-Dpack-stress=N` | 0 | Write and stream a pack of N meshes during the benchmark. |
 | `-Dshowcase=N` | 0 | Hold a fixed viewpoint or scene for review (table below). |
@@ -111,7 +117,7 @@ Options are compiled in, so changing one rebuilds.
 python3 tools/zig.py build test --summary all
 ```
 
-- **Scope:** the latest recorded full run (2026-10-11) passed 419 tests. The suite is deterministic and headless, covering the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
+- **Scope:** the latest full run (2026-10-14) passed **440/440 tests** on default Zig and Zig 0.17. The suite is deterministic and headless, covering the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
 - **Time:** expect about 3.5 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
 - **Release mode:** `-Doptimize=ReleaseSafe` runs the same suite optimized.
 
@@ -157,6 +163,7 @@ MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Dreload-smoke=true -Dsmoke-fra
 | `python3 tools/benchmark.py --canopy [--arbor 1\|2]` | An Arbor up close, at 1 km and back: both LODs and the render CPU budget. |
 | `python3 tools/benchmark.py --scale 10000\|100000\|1000000` | The scale workload (see [Scale Tests](scale.md)). |
 | `python3 tools/benchmark.py --pack 64` | Streaming an 80 MiB pack of 64 meshes during measurement. |
+| `python3 tools/benchmark.py --nature` | Terrain and scatter generation (`Chunk.fill`, scatter p50/p99), generated and visible objects by kind, submitted scene triangles, and render CPU, on the streaming route (`.tools/nature-benchmark.json`). Records a 600-frame pass; a 120-frame run can fail the active-ring gate. |
 | `python3 tools/benchmark.py --frontier` | Four-player ground and air combat: simulation stages, character preparation/skinning, render CPU, presentation intervals, and audio callbacks. |
 
 Shared flags:
@@ -172,7 +179,7 @@ Reports cover:
 - chunk residency, uploads and evictions;
 - pool counts.
 
-They do not measure GPU execution time; the pinned Mach path has no timestamp queries yet. Presentation intervals are not GPU timings. The frontier benchmark is available, with its latest recorded results and follow-up in [next steps](plans/next-steps.md) and [validation](validation.md).
+On Metal, benchmark reports include whole-command-buffer GPU duration from the command buffer's completion timestamps; this is not per-pass timing. Other backends do not currently report GPU samples. Presentation intervals remain display-pacing measurements. The frontier benchmark is available, with its latest recorded results and follow-up in [next steps](plans/next-steps.md) and [validation](validation.md).
 
 ## Showcases and captures
 
@@ -193,6 +200,11 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 66 | Early procedural orbital habitat cylinder beside Rand Corporation's Mother construction ark (art review only) |
 | 67 | Wilds architecture lineup: cabin, barn, and cave sanctuary |
 | 70 | Detroit test Arbor, framed from trunk through crown |
+| 71 | Nature review: ground cover, looking across low plants from an offset, downward-facing camera |
+| 72 | Nature review: mid-distance forest silhouettes, backed away from the nearby trunks |
+| 73 | Nature review: terrain overview, daylight |
+| 74 | Nature review: a close pine view |
+| 75 | Nature review: a close moon-cascade view |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |

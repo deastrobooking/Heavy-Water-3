@@ -119,6 +119,8 @@ def main():
     if args.nature:
         checks["nature_generation_measured"] = result.get("generated", 0) > 0 and result.get("chunk_fill_p99_ms", 0) > 0 and result.get("scatter_p99_ms", 0) > 0
         checks["nature_draw_counts_measured"] = result.get("submitted_triangles", 0) > 0 and result.get("visible_vegetation", 0) > 0
+        if platform.system() == "Darwin":
+            checks["gpu_timing_collected"] = result.get("gpu_time_available", False) and result.get("gpu_time_samples", 0) >= args.frames * 0.9
     if args.canopy:
         checks["arbor_lods_exercised"] = result["arbor_detail_frames"] > 0 and result["arbor_proxy_frames"] > 0
         checks["render_cpu_budget"] = result["cpu_p99_ms"] < 16.667

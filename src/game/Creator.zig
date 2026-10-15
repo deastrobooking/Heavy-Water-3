@@ -8,6 +8,11 @@ const Modifiers = @import("../asset/Modifiers.zig");
 const EnemyDesign = @import("EnemyDesign.zig");
 const Creator = @This();
 
+const imported_history_capacity = 64;
+const imported_rig_status_capacity = 96;
+const all_clothing_owned = std.math.maxInt(u8);
+const all_armor_owned = std.math.maxInt(u16);
+
 pub const Key = union(enum) { up, down, left, right, enter, escape, backspace, undo, redo, char: u8 };
 pub const Line = struct {
     text: [64]u8 = undefined,
@@ -25,9 +30,9 @@ draft: Profile = .{},
 /// Set once a profile has been confirmed; a new game starts with the creator open.
 confirmed: bool = false,
 /// Clothing the player owns, one bit per `Profile.Clothing`; others are skipped when cycling.
-owned: u8 = 0xff,
+owned: u8 = all_clothing_owned,
 /// Armor accents owned, one bit per `Profile.Armor`.
-owned_armor: u16 = 0xffff,
+owned_armor: u16 = all_armor_owned,
 /// Forms unlocked, one bit per `Profile.Species` (human always; a Wildkin form once its hero
 /// has joined the roster).
 owned_species: u32 = 1,
@@ -35,8 +40,8 @@ owned_species: u32 = 1,
 registry: ?*const CharacterContent.Registry = null,
 /// Source-linked imported character library shown in the in-game Character Designer.
 imported_doc: ?*Modifiers.Document = null,
-imported_history: Modifiers.History(64) = .{},
-imported_dirty_ids: [64]u32 = @splat(0),
+imported_history: Modifiers.History(imported_history_capacity) = .{},
+imported_dirty_ids: [imported_history_capacity]u32 = @splat(0),
 imported_dirty_len: usize = 0,
 imported_dirty_all: bool = false,
 imported_open: bool = false,
@@ -45,7 +50,7 @@ imported_filter: u8 = 0,
 imported_palette: Modifiers.Palette = .eyes,
 imported_palette_variant: u8 = 0,
 imported_status: enum { ready, unsaved, saved } = .ready,
-imported_rig_status: [96]u8 = @splat(0),
+imported_rig_status: [imported_rig_status_capacity]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
 /// In-game villain assembly panel; its chosen kit skins transformer-scale Scalari frames.
 enemy_design_open: bool = false,
@@ -53,44 +58,74 @@ enemy_design: EnemyDesign.Design = .{},
 enemy_part: EnemyDesign.Part = .frame,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry, .imported_doc = self.imported_doc, .imported_history = self.imported_history, .imported_dirty_ids = self.imported_dirty_ids, .imported_dirty_len = self.imported_dirty_len, .imported_dirty_all = self.imported_dirty_all, .imported_selected = self.imported_selected, .imported_filter = self.imported_filter, .imported_palette = self.imported_palette, .imported_palette_variant = self.imported_palette_variant, .imported_status = self.imported_status, .imported_rig_status = self.imported_rig_status, .imported_rig_status_len = self.imported_rig_status_len, .enemy_design = self.enemy_design, .enemy_part = self.enemy_part };
+    self.* = .{
+        .open = true,
+        .draft = current,
+        .confirmed = self.confirmed,
+        .owned = self.owned,
+        .owned_armor = self.owned_armor,
+        .owned_species = self.owned_species | 1,
+        .registry = self.registry,
+        .imported_doc = self.imported_doc,
+        .imported_history = self.imported_history,
+        .imported_dirty_ids = self.imported_dirty_ids,
+        .imported_dirty_len = self.imported_dirty_len,
+        .imported_dirty_all = self.imported_dirty_all,
+        .imported_selected = self.imported_selected,
+        .imported_filter = self.imported_filter,
+        .imported_palette = self.imported_palette,
+        .imported_palette_variant = self.imported_palette_variant,
+        .imported_status = self.imported_status,
+        .imported_rig_status = self.imported_rig_status,
+        .imported_rig_status_len = self.imported_rig_status_len,
+        .enemy_design = self.enemy_design,
+        .enemy_part = self.enemy_part,
+    };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
 
 pub fn key(self: *Creator, k: Key) Result {
     if (!self.open) return .editing;
-    if (self.enemy_design_open) {
-        switch (k) {
-            .up => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + EnemyDesign.part_count - 1) % EnemyDesign.part_count),
-            .down => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + 1) % EnemyDesign.part_count),
-            .left => self.enemy_design.cycle(self.enemy_part, -1),
-            .right => self.enemy_design.cycle(self.enemy_part, 1),
-            .char => |c| if (std.ascii.toLower(c) == 'p') self.enemy_design.cyclePalette(1),
-            .escape, .enter => self.enemy_design_open = false,
-            else => {},
-        }
-        return .editing;
+    if (self.enemy_design_open) return self.handleEnemyKey(k);
+    if (self.imported_open) return self.handleImportedKey(k);
+    return self.handleProfileKey(k);
+}
+
+fn handleEnemyKey(self: *Creator, k: Key) Result {
+    switch (k) {
+        .up => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + EnemyDesign.part_count - 1) % EnemyDesign.part_count),
+        .down => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + 1) % EnemyDesign.part_count),
+        .left => self.enemy_design.cycle(self.enemy_part, -1),
+        .right => self.enemy_design.cycle(self.enemy_part, 1),
+        .char => |c| if (std.ascii.toLower(c) == 'p') self.enemy_design.cyclePalette(1),
+        .escape, .enter => self.enemy_design_open = false,
+        else => {},
     }
-    if (self.imported_open) {
-        switch (k) {
-            .undo => self.undoImported(std.heap.page_allocator),
-            .redo => self.redoImported(std.heap.page_allocator),
-            .up => self.moveImported(-1),
-            .down => self.moveImported(1),
-            .left => self.cycleImportedSurface(-1),
-            .right => self.cycleImportedSurface(1),
-            .char => |c| switch (std.ascii.toLower(c)) {
-                'p' => self.cycleImportedPalette(1),
-                'c' => self.paintImportedPart(),
-                'h' => self.toggleImportedPart(),
-                else => {},
-            },
-            .escape, .enter => self.imported_open = false,
+    return .editing;
+}
+
+fn handleImportedKey(self: *Creator, k: Key) Result {
+    switch (k) {
+        .undo => self.undoImported(std.heap.page_allocator),
+        .redo => self.redoImported(std.heap.page_allocator),
+        .up => self.moveImported(-1),
+        .down => self.moveImported(1),
+        .left => self.cycleImportedSurface(-1),
+        .right => self.cycleImportedSurface(1),
+        .char => |c| switch (std.ascii.toLower(c)) {
+            'p' => self.cycleImportedPalette(1),
+            'c' => self.paintImportedPart(),
+            'h' => self.toggleImportedPart(),
             else => {},
-        }
-        return .editing;
+        },
+        .escape, .enter => self.imported_open = false,
+        else => {},
     }
+    return .editing;
+}
+
+fn handleProfileKey(self: *Creator, k: Key) Result {
     switch (k) {
         .undo, .redo => {},
         .up => self.field = @enumFromInt((@intFromEnum(self.field) + fields.len - 1) % fields.len),
@@ -124,8 +159,18 @@ pub fn openImported(self: *Creator) void {
 pub fn moveImported(self: *Creator, delta: isize) void {
     const doc = self.imported_doc orelse return;
     if (doc.parts.len == 0) return;
-    const count: isize = @intCast(doc.parts.len);
-    self.imported_selected = @intCast(@mod(@as(isize, @intCast(self.imported_selected)) + delta, count));
+    const count = doc.parts.len;
+    const selected = self.imported_selected % count;
+    if (delta >= 0) {
+        const wrapped_step = @as(usize, @intCast(delta)) % count;
+        const to_wrap = count - selected;
+        self.imported_selected = if (wrapped_step >= to_wrap) wrapped_step - to_wrap else selected + wrapped_step;
+    } else {
+        // Add one before negating so the minimum isize value is representable.
+        const magnitude: usize = @as(usize, @intCast(-(delta + 1))) + 1;
+        const wrapped_step = magnitude % count;
+        self.imported_selected = if (wrapped_step > selected) count - (wrapped_step - selected) else selected - wrapped_step;
+    }
     self.alignImportedPalette();
 }
 
@@ -233,7 +278,7 @@ pub fn clearImportedHistory(self: *Creator) void {
     self.imported_dirty_all = false;
 }
 
-pub const DirtySnapshot = struct { ids: [64]u32, len: usize, all: bool };
+pub const DirtySnapshot = struct { ids: [imported_history_capacity]u32, len: usize, all: bool };
 
 pub fn takeImportedDirty(self: *Creator) DirtySnapshot {
     const result: DirtySnapshot = .{ .ids = self.imported_dirty_ids, .len = self.imported_dirty_len, .all = self.imported_dirty_all };
@@ -312,23 +357,28 @@ pub fn adjust(self: *Creator, delta: i32) void {
     self.draft.adjust(self.field, delta);
     if (self.field == .species) {
         for (0..Profile.species_count) |_| {
-            if (self.owned_species & (@as(u32, 1) << @intCast(@intFromEnum(self.draft.species))) != 0) return;
+            if (isOwned(self.owned_species, self.draft.species)) return;
             self.draft.adjust(.species, delta);
         }
         return;
     }
     if (self.field == .armor) {
         for (0..enum_compat.fields(Profile.Armor).len) |_| {
-            if (self.owned_armor & (@as(u16, 1) << @intCast(@intFromEnum(self.draft.armor))) != 0) return;
+            if (isOwned(self.owned_armor, self.draft.armor)) return;
             self.draft.adjust(.armor, delta);
         }
         return;
     }
     if (self.field != .clothing) return;
     for (0..enum_compat.fields(Profile.Clothing).len) |_| {
-        if (self.owned & (@as(u8, 1) << @intCast(@intFromEnum(self.draft.clothing))) != 0) return;
+        if (isOwned(self.owned, self.draft.clothing)) return;
         self.draft.adjust(.clothing, delta);
     }
+}
+
+fn isOwned(mask: anytype, item: anytype) bool {
+    const bit = @as(@TypeOf(mask), 1) << @intCast(@intFromEnum(item));
+    return mask & bit != 0;
 }
 
 /// The mod content slot a field offers, if any: mod entries are extra options after the built-ins.
@@ -389,7 +439,7 @@ fn adjustWithMods(self: *Creator, delta: i32) bool {
             return true;
         }
         // Built-in choice: respect what the player owns.
-        if (self.field == .armor and self.owned_armor & (@as(u8, 1) << @intCast(choice)) == 0) continue;
+        if (self.field == .armor and !isOwned(self.owned_armor, @as(Profile.Armor, @enumFromInt(choice)))) continue;
         self.draft.mod.clear(slot);
         if (self.field != .cel_style) self.draft.adjust(self.field, @as(i32, @intCast(choice)) - @as(i32, @intCast(builtinIndex(&self.draft, self.field))));
         return true;
@@ -487,8 +537,8 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     while (c.draft.name_len > 0) _ = c.key(.backspace);
     try std.testing.expect(c.key(.enter) == .editing);
     for ("Mira-7") |ch| _ = c.key(.{ .char = ch });
-    // Name, class, species, presentation, face style, height.
-    for (0..5) |_| _ = c.key(.down);
+    // Select height directly so adding a field earlier in the list cannot change this edit.
+    c.field = .height;
     _ = c.key(.right);
     c.field = .accent;
     try std.testing.expectEqual(Profile.Field.accent, c.field);
@@ -526,6 +576,21 @@ test "imported designer keyboard undo restores the saved sidecar state and redo 
     _ = c.key(.redo);
     try std.testing.expectEqual(Modifiers.Surface.skin, doc.parts[0].surface);
     try std.testing.expectEqual(@as(usize, 1), c.imported_history.cursor);
+}
+
+test "imported selection wraps safely for extreme signed navigation deltas" {
+    var parts = [_]Modifiers.Part{
+        .{ .id = 0, .label = "A", .center = .{ 0, 0, 0 }, .vertex_count = 3 },
+        .{ .id = 1, .label = "B", .center = .{ 0, 0, 0 }, .vertex_count = 3 },
+        .{ .id = 2, .label = "C", .center = .{ 0, 0, 0 }, .vertex_count = 3 },
+    };
+    var doc: Modifiers.Document = .{ .source_hash = "fixture", .parts = &parts };
+    var c: Creator = .{ .imported_doc = &doc };
+
+    c.moveImported(std.math.minInt(isize));
+    try std.testing.expectEqual(@as(usize, 1), c.imported_selected);
+    c.moveImported(std.math.maxInt(isize));
+    try std.testing.expectEqual(@as(usize, 2), c.imported_selected);
 }
 
 test "forms cycle only through unlocked Wildkin, and human is always available" {

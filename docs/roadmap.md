@@ -264,7 +264,7 @@ Make the engine able to hold a vertical world and look like one.
 3. Done: toon ramp, rim light, depth silhouette outlines, aerial haze, and warm/cool day/night lighting. A twenty-minute cycle derives from the saved world tick and appears on the HUD; powered lamps (including vehicle-mounted lamps) and ranger accents publish emissive material values. Direct lighting fades through twilight without a face-lighting flip. Emission is surface brightness, not local light casting or bloom.
 4. Done: a hand-authored test Arbor (`procedural/TestArbor.zig`) 100 m from the spawn, with a 320 m tapered trunk, a 2.5-turn spiral ramp with a curb, a branch platform at 40 m, a 14 m bridge road descending 5.7° to a tower top at 36 m, and render mesh and colliders from one description. The walk acceptance passes headlessly: up the ramp without dropping below its surface, onto the platform (±0.3 m), and down the bridge to the tower top (±0.1 m). Rendering switched to reversed, infinite-far depth with a height-aware haze so the tree is visible above the ground haze.
 
-Acceptance: the headless full-ramp/platform/bridge walk passes. The `--canopy` benchmark renders up close and at 1 km, exercises both LODs, and passes the 16.667 ms render CPU P99 budget (0.926 ms on the recorded Apple M3 Pro run). Presentation interval P99 was 21.074 ms; GPU execution time and visual art-direction approval remain unmeasured. Multiple-Arbor residency remains deferred as described above.
+Acceptance: the headless full-ramp/platform/bridge walk passes. The `--canopy` benchmark renders up close and at 1 km, exercises both LODs, and passes the 16.667 ms render CPU P99 budget (0.926 ms on the recorded Apple M3 Pro run). Presentation interval P99 was 21.074 ms; whole-command-buffer GPU time is measured, but that historical canopy run predates the timing hook. Visual art-direction approval remains open. Multiple-Arbor residency remains deferred as described above.
 
 ## 7. Arbor genome — implemented as a bounded grove
 
@@ -381,7 +381,7 @@ Blocked by the pinned Mach, pending a decision to update or fork it:
 
 - GPU-compacted culling (no shader atomics);
 - indirect submission (indirect draws panic `unimplemented`);
-- GPU timing (no timestamp queries on Metal).
+- Per-pass GPU timing (Metal benchmark reports whole-command-buffer duration; timestamp queries remain unimplemented).
 
 ## Sky city — content pass
 
@@ -464,13 +464,15 @@ This isolated path is not yet bound through `Catalog` into the active streamer, 
 
 Phases 1–13 have runnable slices. The game layer has also grown well beyond the phases: menus and conversations, procedural audio, hover cars and the Kestrel fighter, the Hive on the ground and in the air, fabrication and progression. The ordered plan for what comes next is [next steps](plans/next-steps.md). The current user-directed visual priority is the [character and environment pass](plans/visual-direction.md). The first Ranger face, neck, field-harness, and helmet-fit slice is implemented; differentiated armor and the Frontier material, foliage, and city-composition pass remain next.
 
-1. **Play, measure and tune:** the four-player frontier benchmark has a recorded passing baseline. Refresh it after material changes and complete the hands-on flight, combat, controller, co-op and audio checklist. Fix or file the findings.
-2. **Finish the first Earth city liberation loop:** connect the existing wilds campaign to investigation and alliance exposure inside the Frontier sanctuary, with discoverable objectives, a clear liberation outcome, persistent shared story state and per-player rewards. Detailed gates are in [next steps](plans/next-steps.md).
-3. **Co-op completeness:** allow guests to drive/fly, talk, fabricate and earn their own progress through the complete local loop.
-4. **Content and visual polish:** prioritize issues found by hands-on play; keep capture and benchmark evidence with changes.
+0. **Restore a green suite and explicit save floor — complete 2026-10-14:** the tabbed Character Designer is covered by the layout test; the save loader explicitly supports formats 13–25 and has a checked-in round-trip fixture for every supported version. The one-command gate passes 440/440 on default and Zig 0.17, plus the default Metal smoke. Details and remaining gates are in the [technical review](plans/next-steps.md#technical-review--2026-10-14).
+1. **Bound the forest's GPU cost:** geometry rose to 12.25 million submitted triangles with the same 551 visible vegetation instances. Record a GPU frame time, set a triangle budget and implement distance LOD before adding more crown detail; see [next steps](plans/next-steps.md#revised-next-steps).
+2. **Play, measure and tune:** the four-player frontier benchmark has a recorded passing baseline. Refresh it after material changes and complete the hands-on flight, combat, controller, co-op and audio checklist. Fix or file the findings.
+3. **Finish the first Earth city liberation loop:** connect the existing wilds campaign to investigation and alliance exposure inside the Frontier sanctuary, with discoverable objectives, a clear liberation outcome, persistent shared story state and per-player rewards. Detailed gates are in [next steps](plans/next-steps.md).
+4. **Co-op completeness:** allow guests to drive/fly, talk, fabricate and earn their own progress through the complete local loop.
+5. **Content and visual polish:** prioritize issues found by hands-on play; keep capture and benchmark evidence with changes.
    - **Wilds dressing slice:** mountain trailheads now get authored cabin/barn farmsteads, cave cache rooms get rootbound sanctuaries, and a cave wave can roll one rare Scalari hybrid/stinger. These are visual scene assets plus an encounter variation; building entry, farm gameplay, loot tables for the rare unit, and hands-on route tuning remain open.
 5. **Later content:** ocean cities, the Solar frontier and the multi-world arena campaign remain authored plans/catalogs. Their human and cetacean settlements, carrier assault, local planetary flight, stations, mining colonies, Gaia and democracy systems are not playable yet. Build them after the Earth loop proves the shared runtime and save contracts. The [Project Helios habitat plan](plans/space-habitat-network.md) puts space construction behind staged resource, power, thermal, pressure, radiation, and rotation demonstrations; Helios-20 is a speculative reference, not a game milestone commitment. An early procedural habitat cylinder and Rand Corporation's Mother construction ark can now be reviewed in showcase 66, but there is no orbital gameplay or construction loop yet. The 0.5c drive and Gaia globe remain clearly labeled science-fiction exceptions. See [ocean cities](plans/ocean-cities.md), [Solar democracy](plans/solar-democracy.md), and [planetary frontier](plans/planetary-frontier.md).
-6. **Engine work:** Mach `main` evaluation, then phase 14 skeletal animation when a gameplay need justifies it. Phases 15–16 (scenes and networking) remain deferred.
+6. **Engine work:** Mach `main` evaluation, then phase 14 skeletal animation when a gameplay need justifies it. Phases 15–16 (scenes and networking) remain deferred. Gameplay-systems candidates from the Unreal-style feature review (ability core, behavior trees, compiled logic graphs, cinematic tracks, ragdolls) are ordered in [engine features](plans/engine-features.md); the ability core and behavior trees serve the hack-and-slash MVP first.
 
 Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
 

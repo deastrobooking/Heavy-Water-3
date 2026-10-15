@@ -2253,6 +2253,8 @@ pub const Queue = struct {
     command_queue: *mtl.CommandQueue,
     fence_value: u64 = 0,
     completed_value: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    gpu_sample_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    latest_gpu_time_ns: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     command_encoder: ?*CommandEncoder = null,
 
     pub fn init(device: *Device) !*Queue {
@@ -2275,6 +2277,15 @@ pub const Queue = struct {
         if (queue.command_encoder) |command_encoder| command_encoder.manager.release();
         queue.command_queue.release();
         allocator.destroy(queue);
+    }
+
+    pub fn gpuTime(queue: *Queue) ?sysgpu.Queue.GpuTime {
+        const sample_count = queue.gpu_sample_count.load(.acquire);
+        if (sample_count == 0) return null;
+        return .{
+            .sample_count = sample_count,
+            .latest_ns = queue.latest_gpu_time_ns.load(.acquire),
+        };
     }
 
     pub fn submit(queue: *Queue, commands: []const *CommandBuffer) !void {
@@ -2342,7 +2353,13 @@ pub const Queue = struct {
     }
 
     fn completedHandler(block: *ns.BlockLiteral(CompletedContext), mtl_command_buffer: *mtl.CommandBuffer) callconv(.c) void {
-        _ = mtl_command_buffer;
+        const start = mtl_command_buffer.GPUStartTime();
+        const end = mtl_command_buffer.GPUEndTime();
+        if (start > 0 and end > start and std.math.isFinite(start) and std.math.isFinite(end)) {
+            const duration_ns: u64 = @intFromFloat((end - start) * std.time.ns_per_s);
+            block.context.queue.latest_gpu_time_ns.store(duration_ns, .release);
+            _ = block.context.queue.gpu_sample_count.fetchAdd(1, .release);
+        }
         block.context.queue.completed_value.store(block.context.fence_value, .release);
     }
 };

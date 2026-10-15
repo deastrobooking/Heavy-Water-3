@@ -861,7 +861,7 @@ Work graphs and mesh nodes are Direct3D 12 features (HLSL shader model 6.8, mesh
 | Space colonization on the GPU | Reject | Growth is a rare event (load, graft) on at most 192 nodes. The skeleton is gameplay data (sap taps, collision, attachment, saves), so the CPU needs it regardless. A GPU version needs atomics (unimplemented) and readback (a gap). CPU cost is bounded by the constants in `Arbor.grow`: 128 attractors, at most 192 nodes, 28 iterations, about 0.7 million distance tests in the worst case. That is arithmetic from the code, not a measurement; the nature plan's Phase 0 records the real time. |
 | Compute kernels in Zig, compiled to SPIR-V or PTX | Defer | Measured above. The project's shaders are WGSL, spliced onto a shared prelude. Revisit when Zig's SPIR-V backend compiles a real kernel and Mach accepts SPIR-V or a Zig-to-WGSL path exists. |
 | Kilobyte-scale recipes | **Adopt** | `Arbor.Genome` plus a seed already defines a whole tree. Extend the same idea to the forest species and store recipe, seed and graft deltas, not meshes. |
-| Continuous, frame-specific level of detail | **Adopt, CPU-driven** | Per-segment ring sides chosen in the vertex stage, plus a governor on CPU frame time (GPU time is unavailable). |
+| Continuous, frame-specific level of detail | **Adopt, CPU-driven** | Per-segment ring sides chosen in the vertex stage, plus a governor on portable CPU frame time. Metal benchmark GPU duration is whole-command-buffer only and is not yet a live per-pass governor signal. |
 | Zero CPU draw-call overhead | Not needed | Ranged instanced draws per cell already keep the call count low. Indirect draws exist but cannot be compacted without atomics. |
 
 **What to build instead: skeleton-driven trees.** The memory and level-of-detail goals do not need work graphs. They need the skeleton, not a baked mesh, to be what ships to the GPU.
@@ -1018,12 +1018,12 @@ test "pipe model conserves area and never thins toward the root" {
 }
 ```
 
-*Compiled*: the frame-time governor. Raising the bias is fast, lowering it is slow, and a dead band holds steady. It reads CPU time because GPU timestamps are unavailable:
+*Compiled*: the frame-time governor. Raising the bias is fast, lowering it is slow, and a dead band holds steady. It reads portable CPU time; the benchmark's Metal GPU duration is whole-command-buffer and asynchronous:
 
 ```zig
-/// GPU time is unavailable (no timestamp queries), so the governor reads CPU frame time. Raising
-/// the bias is fast, lowering it is slow, and a dead band between the two holds steady, so detail
-/// never oscillates frame to frame.
+/// The governor reads portable CPU frame time. Raising the bias is fast, lowering it is slow, and
+/// a dead band between the two holds steady, so detail never oscillates frame to frame. Metal's
+/// whole-command-buffer GPU duration is benchmark-only and does not isolate this mesh pass.
 pub const Governor = struct {
     bias: f32 = 0, // 0 = full detail; larger values mean coarser levels of detail
     pub const max_bias: f32 = 3;

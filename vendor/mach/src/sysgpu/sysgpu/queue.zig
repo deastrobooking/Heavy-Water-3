@@ -10,6 +10,11 @@ const CopyTextureForBrowserOptions = @import("main.zig").CopyTextureForBrowserOp
 const Impl = @import("interface.zig").Impl;
 
 pub const Queue = opaque {
+    pub const GpuTime = struct {
+        sample_count: u64,
+        latest_ns: u64,
+    };
+
     pub const WorkDoneCallback = *const fn (
         status: WorkDoneStatus,
         userdata: ?*anyopaque,
@@ -52,6 +57,12 @@ pub const Queue = opaque {
 
     pub inline fn setLabel(queue: *Queue, label: [*:0]const u8) void {
         Impl.queueSetLabel(queue, label);
+    }
+
+    /// Returns the latest completed GPU command-buffer duration when the active backend exposes it.
+    pub inline fn gpuTime(queue: *Queue) ?GpuTime {
+        if (@hasDecl(Impl, "queueGpuTime")) return Impl.queueGpuTime(queue);
+        return null;
     }
 
     pub inline fn submit(queue: *Queue, commands: []const *const CommandBuffer) void {

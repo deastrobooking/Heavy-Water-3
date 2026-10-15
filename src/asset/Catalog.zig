@@ -511,7 +511,7 @@ test "deferred meshes reserve handles at load and install once, later" {
     var catalog: Catalog = undefined;
     try catalog.loadSeededDeferred(std.testing.allocator, 42);
     defer catalog.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 5), catalog.pending_count);
+    try std.testing.expectEqual(@as(usize, 6), catalog.pending_count);
     // Reserved handles are valid but not ready: renderers draw nothing for them yet.
     const district = catalog.mesh(catalog.content.district).?;
     try std.testing.expect(!district.ready);
