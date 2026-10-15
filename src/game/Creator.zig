@@ -8,7 +8,7 @@ const Modifiers = @import("../asset/Modifiers.zig");
 const EnemyDesign = @import("EnemyDesign.zig");
 const Creator = @This();
 
-pub const Key = union(enum) { up, down, left, right, enter, escape, backspace, char: u8 };
+pub const Key = union(enum) { up, down, left, right, enter, escape, backspace, undo, redo, char: u8 };
 pub const Line = struct {
     text: [64]u8 = undefined,
     len: usize = 0,
@@ -35,6 +35,10 @@ owned_species: u32 = 1,
 registry: ?*const CharacterContent.Registry = null,
 /// Source-linked imported character library shown in the in-game Character Designer.
 imported_doc: ?*Modifiers.Document = null,
+imported_history: Modifiers.History(64) = .{},
+imported_dirty_ids: [64]u32 = @splat(0),
+imported_dirty_len: usize = 0,
+imported_dirty_all: bool = false,
 imported_open: bool = false,
 imported_selected: usize = 0,
 imported_filter: u8 = 0,
@@ -49,7 +53,7 @@ enemy_design: EnemyDesign.Design = .{},
 enemy_part: EnemyDesign.Part = .frame,
 
 pub fn begin(self: *Creator, current: Profile) void {
-    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry, .imported_doc = self.imported_doc, .imported_selected = self.imported_selected, .imported_filter = self.imported_filter, .imported_palette = self.imported_palette, .imported_palette_variant = self.imported_palette_variant, .imported_status = self.imported_status, .imported_rig_status = self.imported_rig_status, .imported_rig_status_len = self.imported_rig_status_len, .enemy_design = self.enemy_design, .enemy_part = self.enemy_part };
+    self.* = .{ .open = true, .draft = current, .confirmed = self.confirmed, .owned = self.owned, .owned_armor = self.owned_armor, .owned_species = self.owned_species | 1, .registry = self.registry, .imported_doc = self.imported_doc, .imported_history = self.imported_history, .imported_dirty_ids = self.imported_dirty_ids, .imported_dirty_len = self.imported_dirty_len, .imported_dirty_all = self.imported_dirty_all, .imported_selected = self.imported_selected, .imported_filter = self.imported_filter, .imported_palette = self.imported_palette, .imported_palette_variant = self.imported_palette_variant, .imported_status = self.imported_status, .imported_rig_status = self.imported_rig_status, .imported_rig_status_len = self.imported_rig_status_len, .enemy_design = self.enemy_design, .enemy_part = self.enemy_part };
 }
 
 pub const Result = union(enum) { editing, confirmed: Profile, canceled };
@@ -70,6 +74,8 @@ pub fn key(self: *Creator, k: Key) Result {
     }
     if (self.imported_open) {
         switch (k) {
+            .undo => self.undoImported(std.heap.page_allocator),
+            .redo => self.redoImported(std.heap.page_allocator),
             .up => self.moveImported(-1),
             .down => self.moveImported(1),
             .left => self.cycleImportedSurface(-1),
@@ -86,6 +92,7 @@ pub fn key(self: *Creator, k: Key) Result {
         return .editing;
     }
     switch (k) {
+        .undo, .redo => {},
         .up => self.field = @enumFromInt((@intFromEnum(self.field) + fields.len - 1) % fields.len),
         .down => self.field = @enumFromInt((@intFromEnum(self.field) + 1) % fields.len),
         .left => self.adjust(-1),
@@ -155,8 +162,9 @@ pub fn cycleImportedSurface(self: *Creator, delta: i32) void {
     if (self.imported_selected >= doc.parts.len) return;
     const part = &doc.parts[self.imported_selected];
     const surface_count: i32 = @intCast(enum_compat.fields(Modifiers.Surface).len);
-    part.surface = @enumFromInt(@mod(@as(i32, @intCast(@intFromEnum(part.surface))) + delta, surface_count));
-    self.imported_status = .unsaved;
+    const before = part.surface;
+    const after: Modifiers.Surface = @enumFromInt(@mod(@as(i32, @intCast(@intFromEnum(part.surface))) + delta, surface_count));
+    self.recordImported(.{ .surface = .{ .id = part.id, .before = before, .after = after } });
     self.imported_palette = switch (part.surface) {
         .skin => .skin,
         .eyes => .eyes,
@@ -170,26 +178,90 @@ pub fn cycleImportedPalette(self: *Creator, delta: i32) void {
     const count: i32 = @intCast(paletteColorCount(self.imported_palette));
     self.imported_palette_variant = @intCast(@mod(@as(i32, self.imported_palette_variant) + delta, count));
     const color = paletteColor(self.imported_palette, self.imported_palette_variant);
-    switch (self.imported_palette) {
-        .skin => doc.skin_color = color,
-        .eyes => doc.eye_color = color,
-        .armor => doc.armor_color = color,
-        .energy => doc.energy_color = color,
-    }
-    self.imported_status = .unsaved;
+    const before = importedPaletteColor(doc, self.imported_palette);
+    self.recordImported(.{ .palette = .{ .slot = self.imported_palette, .before = before, .after = color } });
 }
 
 pub fn adjustImportedColor(self: *Creator, channel: usize, delta: f32) void {
     const doc = self.imported_doc orelse return;
     if (channel >= 3) return;
-    const color = switch (self.imported_palette) {
-        .skin => &doc.skin_color,
-        .eyes => &doc.eye_color,
-        .armor => &doc.armor_color,
-        .energy => &doc.energy_color,
-    };
-    color[channel] = std.math.clamp(color[channel] + delta, 0, 1);
+    const before = importedPaletteColor(doc, self.imported_palette);
+    var after = before;
+    after[channel] = std.math.clamp(after[channel] + delta, 0, 1);
+    if (std.mem.eql(f32, &before, &after)) return;
+    self.recordImported(.{ .palette = .{ .slot = self.imported_palette, .before = before, .after = after } });
+}
+
+fn importedPaletteColor(doc: *const Modifiers.Document, slot: Modifiers.Palette) [3]f32 {
+    return switch (slot) { .skin => doc.skin_color, .eyes => doc.eye_color, .armor => doc.armor_color, .energy => doc.energy_color };
+}
+
+fn recordImported(self: *Creator, command: Modifiers.Command) void {
+    const doc = self.imported_doc orelse return;
+    self.imported_history.applyAndPush(std.heap.page_allocator, doc, command) catch return;
+    self.markImportedDirty(command);
     self.imported_status = .unsaved;
+}
+
+pub fn undoImported(self: *Creator, allocator: std.mem.Allocator) void {
+    const doc = self.imported_doc orelse return;
+    const command = self.imported_history.undo() orelse return;
+    command.apply(allocator, doc, .before) catch {
+        self.imported_history.cursor += 1;
+        return;
+    };
+    self.markImportedDirty(command);
+    self.alignImportedPalette();
+    self.imported_status = .unsaved;
+}
+
+pub fn redoImported(self: *Creator, allocator: std.mem.Allocator) void {
+    const doc = self.imported_doc orelse return;
+    const command = self.imported_history.redo() orelse return;
+    command.apply(allocator, doc, .after) catch {
+        self.imported_history.cursor -= 1;
+        return;
+    };
+    self.markImportedDirty(command);
+    self.alignImportedPalette();
+    self.imported_status = .unsaved;
+}
+
+pub fn clearImportedHistory(self: *Creator) void {
+    self.imported_history = .{};
+    self.imported_dirty_len = 0;
+    self.imported_dirty_all = false;
+}
+
+pub const DirtySnapshot = struct { ids: [64]u32, len: usize, all: bool };
+
+pub fn takeImportedDirty(self: *Creator) DirtySnapshot {
+    const result: DirtySnapshot = .{ .ids = self.imported_dirty_ids, .len = self.imported_dirty_len, .all = self.imported_dirty_all };
+    self.imported_dirty_len = 0;
+    self.imported_dirty_all = false;
+    return result;
+}
+
+fn markImportedDirty(self: *Creator, command: Modifiers.Command) void {
+    const id: ?u32 = switch (command) {
+        .surface => |c| c.id,
+        .color => |c| c.id,
+        .enabled => |c| c.id,
+        .scale => |c| c.id,
+        .offset => |c| c.id,
+        .palette => {
+            self.imported_dirty_all = true;
+            return;
+        },
+    };
+    if (self.imported_dirty_all) return;
+    for (self.imported_dirty_ids[0..self.imported_dirty_len]) |existing| if (existing == id.?) return;
+    if (self.imported_dirty_len == self.imported_dirty_ids.len) {
+        self.imported_dirty_all = true;
+        return;
+    }
+    self.imported_dirty_ids[self.imported_dirty_len] = id.?;
+    self.imported_dirty_len += 1;
 }
 
 fn paletteColorCount(slot: Modifiers.Palette) usize {
@@ -213,20 +285,21 @@ pub fn paintImportedPart(self: *Creator) void {
     const doc = self.imported_doc orelse return;
     if (self.imported_selected >= doc.parts.len) return;
     const part = &doc.parts[self.imported_selected];
-    part.color = if (part.color != null) null else switch (self.imported_palette) {
+    const before = part.color;
+    const after: ?[3]f32 = if (part.color != null) null else switch (self.imported_palette) {
         .skin => doc.skin_color,
         .eyes => doc.eye_color,
         .armor => doc.armor_color,
         .energy => doc.energy_color,
     };
-    self.imported_status = .unsaved;
+    self.recordImported(.{ .color = .{ .id = part.id, .before = before, .after = after } });
 }
 
 pub fn toggleImportedPart(self: *Creator) void {
     const doc = self.imported_doc orelse return;
     if (self.imported_selected >= doc.parts.len) return;
-    doc.parts[self.imported_selected].enabled = !doc.parts[self.imported_selected].enabled;
-    self.imported_status = .unsaved;
+    const part = doc.parts[self.imported_selected];
+    self.recordImported(.{ .enabled = .{ .id = part.id, .before = part.enabled, .after = !part.enabled } });
 }
 
 pub fn matchesFilter(self: *const Creator, surface: Modifiers.Surface) bool {
@@ -436,6 +509,23 @@ test "creator edits a draft, requires a name, confirms, and cancels only after a
     const count = c.lines(&panel);
     try std.testing.expectEqual(@as(usize, 25), count);
     try std.testing.expectEqualStrings("> name: MIRA-7_", panel[1].slice());
+}
+
+test "imported designer keyboard undo restores the saved sidecar state and redo reapplies it" {
+    var parts = [_]Modifiers.Part{.{ .id = 0, .label = "Body", .center = .{ 0, 0, 0 }, .vertex_count = 3 }};
+    var doc: Modifiers.Document = .{ .source_hash = "fixture", .parts = &parts };
+    var c: Creator = .{ .open = true, .imported_doc = &doc, .imported_open = true };
+    const before = try std.json.Stringify.valueAlloc(std.testing.allocator, doc, .{});
+    defer std.testing.allocator.free(before);
+    _ = c.key(.right);
+    try std.testing.expectEqual(Modifiers.Surface.skin, doc.parts[0].surface);
+    _ = c.key(.undo);
+    const undone = try std.json.Stringify.valueAlloc(std.testing.allocator, doc, .{});
+    defer std.testing.allocator.free(undone);
+    try std.testing.expectEqualStrings(before, undone);
+    _ = c.key(.redo);
+    try std.testing.expectEqual(Modifiers.Surface.skin, doc.parts[0].surface);
+    try std.testing.expectEqual(@as(usize, 1), c.imported_history.cursor);
 }
 
 test "forms cycle only through unlocked Wildkin, and human is always available" {

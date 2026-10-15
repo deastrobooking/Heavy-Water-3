@@ -43,6 +43,9 @@ pub fn build(b: *std.Build) void {
     const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
     compiler.root_module.addImport("enum_compat", enum_compat);
     b.installArtifact(compiler);
+    const modifier_bench = b.addRunArtifact(compiler);
+    modifier_bench.addArg("modifier-bench");
+    b.step("modifier-bench", "Measure synthetic mesh modifier operations").dependOn(&modifier_bench.step);
     // Every source has a `.meta` sidecar (GUID, source hash, importer, settings); compiling checks
     // it, and `zig build import` creates or refreshes sidecars deliberately.
     const import = b.addRunArtifact(compiler);

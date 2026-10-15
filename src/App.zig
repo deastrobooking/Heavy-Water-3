@@ -150,7 +150,7 @@ fire_held: bool = false,
 alt_held: bool = false,
 mesh_library_arena: std.heap.ArenaAllocator = undefined,
 mesh_library: MeshModifiers.Document = undefined,
-mesh_library_base: ?[]u8 = null,
+mesh_library_bake: ?*MeshModifiers.Bake = null,
 mesh_library_preview_dirty: bool = false,
 queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
@@ -205,6 +205,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     }
     self.loadSavedCharacterImport();
     self.sandbox.creator.imported_doc = &self.mesh_library;
+    if (options.smoke_frames > 0) self.mesh_library_preview_dirty = true;
     self.started = std.Io.Timestamp.now(io, .awake);
     self.loader = try Loader.create(allocator, io);
     for (world.catalog.pending[0..world.catalog.pending_count], 0..) |p, i| {
@@ -331,7 +332,12 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
 }
 
 fn validMeshLibraryOverride(source: MeshModifiers.Document, override: MeshModifiers.Document) bool {
-    if (source.format != override.format or !std.mem.eql(u8, source.source_hash, override.source_hash) or source.parts.len != override.parts.len) return false;
+    if ((override.format != MeshModifiers.legacy_format_version and override.format != MeshModifiers.format_version) or
+        !std.mem.eql(u8, source.source_hash, override.source_hash)) return false;
+    // V1 ids were authored without welding. Keep their old analysis path when loading them even
+    // if the freshly generated source document uses v2 welded ids.
+    if (override.format == MeshModifiers.legacy_format_version and source.format != override.format) return true;
+    if (source.format != override.format or source.weld_cell != override.weld_cell or source.parts.len != override.parts.len) return false;
     for (source.parts) |part| {
         var found = false;
         for (override.parts) |candidate| if (candidate.id == part.id) {
@@ -842,7 +848,10 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.adjust(if (Screens.hitArea(hit) == .creator_left) -1 else 1);
         },
         .creator_done => if (click) self.creatorInput(.enter),
-        .creator_imported => if (click and sb.creator.open) sb.creator.openImported(),
+        .creator_imported => if (click and sb.creator.open) {
+            sb.creator.openImported();
+            self.mesh_library_preview_dirty = true;
+        },
         .enemy_forge => if (click and sb.creator.open) {
             sb.creator.enemy_design_open = !sb.creator.enemy_design_open;
             self.uiSound(.confirm);
@@ -880,6 +889,10 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.toggleImportedPart();
             self.mesh_library_preview_dirty = true;
         },
+        .imported_undo, .imported_redo => if (click) {
+            if (Screens.hitArea(hit) == .imported_undo) _ = sb.creator.key(.undo) else _ = sb.creator.key(.redo);
+            self.mesh_library_preview_dirty = true;
+        },
         .imported_back => if (click) {
             sb.creator.imported_open = false;
         },
@@ -907,7 +920,12 @@ fn pointAt(self: *App, click: bool) void {
 }
 
 /// While the creator is open, every key goes to it.
-fn creatorKey(self: *App, key: mach.Core.KeyButtonID) void {
+fn creatorKey(self: *App, key: mach.Core.KeyButtonID, shift: bool) void {
+    if (self.sandbox.creator.imported_open and key == .z) {
+        self.creatorInput(if (shift) .redo else .undo);
+        self.mesh_library_preview_dirty = true;
+        return;
+    }
     const k: Creator.Key = switch (key) {
         .up => .up,
         .down => .down,
@@ -937,7 +955,11 @@ fn creatorInput(self: *App, k: Creator.Key) void {
         else => {},
     }
     if (self.sandbox.creator.imported_open) switch (k) {
-        .left, .right, .char => self.mesh_library_preview_dirty = true,
+        .left, .right => self.mesh_library_preview_dirty = true,
+        .char => |c| switch (std.ascii.toLower(c)) {
+            'p', 'c', 'h' => self.mesh_library_preview_dirty = true,
+            else => {},
+        },
         else => {},
     };
     if (self.sandbox.creator.imported_open) switch (k) {
@@ -1058,14 +1080,14 @@ pub fn update(self: *App, core: *mach.Core) void {
         .key_repeat => |key| if (self.uiActive()) {
             // Held arrows scroll lists; held backspace erases the name.
             if (self.sandbox.creator.open and self.menu.screen == .none) {
-                if (key.key == .backspace or key.key == .left or key.key == .right or key.key == .up or key.key == .down) self.creatorKey(key.key);
+                if (key.key == .backspace or key.key == .left or key.key == .right or key.key == .up or key.key == .down) self.creatorKey(key.key, false);
             } else if (key.key == .up or key.key == .down or key.key == .left or key.key == .right) self.uiNav(self.navKey(key.key).?);
         },
         .key_press => |key| if (self.celKey(key.key)) {
             // Handled: character look-dev keys work everywhere, including the creator.
         } else if (self.menu.screen == .controls and self.menu.capturing) {
             self.runCommand(self.menu.bindKey(key.key));
-        } else if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key) else if (self.uiActive()) {
+        } else if (self.menu.screen == .none and self.sandbox.creator.open) self.creatorKey(key.key, key.mods.shift) else if (self.uiActive()) {
             // Number keys pick a conversation choice directly.
             const digits = [_]mach.Core.KeyButtonID{ .one, .two, .three, .four, .five, .six, .seven, .eight };
             if (self.menu.screen == .none) if (self.sandbox.talk) |*talk| for (digits, 0..) |d, i| if (key.key == d and self.sandbox.dialogue.revealed(talk.*)) {
@@ -2129,14 +2151,23 @@ fn exerciseSmoke(self: *App) void {
             for (self.sandbox.shrines, 0..) |shrine, k| std.log.info("Smoke shrine {d}: {d} rooms at {d:.0} {d:.0}, verified plan of {d} actions after {d} candidates", .{ k, shrine.generated.puzzle.rooms, shrine.origin[0], shrine.origin[2], shrine.generated.plan.len, shrine.generated.attempts });
             // Create a character through the same key path the window uses.
             self.sandbox.creator.begin(self.sandbox.profile);
-            for ([_]mach.Core.KeyButtonID{ .backspace, .backspace, .backspace, .backspace, .backspace, .backspace, .s, .o, .r, .a, .down, .right, .down, .down, .down, .right, .enter }) |key| self.creatorKey(key);
+            for ([_]mach.Core.KeyButtonID{ .backspace, .backspace, .backspace, .backspace, .backspace, .backspace, .s, .o, .r, .a, .down, .right, .down, .down, .down, .right, .enter }) |key| self.creatorKey(key, false);
             std.log.info("Smoke character: {s}, hair style {s}", .{ self.sandbox.profile.name(), @tagName(self.sandbox.profile.hair_style) });
+            self.sandbox.creator.openImported();
+            self.sandbox.creator.selectImported(0);
+            self.sandbox.creator.toggleImportedPart();
+            self.mesh_library_preview_dirty = true;
+            std.log.info("Smoke mesh editor: queued one-component hide patch", .{});
             self.culling = true;
             self.sandbox.player.setMode(.fly, camera.*);
             camera.position = mach.math.vec3(180, 35, 120);
             camera.yaw = 0.4;
         },
         2 => {
+            self.sandbox.creator.toggleImportedPart();
+            self.mesh_library_preview_dirty = true;
+            self.sandbox.creator.imported_open = false;
+            std.log.info("Smoke mesh editor: restored component with a second partial patch", .{});
             self.smokeGui();
             self.smokeFrontier();
             // Look away to exercise a frame with zero visible relics.
@@ -2729,7 +2760,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.installDeferred();
     self.installImportedCharacter();
     self.sandbox.creator.imported_doc = &self.mesh_library;
-    self.applyMeshLibraryPreview();
+    self.applyMeshLibraryPreview(renderer);
     self.pumpReload(renderer);
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
@@ -3031,13 +3062,12 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
         const json = try std.json.Stringify.valueAlloc(scratch.allocator(), generated, .{ .whitespace = .indent_2 });
         try Save.writeFile(self.io, "saves/imported-character.modifiers.json", json);
     }
-    const base = try model.encode(self.allocator);
-    if (self.mesh_library_base) |old| self.allocator.free(old);
-    self.mesh_library_base = base;
+    self.destroyMeshLibraryBake();
     if (self.queued_character_model) |old| old.deinit(self.allocator);
     self.queued_character_model = model;
     model = undefined;
     self.mesh_library = generated;
+    self.sandbox.creator.clearImportedHistory();
     self.mesh_library_preview_dirty = true;
     self.sandbox.profile.body_style = .imported_glb;
     self.sandbox.creator.draft.body_style = .imported_glb;
@@ -3064,6 +3094,7 @@ fn loadSavedCharacterImport(self: *App) void {
     const override = std.json.parseFromSliceLeaky(MeshModifiers.Document, self.mesh_library_arena.allocator(), modifiers, .{}) catch return;
     if (validMeshLibraryOverride(self.mesh_library, override)) {
         self.mesh_library = override;
+        self.sandbox.creator.clearImportedHistory();
         self.mesh_library_preview_dirty = true;
     }
 }
@@ -3091,40 +3122,66 @@ fn installImportedCharacter(self: *App) void {
     self.queued_character_model = null;
 }
 
-/// The packaged Captain is already transform-baked. Rebuild from its immutable packed copy and
-/// apply only component surfaces/colors, so in-game palette edits do not double-scale geometry.
-fn applyMeshLibraryPreview(self: *App) void {
+/// The catalog's immutable source snapshot and part lookup caches live for the editor session;
+/// normal appearance edits update only the selected component's CPU and GPU ranges.
+fn applyMeshLibraryPreview(self: *App, renderer: *Renderer) void {
     if (!self.mesh_library_preview_dirty) return;
-    const base = self.catalog.mesh(self.catalog.content.captain_test) orelse return;
-    if (!base.ready) return;
-    if (self.mesh_library_base == null) self.mesh_library_base = base.model.encode(self.allocator) catch |err| {
-        std.log.err("character library preview snapshot failed: {s}", .{@errorName(err)});
-        self.mesh_library_preview_dirty = false;
-        return;
-    };
-    var model = MeshModel.decode(self.allocator, self.mesh_library_base.?) catch |err| {
-        std.log.err("character library preview decode failed: {s}", .{@errorName(err)});
-        self.mesh_library_preview_dirty = false;
-        return;
-    };
-    var owned = true;
-    defer if (owned) model.deinit(self.allocator);
-    const analysis = MeshModifiers.recolor(self.allocator, &model, self.mesh_library) catch |err| {
-        std.log.err("character library preview update failed: {s}", .{@errorName(err)});
-        self.mesh_library_preview_dirty = false;
-        return;
-    };
-    defer {
-        self.allocator.free(analysis.vertex_parts);
-        self.allocator.free(analysis.components);
+    const handle = &self.catalog.content.captain_test;
+    const entry = self.catalog.meshMut(handle.*) orelse return;
+    if (!entry.ready) return;
+    if (self.mesh_library_bake == null) {
+        const bake = self.allocator.create(MeshModifiers.Bake) catch |err| {
+            std.log.err("character library bake allocation failed: {s}", .{@errorName(err)});
+            self.mesh_library_preview_dirty = false;
+            return;
+        };
+        bake.* = MeshModifiers.Bake.init(self.allocator, entry.model, self.mesh_library) catch |err| {
+            self.allocator.destroy(bake);
+            std.log.err("character library bake setup failed: {s}", .{@errorName(err)});
+            self.mesh_library_preview_dirty = false;
+            return;
+        };
+        self.mesh_library_bake = bake;
+        bake.applyAll(&entry.model, self.mesh_library) catch |err| {
+            std.log.err("character library initial bake failed: {s}", .{@errorName(err)});
+            self.mesh_library_preview_dirty = false;
+            return;
+        };
+        _ = self.sandbox.creator.takeImportedDirty();
+        renderer.queueMeshPatch(.{ .handle = handle.*, .model = &entry.model, .all_vertices = true, .all_indices = true });
+    } else {
+        const bake = self.mesh_library_bake.?;
+        const dirty = self.sandbox.creator.takeImportedDirty();
+        if (dirty.all) {
+            bake.applyAll(&entry.model, self.mesh_library) catch |err| {
+                std.log.err("character library full preview update failed: {s}", .{@errorName(err)});
+                self.mesh_library_preview_dirty = false;
+                return;
+            };
+            renderer.queueMeshPatch(.{ .handle = handle.*, .model = &entry.model, .all_vertices = true, .all_indices = true });
+        } else for (dirty.ids[0..dirty.len]) |id| {
+            const slot = bake.slots.indexOf(id) orelse {
+                std.log.err("character library part {d} is missing from cached analysis", .{id});
+                self.mesh_library_preview_dirty = false;
+                return;
+            };
+            bake.updatePart(&entry.model, self.mesh_library, id) catch |err| {
+                std.log.err("character library part update failed: {s}", .{@errorName(err)});
+                self.mesh_library_preview_dirty = false;
+                return;
+            };
+            renderer.queueMeshPatch(.{ .handle = handle.*, .model = &entry.model, .vertex_indices = bake.vertices.of(slot), .triangle_offsets = bake.triangles.of(slot) });
+        }
     }
-    self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
-        std.log.err("character library mesh install failed: {s}", .{@errorName(err)});
-        self.mesh_library_preview_dirty = false;
-        return;
-    };
-    owned = false;
     self.mesh_library_preview_dirty = false;
+}
+
+fn destroyMeshLibraryBake(self: *App) void {
+    if (self.mesh_library_bake) |bake| {
+        bake.deinit(self.allocator);
+        self.allocator.destroy(bake);
+        self.mesh_library_bake = null;
+    }
 }
 
 /// Lays out this frame's GUI in canvas units (720 tall at interface size 100%) and keeps its
@@ -3219,7 +3276,7 @@ pub fn stop(self: *App) void {
     if (self.loader) |l| l.destroy();
     if (self.reload) |r| r.destroy();
     if (self.test_mode_save) |baseline| self.allocator.free(baseline);
-    if (self.mesh_library_base) |bytes| self.allocator.free(bytes);
+    self.destroyMeshLibraryBake();
     if (self.queued_character_model) |model| model.deinit(self.allocator);
     self.mesh_library_arena.deinit();
     if (options.reload_smoke and !self.reload_smoke_passed) @panic("Reload smoke did not reach GPU acceptance");

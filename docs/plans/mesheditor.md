@@ -1,6 +1,6 @@
 # Mesh editor and importer: engineering design
 
-**Status:** proposed, 2026-10-14. This document is planning and code examples only; no source change accompanies it. It reviews the glTF importer, the modifier document and the in-game imported-character editor as they exist today, lists the defects and limits found by reading them, and lays out a step-by-step path to a real mesh editor.
+**Status:** M0–M3 implemented, 2026-10-14; M4 is next. Later milestone designs remain planning. M1 adds v2 weld-cell metadata while preserving the v1 index-only analysis path. M3 keeps GPU index and submesh ranges stable by degenerating hidden triangle triplets in place.
 
 **Audience:** low-level Zig game developers working in this repository. It assumes you know `std.mem.Allocator`, `extern struct` layout and the project rules in [AGENTS.md](../../AGENTS.md).
 
@@ -18,9 +18,9 @@ What exists:
 - A command-line authoring path (`asset-compiler modifiers`, `modifier-list`, `modifier-edit`, `preview-modified`, `compile-modified`).
 - An in-game editor in the Character Designer that selects islands, cycles surfaces, paints palettes, hides parts and saves a sidecar ([Creator.zig](../../src/game/Creator.zig), [App.zig](../../src/App.zig)).
 
-What does not exist: undo and redo, free-text labels in game, in-game scale and offset, picking in the viewport, gizmos, more than one imported asset, runtime skin data, and export. A standalone Mach viewport (`src/MeshEditor.zig`, 313 lines) was added in commit `77651ae` and deleted in `f4e7bea`; it is not in the tree.
+What does not exist: free-text labels in game, in-game scale and offset, picking in the viewport, gizmos, more than one imported asset, runtime skin data, and export. A standalone Mach viewport (`src/MeshEditor.zig`, 313 lines) was added in commit `77651ae` and deleted in `f4e7bea`; it is not in the tree.
 
-Recommendation, in order: harden and test the modifier module first (section 6, M0 and M1), add reversible commands (M2), make previews incremental (M3), then add the library, viewport, gizmos, skin data and export. Build the viewport inside the game, as one `MeshEditorState` struct that a thin standalone executable can wrap later. Section 4.14 evaluates a GPU work-graph pipeline for procedural trees: adopt its recipe-sized assets and adaptive level of detail through skeleton-driven instanced draws, and do not adopt the work-graph, GPU space-colonization or Zig-to-SPIR-V mechanisms yet.
+Recommendation, in order: harden and test the modifier module first (section 6, M0 and M1), add reversible commands (M2), make previews incremental (M3), then add the library, viewport, gizmos, skin data and export. The incremental bake is implemented; M4 library and stale-source handling is next. Build the viewport inside the game, as one `MeshEditorState` struct that a thin standalone executable can wrap later. Section 4.14 evaluates a GPU work-graph pipeline for procedural trees: adopt its recipe-sized assets and adaptive level of detail through skeleton-driven instanced draws, and do not adopt the work-graph, GPU space-colonization or Zig-to-SPIR-V mechanisms yet.
 
 ## 2. Review of what exists
 
@@ -90,6 +90,7 @@ pub const Part = struct {
 };
 pub const Document = struct {
     format: u32 = format_version,
+    weld_cell: ?f32 = null,  // absent in v1; v1 analysis remains index-only
     character_type: CharacterType = .captain,
     source_hash: []const u8,          // "blake3:" + 64 hex, from Meta.hashSource
     overall_scale: f32 = 1,
@@ -143,8 +144,8 @@ Source: [asset_compiler.zig](../../src/asset_compiler.zig).
 
 Sources: [Creator.zig](../../src/game/Creator.zig), [App.zig](../../src/App.zig), [Catalog.zig](../../src/asset/Catalog.zig).
 
-- **State** lives in `Creator`: `imported_doc: ?*Modifiers.Document`, `imported_open`, `imported_selected`, `imported_filter` (6 surface filters), `imported_palette`, `imported_palette_variant`, `imported_status` (`ready`, `unsaved`, `saved`), and a 96-byte rig status string.
-- **Keys:** up and down select, left and right cycle the surface, `p` cycles the palette, `c` paints, `h` hides, escape or enter closes. Mouse hit areas map to the same methods.
+- **State** lives in `Creator`: `imported_doc: ?*Modifiers.Document`, `imported_open`, `imported_selected`, `imported_filter` (6 surface filters), `imported_palette`, `imported_palette_variant`, `imported_status` (`ready`, `unsaved`, `saved`), bounded 64-command undo/redo history, and a 96-byte rig status string.
+- **Keys:** up and down select, left and right cycle the surface, `p` cycles the palette, `c` paints, `h` hides, `z` undoes and `shift-z` redoes, escape or enter closes. Mouse hit areas map to the same methods; history position and undo/redo buttons are visible in the panel.
 - **Files:** the bundled Captain document is `tools/captain/Captain.modifiers.json`; a user override is `saves/captain.modifiers.json`. One imported GLB lives at `saves/imported-character.glb` with `saves/imported-character.modifiers.json` beside it.
 - **Limits:** source GLB at most 64 MiB, sidecar at most 1 MiB, the GLB picker (`hw_choose_open_glb`) exists on macOS only.
 - **Import** (`importCharacterGlb`): `inspect`, reject if there is no skin, `compilePosePreview(.run)`, hash the source, `generate` the document into `mesh_library_arena`, write the GLB and sidecar, `encode` the model into `mesh_library_base`, queue it for install.
@@ -158,8 +159,8 @@ Sources: [Creator.zig](../../src/game/Creator.zig), [App.zig](../../src/App.zig)
 | --- | --- |
 | `Model` | round trip and rejection cases; decode cleanup on allocation failure |
 | `Gltf` | a crate compiles to two material submeshes; hostile inputs rejected |
-| `Modifiers` | **one** test: islands on a cube, `SourceChanged`, one apply |
-| In-game editor | none found in `Creator.zig` for the imported-part methods |
+| `Modifiers` | cube analysis/apply; rejected edit preservation; missing-component and filtered-index validation; allocation cleanup; welding fixture; v1/v2 analysis compatibility; reversible command values; bounded history, coalescing and rejected-command behavior |
+| In-game editor | imported keyboard surface edit, undo to byte-identical sidecar state, and redo |
 
 ## 3. Findings
 
@@ -1170,23 +1171,29 @@ Sizes: S under a day, M a few days, L about a week. Each milestone is shippable 
 
 ### M0. Harden and measure what exists (S)
 
+**Status: implemented, 2026-10-14.** `partColor` now owns palette resolution; sorted part slots and binary component lookup remove the per-vertex/per-triangle linear scans. Failure-path tests cover every edit variant, missing components, filtered submesh ranges, and allocation cleanup for `apply` and `recolor`. Run the synthetic baseline with `python3 tools/zig.py build modifier-bench`.
+
 1. Extract `partColor(doc, part)` and call it from `apply`, `recolor` and `triangleSurfaceColor` (F8).
 2. Add the sorted-slot lookup (example in 4.5) and use it in `apply`, `recolor` and `filteredIndices` (F2).
 3. Add failure-path tests to `Modifiers.zig` (F7): a rejected `edit` of each kind leaves the document byte-identical; `ComponentSetChanged` when a part is missing; `filteredIndices` keeps submesh ranges contiguous and equal to the sum of visible triangles; `apply` and `recolor` clean up on allocation failure (`std.testing.checkAllAllocationFailures`).
-4. Add a synthetic benchmark (a generated mesh with 100k and 1M vertices and 50 and 500 parts) that times `analyze`, `apply` and `recolor`, and record the numbers in validation.md. This is the baseline for F2 and F3; no claim in this document about speed is measured until it exists.
+4. Add a synthetic benchmark (a generated mesh with 100k and 1M vertices and 50 and 500 parts) that times `analyze`, `apply` and `recolor`, and record the numbers in validation.md. This is the baseline for F2 and F3; no claim in this document about speed is measured until it exists. **Done:** `modifier-bench` build step and dated baseline are recorded in validation.md.
 
 Acceptance: all tests pass; the new tests fail when the corresponding validation is removed.
 
 ### M1. Weld-aware analysis (M)
 
-1. Add `weldedIslands` (4.4) behind a `weld_cell` parameter; keep the old behaviour when it is absent.
+**Status: implemented, 2026-10-14.** New documents are v2 and use a 0.1 mm weld cell. V1 documents with no `weld_cell` keep the original vertex-index-only analysis. The generated split-corner cube GLB imports as one island instead of six; the checked-in Captain v1 sidecar still applies unchanged.
+
+1. Add weld-aware analysis behind a `weld_cell` parameter; keep the old behaviour when it is absent.
 2. Add a fixture GLB with UV seams and hard edges (a small cube with split corners) and a test: the old analysis yields many islands, the welded analysis yields one per shell (this reproduces F1 against the real importer, not only the toy mesh).
-3. Test id stability: for the Captain model, the welded and unwelded ids are identical when the mesh has no split vertices.
+3. Test id stability on an unsplit indexed shell. The Captain source does contain coincident split positions, so its welded ids differ; compatibility is tested by applying the checked-in v1 Captain sidecar through the legacy analysis path.
 4. Write `weld_cell` into new sidecars; read v1 sidecars with the old analysis.
 
-Acceptance: the Captain sidecar loads unchanged; the seam fixture imports as the expected number of parts.
+Acceptance: the Captain sidecar loads unchanged through v1 analysis; the seam fixture imports as one part, and unsplit geometry retains its ids.
 
 ### M2. Reversible commands and history (M)
+
+**Status:** Implemented, 2026-10-14. `Modifiers.Command` stores before/after values for surface, color, visibility, palette, scale and offset; `History(64)` applies changes through validated edits, coalesces scale/offset updates, drops redo entries after a new edit, and evicts the oldest entry at capacity. The Character Designer exposes undo and redo through `z`, `shift-z`, panel buttons and a history counter.
 
 1. Add `Command` and `History` (4.3) to `Modifiers.zig` or a new `MeshEditorState.zig`; `Modifiers.edit` stays the validated mutation primitive.
 2. Make each `Edit` record the previous value (read it before mutating).
@@ -1197,12 +1204,14 @@ Acceptance: edit, undo and redo in the running game; the saved sidecar after und
 
 ### M3. Incremental bake and preview (M)
 
+**Status:** Implemented, 2026-10-14. `Modifiers.Bake` owns a pristine model clone, one analysis, sorted part slots, and compressed per-part vertex and triangle lists. `Creator` reports changed part ids (or a full invalidation for palette edits); the app updates only those cached part ranges and queues them for the renderer. The first preview builds the cache and uploads the full result. Hiding degenerates a part's triangle triplets to `(a, a, a)` while preserving index count and submesh ranges, so the GPU index buffer can be patched without rebuilding the mesh. The runtime editor currently changes appearance and visibility; offline scale/offset edits remain on the full bake path.
+
 1. Build `PartSlots` and `PartVertices` once per analysis (4.5) and cache them with the analysis; invalidate only when the source changes.
 2. Implement `Bake.updatePart`; keep a dirty list; per frame, re-bake dirty parts and upload the changed vertex ranges.
 3. Hiding: choose the index strategy (4.6) by measuring both.
-4. Property test: over random edit sequences, the incremental result equals a full `apply` (positions, colours, indices, normals).
+4. Test incremental edits against a full `recolor` after sequences of surface, palette-color and visibility changes; preserve positions, normals, bounds, index count and submesh ranges.
 
-Acceptance: the M0 benchmark shows preview cost proportional to the edited part, not the mesh.
+Acceptance: the M0 benchmark shows preview cost proportional to the edited part, not the mesh. **Met:** `Bake.updatePart` is benchmarked alongside full analyze/apply/recolor, and the in-game renderer patches only changed vertex runs and triangle triplets.
 
 ### M4. Library and stale-source handling (M)
 

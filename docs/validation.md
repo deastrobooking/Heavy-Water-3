@@ -1240,6 +1240,47 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** `python3 tools/zig.py build check` and `git diff --check` passed on the default Zig 0.16/Mach pair. ReleaseSafe captures for showcase 75 and 62 at frame 120 completed on Apple M3 Pro with Metal API Validation enabled and no reported validation errors; both captures were visually inspected.
 - **Not checked:** headless tests (not run), performance benchmarks, regular gameplay across seeds, Zig 0.17, Linux/Windows compilation or runtime, or hands-on play among the revised trees. The capture proves generated mesh visibility in the fixed showcases, not final art approval or frame cost at forest density.
 
+## Mesh modifier hardening and baseline — 2026-10-14
+
+- Completed M0 from [the mesh editor engineering plan](plans/mesheditor.md). `Modifiers.zig` now shares palette resolution through `partColor`, resolves sidecar part ids through a sorted binary-search slot index, and binary-searches the sorted analysis components. Added regression coverage for rejected edits, missing components, filtered submesh ranges, and allocation failures in both `apply` and `recolor`. Added the `modifier-bench` build step for synthetic connected meshes.
+- **Measured:** `python3 tools/zig.py build modifier-bench` (Zig 0.16 ReleaseSafe), timings in ms (`analyze / apply / recolor`): 100k vertices, 50 parts **4.006 / 5.876 / 4.847**; 100k, 500 parts **4.083 / 7.591 / 5.936**; 1M, 50 parts **39.428 / 59.978 / 50.400**; 1M, 500 parts **39.727 / 74.741 / 58.998**. Under the same ReleaseSafe benchmark step on Zig 0.17: 100k/50 **1.447 / 3.442 / 2.404**; 100k/500 **1.571 / 5.256 / 3.528**; 1M/50 **15.194 / 36.911 / 26.151**; 1M/500 **15.283 / 53.543 / 35.912**. These are single-run baselines, not statistically sampled comparisons.
+- **Checked:** default `python3 tools/zig.py build check`; `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check`; both compiler channels' `modifier-bench` steps; `git diff --check`. The full default headless suite completed **427/431 passing**. All new `Modifiers` tests passed. Four unrelated tests failed: `asset.Catalog.test.deferred meshes reserve handles at load and install once, later` (expected 5, found 6), a `game.Save` v12 migration decode (`Malformed input`), `game.Creator.test.creator edits a draft...` (height expected 1.02, got 1), and `ui.Screens.test.every screen lays out inside the window and records hits` (expected 35, found 25).
+- **Not checked:** baseline results are not a before/after comparison; benchmark variance and Linux/Windows runs were not measured. No rendering code changed, so no Metal smoke was run. M1 welding and its GLB fixture are recorded in the following entry.
+
+## Weld-aware mesh islands and v1 compatibility — 2026-10-14
+
+- Completed M1 from [the mesh editor engineering plan](plans/mesheditor.md). New modifier documents use format 2 with a saved 0.1 mm `weld_cell`; welding joins split vertices by quantized position before triangle connectivity. Format 1 documents without the field retain index-only analysis. Added [a split-corner cube GLB fixture](../src/asset/seam_cube.glb), imported through `Gltf.compile`: old analysis finds six face islands, welded analysis finds one shell. An unsplit indexed shell preserves its ids.
+- The Captain GLB does contain coincident split positions, so the planned assumption that its welded and unwelded ids match was false. Its checked-in format 1 sidecar was instead tested through `apply` and still matches the original 74-part analysis. The in-game override check accepts legacy format 1 against newly generated format 2 source metadata when the source hash matches; bake-time component validation remains authoritative.
+- **Checked:** default and `HEAVYWATER_ZIG_CHANNEL=0.17` `build check`; the direct modifier dependency test run passed **26/26 on both compiler channels**; full default headless suite **431/435 passing**. Four unrelated failures remain: Catalog expected 5 pending meshes but found 6; Save v12 migration returned `Malformed input`; Creator got height 1 instead of 1.02; Screens found 25 rows instead of 35. `git diff --check` passed.
+- **Not checked:** interactive loading/saving of a legacy imported-character override, Linux/Windows builds, or rendering. The seam fixture is covered in headless import and analysis tests; no rendering code changed, so no Metal smoke was run. Next is M2 reversible commands and history.
+
+## Reversible mesh-editor commands and history — 2026-10-14
+
+- Completed M2 from [the mesh editor engineering plan](plans/mesheditor.md). Imported-part changes now use validated before/after commands for surface, part paint, enabled state, palette colors, scale and offset. The fixed 64-entry history discards the redo tail after a new edit, coalesces continuous scale/offset changes, and exposes keyboard (`z`, `shift-z`) plus panel Undo/Redo controls and a history counter. Undo/redo route through the same validation path; imports clear history when replacing the document.
+- Added tests for byte-identical undo and redo across all command kinds, history coalescing and redo-tail discard, rejected-command transactionality, and Creator keyboard edit/undo/redo.
+- **Checked:** default and `HEAVYWATER_ZIG_CHANNEL=0.17` `build check`; both full headless suites **434/438 passing** (all new tests pass on both). The same four existing failures appear on both channels: Catalog expected 5 pending meshes but found 6; Save v12 migration returned `Malformed input`; Creator height expected 1.02 but got 1; Screens expected 35 rows but found 25. `MTL_DEBUG_LAYER=1` ReleaseSafe capture of `-Dcharacter-showcase=46 -Dcapture-frame=120` completed on Apple M3 Pro and the imported-parts panel was visually inspected. The 300-frame ReleaseSafe Metal smoke completed with all scripted stages and Metal API Validation enabled. `git diff --check` passed.
+- **Not checked:** interactive mouse/keyboard use beyond the Creator unit path was not manually exercised. Linux/Windows builds and runtime remain unmeasured. Next is M3 incremental bake and preview.
+
+## Incremental mesh-editor bake and preview — 2026-10-14
+
+- Completed M3 from [the mesh editor engineering plan](plans/mesheditor.md). `Modifiers.Bake` caches a pristine model, analysis, sorted part slots, and compressed per-part vertex/triangle lists. Creator dirty tracking feeds a renderer patch queue; the first preview uploads the full bake, while appearance or visibility edits write only changed vertex runs and triangle triplets. Hiding degenerates each affected triangle in place, keeping index count and submesh ranges stable. Runtime preview currently covers surface, palette color and visibility edits; scale/offset remain in the offline full bake path.
+- Added an incremental/full comparison test over 18 surface, color and enabled-state changes. It checks the incremental output against a fresh full `recolor` result. `modifier-bench` now also measures one-part `Bake.updatePart` updates (1000 repetitions, `analyze / apply / recolor` in ms, `part_update` in µs):
+
+  | Compiler | Vertices / parts | Analyze | Apply | Recolor | Part update |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Zig 0.16 | 100k / 50 | 4.115 | 11.692 | 10.933 | 3.52 |
+  | Zig 0.16 | 100k / 500 | 3.889 | 12.850 | 11.189 | 0.33 |
+  | Zig 0.16 | 1M / 50 | 40.990 | 139.713 | 126.156 | 34.16 |
+  | Zig 0.16 | 1M / 500 | 41.122 | 147.723 | 133.843 | 3.52 |
+  | Zig 0.17 | 100k / 50 | 1.474 | 6.760 | 5.781 | 3.46 |
+  | Zig 0.17 | 100k / 500 | 3.143 | 10.224 | 7.112 | 0.33 |
+  | Zig 0.17 | 1M / 50 | 15.115 | 79.652 | 71.868 | 32.99 |
+  | Zig 0.17 | 1M / 500 | 15.159 | 95.158 | 81.704 | 3.40 |
+
+  Timings are single-run synthetic results; the selected part sizes differ across part counts, so `part_update` is expected to vary with that size. It confirms the update is bounded by the part's vertices/triangles rather than a full mesh recolor.
+- **Checked:** default `python3 tools/zig.py build check` and `HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check`; both headless suites **435/439 passing**, including the new bake test. The same four existing failures remain on both channels: Catalog expected 5 pending meshes but found 6; Save v12 migration returned `Malformed input`; Creator height expected 1.02 but got 1; Screens expected 35 rows but found 25. `MTL_DEBUG_LAYER=1` ReleaseSafe 300-frame smoke completed on Apple M3 Pro / Metal, exercising partial hide and restore patches with Metal API Validation enabled and no reported API errors. Both compiler channels' `modifier-bench` steps passed; `git diff --check` passed.
+- **Not checked:** no manual interactive editing session, Linux/Windows builds or runtime, or multi-asset library behavior. The incremental equality test covers appearance and visibility, not transforms; transforms are not yet exposed by the runtime editor. Next is M4 library and stale-source handling.
+
 ## Imported GLB type visibility, preview, and armor RGB — 2026-10-12
 
 - Added a distinct **IMPORTED GLB** character model choice separate from the bundled Captain. Import selects it immediately, and the in-world Creator avatar is the live preview while editing the imported component document; the panel now identifies preview state and component count. The importer and startup loader continue using the same source-hash-backed generation path and single replaceable saved slot.

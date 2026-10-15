@@ -40,7 +40,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -1005,10 +1005,13 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
         const visible: Rect = .{ .x = info_x, .y = paint.y + 38, .w = 160, .h = 28 };
         button(c, visible, if (part.enabled) "HIDE COMPONENT" else "RESTORE PART", hitId(.imported_toggle, 0), false);
     }
-    const hint = if (cr.imported_status == .saved) "LIBRARY SAVED  |  UP/DOWN SELECT  P PALETTE  C PAINT  H HIDE" else if (cr.imported_status == .unsaved) "UNSAVED EDITS  |  P PALETTE  C PAINT  H HIDE  ENTER BACK" else "UP/DOWN SELECT  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE";
+    const hint = if (cr.imported_status == .saved) "SAVED  |  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE  Z UNDO / SHIFT+Z REDO" else if (cr.imported_status == .unsaved) "UNSAVED  |  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE  Z UNDO / SHIFT+Z REDO" else "UP/DOWN SELECT  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE  Z UNDO / SHIFT+Z REDO";
     c.text(r.x + 18, r.y + h - 48, hint, 0.72, if (cr.imported_status == .unsaved) gold else dim);
-    button(c, .{ .x = r.x + r.w - 286, .y = r.y + h - 42, .w = 104, .h = 28 }, "BACK", hitId(.imported_back, 0), false);
-    button(c, .{ .x = r.x + r.w - 166, .y = r.y + h - 42, .w = 148, .h = 28 }, "SAVE LIBRARY", hitId(.imported_save, 0), false);
+    c.print(info_x, r.y + h - 75, 0.72, dim, "HISTORY {d}/{d}", .{cr.imported_history.cursor, cr.imported_history.len});
+    button(c, .{ .x = r.x + r.w - 414, .y = r.y + h - 42, .w = 68, .h = 28 }, "UNDO", hitId(.imported_undo, 0), cr.imported_history.cursor > 0);
+    button(c, .{ .x = r.x + r.w - 338, .y = r.y + h - 42, .w = 68, .h = 28 }, "REDO", hitId(.imported_redo, 0), cr.imported_history.cursor < cr.imported_history.len);
+    button(c, .{ .x = r.x + r.w - 258, .y = r.y + h - 42, .w = 88, .h = 28 }, "BACK", hitId(.imported_back, 0), false);
+    button(c, .{ .x = r.x + r.w - 158, .y = r.y + h - 42, .w = 140, .h = 28 }, "SAVE LIBRARY", hitId(.imported_save, 0), false);
 }
 
 // ---------------------------------------------------------------- shop, upgrades, wardrobe

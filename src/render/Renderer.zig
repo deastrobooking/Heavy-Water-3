@@ -38,6 +38,7 @@ const Field = @import("Field.zig");
 const Memory = @import("../engine/Memory.zig");
 const Visibility = @import("Visibility.zig");
 pub const max_views = Layout.max_views;
+const max_mesh_patches = 64;
 /// One split-screen view. View 0 is P1's and uses `hud_lines`, `panel`, and the metrics.
 pub const View = struct {
     camera: Camera = .{},
@@ -73,6 +74,8 @@ panel_count: usize = 0,
 /// The GUI for this frame (menus, HUD, panels), built by the application in canvas units.
 ui: Canvas = .{},
 scene: Scene = undefined,
+mesh_patches: [max_mesh_patches]Scene.MeshPatch = undefined,
+mesh_patch_count: usize = 0,
 characters: Characters = .{},
 /// Views 2–4 stream their own terrain; created when first shown, kept until exit so pools
 /// never grow again mid-session.
@@ -170,6 +173,21 @@ pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Alloc
         self.field_peak_cpu_bytes = self.field.?.cpuBytes();
         std.log.info("Scale workload: {d} objects in {d} cells, generated in {d:.0} ms, {d} MiB of instances", .{ options.scale_objects, Field.cell_count, self.field.?.generation_ms, self.field.?.gpuBytes() >> 20 });
     }
+}
+
+/// App.publish queues these while holding the render snapshot mutex; render consumes them before
+/// encoding this frame, so the catalog's CPU model and GPU buffers stay in step.
+pub fn queueMeshPatch(self: *Renderer, patch: Scene.MeshPatch) void {
+    if (self.mesh_patch_count < self.mesh_patches.len) {
+        self.mesh_patches[self.mesh_patch_count] = patch;
+        self.mesh_patch_count += 1;
+        return;
+    }
+    // A burst beyond the bounded list becomes one full upload for this mesh.
+    for (self.mesh_patches[0..self.mesh_patch_count]) |*pending| if (pending.handle.eql(patch.handle)) {
+        pending.* = .{ .handle = patch.handle, .model = patch.model, .all_vertices = true, .all_indices = true };
+        return;
+    };
 }
 
 fn setup(self: *Renderer, core: *mach.Core) !void {
@@ -551,6 +569,8 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     self.characters.cel_debug = self.cel_debug;
     try self.characters.prepare(self.allocator, self.timer.io, window.device, encoder, self.props[0..self.prop_count], character_visible, if (measure_character_prepare) &self.character_skin_times else null);
     if (measure_character_prepare) self.character_prepare_times.record(character_timer.lap() * 1000);
+    for (self.mesh_patches[0..self.mesh_patch_count]) |patch| self.scene.patchMesh(window.queue, patch);
+    self.mesh_patch_count = 0;
     // Catalog meshes installed after startup (deferred builds, reloads) upload under a budget.
     const late = self.scene.uploadMeshes(window.device, window.queue, options.asset_upload);
     if (options.benchmark_frames == 0 or self.frames >= warmup_frames) {

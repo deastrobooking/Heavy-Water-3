@@ -11,6 +11,7 @@ const Raster = @import("character/raster.zig");
 const CharacterMath = @import("character/math.zig");
 const CharacterSpec = @import("character/spec.zig");
 const Modifiers = @import("asset/Modifiers.zig");
+const Mesh = @import("render/Mesh.zig");
 
 /// Build-time tool:
 ///   asset-compiler compile <source> <source.meta> <output>
@@ -30,6 +31,8 @@ const Modifiers = @import("asset/Modifiers.zig");
 ///       compile a source-hash-validated, modifier-baked static model for the game
 ///   asset-compiler modifier-list <modifiers.json>
 ///       list editable connected mesh islands by stable source vertex ID for offline authoring
+///   asset-compiler modifier-bench
+///       benchmark analyze, apply and recolor on synthetic 100k and 1M vertex meshes
 ///   asset-compiler modifier-edit <input.json> <output.json> part <id> <property> <values...>
 ///       author one source-linked label/surface/color/scale/offset edit without replacing input
 ///       or: modifier-edit <input.json> <output.json> palette <skin|eyes|armor|energy> <r> <g> <b>
@@ -51,6 +54,7 @@ pub fn main(init: std.process.Init) !void {
     if ((args.len == 5 or args.len == 6) and std.mem.eql(u8, args[1], "preview-bind")) return previewBind(init.gpa, io, args[2], args[3], args[4], if (args.len == 6) args[5] else "bind");
     if (args.len == 5 and std.mem.eql(u8, args[1], "modifiers")) return createModifiers(init.gpa, io, args[2], args[3], args[4]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "modifier-list")) return listModifiers(init.gpa, io, args[2]);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "modifier-bench")) return modifierBenchmark(init.gpa, io);
     if (args.len >= 8 and std.mem.eql(u8, args[1], "modifier-edit")) return editModifiers(init.gpa, io, args[2..]);
     if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "preview-modified")) return previewModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
     if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "compile-modified")) return compileModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
@@ -60,6 +64,89 @@ pub fn main(init: std.process.Init) !void {
     if (args.len == 4 or args.len == 8) if (std.mem.eql(u8, args[1], "heightmap")) return compileHeightmap(init.gpa, io, args[2], args[3], args[4..]);
     std.log.err("usage: asset-compiler compile <source> <meta> <output> | trace <source> <meta> <output.json> | split <source> <meta> <output-dir> | preview-bind <source> <meta> <output.png> [bind|run] | modifiers <source> <meta> <output.json> | modifier-list <modifiers.json> | modifier-edit <input.json> <output.json> part <id> <property> <values...> | modifier-edit <input.json> <output.json> palette <slot> <r> <g> <b> | preview-modified <source> <meta> <modifiers.json> <output.png> [bind|run] | compile-modified <source> <meta> <modifiers.json> <output.hwmesh> [bind|run] | manifest ... | import <dir> | heightmap ...", .{});
     return error.InvalidArguments;
+}
+
+fn modifierBenchmark(gpa: std.mem.Allocator, io: std.Io) !void {
+    for ([_]usize{ 100_000, 1_000_000 }) |vertex_count| for ([_]usize{ 50, 500 }) |part_count| {
+        var model = try syntheticModifierModel(gpa, vertex_count, part_count);
+        defer model.deinit(gpa);
+        const doc = try Modifiers.generate(gpa, model, "benchmark");
+        defer Modifiers.deinit(gpa, doc);
+
+        const analyze_start = std.Io.Clock.awake.now(io);
+        const analysis = try Modifiers.analyze(gpa, model);
+        const analyze_ns = analyze_start.durationTo(std.Io.Clock.awake.now(io)).nanoseconds;
+        gpa.free(analysis.vertex_parts);
+        gpa.free(analysis.components);
+
+        var apply_model = try cloneModel(gpa, model);
+        defer apply_model.deinit(gpa);
+        const apply_start = std.Io.Clock.awake.now(io);
+        const applied = try Modifiers.apply(gpa, &apply_model, doc, "benchmark");
+        const apply_ns = apply_start.durationTo(std.Io.Clock.awake.now(io)).nanoseconds;
+        gpa.free(applied.vertex_parts);
+        gpa.free(applied.components);
+
+        var recolor_model = try cloneModel(gpa, model);
+        defer recolor_model.deinit(gpa);
+        const recolor_start = std.Io.Clock.awake.now(io);
+        const recolored = try Modifiers.recolor(gpa, &recolor_model, doc);
+        const recolor_ns = recolor_start.durationTo(std.Io.Clock.awake.now(io)).nanoseconds;
+        gpa.free(recolored.vertex_parts);
+        gpa.free(recolored.components);
+
+        var incremental_model = try cloneModel(gpa, model);
+        defer incremental_model.deinit(gpa);
+        const bake = try Modifiers.Bake.init(gpa, model, doc);
+        defer bake.deinit(gpa);
+        try bake.applyAll(&incremental_model, doc);
+        const update_repeats = 1000;
+        const update_start = std.Io.Clock.awake.now(io);
+        for (0..update_repeats) |_| try bake.updatePart(&incremental_model, doc, doc.parts[0].id);
+        const update_us = @as(f64, @floatFromInt(update_start.durationTo(std.Io.Clock.awake.now(io)).nanoseconds)) /
+            @as(f64, @floatFromInt(update_repeats)) / 1_000;
+
+        std.log.info("modifier-bench vertices={d} parts={d} analyze={d:.3}ms apply={d:.3}ms recolor={d:.3}ms part_update={d:.2}us", .{
+            vertex_count, part_count, @as(f64, @floatFromInt(analyze_ns)) / 1_000_000,
+            @as(f64, @floatFromInt(apply_ns)) / 1_000_000, @as(f64, @floatFromInt(recolor_ns)) / 1_000_000,
+            update_us,
+        });
+    };
+}
+
+fn syntheticModifierModel(allocator: std.mem.Allocator, vertex_count: usize, part_count: usize) !Model {
+    const vertices = try allocator.alloc(Mesh.Vertex, vertex_count);
+    errdefer allocator.free(vertices);
+    const per_part = vertex_count / part_count;
+    const triangle_count = part_count * (per_part - 2);
+    const indices = try allocator.alloc(u32, triangle_count * 3);
+    errdefer allocator.free(indices);
+    for (0..part_count) |part| {
+        const base = part * per_part;
+        for (0..per_part) |offset| vertices[base + offset] = .{
+            .position = .{ @floatFromInt(part), @floatFromInt(offset % 32), @floatFromInt(offset / 32) },
+            .normal = .{ 0, 1, 0 }, .uv = .{ 0, 0 },
+        };
+        for (1..per_part - 1) |offset| {
+            const out = part * (per_part - 2) * 3 + (offset - 1) * 3;
+            indices[out] = @intCast(base);
+            indices[out + 1] = @intCast(base + offset);
+            indices[out + 2] = @intCast(base + offset + 1);
+        }
+    }
+    const mesh: Mesh = .{ .vertices = vertices, .indices = indices };
+    return Model.fromMesh(allocator, mesh, .named("synthetic", .{ 1, 1, 1, 1 }));
+}
+
+fn cloneModel(allocator: std.mem.Allocator, source: Model) !Model {
+    const vertices = try allocator.dupe(Mesh.Vertex, source.mesh.vertices);
+    errdefer allocator.free(vertices);
+    const indices = try allocator.dupe(u32, source.mesh.indices);
+    errdefer allocator.free(indices);
+    const submeshes = try allocator.dupe(Model.Submesh, source.submeshes);
+    errdefer allocator.free(submeshes);
+    const materials = try allocator.dupe(Model.Material, source.materials);
+    return .{ .mesh = .{ .vertices = vertices, .indices = indices }, .submeshes = submeshes, .materials = materials, .bounds_min = source.bounds_min, .bounds_max = source.bounds_max };
 }
 
 fn listModifiers(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !void {

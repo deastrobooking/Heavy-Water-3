@@ -436,6 +436,10 @@ pub fn mesh(self: *const Catalog, handle: MeshHandle) ?*const Entry {
     return self.meshes.getConst(handle);
 }
 
+pub fn meshMut(self: *Catalog, handle: MeshHandle) ?*Entry {
+    return self.meshes.get(handle);
+}
+
 pub fn material(self: *const Catalog, handle: MaterialHandle) ?*const Model.Material {
     return self.materials.getConst(handle);
 }

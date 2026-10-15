@@ -24,6 +24,14 @@ pub const max_instances = Streamer.render_capacity * Scatter.capacity + 1 + Worl
 /// `ground` draws (the mountain panorama and cave meshes) are shaded as terrain.
 const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32, ground: bool = false };
 const max_draws = Catalog.mesh_capacity * Model.max_submeshes;
+pub const MeshPatch = struct {
+    handle: Catalog.MeshHandle,
+    model: *const Model,
+    vertex_indices: []const u32 = &.{},
+    triangle_offsets: []const u32 = &.{},
+    all_vertices: bool = false,
+    all_indices: bool = false,
+};
 pub const chunk_bytes = Chunk.vertex_count * @sizeOf(Mesh.Vertex) + Chunk.index_count * 4;
 pub const gpu_pool_bytes = Streamer.render_capacity * chunk_bytes;
 const Resident = struct { mesh: GpuMesh, view: ?Streamer.View = null, visible: bool = false };
@@ -106,6 +114,37 @@ pub fn gpuMesh(self: *const Scene, handle: Catalog.MeshHandle) ?*const GpuMesh {
     const entry = self.catalog.mesh(handle) orelse return null;
     if (!entry.ready or owner.mesh_generation[handle.index] != handle.generation) return null;
     return if (owner.meshes[handle.index]) |*mesh| mesh else null;
+}
+
+/// Writes only changed vertex runs and triangle triplets into an existing catalog GPU mesh.
+/// If it has not uploaded yet, the normal catalog upload will include the current CPU model.
+pub fn patchMesh(self: *Scene, queue: *gpu.Queue, patch: MeshPatch) void {
+    if (!self.owns_meshes or self.mesh_generation[patch.handle.index] != patch.handle.generation) return;
+    const mesh = if (self.meshes[patch.handle.index]) |*value| value else return;
+    if (patch.all_vertices) {
+        queue.writeBuffer(mesh.vertices, 0, patch.model.mesh.vertices);
+    } else {
+        var at: usize = 0;
+        while (at < patch.vertex_indices.len) {
+            const first: usize = patch.vertex_indices[at];
+            var end = first + 1;
+            at += 1;
+            while (at < patch.vertex_indices.len and patch.vertex_indices[at] == end) : (at += 1) end += 1;
+            queue.writeBuffer(mesh.vertices, first * @sizeOf(Mesh.Vertex), patch.model.mesh.vertices[first..end]);
+        }
+    }
+    if (patch.all_indices) {
+        queue.writeBuffer(mesh.indices, 0, patch.model.mesh.indices);
+    } else {
+        var at: usize = 0;
+        while (at < patch.triangle_offsets.len) {
+            const first: usize = patch.triangle_offsets[at];
+            var end = first + 3;
+            at += 1;
+            while (at < patch.triangle_offsets.len and patch.triangle_offsets[at] == end) : (at += 1) end += 3;
+            queue.writeBuffer(mesh.indices, first * @sizeOf(u32), patch.model.mesh.indices[first..end]);
+        }
+    }
 }
 
 /// Uploads ready catalog meshes that have no current GPU copy, within `budget` bytes; one mesh

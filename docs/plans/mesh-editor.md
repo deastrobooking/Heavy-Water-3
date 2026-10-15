@@ -25,6 +25,10 @@ preview updates when the source mesh is recolored or hidden. The bundled Captain
 separate body type. Imports are still a single replaceable user slot at
 `saves/imported-character.glb`, so importing a second GLB replaces the first.
 
+New generated sidecars are format 2 and save a weld cell so UV seams and hard edges do not split
+one geometric shell into many editable parts. Existing format 1 sidecars keep their original
+index-only part IDs and remain usable.
+
 It traces the skin, maps
 recognized Mixamo/Blender/Unity-style humanoid joint names to the game's run tracks, and evaluates
 that controller pose into the imported preview. The source is stored at
@@ -44,15 +48,23 @@ serialization and live controller-driven imported characters remain separate sta
 
 ## Next slices
 
-1. **Library breadth:** replace the current single imported slot with a multi-asset browser. Keep
+0. **Modifier reliability, welded islands and reversible edits (M0/M1/M2 complete):** shared palette resolution,
+   sorted part-slot lookup, failure-path coverage, benchmark baseline, weld-aware analysis, the
+   split-corner GLB fixture, v1 sidecar compatibility, fixed-capacity commands and in-game undo/redo
+   are in place.
+1. **Incremental bake and preview (M3 complete):** the preview caches source analysis and per-part
+   vertex/triangle membership, then patches only dirty part ranges. Visibility edits degenerate
+   triangle triplets in place, preserving GPU index count and submesh ranges. Next is **library and
+   stale-source handling (M4)**.
+2. **Library breadth:** replace the current single imported slot with a multi-asset browser. Keep
    per-asset names, source hashes, modifier documents and selectable character types; reject stale
    overrides without discarding them.
-2. **Component authoring:** add component relabeling, undo/redo, and basic size/offset controls
+3. **Component authoring:** add component relabeling and basic size/offset controls
    with one reversible action per edit. Keep edits source-linked and offer export as a separate
    user copy.
-3. **Rig integration:** replace the current controller-pose bake with runtime `HWSK`/`HWAN`
+4. **Rig integration:** replace the current controller-pose bake with runtime `HWSK`/`HWAN`
    import, live controller-driven animation, named sockets, and robust mapping controls.
-4. **User animation:** bring file-based and later webcam capture review into the same in-game
+5. **User animation:** bring file-based and later webcam capture review into the same in-game
    character workspace only after runtime skeleton and clip import work. Keep inference local and
    make captured clips editable before they can enter gameplay.
 
@@ -62,6 +74,8 @@ serialization and live controller-driven imported characters remain separate sta
   appearance, hide or restore a part, and see the preview update without restarting.
 - Saving and reopening preserves library appearance edits without altering the checked-in GLB or
   importer recipe.
+- Imported-part edits can be undone and redone in the game; saving after undo writes the same
+  sidecar state that existed before the edit.
 - A stale source/component set is reported clearly and does not replace the user's working file.
 - Routine library/color edits require no external application; advanced geometry and rig changes
   can be exported to Blender and reimported.

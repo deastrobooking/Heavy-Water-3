@@ -42,6 +42,24 @@ pub fn deinit(self: Model, allocator: std.mem.Allocator) void {
     self.mesh.deinit(allocator);
 }
 
+pub fn clone(allocator: std.mem.Allocator, source: Model) !Model {
+    const materials = try allocator.dupe(Material, source.materials);
+    errdefer allocator.free(materials);
+    const submeshes = try allocator.dupe(Submesh, source.submeshes);
+    errdefer allocator.free(submeshes);
+    const vertices = try allocator.dupe(Mesh.Vertex, source.mesh.vertices);
+    errdefer allocator.free(vertices);
+    const indices = try allocator.dupe(u32, source.mesh.indices);
+    errdefer allocator.free(indices);
+    return .{
+        .mesh = .{ .vertices = vertices, .indices = indices },
+        .submeshes = submeshes,
+        .materials = materials,
+        .bounds_min = source.bounds_min,
+        .bounds_max = source.bounds_max,
+    };
+}
+
 /// Takes ownership of `mesh`. One submesh, one material covering the whole mesh.
 pub fn fromMesh(allocator: std.mem.Allocator, mesh: Mesh, material: Material) !Model {
     errdefer mesh.deinit(allocator);

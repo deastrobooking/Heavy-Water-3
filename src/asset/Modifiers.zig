@@ -5,7 +5,9 @@ const std = @import("std");
 const Model = @import("Model.zig");
 const Modifiers = @This();
 
-pub const format_version: u32 = 1;
+pub const legacy_format_version: u32 = 1;
+pub const format_version: u32 = 2;
+pub const default_weld_cell: f32 = 0.0001;
 pub const CharacterType = enum { captain, ranger, synthetic };
 pub const Surface = enum { armor, skin, eyes, energy, neutral };
 pub const Part = struct {
@@ -22,6 +24,8 @@ pub const Part = struct {
 };
 pub const Document = struct {
     format: u32 = format_version,
+    /// Absent on v1 documents, which retain vertex-index-only island analysis.
+    weld_cell: ?f32 = null,
     character_type: CharacterType = .captain,
     source_hash: []const u8,
     overall_scale: f32 = 1,
@@ -39,12 +43,268 @@ pub const Edit = union(enum) {
     scale: struct { id: u32, value: [3]f32 },
     offset: struct { id: u32, value: [3]f32 },
     palette: struct { slot: Palette, value: [3]f32 },
+    enabled: struct { id: u32, value: bool },
 };
+pub const Command = union(enum) {
+    surface: struct { id: u32, before: Surface, after: Surface },
+    color: struct { id: u32, before: ?[3]f32, after: ?[3]f32 },
+    enabled: struct { id: u32, before: bool, after: bool },
+    scale: struct { id: u32, before: [3]f32, after: [3]f32 },
+    offset: struct { id: u32, before: [3]f32, after: [3]f32 },
+    palette: struct { slot: Palette, before: [3]f32, after: [3]f32 },
+
+    pub fn apply(self: Command, allocator: std.mem.Allocator, doc: *Document, direction: enum { before, after }) !void {
+        switch (self) {
+            .surface => |c| try edit(allocator, doc, .{ .surface = .{ .id = c.id, .value = if (direction == .before) c.before else c.after } }),
+            .color => |c| try edit(allocator, doc, .{ .color = .{ .id = c.id, .value = if (direction == .before) c.before else c.after } }),
+            .enabled => |c| try edit(allocator, doc, .{ .enabled = .{ .id = c.id, .value = if (direction == .before) c.before else c.after } }),
+            .scale => |c| try edit(allocator, doc, .{ .scale = .{ .id = c.id, .value = if (direction == .before) c.before else c.after } }),
+            .offset => |c| try edit(allocator, doc, .{ .offset = .{ .id = c.id, .value = if (direction == .before) c.before else c.after } }),
+            .palette => |c| try edit(allocator, doc, .{ .palette = .{ .slot = c.slot, .value = if (direction == .before) c.before else c.after } }),
+        }
+    }
+
+    fn coalesce(self: *Command, next: Command) bool {
+        switch (self.*) {
+            .scale => |*a| switch (next) { .scale => |b| if (a.id == b.id) { a.after = b.after; return true; }, else => {} },
+            .offset => |*a| switch (next) { .offset => |b| if (a.id == b.id) { a.after = b.after; return true; }, else => {} },
+            else => {},
+        }
+        return false;
+    }
+};
+
+/// Fixed-capacity undo history. Pushing after undo discards the redo tail.
+pub fn History(comptime capacity: usize) type {
+    return struct {
+        const Self = @This();
+        items: [capacity]Command = undefined,
+        len: usize = 0,
+        cursor: usize = 0,
+
+        pub fn push(self: *Self, command: Command) void {
+            self.len = self.cursor;
+            if (self.cursor > 0 and self.items[self.cursor - 1].coalesce(command)) return;
+            if (self.len == capacity) {
+                if (capacity == 0) return;
+                std.mem.copyForwards(Command, self.items[0 .. capacity - 1], self.items[1..capacity]);
+                self.len -= 1;
+                self.cursor -= 1;
+            }
+            if (capacity == 0) return;
+            self.items[self.len] = command;
+            self.len += 1;
+            self.cursor = self.len;
+        }
+
+        /// Apply before recording so invalid commands leave both the document and history intact.
+        pub fn applyAndPush(self: *Self, allocator: std.mem.Allocator, doc: *Document, command: Command) !void {
+            try command.apply(allocator, doc, .after);
+            self.push(command);
+        }
+
+        pub fn undo(self: *Self) ?Command {
+            if (self.cursor == 0) return null;
+            self.cursor -= 1;
+            return self.items[self.cursor];
+        }
+
+        pub fn redo(self: *Self) ?Command {
+            if (self.cursor >= self.len) return null;
+            const command = self.items[self.cursor];
+            self.cursor += 1;
+            return command;
+        }
+    };
+}
 pub const Component = struct { id: u32, count: u32, center: [3]f32, min: [3]f32, max: [3]f32 };
 pub const Analysis = struct {
     /// For each vertex, the `id` of its disconnected component.
     vertex_parts: []u32,
     components: []Component,
+};
+const PartSlot = struct { id: u32, index: usize };
+pub const PartSlots = struct {
+    items: []PartSlot,
+
+    fn init(allocator: std.mem.Allocator, parts: []const Part) !PartSlots {
+        const items = try allocator.alloc(PartSlot, parts.len);
+        errdefer allocator.free(items);
+        for (parts, 0..) |part, i| items[i] = .{ .id = part.id, .index = i };
+        // Insertion sort is efficient for the small sidecar lists and avoids depending on
+        // different std sort APIs across the shipping and migration compilers.
+        for (1..items.len) |i| {
+            const item = items[i];
+            var at = i;
+            while (at > 0 and items[at - 1].id > item.id) : (at -= 1) items[at] = items[at - 1];
+            items[at] = item;
+        }
+        return .{ .items = items };
+    }
+
+    fn deinit(self: PartSlots, allocator: std.mem.Allocator) void {
+        allocator.free(self.items);
+    }
+
+    pub fn indexOf(self: PartSlots, id: u32) ?usize {
+        var lo: usize = 0;
+        var hi = self.items.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (self.items[mid].id == id) return self.items[mid].index;
+            if (self.items[mid].id < id) lo = mid + 1 else hi = mid;
+        }
+        return null;
+    }
+};
+pub const PartVertices = struct {
+    offsets: []u32,
+    vertices: []u32,
+
+    pub fn build(allocator: std.mem.Allocator, slot_of_vertex: []const u32, part_count: usize) !PartVertices {
+        const offsets = try allocator.alloc(u32, part_count + 1);
+        errdefer allocator.free(offsets);
+        @memset(offsets, 0);
+        for (slot_of_vertex) |slot| {
+            if (slot >= part_count) return error.ComponentSetChanged;
+            offsets[slot + 1] += 1;
+        }
+        for (0..part_count) |i| offsets[i + 1] += offsets[i];
+        const vertices = try allocator.alloc(u32, slot_of_vertex.len);
+        errdefer allocator.free(vertices);
+        const cursor = try allocator.dupe(u32, offsets[0..part_count]);
+        defer allocator.free(cursor);
+        for (slot_of_vertex, 0..) |slot, vertex| {
+            vertices[cursor[slot]] = @intCast(vertex);
+            cursor[slot] += 1;
+        }
+        return .{ .offsets = offsets, .vertices = vertices };
+    }
+
+    pub fn deinit(self: PartVertices, allocator: std.mem.Allocator) void {
+        allocator.free(self.vertices);
+        allocator.free(self.offsets);
+    }
+
+    pub fn of(self: PartVertices, slot: usize) []const u32 {
+        return self.vertices[self.offsets[slot]..self.offsets[slot + 1]];
+    }
+};
+
+/// Per-part offsets to the first index of each source triangle.
+pub const PartTriangles = struct {
+    offsets: []u32,
+    triangles: []u32,
+
+    pub fn build(allocator: std.mem.Allocator, model: Model, analysis: Analysis, slots: PartSlots, part_count: usize) !PartTriangles {
+        if (model.mesh.indices.len % 3 != 0) return error.InvalidModifiers;
+        const offsets = try allocator.alloc(u32, part_count + 1);
+        errdefer allocator.free(offsets);
+        @memset(offsets, 0);
+        var triangle: usize = 0;
+        while (triangle < model.mesh.indices.len) : (triangle += 3) {
+            const vertex = model.mesh.indices[triangle];
+            if (vertex >= analysis.vertex_parts.len) return error.InvalidModifiers;
+            const slot = slots.indexOf(analysis.vertex_parts[vertex]) orelse return error.ComponentSetChanged;
+            offsets[slot + 1] += 1;
+        }
+        for (0..part_count) |i| offsets[i + 1] += offsets[i];
+        const triangles = try allocator.alloc(u32, model.mesh.indices.len / 3);
+        errdefer allocator.free(triangles);
+        const cursor = try allocator.dupe(u32, offsets[0..part_count]);
+        defer allocator.free(cursor);
+        triangle = 0;
+        while (triangle < model.mesh.indices.len) : (triangle += 3) {
+            const vertex = model.mesh.indices[triangle];
+            const slot = slots.indexOf(analysis.vertex_parts[vertex]).?;
+            triangles[cursor[slot]] = @intCast(triangle);
+            cursor[slot] += 1;
+        }
+        return .{ .offsets = offsets, .triangles = triangles };
+    }
+
+    pub fn deinit(self: PartTriangles, allocator: std.mem.Allocator) void {
+        allocator.free(self.triangles);
+        allocator.free(self.offsets);
+    }
+
+    pub fn of(self: PartTriangles, slot: usize) []const u32 {
+        return self.triangles[self.offsets[slot]..self.offsets[slot + 1]];
+    }
+};
+/// Cached appearance bake for the in-game editor. Source geometry and the two lookup tables are
+/// built once; a normal edit only visits one part's vertices and triangles.
+pub const Bake = struct {
+    pristine: Model,
+    analysis: Analysis,
+    slots: PartSlots,
+    vertices: PartVertices,
+    triangles: PartTriangles,
+
+    pub fn init(allocator: std.mem.Allocator, source: Model, doc: Document) !Bake {
+        if (!validDocument(doc)) return error.InvalidModifiers;
+        const analysis = try analyzeWithWeldCell(allocator, source, doc.weld_cell);
+        errdefer {
+            allocator.free(analysis.vertex_parts);
+            allocator.free(analysis.components);
+        }
+        if (doc.parts.len != analysis.components.len) return error.ComponentSetChanged;
+        const slots = try PartSlots.init(allocator, doc.parts);
+        errdefer slots.deinit(allocator);
+        for (analysis.components) |component| if (slots.indexOf(component.id) == null) return error.ComponentSetChanged;
+        for (doc.parts) |part| {
+            if (!validScale(part.scale) or !validOffset(part.offset)) return error.InvalidPartTransform;
+            if (part.color) |color| if (!validColor(color)) return error.InvalidPartColor;
+        }
+        const slot_of_vertex = try allocator.alloc(u32, analysis.vertex_parts.len);
+        defer allocator.free(slot_of_vertex);
+        for (analysis.vertex_parts, slot_of_vertex) |id, *slot| slot.* = @intCast(slots.indexOf(id) orelse return error.ComponentSetChanged);
+        const vertices = try PartVertices.build(allocator, slot_of_vertex, doc.parts.len);
+        errdefer vertices.deinit(allocator);
+        const triangles = try PartTriangles.build(allocator, source, analysis, slots, doc.parts.len);
+        errdefer triangles.deinit(allocator);
+        const pristine = try Model.clone(allocator, source);
+        errdefer pristine.deinit(allocator);
+        return .{ .pristine = pristine, .analysis = analysis, .slots = slots, .vertices = vertices, .triangles = triangles };
+    }
+
+    pub fn deinit(self: Bake, allocator: std.mem.Allocator) void {
+        self.pristine.deinit(allocator);
+        allocator.free(self.analysis.vertex_parts);
+        allocator.free(self.analysis.components);
+        self.slots.deinit(allocator);
+        self.vertices.deinit(allocator);
+        self.triangles.deinit(allocator);
+    }
+
+    pub fn applyAll(self: *const Bake, model: *Model, doc: Document) !void {
+        if (model.mesh.vertices.len != self.pristine.mesh.vertices.len or model.mesh.indices.len != self.pristine.mesh.indices.len) return error.ComponentSetChanged;
+        @memcpy(model.mesh.vertices, self.pristine.mesh.vertices);
+        @memcpy(model.mesh.indices, self.pristine.mesh.indices);
+        for (doc.parts) |part| try self.updatePart(model, doc, part.id);
+    }
+
+    pub fn updatePart(self: *const Bake, model: *Model, doc: Document, id: u32) !void {
+        if (model.mesh.vertices.len != self.pristine.mesh.vertices.len or model.mesh.indices.len != self.pristine.mesh.indices.len) return error.ComponentSetChanged;
+        const slot = self.slots.indexOf(id) orelse return error.ComponentSetChanged;
+        const part = doc.parts[slot];
+        if (part.id != id) return error.ComponentSetChanged;
+        if (!validScale(part.scale) or !validOffset(part.offset)) return error.InvalidPartTransform;
+        if (part.color) |color| if (!validColor(color)) return error.InvalidPartColor;
+        for (self.vertices.of(slot)) |vertex_index| {
+            const vertex = &model.mesh.vertices[vertex_index];
+            vertex.color = partColor(doc, part);
+        }
+        for (self.triangles.of(slot)) |offset_u32| {
+            const offset: usize = offset_u32;
+            if (part.enabled) {
+                @memcpy(model.mesh.indices[offset .. offset + 3], self.pristine.mesh.indices[offset .. offset + 3]);
+            } else {
+                const repeated = self.pristine.mesh.indices[offset];
+                @memset(model.mesh.indices[offset .. offset + 3], repeated);
+            }
+        }
+    }
 };
 pub const Error = error{ InvalidModifiers, SourceChanged, ComponentSetChanged, InvalidPartTransform, InvalidPartColor, OutOfMemory };
 
@@ -87,6 +347,10 @@ pub fn edit(allocator: std.mem.Allocator, doc: *Document, command: Edit) !void {
             if (!validOffset(change.value)) return error.InvalidPartTransform;
             doc.parts[index].offset = change.value;
         },
+        .enabled => |change| {
+            const index = partIndex(doc.parts, change.id) orelse return error.ComponentSetChanged;
+            doc.parts[index].enabled = change.value;
+        },
     }
 }
 
@@ -96,11 +360,25 @@ fn partIndex(parts: []const Part, id: u32) ?usize {
 }
 
 pub fn analyze(allocator: std.mem.Allocator, model: Model) !Analysis {
+    return analyzeWithWeldCell(allocator, model, null);
+}
+
+pub fn analyzeWithWeldCell(allocator: std.mem.Allocator, model: Model, weld_cell: ?f32) !Analysis {
     const count = model.mesh.vertices.len;
     if (count == 0) return error.InvalidModifiers;
+    if (weld_cell) |cell| if (!std.math.isFinite(cell) or cell <= 0) return error.InvalidModifiers;
     const parents = try allocator.alloc(u32, count);
     defer allocator.free(parents);
     for (parents, 0..) |*p, i| p.* = @intCast(i);
+    if (weld_cell) |cell| {
+        var first_at: std.AutoHashMapUnmanaged([3]i32, u32) = .empty;
+        defer first_at.deinit(allocator);
+        for (model.mesh.vertices, 0..) |vertex, i| {
+            const key = try quantize(vertex.position, cell);
+            const entry = try first_at.getOrPut(allocator, key);
+            if (entry.found_existing) merge(parents, entry.value_ptr.*, @intCast(i)) else entry.value_ptr.* = @intCast(i);
+        }
+    }
     if (model.mesh.indices.len == 0 or model.mesh.indices.len % 3 != 0) return error.InvalidModifiers;
     for (model.mesh.indices) |index| if (index >= count) return error.InvalidModifiers;
     var triangle: usize = 0;
@@ -151,7 +429,7 @@ pub fn analyze(allocator: std.mem.Allocator, model: Model) !Analysis {
 }
 
 pub fn generate(allocator: std.mem.Allocator, model: Model, source_hash: []const u8) !Document {
-    const analysis = try analyze(allocator, model);
+    const analysis = try analyzeWithWeldCell(allocator, model, default_weld_cell);
     defer allocator.free(analysis.vertex_parts);
     defer allocator.free(analysis.components);
     const parts = try allocator.alloc(Part, analysis.components.len);
@@ -168,7 +446,7 @@ pub fn generate(allocator: std.mem.Allocator, model: Model, source_hash: []const
         };
         initialized += 1;
     }
-    return .{ .source_hash = try allocator.dupe(u8, source_hash), .parts = parts };
+    return .{ .format = format_version, .weld_cell = default_weld_cell, .source_hash = try allocator.dupe(u8, source_hash), .parts = parts };
 }
 
 pub fn deinit(allocator: std.mem.Allocator, doc: Document) void {
@@ -180,31 +458,27 @@ pub fn deinit(allocator: std.mem.Allocator, doc: Document) void {
 /// Applies label-selected palette colors and component transforms to a static preview/runtime
 /// model. The model stays source geometry; the sidecar remains the editable source of truth.
 pub fn apply(allocator: std.mem.Allocator, model: *Model, doc: Document, expected_hash: []const u8) !Analysis {
-    if (doc.format != format_version or !validColor(doc.skin_color) or !validColor(doc.eye_color) or !validColor(doc.armor_color) or !validColor(doc.energy_color) or !std.math.isFinite(doc.overall_scale) or doc.overall_scale <= 0 or doc.overall_scale > 100) return error.InvalidModifiers;
+    if (!validDocument(doc) or !std.math.isFinite(doc.overall_scale) or doc.overall_scale <= 0 or doc.overall_scale > 100) return error.InvalidModifiers;
     if (!std.mem.eql(u8, doc.source_hash, expected_hash)) return error.SourceChanged;
-    const analysis = try analyze(allocator, model.*);
+    const analysis = try analyzeWithWeldCell(allocator, model.*, doc.weld_cell);
     errdefer {
         allocator.free(analysis.vertex_parts);
         allocator.free(analysis.components);
     }
     if (doc.parts.len != analysis.components.len) return error.ComponentSetChanged;
-    for (analysis.components) |component| if (findPart(doc.parts, component.id) == null) return error.ComponentSetChanged;
+    const slots = try PartSlots.init(allocator, doc.parts);
+    defer slots.deinit(allocator);
+    for (analysis.components) |component| if (slots.indexOf(component.id) == null) return error.ComponentSetChanged;
     for (doc.parts) |part| {
         if (!validScale(part.scale) or !validOffset(part.offset)) return error.InvalidPartTransform;
         if (part.color) |color| if (!validColor(color)) return error.InvalidPartColor;
     }
-    const filtered_indices = try filteredIndices(allocator, model, analysis, doc);
+    const filtered_indices = try filteredIndices(allocator, model, analysis, doc, slots);
     errdefer if (filtered_indices) |indices| allocator.free(indices);
     for (model.mesh.vertices, analysis.vertex_parts) |*vertex, id| {
-        const part = findPart(doc.parts, id).?;
-        const color = part.color orelse switch (part.surface) {
-            .armor => doc.armor_color,
-            .skin => doc.skin_color,
-            .eyes => doc.eye_color,
-            .energy => doc.energy_color,
-            .neutral => .{ 1, 1, 1 },
-        };
-        const component = componentById(analysis.components, id).?;
+        const part = doc.parts[slots.indexOf(id).?];
+        const color = partColor(doc, part);
+        const component = analysis.components[componentIndex(analysis.components, id).?];
         for (0..3) |axis| {
             vertex.position[axis] = (component.center[axis] + (vertex.position[axis] - component.center[axis]) * part.scale[axis]) * doc.overall_scale + part.offset[axis];
             vertex.color[axis] = color[axis];
@@ -223,40 +497,40 @@ pub fn apply(allocator: std.mem.Allocator, model: *Model, doc: Document, expecte
 /// Runtime character customization starts from the build-baked mesh, so palette edits use this
 /// path while the offline importer continues to use `apply` on source geometry.
 pub fn recolor(allocator: std.mem.Allocator, model: *Model, doc: Document) !Analysis {
-    if (doc.format != format_version or !validColor(doc.skin_color) or !validColor(doc.eye_color) or !validColor(doc.armor_color) or !validColor(doc.energy_color)) return error.InvalidModifiers;
-    const analysis = try analyze(allocator, model.*);
+    if (!validDocument(doc)) return error.InvalidModifiers;
+    const analysis = try analyzeWithWeldCell(allocator, model.*, doc.weld_cell);
     errdefer {
         allocator.free(analysis.vertex_parts);
         allocator.free(analysis.components);
     }
     if (doc.parts.len != analysis.components.len) return error.ComponentSetChanged;
-    for (analysis.components) |component| if (findPart(doc.parts, component.id) == null) return error.ComponentSetChanged;
-    const filtered_indices = try filteredIndices(allocator, model, analysis, doc);
-    errdefer if (filtered_indices) |indices| allocator.free(indices);
-    for (model.mesh.vertices, analysis.vertex_parts) |*vertex, id| {
-        const part = findPart(doc.parts, id).?;
-        const color = part.color orelse switch (part.surface) {
-            .armor => doc.armor_color,
-            .skin => doc.skin_color,
-            .eyes => doc.eye_color,
-            .energy => doc.energy_color,
-            .neutral => .{ 1, 1, 1 },
-        };
-        vertex.color = color;
+    const slots = try PartSlots.init(allocator, doc.parts);
+    defer slots.deinit(allocator);
+    for (analysis.components) |component| if (slots.indexOf(component.id) == null) return error.ComponentSetChanged;
+    for (doc.parts) |part| {
+        if (!validScale(part.scale) or !validOffset(part.offset)) return error.InvalidPartTransform;
+        if (part.color) |color| if (!validColor(color)) return error.InvalidPartColor;
     }
-    if (filtered_indices) |indices| {
-        allocator.free(model.mesh.indices);
-        model.mesh.indices = indices;
+    for (model.mesh.vertices, analysis.vertex_parts) |*vertex, id| {
+        vertex.color = partColor(doc, doc.parts[slots.indexOf(id).?]);
+    }
+    var triangle: usize = 0;
+    while (triangle < model.mesh.indices.len) : (triangle += 3) {
+        const part = doc.parts[slots.indexOf(analysis.vertex_parts[model.mesh.indices[triangle]]).?];
+        if (!part.enabled) {
+            const repeated = model.mesh.indices[triangle];
+            @memset(model.mesh.indices[triangle .. triangle + 3], repeated);
+        }
     }
     return analysis;
 }
 
-fn filteredIndices(allocator: std.mem.Allocator, model: *Model, analysis: Analysis, doc: Document) !?[]u32 {
+fn filteredIndices(allocator: std.mem.Allocator, model: *Model, analysis: Analysis, doc: Document, slots: PartSlots) !?[]u32 {
     const indices = model.mesh.indices;
     var kept: usize = 0;
     var triangle: usize = 0;
     while (triangle < indices.len) : (triangle += 3) {
-        const visible = findPart(doc.parts, analysis.vertex_parts[indices[triangle]]).?.enabled;
+        const visible = doc.parts[slots.indexOf(analysis.vertex_parts[indices[triangle]]).?].enabled;
         if (visible) kept += 3;
     }
     if (kept == indices.len) return null;
@@ -267,7 +541,7 @@ fn filteredIndices(allocator: std.mem.Allocator, model: *Model, analysis: Analys
         const first = out;
         var at: usize = submesh.first_index;
         while (at < end) : (at += 3) {
-            if (!findPart(doc.parts, analysis.vertex_parts[indices[at]]).?.enabled) continue;
+            if (!doc.parts[slots.indexOf(analysis.vertex_parts[indices[at]]).?].enabled) continue;
             @memcpy(result[out .. out + 3], indices[at .. at + 3]);
             out += 3;
         }
@@ -280,7 +554,12 @@ fn filteredIndices(allocator: std.mem.Allocator, model: *Model, analysis: Analys
 pub fn triangleSurfaceColor(doc: Document, analysis: Analysis, model: Model, triangle: usize) [3]f32 {
     if (triangle * 3 + 2 >= model.mesh.indices.len) return .{ 1, 1, 1 };
     const id = analysis.vertex_parts[model.mesh.indices[triangle * 3]];
-    const part = findPart(doc.parts, id) orelse return .{ 1, 1, 1 };
+    const part_index = partIndex(doc.parts, id) orelse return .{ 1, 1, 1 };
+    const part = doc.parts[part_index];
+    return partColor(doc, part);
+}
+
+fn partColor(doc: Document, part: Part) [3]f32 {
     return part.color orelse switch (part.surface) {
         .armor => doc.armor_color,
         .skin => doc.skin_color,
@@ -290,12 +569,34 @@ pub fn triangleSurfaceColor(doc: Document, analysis: Analysis, model: Model, tri
     };
 }
 
-fn findPart(parts: []const Part, id: u32) ?Part {
-    for (parts) |part| if (part.id == id) return part;
-    return null;
+fn validDocument(doc: Document) bool {
+    if (!validColor(doc.skin_color) or !validColor(doc.eye_color) or !validColor(doc.armor_color) or !validColor(doc.energy_color)) return false;
+    return switch (doc.format) {
+        legacy_format_version => doc.weld_cell == null,
+        format_version => if (doc.weld_cell) |cell| std.math.isFinite(cell) and cell > 0 else false,
+        else => false,
+    };
 }
-fn componentById(components: []const Component, id: u32) ?Component {
-    for (components) |component| if (component.id == id) return component;
+
+fn quantize(position: [3]f32, cell: f32) ![3]i32 {
+    var result: [3]i32 = undefined;
+    for (position, 0..) |value, axis| {
+        if (!std.math.isFinite(value)) return error.InvalidModifiers;
+        const scaled = @floor(@as(f64, value) / @as(f64, cell));
+        if (scaled < std.math.minInt(i32) or scaled > std.math.maxInt(i32)) return error.InvalidModifiers;
+        result[axis] = @intFromFloat(scaled);
+    }
+    return result;
+}
+
+fn componentIndex(components: []const Component, id: u32) ?usize {
+    var lo: usize = 0;
+    var hi = components.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (components[mid].id == id) return mid;
+        if (components[mid].id < id) lo = mid + 1 else hi = mid;
+    }
     return null;
 }
 fn validColor(color: [3]f32) bool {
@@ -388,7 +689,7 @@ fn recalcNormals(model: Model) void {
     }
 }
 
-test "modifier analysis groups disconnected islands and applies reversible author edits" {
+test "modifier analysis welds cube face seams and applies author edits" {
     const allocator = std.testing.allocator;
     const Mesh = @import("../render/Mesh.zig");
     const source_hash = "blake3:test-source-hash";
@@ -397,7 +698,7 @@ test "modifier analysis groups disconnected islands and applies reversible autho
     defer model.deinit(allocator);
     const doc = try generate(allocator, model, source_hash);
     defer deinit(allocator, doc);
-    try std.testing.expectEqual(@as(usize, 6), doc.parts.len);
+    try std.testing.expectEqual(@as(usize, 1), doc.parts.len);
     const parts = try allocator.dupe(Part, doc.parts);
     defer allocator.free(parts);
     parts[0].surface = .skin;
@@ -412,4 +713,273 @@ test "modifier analysis groups disconnected islands and applies reversible autho
     try std.testing.expectEqual(@as(f32, 0.7), model.mesh.vertices[0].color[0]);
     try std.testing.expectEqual(@as(f32, 0.4), model.mesh.vertices[0].color[1]);
     try std.testing.expect(model.bounds_max[1] > 2);
+}
+
+test "rejected edits preserve the document" {
+    const allocator = std.testing.allocator;
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var model = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer model.deinit(allocator);
+    var doc = try generate(allocator, model, "source");
+    defer deinit(allocator, doc);
+    const invalid = [_]Edit{
+        .{ .label = .{ .id = 0, .value = "" } },
+        .{ .surface = .{ .id = 999, .value = .skin } },
+        .{ .color = .{ .id = 0, .value = .{ 2, 0, 0 } } },
+        .{ .scale = .{ .id = 0, .value = .{ 0, 1, 1 } } },
+        .{ .offset = .{ .id = 0, .value = .{ 11, 0, 0 } } },
+        .{ .palette = .{ .slot = .skin, .value = .{ 0, std.math.nan(f32), 0 } } },
+    };
+    for (invalid) |command| {
+        const before = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+        defer allocator.free(before);
+        const expected: anyerror = switch (command) {
+            .surface => error.ComponentSetChanged,
+            .color, .palette => error.InvalidPartColor,
+            .scale, .offset => error.InvalidPartTransform,
+            .enabled => error.ComponentSetChanged,
+            .label => error.InvalidModifiers,
+        };
+        try std.testing.expectError(expected, edit(allocator, &doc, command));
+        const after = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+        defer allocator.free(after);
+        try std.testing.expectEqualStrings(before, after);
+    }
+}
+
+test "modifier bake rejects a missing component without changing the model" {
+    const allocator = std.testing.allocator;
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var model = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer model.deinit(allocator);
+    var doc = try generate(allocator, model, "source");
+    defer deinit(allocator, doc);
+    const original = try allocator.dupe(@import("../render/Mesh.zig").Vertex, model.mesh.vertices);
+    defer allocator.free(original);
+    var missing = doc;
+    missing.parts = doc.parts[0 .. doc.parts.len - 1];
+    try std.testing.expectError(error.ComponentSetChanged, apply(allocator, &model, missing, "source"));
+    try std.testing.expectEqualSlices(@import("../render/Mesh.zig").Vertex, original, model.mesh.vertices);
+}
+
+test "filtered modifier indices keep submeshes contiguous and count visible triangles" {
+    const allocator = std.testing.allocator;
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var model = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer model.deinit(allocator);
+    const submeshes = try allocator.alloc(Model.Submesh, 2);
+    allocator.free(model.submeshes);
+    submeshes[0] = .{ .first_index = 0, .index_count = 18, .material = 0 };
+    submeshes[1] = .{ .first_index = 18, .index_count = 18, .material = 0 };
+    model.submeshes = submeshes;
+    const doc = try generate(allocator, model, "source");
+    defer deinit(allocator, doc);
+    doc.parts[0].enabled = false;
+    const analysis = try apply(allocator, &model, doc, "source");
+    defer allocator.free(analysis.vertex_parts);
+    defer allocator.free(analysis.components);
+    try std.testing.expectEqual(model.submeshes[0].index_count, model.submeshes[1].first_index);
+    try std.testing.expectEqual(@as(u32, @intCast(model.mesh.indices.len)), model.submeshes[0].index_count + model.submeshes[1].index_count);
+    try std.testing.expect(model.mesh.indices.len < 36);
+}
+
+fn allocationProbe(allocator: std.mem.Allocator, recolor_only: bool) !void {
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var model = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer model.deinit(allocator);
+    const doc = try generate(allocator, model, "source");
+    defer deinit(allocator, doc);
+    if (recolor_only) {
+        const analysis = try recolor(allocator, &model, doc);
+        allocator.free(analysis.vertex_parts);
+        allocator.free(analysis.components);
+    } else {
+        const analysis = try apply(allocator, &model, doc, "source");
+        allocator.free(analysis.vertex_parts);
+        allocator.free(analysis.components);
+    }
+}
+
+test "modifier apply cleans up on allocation failure" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationProbe, .{false});
+}
+
+test "modifier recolor cleans up on allocation failure" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, allocationProbe, .{true});
+}
+
+test "cached part bake matches full recolor through appearance and visibility edits" {
+    const allocator = std.testing.allocator;
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var source = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer source.deinit(allocator);
+    var doc = try generate(allocator, source, "source");
+    defer deinit(allocator, doc);
+    const bake = try Bake.init(allocator, source, doc);
+    defer bake.deinit(allocator);
+    var actual = try Model.clone(allocator, source);
+    defer actual.deinit(allocator);
+
+    for (0..18) |step| {
+        switch (step % 3) {
+            0 => try edit(allocator, &doc, .{ .surface = .{ .id = 0, .value = if (step % 2 == 0) .skin else .energy } }),
+            1 => try edit(allocator, &doc, .{ .color = .{ .id = 0, .value = if (step % 2 == 0) .{ 0.2, 0.4, 0.6 } else null } }),
+            else => try edit(allocator, &doc, .{ .enabled = .{ .id = 0, .value = step % 2 == 0 } }),
+        }
+        try bake.updatePart(&actual, doc, 0);
+        var expected = try Model.clone(allocator, source);
+        defer expected.deinit(allocator);
+        const analysis = try recolor(allocator, &expected, doc);
+        allocator.free(analysis.vertex_parts);
+        allocator.free(analysis.components);
+        try std.testing.expectEqualSlices(Mesh.Vertex, expected.mesh.vertices, actual.mesh.vertices);
+        try std.testing.expectEqualSlices(u32, expected.mesh.indices, actual.mesh.indices);
+        try std.testing.expectEqualSlices(Model.Submesh, expected.submeshes, actual.submeshes);
+        try std.testing.expectEqualSlices(f32, &expected.bounds_min, &actual.bounds_min);
+        try std.testing.expectEqualSlices(f32, &expected.bounds_max, &actual.bounds_max);
+    }
+    try std.testing.expectEqual(source.mesh.indices.len, actual.mesh.indices.len);
+}
+
+test "welding joins split corners from the GLB fixture into one shell" {
+    const allocator = std.testing.allocator;
+    const Gltf = @import("Gltf.zig");
+    const source = @embedFile("seam_cube.glb");
+    var model = try Gltf.compile(allocator, source, .{});
+    defer model.deinit(allocator);
+    const legacy = try analyze(allocator, model);
+    defer allocator.free(legacy.vertex_parts);
+    defer allocator.free(legacy.components);
+    const welded = try analyzeWithWeldCell(allocator, model, default_weld_cell);
+    defer allocator.free(welded.vertex_parts);
+    defer allocator.free(welded.components);
+    try std.testing.expectEqual(@as(usize, 6), legacy.components.len);
+    try std.testing.expectEqual(@as(usize, 1), welded.components.len);
+    try std.testing.expectEqual(@as(u32, 0), welded.components[0].id);
+    try std.testing.expectEqual(@as(u32, @intCast(model.mesh.vertices.len)), welded.components[0].count);
+}
+
+test "Captain v1 sidecar keeps its original component analysis" {
+    const allocator = std.testing.allocator;
+    const Gltf = @import("Gltf.zig");
+    const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "assets/Characters/Test+Chroma (1).glb", allocator, .limited(1 << 20));
+    defer allocator.free(source);
+    var model = try Gltf.compilePosePreview(allocator, source, .{}, .bind);
+    defer model.deinit(allocator);
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "tools/captain/Captain.modifiers.json", allocator, .limited(1 << 20));
+    defer allocator.free(bytes);
+    var arena_state: std.heap.ArenaAllocator = .init(allocator);
+    defer arena_state.deinit();
+    const doc = try std.json.parseFromSliceLeaky(Document, arena_state.allocator(), bytes, .{});
+    try std.testing.expectEqual(legacy_format_version, doc.format);
+    const analysis = try apply(allocator, &model, doc, doc.source_hash);
+    defer allocator.free(analysis.vertex_parts);
+    defer allocator.free(analysis.components);
+    try std.testing.expectEqual(doc.parts.len, analysis.components.len);
+}
+
+test "welded and unwelded ids match for an unsplit indexed shell" {
+    const allocator = std.testing.allocator;
+    const vertices = try allocator.alloc(@import("../render/Mesh.zig").Vertex, 4);
+    defer allocator.free(vertices);
+    vertices[0] = .{ .position = .{ 0, 0, 0 }, .normal = .{ 0, 0, 1 }, .uv = .{ 0, 0 } };
+    vertices[1] = .{ .position = .{ 1, 0, 0 }, .normal = .{ 0, 0, 1 }, .uv = .{ 1, 0 } };
+    vertices[2] = .{ .position = .{ 1, 1, 0 }, .normal = .{ 0, 0, 1 }, .uv = .{ 1, 1 } };
+    vertices[3] = .{ .position = .{ 0, 1, 0 }, .normal = .{ 0, 0, 1 }, .uv = .{ 0, 1 } };
+    const indices = [_]u32{ 0, 1, 2, 0, 2, 3 };
+    const model: Model = .{ .mesh = .{ .vertices = vertices, .indices = @constCast(&indices) }, .submeshes = &.{}, .materials = &.{}, .bounds_min = .{ 0, 0, 0 }, .bounds_max = .{ 1, 1, 0 } };
+    const legacy = try analyze(allocator, model);
+    defer allocator.free(legacy.vertex_parts);
+    defer allocator.free(legacy.components);
+    const welded = try analyzeWithWeldCell(allocator, model, default_weld_cell);
+    defer allocator.free(welded.vertex_parts);
+    defer allocator.free(welded.components);
+    try std.testing.expectEqualSlices(u32, legacy.vertex_parts, welded.vertex_parts);
+    try std.testing.expectEqual(legacy.components.len, welded.components.len);
+}
+
+test "v1 modifiers retain unwelded analysis and v2 documents require a weld cell" {
+    var legacy = Document{
+        .format = legacy_format_version,
+        .source_hash = "legacy",
+        .parts = &.{},
+    };
+    try std.testing.expect(validDocument(legacy));
+    legacy.format = format_version;
+    try std.testing.expect(!validDocument(legacy));
+    legacy.weld_cell = default_weld_cell;
+    try std.testing.expect(validDocument(legacy));
+    legacy.weld_cell = 0;
+    try std.testing.expect(!validDocument(legacy));
+}
+
+test "modifier commands undo and redo each editable value byte for byte" {
+    const allocator = std.testing.allocator;
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var model = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer model.deinit(allocator);
+    var doc = try generate(allocator, model, "source");
+    defer deinit(allocator, doc);
+    const commands = [_]Command{
+        .{ .surface = .{ .id = 0, .before = .armor, .after = .skin } },
+        .{ .color = .{ .id = 0, .before = null, .after = .{ 0.1, 0.2, 0.3 } } },
+        .{ .enabled = .{ .id = 0, .before = true, .after = false } },
+        .{ .scale = .{ .id = 0, .before = .{ 1, 1, 1 }, .after = .{ 1.1, 1.2, 1.3 } } },
+        .{ .offset = .{ .id = 0, .before = .{ 0, 0, 0 }, .after = .{ 0.1, 0.2, 0.3 } } },
+        .{ .palette = .{ .slot = .eyes, .before = doc.eye_color, .after = .{ 0.3, 0.4, 0.5 } } },
+    };
+    for (commands) |command| {
+        const before = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+        defer allocator.free(before);
+        try command.apply(allocator, &doc, .after);
+        const after = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+        defer allocator.free(after);
+        try command.apply(allocator, &doc, .before);
+        const undone = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+        defer allocator.free(undone);
+        try std.testing.expectEqualStrings(before, undone);
+        try command.apply(allocator, &doc, .after);
+        const redone = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+        defer allocator.free(redone);
+        try std.testing.expectEqualStrings(after, redone);
+        try command.apply(allocator, &doc, .before);
+    }
+}
+
+test "modifier history coalesces transforms and rejected commands do not change state" {
+    const allocator = std.testing.allocator;
+    const Mesh = @import("../render/Mesh.zig");
+    const mesh = try Mesh.cube(allocator);
+    var model = try Model.fromMesh(allocator, mesh, .named("cube", .{ 1, 1, 1, 1 }));
+    defer model.deinit(allocator);
+    var doc = try generate(allocator, model, "source");
+    defer deinit(allocator, doc);
+    var history: History(4) = .{};
+    const first: Command = .{ .scale = .{ .id = 0, .before = .{ 1, 1, 1 }, .after = .{ 1.1, 1, 1 } } };
+    const second: Command = .{ .scale = .{ .id = 0, .before = .{ 1.1, 1, 1 }, .after = .{ 1.2, 1, 1 } } };
+    try history.applyAndPush(allocator, &doc, first);
+    try history.applyAndPush(allocator, &doc, second);
+    try std.testing.expectEqual(@as(usize, 1), history.len);
+    try std.testing.expectEqual(@as(f32, 1.2), doc.parts[0].scale[0]);
+    const before_rejection = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+    defer allocator.free(before_rejection);
+    try std.testing.expectError(error.ComponentSetChanged, history.applyAndPush(allocator, &doc, .{ .surface = .{ .id = 999, .before = .armor, .after = .skin } }));
+    try std.testing.expectEqual(@as(usize, 1), history.len);
+    try std.testing.expectEqual(@as(usize, 1), history.cursor);
+    const after_rejection = try std.json.Stringify.valueAlloc(allocator, doc, .{});
+    defer allocator.free(after_rejection);
+    try std.testing.expectEqualStrings(before_rejection, after_rejection);
+    const undo = history.undo().?;
+    try undo.apply(allocator, &doc, .before);
+    try std.testing.expectEqual(@as(f32, 1), doc.parts[0].scale[0]);
+    try history.applyAndPush(allocator, &doc, .{ .palette = .{ .slot = .eyes, .before = doc.eye_color, .after = .{ 0.2, 0.3, 0.4 } } });
+    try std.testing.expectEqual(@as(usize, 1), history.len);
+    try std.testing.expectEqual(@as(usize, 1), history.cursor);
+    try std.testing.expect(history.redo() == null);
 }
