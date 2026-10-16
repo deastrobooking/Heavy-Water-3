@@ -204,7 +204,7 @@ Acceptance:
 
 Next:
 - steeper mouths with an overhang (they read as slots on gentle flanks; mouths now carry an ancient gate, doorways mark each tunnel, and halls hold collapsed labs, all visual dressing: see [validation](validation.md));
-- interior lighting (the sun still shades cave walls) and audio reverb underground;
+- interior lighting beyond the per-view cave blend (point lights at crystals and veins) and audio reverb underground; the sun no longer lights cave interiors;
 - cave puzzles from the shrine solver;
 - the Landscape authoring path's cave plans, joined to this runtime.
 
@@ -307,6 +307,8 @@ Acceptance evidence, all with the real Sandbox:
 See [canopy city](city.md) and [validation](validation.md).
 
 **New York City travel slice — implemented:** the world map now reaches a seeded Hudson-side NYC landing district east of Detroit, with its own terrain and vegetation seed, a compact skyline landmark set, a safe on-foot arrival, and a destination-specific map view. This is an arrival/exploration foothold; New York's missions, boss, discoveries, shops, interiors, and liberation state are still future work. The next metropolitan slice remains Detroit's public venue/subway route and the full NYC district before extending intercity transit.
+
+**Immediate 3D helpers — implemented:** `engine/Scene3D.zig` provides bounded per-frame model, box and sphere commands over Catalog handles and `World.Prop`. The existing publisher uses it for core district geometry and the NYC landmark set; showcase 78 reviews the real Mach-rendered output. It is not a Raylib port and does not change asset loading or introduce a scene graph.
 
 Next metropolitan slice: grow this canopy hub into an Earth city region with a dense downtown and public venue block, residential suburbs, farms, then a clear wilds edge. Build the first mall/arcade/music venue around a traversable maintenance tunnel and subway platform, and make the light-rail stations and rooftop parkour routes usable together. After the other Earth city regions and a spaceport exist, extend the same transit modules into high-speed intercity and port links. Do not represent disconnected cities or a spaceport as travel destinations before their playable arrival areas exist.
 

@@ -213,6 +213,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 73 | Nature review: terrain overview, daylight |
 | 74 | Nature review: a close pine view |
 | 75 | Nature review: a close moon-cascade view |
+| 78 | Immediate 3D API review: box, sphere, catalog models, tint, scale, and LOD |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |

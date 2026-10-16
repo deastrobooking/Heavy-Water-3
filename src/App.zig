@@ -140,6 +140,9 @@ showcase_feet: [3]f32 = @splat(0),
 gui_showcase_ready: bool = false,
 /// The camera a fixed-view showcase set this frame, re-applied after the simulation steps.
 showcase_pose: ?struct { eye: [3]f32, yaw: f32, pitch: f32 } = null,
+/// Per-view blend into cave lighting (see `publish`), and the hue of the cave last entered.
+underground: [5]f32 = @splat(0),
+cave_hue: [5][3]f32 = @splat(.{ 0.35, 0.9, 1 }),
 settings_dirty: bool = false,
 /// Sound output; null when disabled (`-Daudio=false`), benchmarking, or without a device.
 audio: ?*Audio = null,
@@ -1599,6 +1602,9 @@ fn showcase(self: *App) void {
         const inside = span.point(0.72);
         eye = .{ entrance[0], entrance[1] + 4.1, entrance[2] };
         target = .{ inside[0], inside[1] + 4.1, inside[2] };
+    } else if (v == 78) {
+        target = .{ 0, 1.3, 0 };
+        eye = .{ 13, 10, 19 };
     } else if (v == 70) {
         const origin = District.testOrigin(self.sandbox.seed);
         target = .{ origin[0], origin[1] + 185, origin[2] };
@@ -2858,7 +2864,17 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.cel_debug = self.cel_debug;
     renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
-    renderer.prop_count = self.sandbox.publishProps(&renderer.props);
+    if (options.showcase == 78) {
+        const Scene3D = @import("engine/Scene3D.zig");
+        var scene = Scene3D.Frame.init(self.sandbox.catalog, &renderer.props);
+        scene.drawBox(.{ -5, 1, 0 }, .{ 2, 2, 2 }, .{ 0.22, 0.52, 0.82, 1 }) catch unreachable;
+        scene.drawSphere(.{ 0, 1, 0 }, 1, .{ 0.95, 0.48, 0.18, 1 }) catch unreachable;
+        scene.drawModel(self.sandbox.catalog.content.crate, .{ .position = .{ 4, 1, 0 }, .scale = 1.8 }, .{ .tint = .{ 0.72, 0.88, 0.3, 1 } }) catch unreachable;
+        scene.drawModel(self.sandbox.catalog.content.cars[0].body, .{ .position = .{ 8, 0.5, 0 }, .scale = 1.3 }, .{ .tint = .{ 1, 1, 1, 1 }, .lod = self.sandbox.catalog.content.cars[1].body, .lod_distance = 100 }) catch unreachable;
+        renderer.prop_count = scene.count;
+    } else {
+        renderer.prop_count = self.sandbox.publishProps(&renderer.props);
+    }
     if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76)) renderer.prop_count = 0;
     renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74 or options.showcase == 75;
     renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else if (options.showcase == 75) 12 else null;
@@ -2921,7 +2937,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
     renderer.views[0].hide_owner = if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
@@ -2937,6 +2953,21 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         }
         renderer.view_count += 1;
     };
+    // Inside a cave the sun is shut out and the ambient takes the cave's hue; blend over about
+    // half a second so crossing a mouth never pops.
+    for (renderer.views[0..renderer.view_count], 0..) |*view, i| {
+        const eye = [3]f32{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z() };
+        var target: f32 = 0;
+        if (Sandbox.Caves.systemAt(&sandbox.caves, eye)) |system| {
+            const ground = @import("procedural/Terrain.zig").surface(sandbox.seed, eye[0], eye[2]).height;
+            const depth = std.math.clamp((ground - eye[1] - 1) / 6, 0, 1);
+            target = depth * depth * (3 - 2 * depth);
+            self.cave_hue[i] = Sandbox.Caves.veinHue(system);
+        }
+        self.underground[i] += (target - self.underground[i]) * 0.1;
+        view.underground = self.underground[i];
+        view.cave_hue = self.cave_hue[i];
+    }
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
     const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "SUPER FLIGHT" else @tagName(sandbox.player.motion);
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.kits[0].wallet.scrap, sandbox.kits[0].wallet.parts });

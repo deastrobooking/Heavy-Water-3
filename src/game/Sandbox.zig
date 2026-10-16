@@ -15,6 +15,7 @@ const Catalog = @import("../asset/Catalog.zig");
 const Key = @import("../world/ChunkKey.zig");
 const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
+const Scene3D = @import("../engine/Scene3D.zig");
 const Modifications = @import("../world/Modifications.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
@@ -2023,12 +2024,18 @@ pub fn devicePosition(self: *const Sandbox, ref: DeviceRef) Physics.Vec3 {
 /// Render view of crates, machines, and (with the build or wire tool) previews and wires.
 pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     if (out.len == 0) return 0;
-    out[0] = .{ .mesh = self.catalog.content.district, .transform = .{}, .tint = .{ 1, 1, 1, 1 } };
-    var n: usize = 1;
-    if (n < out.len) {
-        out[n] = .{ .mesh = self.catalog.content.raceway, .transform = .{}, .tint = .{ 1, 1, 1, 1 } };
-        n += 1;
+    var scene = Scene3D.Frame.init(self.catalog, out);
+    for ([2]Catalog.MeshHandle{ self.catalog.content.district, self.catalog.content.raceway }) |mesh| {
+        if (self.catalog.mesh(mesh)) |entry| if (entry.ready) {
+            scene.drawModel(mesh, .{}, .{}) catch unreachable;
+        };
     }
+    for (new_york_landmarks, 0..) |_, i| {
+        if (scene.count == out.len) return scene.count;
+        const landmark = newYorkLandmark(self.seed, i).?;
+        scene.drawBox(landmark.position, landmark.size, landmark.tint) catch unreachable;
+    }
+    var n = scene.count;
     for (self.bridges) |maybe| if (maybe) |bridge| {
         for (bridge.parts.slice()) |p| {
             if (n == out.len) return n;
@@ -2061,12 +2068,6 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         const index: u32 = @intCast(i);
         const glow: f32 = if (self.held == index) 1.35 else if (self.target == .prop and self.target.prop == index) 1.18 else 1;
         out[n] = .{ .mesh = self.catalog.content.crate, .transform = .{ .position = self.cratePosition(index) }, .tint = .{ glow, glow, glow, 1 } };
-        n += 1;
-    }
-    for (new_york_landmarks, 0..) |_, i| {
-        if (n == out.len) return n;
-        const landmark = newYorkLandmark(self.seed, i).?;
-        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = landmark.position }, .size = landmark.size, .tint = landmark.tint };
         n += 1;
     }
     for (&self.machines, 0..) |*placed, m| {

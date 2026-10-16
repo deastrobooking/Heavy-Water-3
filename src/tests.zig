@@ -12,6 +12,7 @@ test {
     _ = @import("character/root.zig");
     _ = @import("character/Ranger.zig");
     _ = @import("engine/Time.zig");
+    _ = @import("engine/Scene3D.zig");
     _ = @import("world/Camera.zig");
     _ = @import("render/Layout.zig");
     _ = @import("city/Routes.zig");

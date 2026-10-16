@@ -29,6 +29,28 @@ const Sky = @import("../engine/Sky.zig");
 /// Matches `Frame` in scene.wgsl.
 const Frame = struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32 };
 
+fn scale3(a: [3]f32, s: f32) [3]f32 {
+    return .{ a[0] * s, a[1] * s, a[2] * s };
+}
+
+fn mix3(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
+    return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
+}
+
+/// The dim light of a cave: a cool grey floor of ambient plus the cave's own hue. Dark enough to
+/// read as underground, bright enough that the rock's strata and veins still show.
+pub fn caveAmbient(hue: [3]f32, strength: f32) [3]f32 {
+    return .{ 0.2 + hue[0] * strength * 0.8, 0.22 + hue[1] * strength * 0.8, 0.28 + hue[2] * strength * 0.8 };
+}
+
+test "cave light is dark, tinted by the hue and brighter with strength" {
+    const dim = caveAmbient(.{ 1, 0, 0 }, 0.05);
+    const bright = caveAmbient(.{ 1, 0, 0 }, 0.2);
+    try std.testing.expect(dim[0] > dim[1] and bright[0] > dim[0]);
+    for (bright) |c| try std.testing.expect(c < 0.6);
+    try std.testing.expectEqual(@as(f32, 0.5), mix3(.{ 0, 0, 0 }, .{ 1, 1, 1 }, 0.5)[2]);
+}
+
 comptime {
     if (@sizeOf(Frame) != 272 or @offsetOf(Frame, "planes") != 160 or @offsetOf(Frame, "params") != 256) {
         @compileError("Frame uniform layout changed; update the GPU layout before continuing");
@@ -48,6 +70,10 @@ pub const View = struct {
     /// Guest prompt text (`lines[1]`), drawn by the application's GUI; crosshair in `accent`.
     lines: [2]Overlay.Line = @splat(.{}),
     accent: [4]f32 = .{ 0.24, 0.88, 0.82, 1 },
+    /// 0 in the open, 1 deep inside a cave: the sun is shut out, the ambient takes `cave_hue`, and
+    /// lumen glows as at night.
+    underground: f32 = 0,
+    cave_hue: [3]f32 = .{ 0.35, 0.9, 1 },
 };
 const Layout = @import("Layout.zig");
 pub const Rect = Layout.Rect;
@@ -610,15 +636,16 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         const y1: u32 = @intFromFloat(@round((r.y + r.h) * h));
         pixels[i] = .{ x0, y0, @max(1, x1 - x0), @max(1, y1 - y0) };
         const vp = view.camera.viewProjection(@as(f32, @floatFromInt(pixels[i][2])) / @as(f32, @floatFromInt(pixels[i][3])));
+        const under = std.math.clamp(view.underground, 0, 1);
         const frame = Frame{
             .vp = vp,
             .eye = .{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z(), 1 },
             // The spare w lanes carry the view's pixel height and tan(fovy / 2) for ink widths.
             .light_direction = light.direction ++ [_]f32{@floatFromInt(pixels[i][3])},
-            .light_color = light.color ++ [_]f32{@tan(view.camera.fov / 2)},
-            .ambient_sky = light.ambient_sky ++ [_]f32{0},
-            .ambient_ground = light.ambient_ground ++ [_]f32{0},
-            .horizon = light.horizon ++ [_]f32{light.night},
+            .light_color = scale3(light.color, 1 - 0.78 * under) ++ [_]f32{@tan(view.camera.fov / 2)},
+            .ambient_sky = mix3(light.ambient_sky, caveAmbient(view.cave_hue, 0.2), under) ++ [_]f32{0},
+            .ambient_ground = mix3(light.ambient_ground, caveAmbient(view.cave_hue, 0.1), under) ++ [_]f32{0},
+            .horizon = mix3(light.horizon, scale3(caveAmbient(view.cave_hue, 0.05), 0.5), under) ++ [_]f32{light.night + (1 - light.night) * under},
             .planes = Visibility.frustumPlanes(vp),
             .params = params,
         };
