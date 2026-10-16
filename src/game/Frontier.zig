@@ -2163,6 +2163,18 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
             out[n] = .{ .mesh = sb.catalog.cave_meshes[i], .transform = .{ .position = .{ 0, 0, 0 } }, .tint = .{ 1, 1, 1, 1 } };
             n += 1;
         }
+        // The ancient gate that frames the mouth, visible from afar; its seams glow at dusk.
+        if (n < out.len) {
+            const yaw = std.math.atan2(sys.inward[0], sys.inward[2]);
+            const gate_at = R.add(sys.entrance, R.scale(sys.inward, 1.5));
+            // The mouth sits on a flank: lean the gate into the hill by a fraction of the slope: the face is steep,
+            // and a full lean lays it along the rock.
+            const uphill = Terrain.surface(sb.seed, gate_at[0] + sys.inward[0] * 6, gate_at[2] + sys.inward[2] * 6).height - Terrain.surface(sb.seed, gate_at[0], gate_at[2]).height;
+            const lean = std.math.clamp(std.math.atan2(uphill, 6.0) * 0.3, 0, 0.25);
+            const gate_facing = m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, lean));
+            out[n] = .{ .mesh = sb.catalog.content.cave_gate, .transform = .{ .position = .{ gate_at[0], gate_at[1] - 0.5, gate_at[2] } }, .rotation = quat(gate_facing), .tint = .{ 1, 1, 1, 1 } };
+            n += 1;
+        }
         if (d > 160) continue;
         // Crystals cluster around each chamber's walls, in the system's hue.
         const hues = [_][3]f32{ .{ 0.35, 0.9, 1 }, .{ 0.75, 0.45, 1 }, .{ 0.45, 1, 0.6 }, .{ 1, 0.7, 0.35 } };
@@ -2182,6 +2194,27 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
                 out[n] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = gem_at }, .size = .{ 0.8, 1.4, 0.8 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, t * 0.4)), .tint = Material.emissive(hue ++ [_]f32{1}, 0.9 + 0.1 * @sin(t * 1.3 + @as(f32, @floatFromInt(r)))) };
                 n += 1;
             }
+            // A carved doorway where the tunnel from the parent chamber opens into this one, and a
+            // collapsed lab in each hall.
+            if (r > 0 and n + 4 <= out.len) {
+                const parent = sys.rooms[room.parent];
+                const dx = room.center[0] - parent.center[0];
+                const dz = room.center[2] - parent.center[2];
+                const dist = @sqrt(dx * dx + dz * dz);
+                const dir_x = dx / dist;
+                const dir_z = dz / dist;
+                // Where the tunnel meets this chamber's wall, along the ellipse's radius that way.
+                const reach = 1 / @sqrt((dir_x / room.radii[0]) * (dir_x / room.radii[0]) + (dir_z / room.radii[2]) * (dir_z / room.radii[2]));
+                const back = reach * 0.9;
+                const floor = room.floor + (parent.floor - room.floor) * std.math.clamp(back / dist, 0, 1);
+                out[n] = .{ .mesh = sb.catalog.content.cave_arch, .transform = .{ .position = .{ room.center[0] - dir_x * back, floor, room.center[2] - dir_z * back } }, .rotation = yawQuat(std.math.atan2(dir_x, dir_z)), .tint = .{ 1, 1, 1, 1 } };
+                n += 1;
+            }
+            if (room.role == .hall and n + 3 <= out.len) for (0..2) |k| {
+                const spot = Caves.floorSpot(sys, @intCast(r), k, 2, 0.5);
+                out[n] = .{ .mesh = sb.catalog.content.cave_ruin, .transform = .{ .position = .{ spot[0], spot[1], spot[2] } }, .rotation = yawQuat(@as(f32, @floatFromInt(r * 3 + k)) * 1.9), .tint = .{ 1, 1, 1, 1 } };
+                n += 1;
+            };
             const count: usize = if (room.role == .heart) 8 else 5;
             for (0..count) |k| {
                 if (n == out.len) return n;

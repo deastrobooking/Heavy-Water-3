@@ -205,6 +205,65 @@ pub fn caveTemple(a: Allocator) !RenderMesh {
     return finish(a, &mesh, temple_palette);
 }
 
+/// The ancient gate that frames a cave mouth: leaning pylons with glowing seams, a lintel carrying
+/// a hanging lens and gimbal ring, flanking stelae and resonator coils, an apron and glowing
+/// circuit lines leading inward. Local +Z points into the cave; the opening is about 8 m wide.
+pub fn caveGate(a: Allocator) !RenderMesh {
+    var mesh: cm.Mesh = .{};
+    defer mesh.deinit(a);
+    try box(a, &mesh, Vec3.init(0, 0.15, 2.5), Vec3.init(5.2, 0.15, 4.5), .paint_accent);
+    try box(a, &mesh, Vec3.init(0, 0.34, -1.9), Vec3.init(3.6, 0.04, 0.08), .emissive);
+    for ([_]f32{ -1, 1 }) |side| {
+        try prims.strut(a, &mesh, Vec3.init(side * 4.9, 0, 0), Vec3.init(side * 4.0, 10.2, 0), Vec3.unit_z, 2.0, 1.7, .paint);
+        try prims.strut(a, &mesh, Vec3.init(side * 4.6, 1.2, -0.9), Vec3.init(side * 3.95, 9.6, -0.9), Vec3.unit_z, 0.14, 0.08, .emissive);
+        try prims.strut(a, &mesh, Vec3.init(side * 7.6, 0, 0.5), Vec3.init(side * 7.9 + side * 0.4, 6.4, 0.5), Vec3.unit_z, 1.2, 0.7, .paint);
+        try prims.strut(a, &mesh, Vec3.init(side * 7.5, 1.6, 0.14), Vec3.init(side * 7.7 + side * 0.3, 5.4, 0.14), Vec3.unit_z, 0.1, 0.04, .emissive);
+        try resonator(a, &mesh, Vec3.init(side * 6.2, 0.3, -2.2));
+        try prims.strut(a, &mesh, Vec3.init(side * 1.3, 0.34, 0.5), Vec3.init(side * 1.3, 0.34, 11), Vec3.unit_y, 0.12, 0.05, .emissive);
+    }
+    try box(a, &mesh, Vec3.init(0, 10.6, 0), Vec3.init(5.0, 0.6, 1.1), .metal);
+    try box(a, &mesh, Vec3.init(0, 9.95, -1.12), Vec3.init(4.2, 0.07, 0.03), .emissive);
+    try box(a, &mesh, Vec3.init(0, 9.2, 0), Vec3.init(0.5, 0.6, 0.16), .emissive);
+    try gimbal(a, &mesh, Vec3.init(0, 7.4, 0), 1.3, 0.07, 1.57, 0, .metal);
+    try gimbal(a, &mesh, Vec3.init(0, 7.4, 0), 0.95, 0.06, 1.0, 0.7, .emissive);
+    return finish(a, &mesh, temple_palette);
+}
+
+/// A carved doorway that marks where a tunnel opens into a chamber: two capitals-and-glyph
+/// columns, an arched lintel with a lens, and a glowing threshold. Local +Z points into the room.
+pub fn caveArch(a: Allocator) !RenderMesh {
+    var mesh: cm.Mesh = .{};
+    defer mesh.deinit(a);
+    for ([_]f32{ -1, 1 }) |side| {
+        try column(a, &mesh, Vec3.init(side * 3.0, 0, 0), 5.0);
+        try prims.strut(a, &mesh, Vec3.init(side * 3.0, 5.0, 0), Vec3.init(side * 1.2, 6.0, 0), Vec3.unit_z, 0.7, 0.55, .metal);
+    }
+    try box(a, &mesh, Vec3.init(0, 6.2, 0), Vec3.init(1.4, 0.45, 0.6), .metal);
+    try box(a, &mesh, Vec3.init(0, 5.7, -0.62), Vec3.init(0.7, 0.12, 0.03), .emissive);
+    try box(a, &mesh, Vec3.init(0, 0.03, 0), Vec3.init(2.6, 0.03, 0.12), .emissive);
+    return finish(a, &mesh, temple_palette);
+}
+
+/// A collapsed laboratory in a hall: broken columns, a toppled shaft, a bench with a glowing
+/// screen, a floor disc with a hovering gimbal ring and a crystal conduit across the floor.
+pub fn caveRuin(a: Allocator) !RenderMesh {
+    var mesh: cm.Mesh = .{};
+    defer mesh.deinit(a);
+    try column(a, &mesh, Vec3.init(-2.4, 0, -1.2), 4.4);
+    try column(a, &mesh, Vec3.init(2.6, 0, -0.6), 2.4);
+    try column(a, &mesh, Vec3.init(0.2, 0, -3.0), 1.3);
+    try prims.strut(a, &mesh, Vec3.init(-1.0, 0.5, 2.6), Vec3.init(2.6, 0.7, 3.6), Vec3.unit_y, 1.0, 0.9, .paint);
+    try box(a, &mesh, Vec3.init(-2.2, 0.55, 1.6), Vec3.init(0.9, 0.55, 0.5), .paint_accent);
+    try box(a, &mesh, Vec3.init(-2.2, 1.12, 1.6), Vec3.init(0.95, 0.04, 0.55), .glass);
+    try prims.strut(a, &mesh, Vec3.init(-2.2, 1.2, 1.35), Vec3.init(-2.2, 2.2, 1.1), Vec3.unit_x, 1.0, 0.07, .carbon);
+    try prims.strut(a, &mesh, Vec3.init(-2.2, 1.25, 1.31), Vec3.init(-2.2, 2.15, 1.08), Vec3.unit_x, 0.8, 0.04, .emissive);
+    try drum(a, &mesh, Vec3.init(1.2, 0, 0.4), 1.5, 1.4, 0, 0.18, 20, .metal);
+    try band(a, &mesh, Vec3.init(1.2, 0.2, 0.4), 1.0, 0.06, 0.03, .emissive);
+    try gimbal(a, &mesh, Vec3.init(1.2, 1.5, 0.4), 0.8, 0.05, 0.6, 0.3, .emissive);
+    try prims.strut(a, &mesh, Vec3.init(-1.5, 0.05, 0.6), Vec3.init(0.2, 0.05, 0.4), Vec3.unit_y, 0.12, 0.05, .emissive);
+    return finish(a, &mesh, temple_palette);
+}
+
 /// A unit torus (radius 1) lying flat, for halos and gimbal hoops; scale it to the hoop's size.
 /// The tube is emissive so it reads as a ring of light.
 pub fn hoop(a: Allocator) !RenderMesh {
@@ -232,6 +291,25 @@ pub fn pilaster(a: Allocator) !RenderMesh {
     try prims.lathe(a, &mesh, &loop, 8, .{}, .paint);
     // White so a prop's tint sets the stone colour per shrine.
     return finish(a, &mesh, .{ .paint = .{ 1, 1, 1 }, .accent = .{ 1, 1, 1 }, .lights = .{ 1, 1, 1 } });
+}
+
+test "cave gate, arch and ruin build as finite, lit, grounded meshes" {
+    const a = std.testing.allocator;
+    inline for (.{ caveGate, caveArch, caveRuin }) |build| {
+        const mesh = try build(a);
+        defer mesh.deinit(a);
+        var top: f32 = 0;
+        var lit: usize = 0;
+        for (mesh.vertices) |v| {
+            for (v.position) |c| try std.testing.expect(std.math.isFinite(c));
+            top = @max(top, v.position[1]);
+            if (v.color[1] > 0.8 and v.color[0] < 0.4) lit += 1;
+        }
+        for (mesh.indices) |i| try std.testing.expect(i < mesh.vertices.len);
+        try std.testing.expect(top > 4 and top < 14);
+        try std.testing.expect(mesh.vertices.len > 400);
+        try std.testing.expect(lit > 0);
+    }
 }
 
 test "the hoop and pilaster props are unit-sized and finite" {

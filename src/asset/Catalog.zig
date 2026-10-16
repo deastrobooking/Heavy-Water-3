@@ -121,6 +121,10 @@ pub const Content = struct {
     /// Unit halo ring and wall pilaster that dress the Rootdeep shrines.
     shrine_hoop: MeshHandle,
     shrine_pilaster: MeshHandle,
+    /// Ancient dressing for the mountain caves: mouth gate, chamber doorway, collapsed lab.
+    cave_gate: MeshHandle,
+    cave_arch: MeshHandle,
+    cave_ruin: MeshHandle,
 };
 /// One hover car design: its body, a rotor drawn spinning at each pivot, emissive light strips,
 /// and the mass properties the simulation flies it with.
@@ -290,6 +294,9 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         self.content.cave_temple = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.caveTemple(allocator), .named("rootbound cave sanctuary", .{ 1, 1, 1, 1 })));
         self.content.shrine_hoop = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.hoop(allocator), .named("shrine hoop", .{ 1, 1, 1, 1 })));
         self.content.shrine_pilaster = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.pilaster(allocator), .named("shrine pilaster", .{ 1, 1, 1, 1 })));
+        self.content.cave_gate = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.caveGate(allocator), .named("cave mouth gate", .{ 1, 1, 1, 1 })));
+        self.content.cave_arch = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.caveArch(allocator), .named("cave chamber arch", .{ 1, 1, 1, 1 })));
+        self.content.cave_ruin = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.caveRuin(allocator), .named("cave ruined lab", .{ 1, 1, 1, 1 })));
     }
     {
         const H = @import("../vehicle/HiveMeshes.zig");
@@ -384,6 +391,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "rand_mother_glow", .handle = self.content.rand_mother_glow },                       .{ .name = "wilds_cabin", .handle = self.content.wilds_cabin },
         .{ .name = "wilds_barn", .handle = self.content.wilds_barn },                                   .{ .name = "cave_temple", .handle = self.content.cave_temple },
         .{ .name = "shrine_hoop", .handle = self.content.shrine_hoop },                                 .{ .name = "shrine_pilaster", .handle = self.content.shrine_pilaster },
+        .{ .name = "cave_gate", .handle = self.content.cave_gate },                                     .{ .name = "cave_arch", .handle = self.content.cave_arch },
+        .{ .name = "cave_ruin", .handle = self.content.cave_ruin },
     };
     for (generated) |g| {
         var full: [64]u8 = undefined;

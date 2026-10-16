@@ -203,7 +203,7 @@ Acceptance:
 - **Captures:** `-Dshowcase=41` to `44`: a range from the foothills, a cave mouth, the first chamber, and a heart chamber with its nest.
 
 Next:
-- steeper mouths with an overhang (they read as slots on gentle flanks);
+- steeper mouths with an overhang (they read as slots on gentle flanks; mouths now carry an ancient gate, doorways mark each tunnel, and halls hold collapsed labs, all visual dressing: see [validation](validation.md));
 - interior lighting (the sun still shades cave walls) and audio reverb underground;
 - cave puzzles from the shrine solver;
 - the Landscape authoring path's cave plans, joined to this runtime.
