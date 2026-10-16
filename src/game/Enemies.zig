@@ -46,9 +46,9 @@ pub const Stats = struct {
 /// Combat and pacing values for Hive and Scalari ground roles. Keep balance edits here.
 pub const tuning = .{
     .surface_nests = 3,
-    .cave_troopers = 4,
-    .units_per_nest = 6,
-    .troopers_per_nest = 2,
+    .cave_troopers = 8,
+    .units_per_nest = 10,
+    .troopers_per_nest = 5,
     .max_bolts = 48,
     .nest_radius = 4.0,
     .nest_health = 900.0,
@@ -87,7 +87,7 @@ comptime {
     // Blades and dashes remember nests cut per swing in a u16.
     std.debug.assert(max_nests <= 16);
 }
-pub const max_units = 24;
+pub const max_units = 32;
 /// Cave nests field troopers only (fliers have no room), at most this many.
 pub const cave_troopers = tuning.cave_troopers;
 pub const max_bolts = tuning.max_bolts;
@@ -430,10 +430,14 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
 
     for (&self.units) |*slot| {
         const u = &(slot.* orelse continue);
+        // Units outside every player's active area are simulation debris. Reclaiming these
+        // slots lets previously visited nests continue to replenish as the party travels.
+        if (!nearAny(players, u.position, wake_distance + 40)) {
+            slot.* = null;
+            continue;
+        }
         const s = stats(u.kind);
         const nest = self.nests[u.nest];
-        // Dormant when no player is anywhere near (keeps distant nests free).
-        if (!nearAny(players, u.position, wake_distance + 40)) continue;
         u.flash = @max(0, u.flash - dt);
         // Action clips keep advancing through knockback and stun instead of sticking on a pose.
         u.melee_anim = @max(0, u.melee_anim - dt);
@@ -1061,6 +1065,18 @@ test "campaign spore nests use stable seeded positions and respect the hard cap"
     try std.testing.expectEqual(@as(usize, surface_nests + max_seeded_nests), first.nest_count);
 }
 
+test "enemy groups far beyond the active area release slots for later patrols" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{ .seed = 6, .rng = .init(6) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    try std.testing.expect(e.spawnAt(.trooper, 0, .{ 0, 0, 0 }, 1));
+    var events: [16]Event = undefined;
+    _ = e.step(&physics, &.{.{ .chest = .{ 500, 1.4, 0 }, .velocity = @splat(0) }}, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(@as(usize, 0), e.unitCount(null));
+}
+
 test "a woken nest fabricates units that hunt, shoot, and can be destroyed" {
     var physics = testPhysics();
     defer physics.deinit();
@@ -1108,7 +1124,7 @@ test "troopers march out of the nest, keep to the ground, and hunt" {
     e.nest_count = 1;
     var events: [64]Event = undefined;
     const player: Target = .{ .chest = .{ 25, 1.4, 0 }, .velocity = @splat(0) };
-    for (0..60 * 40) |_| _ = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
+    for (0..60 * 55) |_| _ = e.step(&physics, &.{player}, 1.0 / 60.0, &events);
     var troopers: usize = 0;
     for (e.units) |slot| if (slot) |u| if (u.kind == .trooper) {
         troopers += 1;

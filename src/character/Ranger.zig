@@ -21,8 +21,8 @@ const V = m.Vec3;
 const Q = m.Quat;
 const Ranger = @This();
 /// Skinned characters drawn at once: players 0–3, keepers 4–6, pedestrians 7–14, Hive troopers
-/// 16–23, Wildkin heroes met in the world 24–31.
-pub const capacity = 32;
+/// 16–31, Wildkin heroes met in the world 32–39.
+pub const capacity = 40;
 /// What the upper body is doing on top of the gait: weapon use, throwing, a trooper's strike, or
 /// a low cover posture. `action_t` advances timed actions from 0 to 1.
 pub const Action = enum { none, aim, swing, guard, cast, throw, strike, kick, cover };

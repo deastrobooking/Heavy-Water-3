@@ -10,6 +10,7 @@ const Menu = @This();
 pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
 pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel };
+pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
 pub const title_items = [_]Item{
@@ -98,6 +99,7 @@ screen: Screen = .none,
 map_zoom: u8 = 1,
 map_frame_destination: bool = false,
 map_destination: u8 = 0,
+map_target: MapTarget = .none,
 travel_players: u8 = 15,
 parents: [8]Parent = undefined,
 parent_count: usize = 0,
@@ -216,6 +218,10 @@ pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .pad_controls) return self.padControlsKey(k);
     if (self.screen == .world_map and self.row < 6) self.map_destination = self.row;
     if (self.screen == .world_map and k == .confirm and self.row == 6) {
+        self.map_target = switch (self.map_target) { .none => .nest, .nest => .cave, .cave => .wildkin, .wildkin => .wildlife, .wildlife => .none };
+        return .none;
+    }
+    if (self.screen == .world_map and self.row == 6 and k == .left) {
         self.map_frame_destination = !self.map_frame_destination;
         return .none;
     }
@@ -624,21 +630,22 @@ test "map zoom stays bounded and preserves destination selection" {
     try std.testing.expectEqual(@as(u8, 2), m.row);
 }
 
-test "nested player map returns to its parent and blocked travel skips equally for every input" {
+test "map target selection cycles independently from travel and returns to its parent" {
     var m: Menu = .{};
     m.open(.pause);
     m.open(.player);
     m.row = 3;
     _ = m.key(.confirm);
     try std.testing.expectEqual(Screen.world_map, m.screen);
-    m.travel_players = 0;
-    m.select(1);
-    try std.testing.expectEqual(@as(u8, 0), m.row);
-    try std.testing.expectEqual(Command.none, m.key(.confirm));
-    _ = m.key(.down);
-    try std.testing.expectEqual(@as(u8, 6), m.row);
-    _ = m.key(.confirm);
+    m.row = 6;
+    _ = m.key(.left);
     try std.testing.expect(m.map_frame_destination);
+    _ = m.key(.left);
+    try std.testing.expect(!m.map_frame_destination);
+    inline for (.{ MapTarget.nest, MapTarget.cave, MapTarget.wildkin, MapTarget.wildlife, MapTarget.none }) |target| {
+        try std.testing.expectEqual(Command.none, m.key(.confirm));
+        try std.testing.expectEqual(target, m.map_target);
+    }
     _ = m.key(.back);
     try std.testing.expectEqual(Screen.player, m.screen);
     try std.testing.expectEqual(@as(u8, 3), m.row);

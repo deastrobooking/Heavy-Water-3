@@ -14,6 +14,7 @@ const Material = @import("../render/Material.zig");
 const Input = @import("../engine/Input.zig");
 const Sandbox = @import("Sandbox.zig");
 const Garage = @import("Garage.zig");
+const WildsMeshes = @import("../vehicle/WildsMeshes.zig");
 const Collectibles = @import("Collectibles.zig");
 const Enemies = @import("Enemies.zig");
 const EnemyDesign = @import("EnemyDesign.zig");
@@ -38,7 +39,7 @@ const Arena = @import("Arena.zig");
 const QuestLog = @import("QuestLog.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
-pub const hero_first_id: u8 = 24;
+pub const hero_first_id: u8 = 32;
 const V = Physics.Vec3;
 
 /// The fabricator kiosk stands at the head of the garage pads.
@@ -1204,6 +1205,9 @@ fn cityInvasion(sb: *Sandbox, plaza: V) void {
     _ = sb.enemies.spawnAt(.scalari_titan, anchor, R.add(center, .{ -12, 0, -10 }), 1);
     _ = sb.enemies.spawnAt(.scalari_stinger, anchor, R.add(center, .{ 11, 0, -7 }), 1);
     _ = sb.enemies.spawnAt(.scalari_hybrid, anchor, R.add(center, .{ 2, 0, 13 }), 1);
+    _ = sb.enemies.spawnAt(.scalari_stinger, anchor, R.add(center, .{ -18, 0, 9 }), 1);
+    _ = sb.enemies.spawnAt(.scalari_hybrid, anchor, R.add(center, .{ 17, 0, 12 }), 1);
+    _ = sb.enemies.spawnAt(.scalari_miner, anchor, R.add(center, .{ 0, 0, -19 }), 1);
 }
 
 fn burst(sb: *Sandbox, at: V, size: f32, color: [3]f32) void {
@@ -1418,7 +1422,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             n += 1;
         }
     }
-    // Ground Hive units are skinned characters (ids 16–23), drawn only near P1 to bound cost.
+    // Ground Hive units use ids 16–31, leaving the final eight slots for nearby Wildkin.
     var trooper_id: u8 = 16;
     for (sb.enemies.units) |slot| if (slot) |u| if (Enemies.isGround(u.kind)) {
         if (u.kind == .scalari_scout or u.kind == .scalari_miner) continue;
@@ -1427,9 +1431,9 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             n += scalariTitan(out[n..], c.block, c.gem, u.position, u.yaw, t, u.flash, sb.creator.enemy_design);
             continue;
         }
-        if (trooper_id >= hero_first_id or !room(out, n, 1)) break;
         const d = R.sub(u.position, sb.player.feet);
         if (d[0] * d[0] + d[2] * d[2] > 120 * 120) continue;
+        if (trooper_id >= hero_first_id or !room(out, n, 1)) break;
         const Ranger = @import("../character/Ranger.zig");
         const action: Ranger.Action = if (u.throw_anim > 0) .throw else if (u.melee_anim > 0) .strike else if (u.tactic == .cover) .cover else .none;
         const action_t: f32 = switch (action) {
@@ -2110,19 +2114,18 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
         const hues = [_][3]f32{ .{ 0.35, 0.9, 1 }, .{ 0.75, 0.45, 1 }, .{ 0.45, 1, 0.6 }, .{ 1, 0.7, 0.35 } };
         const hue = hues[i % hues.len];
         for (sys.rooms[0..sys.room_count], 0..) |room, r| {
-            if (room.role == .cache and n + 3 <= out.len) {
+            if (room.role == .cache and n + 2 <= out.len) {
                 const parent = sys.rooms[room.parent];
                 const toward = R.sub(parent.center, room.center);
                 const orientation = m.Quat.fromAxisAngle(m.Vec3.unit_y, std.math.atan2(toward[0], toward[2]));
                 const shrine_at: V = .{ room.center[0], room.floor, room.center[2] };
-                out[n] = .{ .mesh = sb.catalog.content.cave_temple, .transform = .{ .position = shrine_at }, .size = .{ 0.66, 0.66, 0.66 }, .rotation = quat(orientation), .tint = .{ 1, 1, 1, 1 } };
+                const temple_scale: f32 = 0.66;
+                out[n] = .{ .mesh = sb.catalog.content.cave_temple, .transform = .{ .position = shrine_at }, .size = .{ temple_scale, temple_scale, temple_scale }, .rotation = quat(orientation), .tint = .{ 1, 1, 1, 1 } };
                 n += 1;
-                const gem_offset = orientation.rotate(m.Vec3.init(0, 7.2, -0.8));
+                // The signal gem hovers over the temple's crown, turning slowly.
+                const gem_offset = orientation.rotate(WildsMeshes.temple_crown.scale(temple_scale).add(m.Vec3.init(0, 0.9, 0)));
                 const gem_at = R.add(shrine_at, .{ gem_offset.x, gem_offset.y, gem_offset.z });
-                out[n] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = gem_at }, .size = .{ 0.8, 1.4, 0.8 }, .rotation = quat(orientation), .tint = Material.emissive(hue ++ [_]f32{1}, 0.9 + 0.1 * @sin(t * 1.3 + @as(f32, @floatFromInt(r)))) };
-                n += 1;
-                const trim_offset = orientation.rotate(m.Vec3.init(0, 4.3, 3.95));
-                out[n] = .{ .mesh = sb.catalog.content.block, .transform = .{ .position = R.add(shrine_at, .{ trim_offset.x, trim_offset.y, trim_offset.z }) }, .size = .{ 0.2, 1.8, 0.12 }, .rotation = quat(orientation), .tint = Material.emissive(hue ++ [_]f32{1}, 0.7 + 0.2 * @sin(t * 1.7 + @as(f32, @floatFromInt(i)))) };
+                out[n] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = gem_at }, .size = .{ 0.8, 1.4, 0.8 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, t * 0.4)), .tint = Material.emissive(hue ++ [_]f32{1}, 0.9 + 0.1 * @sin(t * 1.3 + @as(f32, @floatFromInt(r)))) };
                 n += 1;
             }
             const count: usize = if (room.role == .heart) 8 else 5;

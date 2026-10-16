@@ -74,6 +74,8 @@ hover_enabled: bool = false,
 coyote: f32 = 0,
 jump_buffer: f32 = 0,
 previous_jump: bool = false,
+jumped_since_ground: bool = false,
+air_assist_engaged: bool = false,
 tap_count: u8 = 0,
 tap_timer: f32 = 0,
 wall_lock: f32 = 0,
@@ -170,6 +172,7 @@ fn releaseGrapple(self: *Player) void {
 fn jump(self: *Player, speed: f32) void {
     self.velocity[1] = speed;
     self.grounded = false;
+    self.jumped_since_ground = true;
     self.support = .none;
     self.jump_buffer = 0;
     self.coyote = 0;
@@ -216,6 +219,10 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         self.previous_jump = input.jump;
         return;
     }
+    if (self.grounded) {
+        self.jumped_since_ground = false;
+        self.air_assist_engaged = false;
+    }
     const pressed = input.jump_pressed or (input.jump and !self.previous_jump);
     const released = !input.jump and self.previous_jump;
     self.previous_jump = input.jump;
@@ -226,6 +233,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     if (input.cycle_mode) {
         self.traversal = @enumFromInt(@intFromEnum(self.traversal) +% 1);
         self.flight_engaged = false;
+        self.air_assist_engaged = false;
         self.flight_tap_count = 0;
         self.releaseGrapple();
         self.motion = .fall;
@@ -317,6 +325,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         self.wading = top - self.feet[1];
         self.motion = .swim;
         self.flight_engaged = false;
+        self.air_assist_engaged = false;
         self.flight_tap_count = 0;
         self.dash_timer = 0;
         self.releaseGrapple();
@@ -336,11 +345,15 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     const contact = self.wall(physics, probe_direction);
     if (contact) |hit| self.wall_normal = R.normalize(horizontal(hit.normal));
     const pushing = contact != null and R.dot(wish, R.scale(self.wall_normal, -1)) > 0.35;
+    var jumped_this_step = false;
     var controlled = false;
     if (self.motion == .hang) {
         self.hang_timer += dt;
         self.stamina = @max(0, self.stamina - 32 * dt);
-        if (self.jump_buffer > 0) self.wallJump() else if (input.mantle and self.clearAt(physics, self.ledge_top, 1.8)) {
+        if (self.jump_buffer > 0) {
+            self.wallJump();
+            jumped_this_step = true;
+        } else if (input.mantle and self.clearAt(physics, self.ledge_top, 1.8)) {
             self.motion = .mantle;
             self.velocity = .{ 0, 8, 0 };
         } else if (input.dodge or input.forward < -0.35 or self.stamina == 0 or self.hang_timer > 2.5 or contact == null) {
@@ -364,11 +377,15 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         }
         controlled = true;
     } else if (self.motion == .climb) {
-        if (self.jump_buffer > 0 and self.wall_charges > 0) self.wallJump() else if (input.dodge or self.climb_energy <= 0 or contact == null) {
+        if (self.jump_buffer > 0 and self.wall_charges > 0) {
+            self.wallJump();
+            jumped_this_step = true;
+        } else if (input.dodge or self.climb_energy <= 0 or contact == null) {
             self.motion = .fall;
             self.grab_cooldown = 0.22;
             if (contact == null) {
                 self.jump(5.5);
+                jumped_this_step = true;
                 h = R.scale(self.wall_normal, -3);
                 self.velocity[0] = h[0];
                 self.velocity[2] = h[2];
@@ -404,10 +421,14 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         }
     }
     if (!controlled and self.motion != .hang and self.motion != .climb) {
-        if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) self.wallJump() else if (self.jump_buffer > 0 and self.coyote > 0) {
+        if (self.jump_buffer > 0 and contact != null and !self.grounded and self.wall_charges > 0 and self.grab_cooldown == 0) {
+            self.wallJump();
+            jumped_this_step = true;
+        } else if (self.jump_buffer > 0 and self.coyote > 0) {
             const backflip = self.grounded and input.forward < -0.35 and !board;
             const long_jump = self.grounded and input.forward > 0.35 and strength > 0.35 and (input.fast or input.dodge or input.dodge_held) and !board;
             self.jump(jump_speed * (if (backflip) @as(f32, 1.1) else if (long_jump) @as(f32, 1.12) else if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
+            jumped_this_step = true;
             if (backflip) {
                 const flip_speed: f32 = if (input.dodge or input.dodge_held) 9 else 5;
                 self.velocity[0] = wish[0] * flip_speed;
@@ -451,6 +472,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.motion = .stomp;
             self.velocity[1] = -22;
             self.flight_engaged = false;
+            self.air_assist_engaged = false;
             self.releaseGrapple();
         }
         const skate_speed: f32 = if (sprinting) 23 else 16;
@@ -493,7 +515,11 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.stamina = @max(0, self.stamina - 28 * dt);
             self.motion = .wall_slide;
         }
-        if (input.jump and !pressed and !self.grounded and self.fuel > 0 and self.motion != .stomp and self.wall_lock == 0 and !self.flight_engaged) {
+        if (pressed and !jumped_this_step and self.jumped_since_ground and !self.grounded and self.fuel > 0 and self.motion != .stomp and self.wall_lock == 0 and !self.flight_engaged) {
+            self.air_assist_engaged = true;
+        }
+        if (!input.jump and !pressed) self.air_assist_engaged = false;
+        if (self.air_assist_engaged and (input.jump or pressed) and !self.grounded and self.fuel > 0 and self.motion != .stomp and self.wall_lock == 0 and !self.flight_engaged) {
             switch (self.traversal) {
                 .grapple, .hover_jet => {
                     self.velocity[1] = if (self.hover_enabled) self.velocity[1] * @exp(-7.5 * dt) else @min(7, self.velocity[1] + 26 * dt);
@@ -598,6 +624,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     }
     self.move(physics, dt);
     if (self.grounded and !was_grounded) {
+        self.air_assist_engaged = false;
         self.landing = 0.25;
         if (self.motion == .stomp) {
             self.energy_kick_timer = 0.3;
@@ -657,6 +684,37 @@ test "a jump pressed just before landing is buffered; one pressed too early is d
         }
         try std.testing.expectEqual(press_height < 1, launched);
     }
+}
+
+test "jump takes off before a second press engages the jetpack" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{};
+    var p: Player = .{};
+    runFor(&p, &physics, &camera, .{}, 2);
+    try std.testing.expect(p.grounded);
+
+    const full_fuel = p.fuel;
+    runFor(&p, &physics, &camera, .{ .jump = true }, 1);
+    try std.testing.expect(p.velocity[1] > 8);
+    runFor(&p, &physics, &camera, .{ .jump = true }, 10);
+    try std.testing.expectEqual(full_fuel, p.fuel);
+    try std.testing.expect(p.motion != .jet);
+
+    runFor(&p, &physics, &camera, .{}, 1);
+    runFor(&p, &physics, &camera, .{ .jump = true }, 1);
+    try std.testing.expectEqual(Motion.jet, p.motion);
+    try std.testing.expect(p.fuel < full_fuel);
+    const assisted_fuel = p.fuel;
+    runFor(&p, &physics, &camera, .{ .jump = true }, 8);
+    try std.testing.expect(p.fuel < assisted_fuel);
+    runFor(&p, &physics, &camera, .{}, 1);
+    try std.testing.expect(!p.air_assist_engaged);
+
+    var falling: Player = .{ .feet = .{ 20, 10, 0 } };
+    runFor(&falling, &physics, &camera, .{ .jump = true }, 1);
+    try std.testing.expect(falling.motion != .jet);
+    try std.testing.expectEqual(full_fuel, falling.fuel);
 }
 
 test "stomp slams down and bounces on landing; a fast grounded dodge rolls low" {
@@ -722,9 +780,11 @@ test "grapple zips toward a static anchor and releases on arrival; flight glides
     try std.testing.expect(zipped and p.feet[2] > 26);
     try std.testing.expect(p.grapple.mode == .ready or p.grapple.mode == .cooldown);
 
-    var glider: Player = .{ .feet = .{ 50, 30, 0 }, .traversal = .flight };
-    runFor(&glider, &physics, &camera, .{}, 40);
-    runFor(&glider, &physics, &camera, .{ .jump = true }, 60);
+    var glider: Player = .{ .feet = .{ 50, 0, 0 }, .traversal = .flight };
+    runFor(&glider, &physics, &camera, .{}, 2);
+    runFor(&glider, &physics, &camera, .{ .jump = true }, 6);
+    runFor(&glider, &physics, &camera, .{}, 1);
+    runFor(&glider, &physics, &camera, .{ .jump = true }, 12);
     try std.testing.expectEqual(Motion.glide, glider.motion);
     try std.testing.expect(glider.velocity[1] >= -3.5);
     try std.testing.expect(glider.fuel < glider.suit.fuel_max);

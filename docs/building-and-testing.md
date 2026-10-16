@@ -47,6 +47,8 @@ To capture the imported-component window on Metal for visual review:
 MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dcharacter-showcase=46 -Dcapture-frame=120
 ```
 
+To review the redesigned cave temple (an ancient sanctuary that doubles as a lab) use `-Dshowcase=67` for the wilds set or `-Dshowcase=76` for a close-up of the temple alone.
+
 To see the bundled rigged GLB driven by the game's pose in the world (third person), add `-Dcharacter-showcase=47` and a `-Dcharacter-pose=N` (0 idle, 1 aim, 2 overhead swing, 3 cast, 4 guard) to the same command.
 
 The modifier commands remain useful for batch import and offline GLB preview. The in-game editor saves a local library override rather than editing the checked-in import recipe. Live imported skinning uses the GPU character pipeline; `-Dcpu-skinning=true` does not support imported rigs. Only binary GLB files with embedded buffers are supported by the in-game picker; external-buffer `.gltf` scenes, source-authored animation clips, texture editing, and component text relabeling remain open.

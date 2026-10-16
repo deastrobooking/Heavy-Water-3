@@ -136,7 +136,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
         },
     };
     const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or menu.screen != .none;
-    if (!sb.creator.open) drawHud(c, sb, hud, panels);
+    if (!sb.creator.open) drawHud(c, menu, sb, hud, panels);
     // Panels and menus scroll as one when they are taller than the screen (larger interface
     // sizes); the HUD above never moves.
     c.beginScroll(hud.scroll);
@@ -558,7 +558,7 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
 
 // ---------------------------------------------------------------- HUD
 
-fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
+fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: bool) void {
     const v = hud.view;
     // Vitals, bottom left (hidden under conversation and shop panels).
     if (sb.seated == null and !panels) {
@@ -578,6 +578,22 @@ fn drawHud(c: *Canvas, sb: *const Sandbox, hud: Hud, panels: bool) void {
         c.print(r.x + 14, r.y + 32, 1, ink, "{d} PARTS   {d} KITS", .{ sb.kits[0].wallet.parts, kits(sb.kits[0].wallet) });
         inventoryLine(c, sb, r.x + 14, r.y + 50, 1);
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
+    }
+    if (menu.map_target != .none and !panels) {
+        if (trackedTarget(menu.map_target, sb, sb.player.feet, 0)) |target| {
+            const dx = target.position[0] - sb.player.feet[0];
+            const dz = target.position[2] - sb.player.feet[2];
+            const bearing = std.math.atan2(dx, dz);
+            const octant: i32 = @intFromFloat(@floor((bearing + std.math.pi / 8.0) / (std.math.pi / 4.0)));
+            const direction: usize = @intCast(@mod(octant, 8));
+            const cardinal = [_][]const u8{ "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+            const label: []const u8 = switch (menu.map_target) { .none => "", .nest => "HIVE NEST", .cave => "CAVE", .wildkin => "WILDKIN", .wildlife => "CAPTURABLE WILDLIFE" };
+            const w: f32 = @min(v.w - 40, 310);
+            const box: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + 54, .w = w, .h = 30 };
+            c.rect(box, .{ 0.02, 0.035, 0.05, 0.72 });
+            c.frame(box, 1, alpha(gold, 0.7));
+            c.print(box.x + 10, box.y + 10, 1.05, gold, "{s}  {d:.0}M  {s}", .{ label, @sqrt(dx * dx + dz * dz), cardinal[direction] });
+        }
     }
     if (panels) return;
     // The Starbowl's wave banner, top centre.
@@ -1484,6 +1500,45 @@ fn mapPoi(c: *Canvas, map: Rect, fx: f32, fy: f32, mark: []const u8, color: Colo
     if (selected) c.focus(icon);
 }
 
+const TrackedTarget = struct { position: [3]f32 };
+
+fn sameTarget(a: [3]f32, b: [3]f32) bool {
+    return a[0] == b[0] and a[2] == b[2];
+}
+
+fn trackedTarget(kind: Menu.MapTarget, sb: *const Sandbox, from: [3]f32, player: usize) ?TrackedTarget {
+    if (kind == .none) return null;
+    var best: ?TrackedTarget = null;
+    var best_d2 = std.math.inf(f32);
+    const consider = struct {
+        fn add(best_target: *?TrackedTarget, best_distance: *f32, origin: [3]f32, position: [3]f32) void {
+            const dx = position[0] - origin[0];
+            const dz = position[2] - origin[2];
+            const d2 = dx * dx + dz * dz;
+            if (d2 < best_distance.*) {
+                best_distance.* = d2;
+                best_target.* = .{ .position = position };
+            }
+        }
+    }.add;
+    switch (kind) {
+        .none => unreachable,
+        .nest => for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| {
+            if (nest.alive and !nest.cave) consider(&best, &best_d2, from, nest.position);
+        },
+        .cave => for (sb.caves.systems[0..sb.caves.count]) |cave| consider(&best, &best_d2, from, cave.entrance),
+        .wildkin => for (sb.encounters) |maybe| if (maybe) |spot| {
+            if (Heroes.roster[spot.hero].home == .wilds and !sb.progress.hasHero(spot.hero)) consider(&best, &best_d2, from, spot.position);
+        },
+        .wildlife => for (sb.pets.spots, 0..) |spot, i| {
+            if (sb.pets.wild_health[i] <= 0) continue;
+            const species: Pets.Species = @enumFromInt(i);
+            if (!sb.kits[player].hasPet(species)) consider(&best, &best_d2, from, spot.position);
+        },
+    }
+    return best;
+}
+
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const r = menuRect(c, @min(720, c.width - 30), @min(690, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
@@ -1496,8 +1551,9 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     };
     const depth = span * map.h / map.w;
     const player_position = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
+    const tracked = trackedTarget(menu.map_target, sb, player_position, menu.hero_player);
     const destination = if (menu.row < Sandbox.travel_count) menu.row else menu.map_destination;
-    const focus = if (menu.map_frame_destination) sb.travelPoint(destination) else player_position;
+    const focus = if (tracked) |target| target.position else if (menu.map_frame_destination) sb.travelPoint(destination) else player_position;
     for (0..12) |z| for (0..20) |x| {
         const fx = @as(f32, @floatFromInt(x)) / 20;
         const fz = @as(f32, @floatFromInt(z)) / 12;
@@ -1542,14 +1598,17 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         mapMarker(c, map, 0.5 + (point[0] - focus[0]) / span, 0.5 + (point[2] - focus[2]) / depth, std.fmt.bufPrint(&label, "P{d}", .{i + 1}) catch "?", accent, menu.hero_player == i, &occupied, &marker_count);
     }
     for (sb.enemies.nests[0..sb.enemies.nest_count]) |nest| if (nest.alive and !nest.cave) {
-        mapPoi(c, map, 0.5 + (nest.position[0] - focus[0]) / span, 0.5 + (nest.position[2] - focus[2]) / depth, "N", bad, false);
+        const selected = if (tracked) |target| sameTarget(target.position, nest.position) else false;
+        mapPoi(c, map, 0.5 + (nest.position[0] - focus[0]) / span, 0.5 + (nest.position[2] - focus[2]) / depth, "N", bad, selected);
     };
     for (sb.caves.systems[0..sb.caves.count]) |cave| {
-        mapPoi(c, map, 0.5 + (cave.entrance[0] - focus[0]) / span, 0.5 + (cave.entrance[2] - focus[2]) / depth, "C", accent, false);
+        const selected = if (tracked) |target| sameTarget(target.position, cave.entrance) else false;
+        mapPoi(c, map, 0.5 + (cave.entrance[0] - focus[0]) / span, 0.5 + (cave.entrance[2] - focus[2]) / depth, "C", accent, selected);
     }
     for (sb.encounters) |maybe| if (maybe) |spot| {
         if (Heroes.roster[spot.hero].home == .wilds and !sb.progress.hasHero(spot.hero)) {
-            mapPoi(c, map, 0.5 + (spot.position[0] - focus[0]) / span, 0.5 + (spot.position[2] - focus[2]) / depth, "H", .{ 0.82, 0.63, 1, 1 }, false);
+            const selected = if (tracked) |target| sameTarget(target.position, spot.position) else false;
+            mapPoi(c, map, 0.5 + (spot.position[0] - focus[0]) / span, 0.5 + (spot.position[2] - focus[2]) / depth, "H", .{ 0.82, 0.63, 1, 1 }, selected);
         }
     };
     for (sb.pets.spots, 0..) |spot, species_index| {
@@ -1559,7 +1618,10 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         for (0..Sandbox.max_players) |p| if (sb.present(p) and !sb.kits[p].hasPet(species)) {
             wanted = true;
         };
-        if (wanted) mapPoi(c, map, 0.5 + (spot.position[0] - focus[0]) / span, 0.5 + (spot.position[2] - focus[2]) / depth, "A", good, false);
+        if (wanted) {
+            const selected = if (tracked) |target| sameTarget(target.position, spot.position) else false;
+            mapPoi(c, map, 0.5 + (spot.position[0] - focus[0]) / span, 0.5 + (spot.position[2] - focus[2]) / depth, "A", good, selected);
+        }
     }
     for (0..Enemies.max_nests) |nest_index| {
         if (sb.enemies.unitCount(@intCast(nest_index)) == 0) continue;
@@ -1571,7 +1633,10 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = r.w - 24, .h = 26 };
         rowBack(c, row, menu.row == i);
         const on = menu.enabled(i);
-        c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
+        if (i == 6) {
+            const label: []const u8 = switch (menu.map_target) { .none => "TRACK TARGET: OFF", .nest => "TRACK TARGET: HIVE NESTS", .cave => "TRACK TARGET: CAVES", .wildkin => "TRACK TARGET: WILDKIN", .wildlife => "TRACK TARGET: CAPTURABLE WILDLIFE" };
+            c.text(row.x + 12, row.y + 9, label, 1, if (menu.row == i) accent else ink);
+        } else c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
         if (on) c.hit(row, hitId(.menu, i));
         if (i < Sandbox.travel_count) {
             const point = sb.travelPoint(i);
@@ -1580,7 +1645,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
             c.print(row.x + row.w - 175, row.y + 9, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
         }
     }
-    c.text(r.x + 22, r.y + r.h - 24, sb.travelBlocked(menu.hero_player) orelse "ENTER SELECT / ESC BACK / OFF = OUTSIDE MAP", 1, dim);
+    c.text(r.x + 22, r.y + r.h - 24, "ENTER CYCLE TARGET / LEFT FRAME / RIGHT ZOOM / ESC BACK", 1, dim);
 }
 
 test "clustered and offscreen map markers retain separate labels inside the map" {

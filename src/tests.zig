@@ -100,6 +100,7 @@ test {
     _ = @import("game/Collectibles.zig");
     _ = @import("game/Fabricator.zig");
     _ = @import("vehicle/HiveMeshes.zig");
+    _ = @import("vehicle/WildsMeshes.zig");
     _ = @import("game/Enemies.zig");
     _ = @import("game/Combat.zig");
     _ = @import("vehicle/ShipMeshes.zig");

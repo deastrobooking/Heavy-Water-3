@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(u32, "capture_frame", b.option(u32, "capture-frame", "Write rendered frame N to zig-out/capture.bmp, then exit (0 = off)") orelse 0);
-    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a review scene: 1-17 city and armor, 18-57 GUI/combat/flight, 58-59 pets, 60-61 Rootdeep and armor, 62 flora, 63 ground flora, 64-65 Arbor interiors, 66 space habitats, 67 wilds structures, 69 homing ki blast, 70 test Arbor, 71 ground cover, 72 forest, 73 dusk terrain") orelse 0);
+    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a review scene: 1-17 city and armor, 18-57 GUI/combat/flight, 58-59 pets, 60-61 Rootdeep and armor, 62 flora, 63 ground flora, 64-65 Arbor interiors, 66 space habitats, 67 wilds structures, 69 homing ki blast, 70 test Arbor, 71 ground cover, 72 forest, 73 dusk terrain, 76 close-up of the cave temple") orelse 0);
     options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
     options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);

@@ -2774,12 +2774,14 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
     renderer.views[0].camera = self.engine.camera;
-    if (options.showcase == 67) {
+    if ((options.showcase == 67 or options.showcase == 76)) {
         const Terrain = @import("procedural/Terrain.zig");
         const ground = Terrain.surface(self.sandbox.seed, 0, 0).height;
-        renderer.views[0].camera.position = mach.math.vec3(0, ground + 18, 66);
+        // 76 holds the camera close on the temple (22 m east), entrance toward the viewer.
+        const close = options.showcase == 76;
+        renderer.views[0].camera.position = if (close) mach.math.vec3(22, ground + 7, 31) else mach.math.vec3(0, ground + 18, 66);
         renderer.views[0].camera.yaw = std.math.pi;
-        renderer.views[0].camera.pitch = -0.202;
+        renderer.views[0].camera.pitch = if (close) -0.12 else -0.202;
     }
     if (options.character_showcase > 0) {
         const feet = self.sandbox.player.feet;
@@ -2846,7 +2848,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
     renderer.prop_count = self.sandbox.publishProps(&renderer.props);
-    if (options.showcase == 66 or options.showcase == 67) renderer.prop_count = 0;
+    if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76)) renderer.prop_count = 0;
     renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74 or options.showcase == 75;
     renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else if (options.showcase == 75) 12 else null;
     renderer.scene.flora_review_seed = self.sandbox.seed;
@@ -2887,7 +2889,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             renderer.prop_count += 1;
         }
     }
-    if (options.showcase == 67 and renderer.prop_count + 3 <= renderer.props.len) {
+    if ((options.showcase == 67 or options.showcase == 76) and renderer.prop_count + 3 <= renderer.props.len) {
         const Terrain = @import("procedural/Terrain.zig");
         const c = &self.sandbox.catalog.content;
         const assets = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, x: f32 }{
@@ -2896,6 +2898,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             .{ .mesh = c.cave_temple, .x = 22 },
         };
         for (assets) |asset| {
+            if (options.showcase == 76 and asset.x != 22) continue;
             const ground = Terrain.surface(self.sandbox.seed, asset.x, 0).height;
             renderer.props[renderer.prop_count] = .{ .mesh = asset.mesh, .transform = .{ .position = .{ asset.x, ground, 0 } }, .tint = .{ 1, 1, 1, 1 } };
             renderer.prop_count += 1;
@@ -2908,7 +2911,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     }
     const sandbox = &self.sandbox;
     renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
-    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 67 or !sandbox.bodyShown()) 1 else 0;
+    renderer.views[0].hide_owner = if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
