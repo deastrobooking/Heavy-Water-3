@@ -91,6 +91,11 @@ test {
     _ = @import("audio/Director.zig");
     _ = @import("vehicle.zig");
     _ = @import("vehicle/Designs.zig");
+    _ = @import("studio/History.zig");
+    _ = @import("studio/Knob.zig");
+    _ = @import("studio/Brush.zig");
+    _ = @import("studio/VehicleRecipe.zig");
+    _ = @import("studio/VehiclePreview.zig");
     _ = @import("game/Garage.zig");
     _ = @import("game/Collectibles.zig");
     _ = @import("game/Fabricator.zig");

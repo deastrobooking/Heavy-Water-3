@@ -103,12 +103,13 @@ Order is by what unblocks the rest. Sizes: S under a day, M a few days, L about 
 | --- | --- | --- | --- |
 | 0 | **Complete — restore a green suite** (R1): fixed the three stale tests; the Screens test follows the tabbed contract in step 5. Added the one-command gate (`check`, `test`, then the smoke), which prints and requires green counts. | S | **Met:** 440 of 440 on default and 0.17; gate result recorded in validation |
 | 1 | **Complete — explicit save-compatibility policy** (R2): `Save.min_supported_format` replaces the rolling `format_version - 12` window; checked-in fixture saves cover each supported format; the stale comment and architecture text are corrected. | S to M | **Met:** formats 13–25 each round-trip; future floor changes are deliberate and documented |
+| 1b | **Ability core (E1) and behavior trees (E2)** from [engine features](engine-features.md), the owner's first priority (2026-10-15): per-player loot affixes on a tag, attribute and effect core, and reactive enemy trees. They serve the hack-and-slash loop. | M each | the acceptance in each phase |
 | 2 | **Bound the forest's cost** (R3): add distance level of detail ([nature plan](nature-upgrade.md) phases 5d and 5f), then tune the triangle budget against the measured GPU time. Hold further crown detail until then. | M | nature-route GPU p99 under 16.7 ms on the recorded M3 Pro baseline; triangle count and LOD budgets recorded |
 | 3 | **Milestone A hands-on pass** with the refreshed baselines above. | S | the checklist below is complete and findings are fixed or filed |
-| 4 | **Milestone B: the investigation content slice** (R4). First deliverable is a short content spec: evidence items, the collaborator conversations, the flags and the quest-log entries, with the save ownership rules. Then build it. | M | the existing acceptance for milestone B |
+| 4 | **Milestone B: the investigation content slice** (R4). First deliverable is a short content spec for the first city's budget of three sub-missions, one boss battle and ten item discoveries: evidence items, the collaborator conversations, the flags and the quest-log entries, with the save ownership rules. Then build it. | M | the existing acceptance for milestone B |
 | 5 | **Complete — split the Character Designer into tabs** (R5): Basics, Hair, Gear, Armor RGB and Style. | S to M | **Met:** every field is reachable across tabs at 720p and 640×480; the Screens test checks tab hits, row bounds and reachability |
 | 6 | **Reconcile tree generators** (R6) before more tree work: one skeleton contract, an explicit decision on `Arbor.generator_version`, and the save migration choice already listed in the nature plan. | M | one documented contract; migration test if Arbors change |
-| 7 | **Parallel tracks, user-directed:** the [nature plan](nature-upgrade.md) (grass is its next visible win), the mesh editor's M4 library ([mesheditor](mesheditor.md)), the gameplay-systems phases in [engine features](engine-features.md) (the ability core E1 and behavior trees E2 serve the MVP loop and rank first among them), and the Zig 0.17 adoption change (a separate small change once the matrix is complete). After step 2 bounds forest cost, cap nature polish and mesh-editor work at one day per week combined until the investigation slice is playable; keep the Zig migration separate. | | per each plan |
+| 7 | **Parallel tracks, user-directed:** the [nature plan](nature-upgrade.md) (grass is its next visible win), the mesh editor's M4 library ([mesheditor](mesheditor.md)), the specialized asset studios ([asset studio](asset-studio.md)), weather and seasons ([plan](weather-seasons.md)) and the shared settlement system for city planning, building, farming, terraforming and mining ([plan](settlement-building.md)), the remaining gameplay-systems phases in [engine features](engine-features.md), and the Zig 0.17 adoption change (a separate small change once the matrix is complete). After step 2 bounds forest cost, cap nature polish and mesh-editor work at one day per week combined until the investigation slice is playable; keep the Zig migration separate. | | per each plan |
 
 ### Doc alignment done in this change
 
@@ -169,6 +170,8 @@ The combat campaign foundation is playable and has an end state, but the world p
 3. Make the city and wilds objectives discoverable from the in-game quest UI, and make the liberation state survive save/load.
 4. Add deterministic coverage for the complete state transition and save round trip, plus a real-game smoke stage that completes or reaches the final gate.
 
+Content budget per city (owner, 2026-10-15): three sub-missions, one boss battle and ten item discoveries. Detroit's draft content and the build phases are in [city content](city-content.md).
+
 Acceptance: a new save can follow the intended city/wilds objectives, expose the alliance, defeat the local Hive force, and reach a clear liberation outcome; shared story state and personal rewards retain their ownership rules. Record any remaining hands-on-only checks in validation.
 
 ### C. Air war depth
@@ -207,7 +210,7 @@ Acceptance: a four-player run can fabricate, fly and fight with every player act
 
 1. **Mach `main` evaluation**, then **phase 14, skeletal animation** ([plan](skeletal-animation.md)). It replaces the procedural gait with clips: rangers, keepers, pedestrians and troopers, plus wing-beat and leg clips for the insect ships.
 2. **Phase 15, scenes** ([plan](scenes.md)): author nests, carrier circuits, raids and shrines as JSON scenes, so content no longer lives in code.
-3. **Phase 16, networking** ([plan](networking.md)): online co-op over the same player and arsenal model as split screen.
+3. **Phase 16, networking** ([plan](networking.md)): not planned (local desktop product, 2026-10-15). A later player and asset exchange with the sibling web engine is in [interchange](interchange.md).
 
 ### G. Content and polish (continuous)
 

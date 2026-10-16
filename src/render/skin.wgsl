@@ -5,7 +5,7 @@
 // vertex over four influences with antipodality kept to the first joint's hemisphere, matching
 // the CPU `skinDualQuat`. One character's palette is selected by a dynamic uniform offset.
 struct Palette {
-    joints: array<vec4<f32>, 128>,
+    joints: array<vec4<f32>, 256>,
 };
 @group(1) @binding(0) var<uniform> palette: Palette;
 

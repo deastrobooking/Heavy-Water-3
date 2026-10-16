@@ -41,7 +41,15 @@ pub const Pose = struct {
     arc: Arc = .forehand,
     aim_pitch: f32 = 0,
 };
-pub const Draw = struct { profile: Profile, pose: Pose, id: u8 = 0 };
+pub const Draw = struct {
+    profile: Profile,
+    pose: Pose,
+    id: u8 = 0,
+    imported_model: ?*const @import("../asset/Model.zig") = null,
+    imported_generation: u16 = 0,
+    imported_revision: u64 = 0,
+    imported_scale: f32 = 1,
+};
 character: gen.Character,
 instance: gen.Instance,
 mesh: Mesh,
@@ -267,7 +275,7 @@ pub const SkinnedVertex = extern struct {
     eye_shadow: [4]f32,
 };
 /// Joints per character in the GPU palette (two vec4s, a dual quaternion, per joint).
-pub const max_palette_joints = 64;
+pub const max_palette_joints = 128;
 /// One character's palette in the uniform buffer, padded to the 256-byte dynamic-offset rule.
 pub const palette_bytes = max_palette_joints * 32;
 pub const Palette = [max_palette_joints * 2][4]f32;

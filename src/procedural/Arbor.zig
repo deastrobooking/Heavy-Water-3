@@ -6,8 +6,8 @@ const Mesh = @import("../render/Mesh.zig");
 const Physics = @import("../physics/Physics.zig");
 const R = Physics.Rotation;
 const V = Physics.Vec3;
-pub const generator_version: u32 = 1;
-pub const max_nodes = 192;
+pub const generator_version: u32 = 3;
+pub const max_nodes = 640;
 pub const max_platforms = 8;
 pub const none: u16 = 0xffff;
 
@@ -100,17 +100,17 @@ pub fn grow(seed: u64, genome: Genome) !Tree {
         tree.nodes[tree.count] = .{ .position = R.add(origin, .{ @cos(angle) * spread * 0.3, 8, @sin(angle) * spread * 0.3 }), .radius = genome.base_radius * 0.3, .parent = parent, .depth = 1 };
         tree.count += 1;
     }
-    const attractor_count = 128;
+    const attractor_count = 448;
     var targets: [attractor_count]V = undefined;
     var live: [attractor_count]bool = @splat(true);
     for (&targets, 0..) |*point, i| {
         const angle = random(seed, i * 3 + 11) * 2 * std.math.pi;
         const vertical = random(seed, i * 3 + 12) * 2 - 1;
         const radial = @sqrt(1 - vertical * vertical) * @sqrt(random(seed, i * 3 + 13));
-        point.* = .{ @cos(angle) * spread * radial, genome.height * (0.68 + 0.26 * vertical), @sin(angle) * spread * radial };
+        point.* = .{ @cos(angle) * spread * radial, genome.height * (0.50 + 0.46 * (vertical + 1) * 0.5), @sin(angle) * spread * radial };
     }
-    const step: f32 = 13;
-    for (0..28) |_| {
+    const step: f32 = 8.5;
+    for (0..44) |_| {
         var sums: [max_nodes]V = @splat(.{ 0, 0, 0 });
         var counts: [max_nodes]u16 = @splat(0);
         for (targets, &live) |target, *alive| {
@@ -156,12 +156,12 @@ pub fn grow(seed: u64, genome: Genome) !Tree {
             const position = R.add(parent.position, R.scale(heading, step));
             if (position[1] > genome.height or position[1] < genome.height * 0.25) continue;
             var duplicate = false;
-            for (tree.nodes[0..tree.count]) |node| if (R.length(R.sub(position, node.position)) < step * 0.35) {
+            for (tree.nodes[0..tree.count]) |node| if (R.length(R.sub(position, node.position)) < step * 0.32) {
                 duplicate = true;
                 break;
             };
             if (duplicate) continue;
-            const radius = if (parent.depth == 0) genome.base_radius * 0.22 else @max(1.2, parent.radius * 0.85);
+            const radius = if (parent.depth == 0) genome.base_radius * 0.22 else @max(0.65, parent.radius * 0.76);
             tree.nodes[tree.count] = .{ .position = position, .radius = radius, .parent = @intCast(i), .depth = parent.depth + 1 };
             if (shelf and tree.platform_count < max_platforms) {
                 tree.platforms[tree.platform_count] = .{ .node = @intCast(tree.count), .center = R.add(position, .{ 0, radius * 0.2, 0 }), .half = .{ 9, 1.4, 7 } };
@@ -171,7 +171,40 @@ pub fn grow(seed: u64, genome: Genome) !Tree {
         }
         if (tree.count == before or tree.count == max_nodes) break;
     }
+    extendTwigs(&tree, step);
     return tree;
+}
+
+/// Add fine, deterministic side twigs to primary and secondary limbs. Colonization lays out the
+/// crown's large boughs; these short shoots fill the spaces between them and provide more leaf
+/// attachment sites without changing the growth loop's attractor assignments.
+fn extendTwigs(tree: *Tree, step: f32) void {
+    const source_count = tree.count;
+    for (1..source_count) |i| {
+        const source = tree.nodes[i];
+        if (source.depth < 1 or source.depth > 2 or source.position[1] < tree.genome.height * 0.42 or source.position[1] > tree.genome.height * 0.96) continue;
+        if (random(tree.seed, i + 2300) > 0.78 or tree.count == max_nodes) continue;
+
+        const incoming = R.normalize(R.sub(source.position, tree.nodes[source.parent].position));
+        const radial = R.normalize(.{ source.position[0], 0, source.position[2] });
+        const side = R.normalize(R.cross(incoming, .{ 0, 1, 0 }));
+        const sign: f32 = if (random(tree.seed, i + 2400) < 0.5) -1 else 1;
+        var direction = R.add(R.scale(incoming, 0.30), R.scale(radial, 0.30));
+        direction = R.add(direction, .{ 0, 0.60, 0 });
+        direction = R.add(direction, R.scale(side, sign * 0.42));
+        direction = R.normalize(direction);
+        const length = step * (0.34 + random(tree.seed, i + 2500) * 0.20);
+        const position = R.add(source.position, R.scale(direction, length));
+        if (position[1] > tree.genome.height) continue;
+
+        tree.nodes[tree.count] = .{
+            .position = position,
+            .radius = @max(0.55, source.radius * 0.52),
+            .parent = @intCast(i),
+            .depth = source.depth + 1,
+        };
+        tree.count += 1;
+    }
 }
 
 const Writer = struct {
@@ -220,9 +253,9 @@ const Writer = struct {
         for (0..rows + 1) |row| for (0..sides) |column| {
             const latitude = std.math.pi * @as(f32, @floatFromInt(row)) / rows;
             const longitude = 2 * std.math.pi * @as(f32, @floatFromInt(column)) / sides;
-            const lobe = 0.96 + 0.04 * @sin(longitude * 3 + phase) * @sin(latitude);
+            const lobes = 0.91 + 0.08 * @sin(longitude * 3 + phase) * @sin(latitude) + 0.04 * @sin(longitude * 7 - phase * 1.7) * @sin(latitude);
             const unit: V = .{ @sin(latitude) * @cos(longitude), @cos(latitude), @sin(latitude) * @sin(longitude) };
-            const position: V = .{ center[0] + unit[0] * half[0] * lobe, center[1] + unit[1] * half[1] * lobe, center[2] + unit[2] * half[2] * lobe };
+            const position: V = .{ center[0] + unit[0] * half[0] * lobes, center[1] + unit[1] * half[1] * lobes, center[2] + unit[2] * half[2] * lobes };
             const normal = R.normalize(.{ unit[0] / half[0], unit[1] / half[1], unit[2] / half[2] });
             const shade = 0.90 + 0.10 * @sin(longitude * 2 + phase);
             self.vertex(position, normal, R.scale(color, shade), 10);
@@ -251,30 +284,31 @@ pub fn mesh(allocator: std.mem.Allocator, tree: *const Tree, detail: Detail) !Me
     var children: [max_nodes]u16 = @splat(0);
     for (tree.nodes[1..tree.count]) |node| children[node.parent] += 1;
     var edges: usize = 0;
-    var leaves: usize = 0;
+    var foliage_clusters: usize = 0;
     for (tree.nodes[1..tree.count], 1..) |node, i| {
         if (detail != .proxy or node.depth < 3) edges += 1;
-        if (detail != .collision and node.depth > 0 and children[i] == 0) leaves += 1;
+        if (detail != .collision) foliage_clusters += foliageLobes(tree, i, children[i]);
     }
     const platforms = if (detail == .proxy) 0 else tree.platform_count;
     const unit = try Mesh.block(allocator);
     defer unit.deinit(allocator);
-    // Each branch tip carries three overlapping, rounder clusters instead of one flat pad.
-    const lobes = 3;
-    const leaf_vertices = 7 * 12 * lobes;
-    const leaf_indices = 6 * 12 * 6 * lobes;
-    const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + leaves * leaf_vertices);
+    const vertices_per_cluster = 7 * 12;
+    const indices_per_cluster = 6 * 12 * 6;
+    const vertices = try allocator.alloc(Mesh.Vertex, edges * (sides * 2 + 2) + platforms * unit.vertices.len + foliage_clusters * vertices_per_cluster);
     errdefer allocator.free(vertices);
-    const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + leaves * leaf_indices);
+    const indices = try allocator.alloc(u32, edges * sides * 12 + platforms * unit.indices.len + foliage_clusters * indices_per_cluster);
     var writer: Writer = .{ .vertices = vertices, .indices = indices };
     for (tree.nodes[1..tree.count], 1..) |node, i| {
         if (detail != .proxy or node.depth < 3) writer.tube(tree.nodes[node.parent].position, node.position, tree.edgeStartRadius(i), node.radius, sides, tree.genome);
-        if (detail != .collision and node.depth > 0 and children[i] == 0) {
+        const lobes = if (detail == .collision) 0 else foliageLobes(tree, i, children[i]);
+        if (lobes > 0) {
             const r = (13 + 10 * (1 - tree.genome.apical_dominance)) * (0.9 + random(tree.seed, i + 700) * 0.2) * 0.62;
+            const terminal = children[i] == 0;
+            const cluster_radius = if (terminal) r * 0.74 else r * 0.60;
             for (0..lobes) |lobe| {
-                const angle = (random(tree.seed, i + 1100) + @as(f32, @floatFromInt(lobe)) / lobes) * 2 * std.math.pi;
-                const size = r * (0.8 + 0.4 * random(tree.seed, i * 3 + lobe + 1300));
-                const offset: V = .{ @cos(angle) * r * 0.7, r * 0.25 * @as(f32, @floatFromInt(lobe)) - r * 0.1, @sin(angle) * r * 0.7 };
+                const angle = (random(tree.seed, i + 1100) + @as(f32, @floatFromInt(lobe)) / @as(f32, @floatFromInt(lobes))) * 2 * std.math.pi;
+                const size = cluster_radius * (0.8 + 0.4 * random(tree.seed, i * 3 + lobe + 1300));
+                const offset: V = .{ @cos(angle) * cluster_radius * 0.48, cluster_radius * 0.12 * @as(f32, @floatFromInt(lobe)) - cluster_radius * 0.06, @sin(angle) * cluster_radius * 0.48 };
                 const shade = random(tree.seed, i) * 0.12 + 0.03 * @as(f32, @floatFromInt(lobe));
                 writer.foliage(R.add(node.position, offset), .{ size, size * 0.72, size }, .{ 0.16, 0.30 + shade, 0.20 }, random(tree.seed, i + 900) * 2 * std.math.pi + @as(f32, @floatFromInt(lobe)));
             }
@@ -283,6 +317,16 @@ pub fn mesh(allocator: std.mem.Allocator, tree: *const Tree, detail: Detail) !Me
     for (tree.platforms[0..platforms]) |p| writer.box(unit, p.center, p.half, .{ 0.38, 0.48, 0.26 });
     std.debug.assert(writer.v == vertices.len and writer.i == indices.len);
     return .{ .vertices = vertices, .indices = indices };
+}
+
+fn foliageLobes(tree: *const Tree, index: usize, child_count: u16) usize {
+    const node = tree.nodes[index];
+    if (node.depth == 0) return 0;
+    if (child_count == 0) return 6;
+    // Small leaf clusters continue along every secondary limb, while terminal twigs carry the
+    // denser crown masses. Stable positions keep each generated Arbor reproducible.
+    if (node.depth >= 1) return 2;
+    return 0;
 }
 
 pub fn createCollider(allocator: std.mem.Allocator, physics: *Physics, tree: *const Tree, origin: V, user: u32) !Physics.MeshCollider {

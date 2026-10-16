@@ -184,7 +184,7 @@ Next:
 - complete frame-480 captures for showcases 71–73 and capture the 62/70 nature baseline set;
 - footprints and wakes;
 - shoreline wetness and reeds;
-- snowfall and rain with the day cycle;
+- snowfall and rain with the day cycle: designed as a global four-season calendar plus deterministic weather in [weather and seasons](plans/weather-seasons.md) (planned, not built);
 - boulder colliders for climbing.
 
 ## Mountain ranges and cave dungeons — implemented
@@ -437,7 +437,7 @@ Acceptance: exact import round trips, pose-math reference tests, the controller 
 
 Acceptance: byte-identical round trips, rejection without mutation, every existing spawn test passing on the spawn scene, and live edits applying in a running session. See [plan](plans/scenes.md).
 
-### 16. UDP networking — planned
+### 16. UDP networking — not planned (local desktop product, 2026-10-15)
 
 - **Topology and transport:** a listen server with up to three remote guests, over native `std.Io` UDP with reliable and unreliable channels.
 - **Join and snapshots:** joining through the save format, and delta-compressed snapshots at 30 Hz.
@@ -467,12 +467,13 @@ Phases 1–13 have runnable slices. The game layer has also grown well beyond th
 0. **Restore a green suite and explicit save floor — complete 2026-10-14:** the tabbed Character Designer is covered by the layout test; the save loader explicitly supports formats 13–25 and has a checked-in round-trip fixture for every supported version. The one-command gate passes 440/440 on default and Zig 0.17, plus the default Metal smoke. Details and remaining gates are in the [technical review](plans/next-steps.md#technical-review--2026-10-14).
 1. **Bound the forest's GPU cost:** geometry rose to 12.25 million submitted triangles with the same 551 visible vegetation instances. Record a GPU frame time, set a triangle budget and implement distance LOD before adding more crown detail; see [next steps](plans/next-steps.md#revised-next-steps).
 2. **Play, measure and tune:** the four-player frontier benchmark has a recorded passing baseline. Refresh it after material changes and complete the hands-on flight, combat, controller, co-op and audio checklist. Fix or file the findings.
-3. **Finish the first Earth city liberation loop:** connect the existing wilds campaign to investigation and alliance exposure inside the Frontier sanctuary, with discoverable objectives, a clear liberation outcome, persistent shared story state and per-player rewards. Detailed gates are in [next steps](plans/next-steps.md).
+3. **Finish the first Earth city liberation loop (per city: three sub-missions, one boss battle, ten item discoveries; draft and plan in [city content](plans/city-content.md)):** connect the existing wilds campaign to investigation and alliance exposure inside the Frontier sanctuary, with discoverable objectives, a clear liberation outcome, persistent shared story state and per-player rewards. Detailed gates are in [next steps](plans/next-steps.md).
 4. **Co-op completeness:** allow guests to drive/fly, talk, fabricate and earn their own progress through the complete local loop.
-5. **Content and visual polish:** prioritize issues found by hands-on play; keep capture and benchmark evidence with changes.
+5. **Content and visual polish** (the specialized asset studios for characters, vehicles, nature and cities, with touch and pen drawing, are planned in [asset studio](plans/asset-studio.md); the vehicle studio's headless core is implemented, the in-game panel and custom designs are not): prioritize issues found by hands-on play; keep capture and benchmark evidence with changes.
    - **Wilds dressing slice:** mountain trailheads now get authored cabin/barn farmsteads, cave cache rooms get rootbound sanctuaries, and a cave wave can roll one rare Scalari hybrid/stinger. These are visual scene assets plus an encounter variation; building entry, farm gameplay, loot tables for the rare unit, and hands-on route tuning remain open.
 5. **Later content:** ocean cities, the Solar frontier and the multi-world arena campaign remain authored plans/catalogs. Their human and cetacean settlements, carrier assault, local planetary flight, stations, mining colonies, Gaia and democracy systems are not playable yet. Build them after the Earth loop proves the shared runtime and save contracts. The [Project Helios habitat plan](plans/space-habitat-network.md) puts space construction behind staged resource, power, thermal, pressure, radiation, and rotation demonstrations; Helios-20 is a speculative reference, not a game milestone commitment. An early procedural habitat cylinder and Rand Corporation's Mother construction ark can now be reviewed in showcase 66, but there is no orbital gameplay or construction loop yet. The 0.5c drive and Gaia globe remain clearly labeled science-fiction exceptions. See [ocean cities](plans/ocean-cities.md), [Solar democracy](plans/solar-democracy.md), and [planetary frontier](plans/planetary-frontier.md).
-6. **Engine work:** Mach `main` evaluation, then phase 14 skeletal animation when a gameplay need justifies it. Phases 15–16 (scenes and networking) remain deferred. Gameplay-systems candidates from the Unreal-style feature review (ability core, behavior trees, compiled logic graphs, cinematic tracks, ragdolls) are ordered in [engine features](plans/engine-features.md); the ability core and behavior trees serve the hack-and-slash MVP first.
+6. **Grow systems (planned, user-directed):** a global season calendar and weather ([weather and seasons](plans/weather-seasons.md)), and a shared-settlement layer of city planning, building, farming, terraforming and mining on ground claims and Arbor shelves ([settlement and building](plans/settlement-building.md)). Both are time-boxed against the MVP gate; the weather plan needs no save change and goes first.
+6. **Engine work:** Mach `main` evaluation, then phase 14 skeletal animation when a gameplay need justifies it. Phase 15 (scenes) remains deferred; phase 16 (networking) is not planned because the product is a local desktop four-player game (a later exchange with the sibling web engine is in [interchange](plans/interchange.md)). Gameplay-systems candidates from the Unreal-style feature review (ability core, behavior trees, compiled logic graphs, cinematic tracks, ragdolls) are ordered in [engine features](plans/engine-features.md); the ability core and behavior trees go first (owner decision, 2026-10-15), then compiled logic graphs and cinematic tracks.
 
 Landscape authoring has an isolated foundation and awaits runtime integration. Open decisions and follow-ups:
 

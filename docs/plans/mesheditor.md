@@ -2,6 +2,8 @@
 
 **Status:** M0–M3 implemented, 2026-10-14; M4 is next. Later milestone designs remain planning. M1 adds v2 weld-cell metadata while preserving the v1 index-only analysis path. M3 keeps GPU index and submesh ranges stable by degenerating hidden triangle triplets in place.
 
+**Scope update (2026-10-15):** the editor is to grow beyond characters into specialized studios for vehicles, nature and city assets, with touch and pen drawing and node-based reuse. That direction is planned in [asset studio](asset-studio.md); this document remains the engineering design of the shared mesh-editing foundation.
+
 **Audience:** low-level Zig game developers working in this repository. It assumes you know `std.mem.Allocator`, `extern struct` layout and the project rules in [AGENTS.md](../../AGENTS.md).
 
 **Relationship to other docs:** [mesh-editor.md](mesh-editor.md) owns the product boundary and the user-facing slices. [asset-pipeline.md](asset-pipeline.md) and [skeletal-animation.md](skeletal-animation.md) own formats and runtime animation. [nature-upgrade.md](nature-upgrade.md) owns the tree and terrain upgrade that section 4.14 plugs into. This document owns the engineering design of the editor itself.

@@ -13,7 +13,7 @@ Build the smallest playable slice that proves the game, then deepen it. Do not w
 **The MVP loop** (the user's direction; edit this section if it changes):
 1. **Wilds are hack-and-slash.** Fast, readable fights against Hive waves, nests and cave dungeons, with loot for each player. Pets and Wildkin heroes fight alongside.
 2. **Sanctuary cities are exploration.** Find upgrades, trade, talk, and uncover the Hive's alliances with scientists and governments.
-3. **Freeing a city needs both:** break the Hive outside, expose its allies inside. Earth's cities first; the Colonies later.
+3. **Freeing a city needs both:** break the Hive outside, expose its allies inside. Earth's cities first; the Colonies later. Each city carries three sub-missions, one boss battle and ten item discoveries.
 4. **Four players, each their own progress.** Every player keeps their own character, gear, wallet and pets (`game/Kit.zig`). The team shares only the world and story (`game/Progress.zig`). Any player can play as a teammate's saved ranger or any Wildkin hero.
 
 **Rules for scope:**
@@ -21,6 +21,7 @@ Build the smallest playable slice that proves the game, then deepen it. Do not w
 - A feature is done when a player can use it in the real game and a test or smoke stage proves it, not when the module compiles.
 - Frame new content by where it lives: wilds content is combat, loot and per-player rewards; city content is exploration, upgrades and the conspiracy story.
 - Never put a personal reward in a shared wallet or shared progress. If it belongs to one player, it goes in their `Kit`.
+- The product is a local desktop four-player game. Online play is not planned (phase 16); exchanging players, items and money with the sibling web engine is a standard to write after feature freeze ([interchange](docs/plans/interchange.md)). Until then keep per-player data separable and item ids stable.
 - Defer: networking, planets beyond Earth, mod ecosystem growth, new engine phases, and anything the loop above does not need. Roadmap phases 14–16 (skeletal animation, scene graph, UDP) are not MVP blockers. The Zig 0.17 migration below is a separate platform track: it never blocks MVP work and MVP work never blocks it, so keep the default pair green and keep both tracks in small, separate changes.
 - Say what you did not verify. Report test failures with their output; do not hide skipped steps.
 

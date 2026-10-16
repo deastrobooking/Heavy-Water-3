@@ -2227,6 +2227,16 @@ fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8,
         if (entry.ready and start < out.len) {
             const model_height = @max(entry.model.bounds_max[1] - entry.model.bounds_min[1], 0.01);
             const scale = 1.8 * profile.height / model_height;
+            if (profile.body_style == .imported_glb and entry.model.skin != null) {
+                out[start] = .{
+                    .mesh = .none,
+                    .transform = .{ .position = pose.feet },
+                    .tint = .{ 1, 1, 1, 1 },
+                    .owner = owner,
+                    .character = .{ .profile = profile, .pose = pose, .id = owner - 1, .imported_model = &entry.model, .imported_generation = catalog.content.captain_test.generation, .imported_revision = entry.model.revision, .imported_scale = scale },
+                };
+                return start + 1;
+            }
             out[start] = .{
                 .mesh = catalog.content.captain_test,
                 .transform = .{ .position = .{ pose.feet[0], pose.feet[1] - entry.model.bounds_min[1] * scale, pose.feet[2] }, .scale = scale },
@@ -3012,7 +3022,7 @@ test "separate machines brown out on one Arbor, another tree stays independent, 
     try std.testing.expect(sb.tap_links[remote][0] == null);
     try std.testing.expectEqual(@as(f32, 0), sb.machines[remote].machine.outputs[2][2]);
     // Old procedural content must never silently replace geometry beneath a saved player.
-    const incompatible = try std.mem.replaceOwned(u8, std.testing.allocator, bytes, "\"arbor_generator\": 1", "\"arbor_generator\": 2");
+    const incompatible = try std.mem.replaceOwned(u8, std.testing.allocator, bytes, "\"arbor_generator\": 3", "\"arbor_generator\": 4");
     defer std.testing.allocator.free(incompatible);
     const tick_before = sb.tick;
     try std.testing.expectError(error.GeneratorMismatch, sb.restore(std.testing.allocator, incompatible, &camera));

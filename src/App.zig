@@ -285,6 +285,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
         }
         if (options.character_showcase == 46) self.sandbox.profile.body_style = .captain_test;
+        if (options.character_showcase == 47) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -309,6 +310,11 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.creator.begin(self.sandbox.profile);
         if (options.character_showcase == 46 and options.capture_frame > 0) self.sandbox.creator.openImported();
+        // 47 reviews the live pose, so it needs the world view rather than the designer window.
+        if (options.character_showcase == 47) {
+            self.sandbox.creator.open = false;
+            self.sandbox.view = .third;
+        }
         self.sandbox.player.mode = .walk;
     }
     // A person playing starts at the title screen (not in unattended smoke, benchmark, or
@@ -3055,11 +3061,12 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     defer scratch.deinit();
     const trace = try @import("asset/Gltf.zig").inspect(scratch.allocator(), source);
     if (trace.skin_count == 0) return error.CharacterNeedsSkin;
-    var model = try @import("asset/Gltf.zig").compilePosePreview(self.allocator, source, .{}, .run);
+    const mapped_count = @import("asset/Gltf.zig").mappedGameplayJointCount(trace);
+    if (mapped_count == 0) return error.NoCompatibleGameplayJoints;
+    var model = try @import("asset/Gltf.zig").compileRigged(self.allocator, source, .{});
     errdefer model.deinit(self.allocator);
     const source_hash = @import("asset/Meta.zig").hashSource(source);
     const generated = try MeshModifiers.generate(self.mesh_library_arena.allocator(), model, &source_hash);
-    const mapped_count = @import("asset/Gltf.zig").mappedGameplayJointCount(trace);
     if (persist) {
         try Save.writeFile(self.io, "saves/imported-character.glb", source);
         const json = try std.json.Stringify.valueAlloc(scratch.allocator(), generated, .{ .whitespace = .indent_2 });
@@ -3076,9 +3083,9 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     self.sandbox.creator.draft.body_style = .imported_glb;
     self.sandbox.creator.imported_selected = 0;
     self.sandbox.creator.imported_status = .ready;
-    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "RUN RETARGET {d}/7 JOINTS  |  STATIC IN GAME", .{mapped_count}) catch unreachable;
+    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "LIVE RETARGET {d}/7 JOINTS", .{mapped_count}) catch unreachable;
     self.imported_rig_status_len = app_status.len;
-    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "RUN RETARGET {d}/7 JOINTS  |  STATIC IN GAME", .{mapped_count}) catch unreachable;
+    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "LIVE RETARGET {d}/7 JOINTS", .{mapped_count}) catch unreachable;
     self.sandbox.creator.imported_rig_status_len = creator_status.len;
     if (persist) self.sandbox.creator.imported_open = true;
 }

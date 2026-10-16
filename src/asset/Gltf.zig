@@ -415,7 +415,7 @@ pub fn externalBuffers(arena: std.mem.Allocator, source: []const u8) ![]const []
 }
 
 pub fn compile(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver) !Model {
-    return compileFiltered(allocator, source, resolver, null, false, .bind);
+    return compileFiltered(allocator, source, resolver, null, false, .bind, false);
 }
 
 pub const PreviewPose = enum { bind, run };
@@ -428,16 +428,21 @@ pub fn compileBindPosePreview(allocator: std.mem.Allocator, source: []const u8, 
 
 /// Preview one of the game's native procedural poses on a compatible named humanoid rig.
 pub fn compilePosePreview(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, pose: PreviewPose) !Model {
-    return compileFiltered(allocator, source, resolver, null, true, pose);
+    return compileFiltered(allocator, source, resolver, null, true, pose, false);
+}
+
+/// Compile a bind-pose mesh with retained per-vertex influences for runtime animation.
+pub fn compileRigged(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver) !Model {
+    return compileFiltered(allocator, source, resolver, null, true, .bind, true);
 }
 
 /// Compile one node's primitive into an independent HWMS module, retaining its accumulated
 /// ancestor transform. `inspect` supplies stable source addresses for these selectors.
 pub fn compileModule(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, address: ModuleAddress) !Model {
-    return compileFiltered(allocator, source, resolver, address, false, .bind);
+    return compileFiltered(allocator, source, resolver, address, false, .bind, false);
 }
 
-fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, selector: ?ModuleAddress, allow_skin_preview: bool, preview_pose: PreviewPose) !Model {
+fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: Resolver, selector: ?ModuleAddress, allow_skin_preview: bool, preview_pose: PreviewPose, retain_rig: bool) !Model {
     var arena_state: std.heap.ArenaAllocator = .init(allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -457,8 +462,8 @@ fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: R
         data.* = if (def.uri) |uri| try loadUri(arena, uri, resolver) else if (i == 0 and glb_bin != null) glb_bin.? else return error.MissingBuffer;
         if (data.len < def.byteLength) return error.BufferTooShort;
     }
-    const node_state = try selectedNodesWithPose(arena, doc, if (allow_skin_preview) preview_pose else .bind);
-    var builder: Builder = .{ .doc = doc, .buffers = buffers, .arena = arena, .selector = selector, .allow_skin_preview = allow_skin_preview, .node_world = node_state.world, .node_active = node_state.active };
+    const node_state = try selectedNodesWithPose(arena, doc, if (retain_rig) .bind else if (allow_skin_preview) preview_pose else .bind);
+    var builder: Builder = .{ .doc = doc, .buffers = buffers, .arena = arena, .selector = selector, .allow_skin_preview = allow_skin_preview, .retain_rig = retain_rig, .node_world = node_state.world, .node_active = node_state.active };
     if (doc.scene) |i| if (i >= doc.scenes.len) return error.InvalidScene;
     const roots: []const u32 = if (doc.scenes.len > 0) doc.scenes[doc.scene orelse 0].nodes else blk: {
         // Without scenes, every node not referenced as a child is a root.
@@ -483,8 +488,20 @@ fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: R
     const submeshes = try allocator.dupe(Model.Submesh, builder.submeshes.items);
     errdefer allocator.free(submeshes);
     const materials = try allocator.dupe(Model.Material, builder.materials.items);
-    var model: Model = .{ .mesh = .{ .vertices = vertices, .indices = indices }, .submeshes = submeshes, .materials = materials, .bounds_min = undefined, .bounds_max = undefined };
+    var skin: ?Model.Skin = null;
+    if (retain_rig) {
+        if (builder.rig_bones.items.len == 0 or builder.rig_vertices.items.len != vertices.len) return error.CharacterNeedsSkin;
+        const rig_vertices = try allocator.dupe(Model.SkinVertex, builder.rig_vertices.items);
+        errdefer allocator.free(rig_vertices);
+        const rig_bones = try allocator.dupe(Model.SkinBone, builder.rig_bones.items);
+        skin = .{ .vertices = rig_vertices, .bones = rig_bones };
+    }
+    var model: Model = .{ .mesh = .{ .vertices = vertices, .indices = indices }, .submeshes = submeshes, .materials = materials, .bounds_min = undefined, .bounds_max = undefined, .skin = skin };
     model.computeBounds();
+    if (retain_rig) {
+        model.bounds_min = builder.rig_bounds_min;
+        model.bounds_max = builder.rig_bounds_max;
+    }
     return model;
 }
 
@@ -500,6 +517,12 @@ const Builder = struct {
     material_map: [Model.max_materials + 1]?u32 = @splat(null),
     selector: ?ModuleAddress = null,
     allow_skin_preview: bool = false,
+    retain_rig: bool = false,
+    rig_skin: ?u32 = null,
+    rig_vertices: std.ArrayList(Model.SkinVertex) = .empty,
+    rig_bones: std.ArrayList(Model.SkinBone) = .empty,
+    rig_bounds_min: [3]f32 = @splat(std.math.inf(f32)),
+    rig_bounds_max: [3]f32 = @splat(-std.math.inf(f32)),
     node_world: []const Mat,
     node_active: []const bool,
 
@@ -535,6 +558,24 @@ const Builder = struct {
         if (positions.component != 5126 or (normals != null and normals.?.component != 5126)) return error.UnsupportedComponentType;
         if (uvs) |u| if (u.component != 5126) return error.UnsupportedComponentType;
         if (skin_mats != null and (weights.?.component != 5126 or (joints.?.component != 5121 and joints.?.component != 5123))) return error.UnsupportedSkinComponentType;
+        if (self.retain_rig) {
+            const skin_id = skin_index orelse return error.CharacterNeedsSkin;
+            if (self.rig_skin) |previous| {
+                if (previous != skin_id) return error.MultipleSkinsUnsupported;
+            } else {
+                self.rig_skin = skin_id;
+                const skin = self.doc.skins[skin_id];
+                if (skin.joints.len == 0 or skin.joints.len > 128) return error.TooManyJoints;
+                for (skin.joints) |node_index| {
+                    const match = mappedNodeJoint(self.doc, node_index);
+                    // Rotate about the matched source joint, or the skin's first joint when no
+                    // ancestor is named: the Ranger's own pivots are in its units and do not apply.
+                    const pivot_node = if (match) |m| m.node else skin.joints[0];
+                    const pivot_world = self.node_world[pivot_node];
+                    try self.rig_bones.append(self.arena, .{ .ranger_joint = @intCast(@intFromEnum(if (match) |m| m.joint else GameSkeleton.Joint.root)), .pivot = .{ pivot_world[12], pivot_world[13], pivot_world[14] } });
+                }
+            }
+        }
 
         const base: u32 = @intCast(self.vertices.items.len);
         const normal_matrix = normalMatrix(world);
@@ -544,6 +585,43 @@ const Builder = struct {
             if (skin_mats) |palette| {
                 const source_pos = positions.vec(3, i);
                 const source_n = if (normals) |view| view.vec(3, i) else [3]f32{ 0, 1, 0 };
+                if (self.retain_rig) {
+                    var bind_point: [3]f32 = .{ 0, 0, 0 };
+                    var bind_normal: [3]f32 = .{ 0, 0, 0 };
+                    const source_joints = joints.?.uint4(i);
+                    const source_weights = weights.?.vec(4, i);
+                    var influence: Model.SkinVertex = .{ .joints = .{ 0, 0, 0, 0 }, .weights = .{ 0, 0, 0, 0 } };
+                    var weight_sum: f32 = 0;
+                    for (0..4) |k| {
+                        const weight = source_weights[k];
+                        if (!std.math.isFinite(weight) or weight < 0) return error.InvalidSkinWeights;
+                        if (weight == 0) continue;
+                        if (source_joints[k] >= palette.len or source_joints[k] >= self.rig_bones.items.len) return error.InvalidJoint;
+                        influence.joints[k] = @intCast(source_joints[k]);
+                        influence.weights[k] = weight;
+                        const bind_matrix = palette[source_joints[k]];
+                        const transformed = transformPoint(bind_matrix, source_pos);
+                        const transformed_normal = transformVector(normalMatrix(bind_matrix), source_n);
+                        for (0..3) |axis| {
+                            bind_point[axis] += transformed[axis] * weight;
+                            bind_normal[axis] += transformed_normal[axis] * weight;
+                        }
+                        weight_sum += weight;
+                    }
+                    if (weight_sum < 1e-6) return error.InvalidSkinWeights;
+                    for (&influence.weights) |*weight| weight.* /= weight_sum;
+                    for (0..3) |axis| {
+                        bind_point[axis] /= weight_sum;
+                        bind_normal[axis] /= weight_sum;
+                        self.rig_bounds_min[axis] = @min(self.rig_bounds_min[axis], bind_point[axis]);
+                        self.rig_bounds_max[axis] = @max(self.rig_bounds_max[axis], bind_point[axis]);
+                    }
+                    // Freeze the original glTF bind pose into the model-space vertex stream.
+                    // Runtime applies Ranger's bind-relative pose deltas to this geometry.
+                    pos = bind_point;
+                    n = normalize(bind_normal);
+                    try self.rig_vertices.append(self.arena, influence);
+                } else {
                 const bone_indices = joints.?.uint4(i);
                 const bone_weights = weights.?.vec(4, i);
                 pos = .{ 0, 0, 0 };
@@ -569,6 +647,7 @@ const Builder = struct {
                     n[axis] /= weight_sum;
                 }
                 n = normalize(n);
+                }
             } else {
                 pos = transformPoint(world, positions.vec(3, i));
                 n = if (normals) |view| normalize(transformVector(normal_matrix, view.vec(3, i))) else .{ 0, 1, 0 };
@@ -764,6 +843,39 @@ fn splitGlb(bytes: []const u8) !struct { json: []const u8, bin: ?[]const u8 } {
     return .{ .json = json orelse return error.MissingJsonChunk, .bin = bin };
 }
 
+fn mappedJoint(name: []const u8) ?GameSkeleton.Joint {
+    for (GameAnimation.run_tracks) |track| {
+        const joint: GameSkeleton.Joint = @enumFromInt(track.joint);
+        if (matchesControllerJoint(name, joint)) return joint;
+    }
+    return null;
+}
+
+const MappedNode = struct { joint: GameSkeleton.Joint, node: u32 };
+
+fn mappedNodeJoint(doc: Doc, node_index: u32) ?MappedNode {
+    var current: ?u32 = node_index;
+    var depth: usize = 0;
+    while (current) |index| : (depth += 1) {
+        if (depth > doc.nodes.len) return null;
+        if (mappedJoint(doc.nodes[index].name orelse "")) |joint| return .{ .joint = joint, .node = index };
+        var parent: ?u32 = null;
+        for (doc.nodes, 0..) |candidate, candidate_index| {
+            for (candidate.children) |child| if (child == index) {
+                parent = @intCast(candidate_index);
+                break;
+            };
+            if (parent != null) break;
+        }
+        current = parent;
+    }
+    return null;
+}
+
+fn dot(a: [3]f32, b: [3]f32) f32 {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
 fn loadUri(arena: std.mem.Allocator, uri: []const u8, resolver: Resolver) ![]const u8 {
     if (std.mem.startsWith(u8, uri, "data:")) {
         const comma = std.mem.indexOfScalar(u8, uri, ',') orelse return error.InvalidDataUri;
@@ -859,6 +971,70 @@ test "crate source compiles to two material submeshes with expected bounds" {
     try std.testing.expectApproxEqAbs(@as(f32, -0.4), model.bounds_min[1], 0.0001);
     // Interleaved band normals decode from the strided view.
     for (model.mesh.vertices) |v| try std.testing.expectApproxEqAbs(@as(f32, 1), v.normal[0] * v.normal[0] + v.normal[1] * v.normal[1] + v.normal[2] * v.normal[2], 0.0001);
+}
+
+test "rigged GLB bakes bind geometry and retains mapped influences" {
+    const allocator = std.testing.allocator;
+    const source = try minimalSkinnedGltf(allocator);
+    defer allocator.free(source);
+    var model = try compileRigged(allocator, source, .{});
+    defer model.deinit(allocator);
+    const skin = model.skin orelse return error.TestExpectedSkin;
+    try std.testing.expectEqual(model.mesh.vertices.len, skin.vertices.len);
+    try std.testing.expectEqual(@as(usize, 1), skin.bones.len);
+    try std.testing.expectEqual(@as(u8, @intCast(@intFromEnum(GameSkeleton.Joint.upper_arm_l))), skin.bones[0].ranger_joint);
+    var weighted: usize = 0;
+    for (skin.vertices) |influence| {
+        var sum: f32 = 0;
+        for (influence.weights) |weight| sum += weight;
+        if (sum > 0.99) weighted += 1;
+    }
+    try std.testing.expectEqual(model.mesh.vertices.len, weighted);
+}
+
+test "bundled humanoid GLB imports through the retained rig path" {
+    const allocator = std.testing.allocator;
+    var model = try compileRigged(allocator, @embedFile("rigged_character.glb"), .{});
+    defer model.deinit(allocator);
+    const skin = model.skin orelse return error.TestExpectedSkin;
+    try std.testing.expectEqual(model.mesh.vertices.len, skin.vertices.len);
+    try std.testing.expect(skin.bones.len > 1);
+    try std.testing.expect(skin.bones.len <= RangerPaletteLimit);
+}
+
+const RangerPaletteLimit = 128;
+
+fn minimalSkinnedGltf(allocator: std.mem.Allocator) ![]u8 {
+    var bytes: [138]u8 = @splat(0);
+    const positions = [_]f32{ 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+    const normals = [_]f32{ 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+    for (positions, 0..) |v, i| std.mem.writeInt(u32, bytes[i * 4 ..][0..4], @bitCast(v), .little);
+    for (normals, 0..) |v, i| std.mem.writeInt(u32, bytes[36 + i * 4 ..][0..4], @bitCast(v), .little);
+    for (0..3) |i| {
+        bytes[72 + i * 4] = 0;
+        std.mem.writeInt(u32, bytes[84 + i * 16 ..][0..4], @bitCast(@as(f32, 1)), .little);
+    }
+    for (0..3) |i| std.mem.writeInt(u16, bytes[132 + i * 2 ..][0..2], @intCast(i), .little);
+
+    const encoder = std.base64.standard.Encoder;
+    var encoded: [encoder.calcSize(bytes.len)]u8 = undefined;
+    _ = encoder.encode(&encoded, &bytes);
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    try out.writer.print(
+        \\{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0,1]}}],
+        \\"nodes":[{{"name":"LeftArm"}},{{"mesh":0,"skin":0}}],"skins":[{{"joints":[0]}}],
+        \\"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":1,"JOINTS_0":2,"WEIGHTS_0":3}},"indices":4}}]}}],
+        \\"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}},
+        \\{{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}},
+        \\{{"bufferView":2,"componentType":5121,"count":3,"type":"VEC4"}},
+        \\{{"bufferView":3,"componentType":5126,"count":3,"type":"VEC4"}},
+        \\{{"bufferView":4,"componentType":5123,"count":3,"type":"SCALAR"}}],
+        \\"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":36}},
+        \\{{"buffer":0,"byteOffset":72,"byteLength":12}},{{"buffer":0,"byteOffset":84,"byteLength":48}},{{"buffer":0,"byteOffset":132,"byteLength":6}}],
+        \\"buffers":[{{"byteLength":138,"uri":"data:application/octet-stream;base64,{s}"}}]}}
+    , .{encoded});
+    return out.toOwnedSlice();
 }
 
 test "node transforms are baked and hostile inputs are rejected" {

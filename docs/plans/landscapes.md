@@ -12,7 +12,7 @@ Implemented in Zig:
 - `.pgm` assets participate in the existing sidecar flow: `zig build import` assigns/preserves GUIDs, hashes the source, and stores validated physical dimensions/elevation settings; `asset-compiler compile` checks freshness before emitting `HWMH`.
 - `HWMH` format v1 stores dimensions, physical width/depth, base elevation, relief, and little-endian samples. The decoder validates the header, settings, and bounded dimensions.
 - `procedural/Heightmap.zig` supplies centered, bilinear world-space sampling; raster row zero maps to negative Z.
-- `procedural/Landscape.zig` layers fixed-capacity smooth stamps (plateau, basin, mound, ridge), classifies wetland/meadow/forest/alpine, and chooses deterministic buildable temple pads and cave entrances/routes from a world seed.
+- `procedural/Landscape.zig` layers fixed-capacity smooth stamps (plateau, basin, mound, mountain, ridge), classifies wetland/meadow/forest/alpine, and chooses deterministic buildable temple pads and cave entrances/routes from a world seed. Mountain stamps use a sharper smooth radial profile than mounds; neither creates a discontinuity at the stamp edge.
 - `Landscape.generateChunk` meshes map-backed 128 m chunks; `Landscape.terrainSurface` uses the same shaped-height samples and the exact triangle split to return matching heights and face normals. Tests check map-edge seams and triangle-interior agreement.
 
 Example:

@@ -304,6 +304,7 @@ pub const Bake = struct {
                 @memset(model.mesh.indices[offset .. offset + 3], repeated);
             }
         }
+        model.revision +%= 1;
     }
 };
 pub const Error = error{ InvalidModifiers, SourceChanged, ComponentSetChanged, InvalidPartTransform, InvalidPartColor, OutOfMemory };

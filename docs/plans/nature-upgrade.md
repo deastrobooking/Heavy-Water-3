@@ -117,6 +117,8 @@ Purpose: make every later claim measurable.
 
 Status (2026-10-14): showcases and benchmark instrumentation are implemented. The 600-frame benchmark passes and its measurements are recorded in [validation](../validation.md). Review found showcase 71 inside a giant trunk/canopy and the original 72 dominated by oversized oval foliage. The eight streamed species now share bounded L-system skeletons; the branch/foliage split fixes green-tinted bark. The follow-up fits each species' crown to the one-unit bole, adds small foliage clusters along secondary branch tiers and terminal twigs, and moves the 72 camera farther back with a steeper view. Daylight frame-120 captures now exist for 71–73: 71 clearly shows open ground and low plants, 72 shows fuller connected crowns at mid distance, and 73 shows the terrain in daylight. The 72/73 views still show spindly giant silhouettes at distance; species shape and LOD work remain. A current 62 review, both 70 captures, frame-480 captures for 71–73, and the requested scatter-density, terrain-bounds and chunk-seam regression guards remain open.
 
+Follow-up pass (2026-10-15): the separate giant Arbor generator now grows with 448 attraction points, a 640-node cap and 8.5 m branch steps, then adds short deterministic twigs to primary and secondary limbs. Every non-trunk limb carries two broad overlapping foliage masses and terminal twigs carry six; Arbor generator version 3 migrates version-1 and version-2 saves because saves do not store Arbor node references. The isolated heightmap authoring path also has a sharper smooth mountain stamp alongside mound, basin, plateau and ridge tools. A frame-120 Metal capture confirms a fuller crown without API validation messages; foliage still reads as rounded clumps, so leaf shape and branching variation need another art pass. Tests and longer performance checks remain open.
+
 Acceptance: numbers recorded; the new tests pass on the default pair and the 0.17 channel.
 
 ### Phase 1. Terrain height: from value noise to eroded-looking relief (M)
@@ -269,7 +271,7 @@ Acceptance: capture 73 and 41 show continuous terrain to the far panorama; the b
 ### Phase 8. Living nature (S to M, repeatable)
 
 - **Wind unification**: one shared wind function and a per-frame `WindState` uniform (direction, strength, gust phase) used by trees, grass and water ripples.
-- **Weather and seasons**: rain wetness (darken and add a specular band on terrain and bark), snowfall accumulation on flat tree surfaces and ground, autumn tint on a time-of-year parameter. These are the roadmap's "snowfall and rain with the day cycle" items.
+- **Weather and seasons** (full design in [weather and seasons](weather-seasons.md)): rain wetness (darken and add a specular band on terrain and bark), snowfall accumulation on flat tree surfaces and ground, autumn tint on a time-of-year parameter. These are the roadmap's "snowfall and rain with the day cycle" items.
 - **Interaction**: footprints and wakes (roadmap Next), tree-hit shake from combat, harvest and graft animations on Arbors.
 - **Wildlife and pollinators** attach to the Phase 3 ecology fields (habitat per species).
 

@@ -127,7 +127,14 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
         } else return error.GeneratorMismatch;
     }
     if (doc.content != Catalog.content_version) return error.ContentMismatch;
-    if (doc.arbor_generator != @import("../procedural/Arbor.zig").generator_version) return error.GeneratorMismatch;
+    if (doc.arbor_generator != @import("../procedural/Arbor.zig").generator_version) {
+        if (doc.arbor_generator == 1 or doc.arbor_generator == 2) {
+            // Arbor node identities are regenerated from the world seed; saves contain no node
+            // references, so the denser crown can safely replace earlier skeletons.
+            parsed.value.arbor_generator = @import("../procedural/Arbor.zig").generator_version;
+            parsed.value.format = format_version;
+        } else return error.GeneratorMismatch;
+    }
     if (doc.bridges.len > @import("../procedural/District.zig").max_bridges) return error.InvalidSave;
     if (doc.collected.len > Modifications.capacity or doc.props.len > prop_count) return error.InvalidSave;
     for (doc.player.feet) |v| if (!finite(v)) return error.InvalidSave;

@@ -18,7 +18,7 @@ Three ways to play, braided so each feeds the others. None is a mode; the player
 
 - **Explore:** descend into the Rootdeep, climb trunks, glide between branches, and open shrines. Exploration finds blueprints, genome fragments, and parts.
 - **Engineer:** tap sap, wire machines, build and repair bridges, doors, lifts, and vehicles. Engineering opens routes and powers what exploration found.
-- **Grow:** guide the city and the trees themselves: graft new branches, plan bridge roads, raise districts. Growth creates new places to explore and new loads to engineer for.
+- **Grow:** (designed in [settlement and building](plans/settlement-building.md), with [weather and seasons](plans/weather-seasons.md)) guide the city and the trees themselves: graft new branches, plan bridge roads, raise districts. Growth creates new places to explore and new loads to engineer for.
 
 A good session moves around the loop: a shrine yields a pump blueprint, the pump powers a new lift, the lift reaches a branch where a new district can take root.
 
@@ -29,6 +29,8 @@ The game changes pace at the city gates.
 - **Inside the sanctuary cities** (the canopy districts), the pace drops to exploring. Players find upgrades, shops and tinkers, talk to people, and uncover how the Hive holds the world: the alliances it has made with scientists and with governments. Evidence found in a city points to the collaborators, and the fights outside its walls are how the party breaks their grip.
 
 **The arc:** free the cities of Earth one by one from the Hive and its human allies, and later the Colonies (Gaia and beyond, see the multi-world direction below). Each city is freed through both halves: the party clears the Hive from the wilds around it and exposes the alliance inside it.
+
+**City content budget:** every city carries three sub-missions, one boss battle and ten item discoveries. What each mission, boss and discovery is stays a per-city content decision; the first city's draft and the build plan are in [city content](plans/city-content.md).
 
 **The team:** up to four players share one world and its story. Each keeps their own saved character, gear, wallet and pets, and any of them can play as a teammate's saved ranger or as any Wildkin hero the team has met.
 

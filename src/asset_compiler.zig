@@ -11,6 +11,9 @@ const Raster = @import("character/raster.zig");
 const CharacterMath = @import("character/math.zig");
 const CharacterSpec = @import("character/spec.zig");
 const Modifiers = @import("asset/Modifiers.zig");
+const VehicleRecipe = @import("studio/VehicleRecipe.zig");
+const VehiclePreview = @import("studio/VehiclePreview.zig");
+const Designs = @import("vehicle/Designs.zig");
 const Mesh = @import("render/Mesh.zig");
 
 /// Build-time tool:
@@ -36,6 +39,10 @@ const Mesh = @import("render/Mesh.zig");
 ///   asset-compiler modifier-edit <input.json> <output.json> part <id> <property> <values...>
 ///       author one source-linked label/surface/color/scale/offset edit without replacing input
 ///       or: modifier-edit <input.json> <output.json> palette <skin|eyes|armor|energy> <r> <g> <b>
+///   asset-compiler vehicle-recipe <skimmer|dart|courier> <output.json>
+///       write a shipped hover car as a vehicle studio recipe
+///   asset-compiler vehicle-preview <skimmer|dart|courier|recipe.json> <output.png>
+///       build the car from a recipe and render a three-view review sheet with its flight numbers
 ///   asset-compiler manifest <output> (<source.meta> <name> <output-name>)...
 ///       write the asset manifest the runtime registry loads
 ///   asset-compiler import <directory>
@@ -54,6 +61,8 @@ pub fn main(init: std.process.Init) !void {
     if ((args.len == 5 or args.len == 6) and std.mem.eql(u8, args[1], "preview-bind")) return previewBind(init.gpa, io, args[2], args[3], args[4], if (args.len == 6) args[5] else "bind");
     if (args.len == 5 and std.mem.eql(u8, args[1], "modifiers")) return createModifiers(init.gpa, io, args[2], args[3], args[4]);
     if (args.len == 3 and std.mem.eql(u8, args[1], "modifier-list")) return listModifiers(init.gpa, io, args[2]);
+    if (args.len == 4 and std.mem.eql(u8, args[1], "vehicle-recipe")) return vehicleRecipeExport(init.gpa, io, args[2], args[3]);
+    if (args.len == 4 and std.mem.eql(u8, args[1], "vehicle-preview")) return vehiclePreview(init.gpa, io, args[2], args[3]);
     if (args.len == 2 and std.mem.eql(u8, args[1], "modifier-bench")) return modifierBenchmark(init.gpa, io);
     if (args.len >= 8 and std.mem.eql(u8, args[1], "modifier-edit")) return editModifiers(init.gpa, io, args[2..]);
     if ((args.len == 6 or args.len == 7) and std.mem.eql(u8, args[1], "preview-modified")) return previewModified(init.gpa, io, args[2], args[3], args[4], args[5], if (args.len == 7) args[6] else "bind");
@@ -253,6 +262,47 @@ fn writeSounds(gpa: std.mem.Allocator, io: std.Io, directory: []const u8) !void 
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.bufPrint(&name, "{s}/{s}.wav", .{ directory, @tagName(sound) }), .data = bytes });
     }
     std.log.info("sounds: {d} WAV files in {s}", .{ Synth.sound_count, directory });
+}
+
+fn designByName(name: []const u8) ?Designs.Design {
+    for (0..Designs.count) |i| {
+        const d: Designs.Design = @enumFromInt(i);
+        if (std.ascii.eqlIgnoreCase(name, Designs.name(d))) return d;
+    }
+    return null;
+}
+
+/// A shipped design name, or a recipe JSON file. Strings live in `arena`.
+fn loadVehicleRecipe(arena: std.mem.Allocator, io: std.Io, source: []const u8) !VehicleRecipe.Recipe {
+    if (designByName(source)) |d| return VehicleRecipe.fromDesign(d);
+    const bytes = try readFile(arena, io, source);
+    return VehicleRecipe.decode(arena, bytes);
+}
+
+fn vehicleRecipeExport(gpa: std.mem.Allocator, io: std.Io, design_name: []const u8, output_path: []const u8) !void {
+    const d = designByName(design_name) orelse return error.UnknownDesign;
+    const bytes = try VehicleRecipe.encode(gpa, VehicleRecipe.fromDesign(d));
+    defer gpa.free(bytes);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = bytes });
+    std.log.info("vehicle recipe for {s} -> {s}", .{ Designs.name(d), output_path });
+}
+
+fn vehiclePreview(gpa: std.mem.Allocator, io: std.Io, source: []const u8, output_path: []const u8) !void {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    const recipe = try loadVehicleRecipe(arena.allocator(), io, source);
+    var eval = try VehicleRecipe.evaluate(gpa, recipe);
+    defer eval.deinit(gpa);
+    var sheet = try VehiclePreview.renderSheet(gpa, &eval.parts, VehicleRecipe.palette(recipe));
+    defer sheet.deinit(gpa);
+    var png: std.ArrayList(u8) = .empty;
+    defer png.deinit(gpa);
+    try sheet.writePng(gpa, &png);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output_path, .data = png.items });
+    std.log.info("vehicle {s}: {d:.0} kg, lift {d:.2}x weight (needs {d:.2}), cruise thrust/weight {d:.2}, boost {d:.2}, {d} body triangles, {s} -> {s}", .{
+        recipe.name,                      eval.mass_kg,                 eval.lift_ratio, VehicleRecipe.min_lift_ratio, eval.cruise_thrust_to_weight, eval.boost_thrust_to_weight,
+        eval.body_triangles, if (eval.flyable) "flyable" else "CANNOT LIFT ITSELF", output_path,
+    });
 }
 
 fn readFile(gpa: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {

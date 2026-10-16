@@ -1,5 +1,7 @@
 # Phase 16: UDP networking
 
+**Status (2026-10-15): not planned.** The owner decided that Heavy Water is a local desktop four-player game, optimized for that, so there is no online mode on the plan. This design is kept as reference. A later exchange of player stats, objects and money with the sibling web engine is a separate, post-feature-freeze standard: see [interchange](interchange.md).
+
 **Goal:** online play for up to four players, matching the local co-op cap, on the engine's deterministic fixed step. It must stay responsive at real-world latency and loss, and every client action is validated by the host.
 
 ## Today

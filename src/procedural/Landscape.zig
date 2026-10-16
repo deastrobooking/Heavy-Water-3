@@ -10,7 +10,7 @@ const Landscape = @This();
 pub const max_stamps = 32;
 pub const cave_segments = 8;
 pub const Biome = enum { wetland, meadow, forest, alpine };
-pub const StampKind = enum { plateau, basin, mound, ridge };
+pub const StampKind = enum { plateau, basin, mound, mountain, ridge };
 pub const Stamp = struct {
     kind: StampKind,
     center: [2]f32,
@@ -40,6 +40,9 @@ pub fn height(map: Heightmap, x: f32, z: f32, stamps: []const Stamp) ?f32 {
             .plateau => y += (stamp.amount - y) * falloff,
             .basin => y -= @max(0, stamp.amount) * falloff,
             .mound, .ridge => y += stamp.amount * falloff,
+            // A mountain keeps the same smooth edge as a mound but concentrates the rise near
+            // its center, producing a sharper summit without a height discontinuity.
+            .mountain => y += stamp.amount * falloff * falloff,
         }
     }
     return y;

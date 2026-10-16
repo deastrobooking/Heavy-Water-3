@@ -1,6 +1,6 @@
 # Engine feature review: Unreal-style systems against Heavy Water
 
-**Status:** proposed, 2026-10-14. Nothing here is built. This reviews a list of Unreal-style engine features (visual scripting, an ability system, behavior trees, Nanite and Lumen equivalents, a material editor, live coding, world partition, a sequencer, a Chaos-style physics engine, animation blueprints and motion matching, and actor replication) against the game as it exists, says which fit and which do not, and orders the ones that do. The [roadmap](../roadmap.md) stays the single plan; the review of the earlier outside advice is in [alignment](alignment.md#review-of-external-advice-2026-10-01).
+**Status:** proposed, 2026-10-14; owner decisions recorded 2026-10-15 (section 8). Nothing here is built. This reviews a list of Unreal-style engine features (visual scripting, an ability system, behavior trees, Nanite and Lumen equivalents, a material editor, live coding, world partition, a sequencer, a Chaos-style physics engine, animation blueprints and motion matching, and actor replication) against the game as it exists, says which fit and which do not, and orders the ones that do. The [roadmap](../roadmap.md) stays the single plan; the review of the earlier outside advice is in [alignment](alignment.md#review-of-external-advice-2026-10-01).
 
 **Audience:** engineers and coding agents working in this repository. Each phase names the files it touches, the tests it needs and the acceptance it must meet.
 
@@ -21,7 +21,7 @@
 | 9 | Sequencer and cinematics | Fixed review cameras (`showcase`), a fly-through, audio cue plumbing, no timeline | Useful for the story chapters | **Adopt, small** ([E4](#e4-cinematic-tracks)) |
 | 10 | Deterministic physics (Chaos-class) | Native Zig physics: boxes, up to eight oriented rigid boxes, triangle meshes, vehicles, a character controller, on a deterministic 60 Hz step | Mostly done; ragdolls missing | **Adopt ragdolls only;** SIMD only if a profile asks ([E5](#e5-animation-graph-ik-and-ragdolls)) |
 | 11 | Animation blueprints, IK, motion matching | Two-bone IK and look-at (`character/ik.zig`), spring chains, a crossfading motion controller, GPU dual-quaternion skinning; phase 14 planned | Strong for the first two; motion matching needs data we lack | **Adopt phase 14 and foot IK; defer motion matching** |
-| 12 | ECS-native actor replication | A phase 16 plan: listen server, input commands, 30 Hz snapshots, prediction, interpolation | Strong, without an ECS | **Adopt the compression ideas inside phase 16** ([E8](#e8-networking-additions)) |
+| 12 | ECS-native actor replication | A phase 16 plan: listen server, input commands, 30 Hz snapshots, prediction, interpolation | Strong, without an ECS | **Not planned:** the product is a local desktop four-player game (owner decision 2026-10-15). The compression ideas stay as reference in [E8](#e8-networking-additions); a later player and asset exchange is in [interchange](interchange.md) |
 
 ## 2. Premises in the list that do not hold here
 
@@ -96,7 +96,7 @@ Order follows the MVP rules in [AGENTS.md](../../AGENTS.md): hack-and-slash dept
 
 ### E0. Prerequisites
 
-Do [next steps](next-steps.md#revised-next-steps) steps 0 and 1 first: a green suite (four failing tests) and an explicit save-format policy. Every phase below adds tests and some touch saves.
+[Next steps](next-steps.md#revised-next-steps) steps 0 and 1 are complete (2026-10-14): the suite is green (440 of 440 on the default pair and 0.17) and `Save.min_supported_format` replaces the rolling window. Every phase below adds tests, and some touch saves, so keep the one-command gate (`tools/validation_gate.py`) in every change.
 
 ### E1. Ability core: tags, attributes, effects
 
@@ -618,7 +618,7 @@ test "camera track interpolates, and events fire once across any step size" {
 
 ### E8. Networking additions
 
-**Size:** S inside phase 16. **Depends on:** [phase 16](networking.md).
+**Status:** not planned. The owner decided on 2026-10-15 that this is a local desktop four-player game, so there is no online mode to compress for; kept only as reference if that is ever reconsidered. **Size:** S inside phase 16. **Depends on:** [phase 16](networking.md).
 
 1. Quantize snapshot fields (positions to centimetres within the chunk, angles to 16 bits) and send deltas against the last acknowledged snapshot; the plan keeps packets under 1,200 bytes, so this is what lets four players and vehicles fit.
 2. Add interest management by chunk: a client receives entities within its streamer's render radius.
@@ -655,7 +655,7 @@ E0 green suite + save policy
  |-- phase 14 --> E5 animation graph, foot IK, ragdolls
  |-- phase 15 + nature Phase 7 --> E6 authored cells, far field
  |-- mesh editor M4 + nature materials --> E7 material data
- `-- phase 16 --> E8 networking additions
+ `-- (phase 16 not planned) E8 networking additions, reference only
 ```
 
 E1 and E2 are the highest value for the MVP (per-player loot and readable fights). E3 and E4 serve the city exploration and story half. E5 to E8 ride on the engine phases already planned. The MVP gate in [next steps](next-steps.md#revised-next-steps) (milestone B) still has no content; none of these phases replaces it, so time-box them against it.
@@ -668,13 +668,21 @@ E1 and E2 are the highest value for the MVP (per-player loot and readable fights
 - **Saves:** E1's loot affixes and E4's flags change saves; each bumps the format with a migration and a round-trip test. Effects, trees and graphs run on data that is already saved or rebuilt at load.
 - **Mods:** abilities, trees, graphs and materials become Mod API 2 candidates once their formats are stable; validate them with the same file-and-key error reports as character content.
 
-## 8. Decisions for the project owner
+## 8. Decisions
 
-1. **Priority:** whether E1 and E2 (loot affixes and enemy roles) go ahead of the nature and mesh-editor tracks, given the MVP gate.
-2. **Ability scope:** whether hero powers move wholesale onto the effect core, or only new content does.
-3. **Graph authoring:** whether machine builders get a graph panel (E3 step 5) or WebAssembly remains the only way beyond simple circuits.
-4. **Cinematics:** how many authored sequences the first city needs, which sets how much editor UI (E4 step 6) is worth building.
-5. **Ragdolls:** whether defeats should ragdoll (E5) or keep the current reactions.
+Recorded from the owner's reply of 2026-10-15. The reply was not numbered like the questions that were asked, so each answer is mapped by its content; correct any mapping that is wrong.
+
+| Topic | Decision | Effect on this plan |
+| --- | --- | --- |
+| Priority | The ability core (E1) and behavior trees (E2) go first. | Do them right after E0, ahead of the nature and mesh-editor tracks. |
+| Tools | The mesh editor grows into specialized asset studios for characters, vehicles, nature and cities, with touch and pen drawing, node-based reusable design and automation. | New plan: [asset studio](asset-studio.md). Graph authoring (E3 step 5) is yes, as a node view that is hidden by default behind cards and sliders. |
+| Product scope | A local desktop four-player game. A separate web game engine exists; exchanging objects, money, characters and stats comes after feature freeze. | E8 (networking) is not planned. See [interchange](interchange.md). Keep per-player documents separable and ids stable. |
+| City content | Each city has 3 sub-missions, 1 boss battle and 10 item discoveries. | Sizes E4 and the milestone B acceptance ([next steps](next-steps.md), [world](../world.md)). A rough sequence budget per city: an opening and an outcome beat for each sub-mission (6), a boss introduction and defeat (2) and a liberation finale (1), about nine short sequences; the ten discoveries need only a pickup banner. This sizing is mine, not the owner's. |
+| Ability scope | Not answered. Default taken: new content is built on the effect core, and existing powers move over one mechanic family at a time (E1 step 4). | Change it if you want a wholesale move, or none. |
+| Ragdolls | The question was not understood (explained below). No decision. Default: defer. | E5 step 3 stays optional. |
+| A trailing "3." in the reply | Read as an unfinished or duplicated item. | Say if it meant something else. |
+
+**What a ragdoll is, in plain words.** Today, when an enemy or a player is defeated, a prepared animation plays (a fall or a flinch). A *ragdoll* instead hands the body to the physics engine for a moment, so the limbs go limp and tumble: knocked off a ledge, the body falls and flops; hit by a big attack, it flies and lands differently each time. It makes defeats feel weighty and varied, for a modest cost in work. The choice is only: keep the prepared defeat animations, or add ragdolls. Recommendation: add them for enemy defeats only, after the ability core and behavior trees, and only if combat still feels flat.
 
 ## 9. Reference
 

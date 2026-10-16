@@ -14,6 +14,7 @@ const GpuMesh = @import("GpuMesh.zig");
 const Instance = @import("StreamingScene.zig").Instance;
 const R = @import("../physics/Rotation.zig");
 const FrameStats = @import("../engine/FrameStats.zig");
+const Model = @import("../asset/Model.zig");
 const Characters = @This();
 /// A character's static GPU-skinned mesh.
 pub const SkinnedMesh = struct {
@@ -36,6 +37,9 @@ pub const cel_stride = std.mem.alignForward(usize, CelStyle.table_bytes, 256);
 const CelKey = struct { style: usize, debug: u8 };
 const Slot = struct {
     ranger: Ranger,
+    imported_model: ?*const Model = null,
+    imported_generation: u16 = 0,
+    imported_revision: u64 = 0,
     gpu_mesh: ?GpuMesh = null,
     skinned: ?SkinnedMesh = null,
     /// The player's own cel style from a mod, validated when the character was built.
@@ -73,27 +77,29 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
         const descriptor = prop.character orelse continue;
         const i = descriptor.id;
         if (i >= Ranger.capacity or !visible_ids[i]) continue;
+        if (descriptor.imported_model != null and self.skinning == null) return error.ImportedRigRequiresGpuSkinning;
         var upload_vertices = false;
-        if (self.slots[i] == null or !Ranger.sameAppearance(self.slots[i].?.ranger.profile, descriptor.profile) or self.contentChanged(&self.slots[i].?, descriptor.profile)) {
+        if (self.slots[i] == null or !Ranger.sameAppearance(self.slots[i].?.ranger.profile, descriptor.profile) or self.slots[i].?.imported_model != descriptor.imported_model or self.slots[i].?.imported_generation != descriptor.imported_generation or self.slots[i].?.imported_revision != descriptor.imported_revision or self.contentChanged(&self.slots[i].?, descriptor.profile)) {
             // Finish the replacement before releasing the live appearance.
             var ranger = try Ranger.initContent(a, descriptor.profile, self.content);
             errdefer ranger.deinit(a);
-            var next: Slot = .{ .ranger = ranger };
+            var next: Slot = .{ .ranger = ranger, .imported_model = descriptor.imported_model, .imported_generation = descriptor.imported_generation, .imported_revision = descriptor.imported_revision };
             if (Ranger.modCelStyle(descriptor.profile, self.content)) |style| {
                 const owned = try a.create(CelStyle.CelStyle);
                 owned.* = style;
                 next.cel = owned;
             }
             errdefer if (next.cel) |c| a.destroy(c);
-            if (self.skinning != null and ranger.gpuSkinnable()) {
-                const vertices = try ranger.skinnedVertices(a);
+            if (self.skinning != null and (descriptor.imported_model != null or ranger.gpuSkinnable())) {
+                const vertices = if (descriptor.imported_model) |model| try importedVertices(a, model) else try ranger.skinnedVertices(a);
                 defer a.free(vertices);
                 const bytes = std.mem.sliceAsBytes(vertices);
                 const vb = device.createBuffer(&.{ .label = "skinned character vertices", .size = bytes.len, .usage = .{ .vertex = true, .copy_dst = true } });
-                const ib = device.createBuffer(&.{ .label = "skinned character indices", .size = ranger.mesh.indices.len * 4, .usage = .{ .index = true, .copy_dst = true } });
+                const indices = if (descriptor.imported_model) |model| model.mesh.indices else ranger.mesh.indices;
+                const ib = device.createBuffer(&.{ .label = "skinned character indices", .size = indices.len * 4, .usage = .{ .index = true, .copy_dst = true } });
                 encoder.writeBuffer(vb, 0, vertices);
-                encoder.writeBuffer(ib, 0, ranger.mesh.indices);
-                next.skinned = .{ .vertices = vb, .indices = ib, .vertex_bytes = bytes.len, .index_count = @intCast(ranger.mesh.indices.len) };
+                encoder.writeBuffer(ib, 0, indices);
+                next.skinned = .{ .vertices = vb, .indices = ib, .vertex_bytes = bytes.len, .index_count = @intCast(indices.len) };
                 // The palette is written for the first pose below, whatever it is.
                 next.ranger.last_pose = null;
             } else {
@@ -112,7 +118,22 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
             // GPU path: only the joint palette changes.
             var palette: Ranger.Palette = undefined;
             if (slot.ranger.posePalette(descriptor.pose, &palette)) {
-                const joints = slot.ranger.character.skeleton.count();
+                const joints: usize = if (descriptor.imported_model) |model| blk: {
+                    const skin = model.skin orelse return error.ImportedRigMissing;
+                    const ranger_palette = palette;
+                    const rest = slot.ranger.character.skeleton.rest_world.items;
+                    // The game's palette rotates about the game's joints, in metres; the imported
+                    // mesh is in its own units, scaled up afterwards by `imported_scale`.
+                    const unit = 1 / descriptor.imported_scale;
+                    for (skin.bones, 0..) |bone, bone_index| {
+                        const source = @as(usize, bone.ranger_joint) * 2;
+                        const r = rest[bone.ranger_joint];
+                        const posed = Model.retargetBone(bone, .{ r.x, r.y, r.z }, ranger_palette[source], ranger_palette[source + 1], unit);
+                        palette[bone_index * 2] = posed.real;
+                        palette[bone_index * 2 + 1] = posed.dual;
+                    }
+                    break :blk skin.bones.len;
+                } else slot.ranger.character.skeleton.count();
                 encoder.writeBuffer(self.skinning.?.palette, @as(u64, i) * Ranger.palette_bytes, palette[0 .. joints * 2]);
             }
         } else {
@@ -122,12 +143,46 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
         if (upload_vertices) if (slot.gpu_mesh) |m| encoder.writeBuffer(m.vertices, 0, slot.ranger.mesh.vertices);
         self.visible[i] = true;
         self.owners[i] = prop.owner;
-        transforms[i] = .{ .translation_scale = descriptor.pose.feet ++ [_]f32{1}, .tint = .{ 1, 1, 1, 1 }, .rotation = R.axisAngle(.{ 0, 1, 0 }, descriptor.pose.yaw) };
+        const imported_scale: f32 = if (descriptor.imported_model != null) descriptor.imported_scale else 1;
+        const ground_offset: f32 = if (descriptor.imported_model) |model| -model.bounds_min[1] * imported_scale else 0;
+        transforms[i] = .{ .translation_scale = .{ descriptor.pose.feet[0], descriptor.pose.feet[1] + ground_offset, descriptor.pose.feet[2], imported_scale }, .tint = .{ 1, 1, 1, 1 }, .rotation = R.axisAngle(.{ 0, 1, 0 }, descriptor.pose.yaw) };
     }
     if (self.instances == null) self.instances = device.createBuffer(&.{ .label = "character transforms", .size = @sizeOf(@TypeOf(transforms)), .usage = .{ .vertex = true, .copy_dst = true } });
     encoder.writeBuffer(self.instances.?, 0, &transforms);
     if (skin_times) |stats| stats.record(@as(f32, @floatFromInt(skin_ns)) / 1_000_000);
 }
+
+fn importedVertices(a: std.mem.Allocator, model: *const Model) ![]Ranger.SkinnedVertex {
+    const skin = model.skin orelse return error.ImportedRigMissing;
+    if (skin.vertices.len != model.mesh.vertices.len or skin.bones.len == 0 or skin.bones.len > Ranger.max_palette_joints) return error.ImportedRigInvalid;
+    const vertices = try a.alloc(Ranger.SkinnedVertex, model.mesh.vertices.len);
+    for (vertices, model.mesh.vertices, skin.vertices) |*out, source, influence| {
+        out.* = .{
+            .position = source.position,
+            .normal = source.normal,
+            .color = source.color,
+            .joints = influence.joints,
+            .weights = influence.weights,
+            .kind = .{ 0, 0, 0, 0 },
+            .face_uv = .{ -1, -1 },
+            .eye_geometry = .{ 0.14, 0.56, 0.025, 1 },
+            .eye_style = .{ 0, 0.5, 2, 0 },
+            .eye_iris = .{ 0.16, 0.12, 0.1, 1 },
+            .eye_shadow = .{ 0.08, 0.06, 0.05, 1 },
+        };
+    }
+    for (model.submeshes) |submesh| {
+        const color = model.materials[submesh.material].base_color;
+        const first: usize = @intCast(submesh.first_index);
+        const end: usize = first + @as(usize, @intCast(submesh.index_count));
+        for (model.mesh.indices[first..end]) |vertex_index| {
+            const vertex = &vertices[vertex_index];
+            for (0..3) |channel| vertex.color[channel] *= color[channel];
+        }
+    }
+    return vertices;
+}
+
 /// Whether mod content arrived since `slot` was built and its profile asked for some.
 fn contentChanged(self: *const Characters, slot: *const Slot, profile: @TypeOf(slot.ranger.profile)) bool {
     const registry = self.content orelse return false;
