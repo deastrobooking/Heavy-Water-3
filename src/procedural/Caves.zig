@@ -369,12 +369,47 @@ const Grid = struct {
     }
 };
 
-/// Rock colour: dark, banded with depth, lighter on floors.
-fn rockColor(sys: *const System, p: V, up: f32) [3]f32 {
-    const n = noise3(sys.noise ^ 0x434f4c, p[0] * 0.08, p[1] * 0.25, p[2] * 0.08);
-    const base: [3]f32 = .{ 0.24 + n * 0.08, 0.22 + n * 0.06, 0.21 + n * 0.05 };
-    const floor = std.math.clamp((up - 0.5) * 2, 0, 1);
-    return .{ base[0] + floor * 0.1, base[1] + floor * 0.07, base[2] + floor * 0.04 };
+/// The glow colour of a system's mineral veins and crystals (shared with the crystals' hues in
+/// the game's cave dressing, so a cave reads as one place).
+pub fn veinHue(index: u8) [3]f32 {
+    const hues = [_][3]f32{ .{ 0.35, 0.9, 1 }, .{ 0.75, 0.45, 1 }, .{ 0.45, 1, 0.6 }, .{ 1, 0.7, 0.35 } };
+    return hues[index % hues.len];
+}
+
+/// How walled-in a rock point is, from 0 (open) to 1 (a crevice): the cave field sampled out
+/// along the surface normal, which is the distance to the next wall.
+fn occlusion(sys: *const System, p: V, normal: V) f32 {
+    var closed: f32 = 0;
+    const reaches = [3]f32{ 1.2, 2.6, 4.6 };
+    for (reaches) |reach| {
+        const free = caveDistance(sys, add(p, scale(normal, reach)));
+        closed += 1 - std.math.clamp(free / reach, 0, 1);
+    }
+    return closed / reaches.len;
+}
+
+/// Rock colour baked into the cave mesh: layered strata of warm sandstone over dark slate, dusty
+/// floors, glowing mineral veins in the cave's own hue, and darker crevices.
+fn rockColor(sys: *const System, hue: [3]f32, p: V, normal: V) [3]f32 {
+    const strata_noise = noise3(sys.noise ^ 0x535452, p[0] * 0.05, p[1] * 0.12, p[2] * 0.05);
+    const band = 0.5 + 0.5 * @sin(p[1] * 0.85 + strata_noise * 5.0);
+    const warm: [3]f32 = .{ 0.36, 0.3, 0.24 };
+    const slate: [3]f32 = .{ 0.16, 0.17, 0.2 };
+    var color: V = .{ slate[0] + (warm[0] - slate[0]) * band, slate[1] + (warm[1] - slate[1]) * band, slate[2] + (warm[2] - slate[2]) * band };
+    // Floors gather pale dust, with a mottled edge.
+    const dust_noise = noise3(sys.noise ^ 0x445553, p[0] * 0.3, p[1] * 0.3, p[2] * 0.3);
+    const floor = std.math.clamp((normal[1] - 0.55) * 2.2, 0, 1) * (0.55 + 0.45 * dust_noise);
+    const dust: [3]f32 = .{ 0.46, 0.4, 0.31 };
+    for (0..3) |a| color[a] += (dust[a] - color[a]) * floor;
+    // Crevices and corners are darker; open faces keep their colour.
+    const shade = 1 - 0.55 * occlusion(sys, p, normal);
+    for (0..3) |a| color[a] *= shade;
+    // Veins: thin ridges of a second noise field, steepest on walls, glowing in the cave's hue.
+    const ridge = @abs(noise3(sys.noise ^ 0x5645494e, p[0] * 0.33, p[1] * 0.33, p[2] * 0.33) - 0.5);
+    const wall = 1 - std.math.clamp((normal[1] - 0.2) * 2, 0, 1);
+    const vein = std.math.clamp(1 - ridge / 0.028, 0, 1) * wall;
+    for (0..3) |a| color[a] += (hue[a] * 1.15 - color[a]) * vein;
+    return color;
 }
 
 /// The rock surface of system `index`, in world coordinates. The caller owns the mesh.
@@ -472,7 +507,7 @@ pub fn mesh(allocator: std.mem.Allocator, caves: *const Layout, index: u8) !Mesh
         const normal: V = .{ -gx / gl, -gy / gl, -gz / gl };
         // The cave's own walls in rock colours; where the mesh stands in for open terrain, the
         // terrain's colours.
-        const color = if (caveDistance(sys, p) < ground - p[1]) rockColor(sys, p, normal[1]) else Biome.terrainColor(seed, p[0], p[2], ground, @sqrt(normal[0] * normal[0] + normal[2] * normal[2]) / @max(0.05, normal[1]));
+        const color = if (caveDistance(sys, p) < ground - p[1]) rockColor(sys, veinHue(index), p, normal) else Biome.terrainColor(seed, p[0], p[2], ground, @sqrt(normal[0] * normal[0] + normal[2] * normal[2]) / @max(0.05, normal[1]));
         vertex_of[(k * cells[1] + j) * cells[0] + i] = @intCast(vertices.items.len);
         try vertices.append(allocator, .{ .position = p, .normal = normal, .uv = .{ p[0] / 4, p[2] / 4 + p[1] / 4 }, .color = color });
     };
@@ -605,6 +640,45 @@ test "a cave mesh is closed around its air, faces into it, and carries floors to
         const up = solid.raycast(.{ r.center[0], r.floor + 1, r.center[2] }, .{ 0, 1, 0 }, 30) orelse return error.NoCeiling;
         try std.testing.expect(up.normal[1] < 0);
     }
+}
+
+test "cave rock is banded, dusty on floors, darker in crevices, and veined in the cave's hue" {
+    const seed: u64 = 0x4845415659;
+    const caves = layout(seed);
+    const m = try mesh(std.testing.allocator, &caves, 0);
+    defer m.deinit(std.testing.allocator);
+    const hue = veinHue(0);
+    var veined: usize = 0;
+    var lo: f32 = 10;
+    var hi: f32 = 0;
+    var floor_sum: f32 = 0;
+    var floor_n: f32 = 0;
+    var wall_sum: f32 = 0;
+    var wall_n: f32 = 0;
+    for (m.vertices) |vtx| {
+        const sys = &caves.systems[0];
+        // Only the cave's own rock: skip vertices standing in for open terrain.
+        const ground = terrain(seed, vtx.position[0], vtx.position[2]);
+        if (caveDistance(sys, vtx.position) >= ground - vtx.position[1]) continue;
+        const lum = (vtx.color[0] + vtx.color[1] + vtx.color[2]) / 3;
+        for (vtx.color) |c| try std.testing.expect(std.math.isFinite(c) and c >= 0 and c <= 1.3);
+        lo = @min(lo, lum);
+        hi = @max(hi, lum);
+        // A vein is close to the hue and much brighter than plain rock.
+        if (vtx.color[0] * 1.0 > hue[0] * 0.8 and vtx.color[1] > hue[1] * 0.8 and vtx.color[2] > hue[2] * 0.8) veined += 1;
+        if (vtx.normal[1] > 0.8) {
+            floor_sum += lum;
+            floor_n += 1;
+        } else if (@abs(vtx.normal[1]) < 0.4) {
+            wall_sum += lum;
+            wall_n += 1;
+        }
+    }
+    try std.testing.expect(veined > 20 and veined * 4 < m.vertices.len);
+    try std.testing.expect(hi - lo > 0.4);
+    // Dusty floors are lighter than the walls above them.
+    try std.testing.expect(floor_n > 100 and wall_n > 100);
+    try std.testing.expect(floor_sum / floor_n > wall_sum / wall_n);
 }
 
 test "where the heightfield opens over a cave, the cave mesh carries the ground" {

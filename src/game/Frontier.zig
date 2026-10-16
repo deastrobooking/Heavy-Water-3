@@ -2177,8 +2177,7 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
         }
         if (d > 160) continue;
         // Crystals cluster around each chamber's walls, in the system's hue.
-        const hues = [_][3]f32{ .{ 0.35, 0.9, 1 }, .{ 0.75, 0.45, 1 }, .{ 0.45, 1, 0.6 }, .{ 1, 0.7, 0.35 } };
-        const hue = hues[i % hues.len];
+        const hue = Caves.veinHue(@intCast(i));
         for (sys.rooms[0..sys.room_count], 0..) |room, r| {
             if (room.role == .cache and n + 2 <= out.len) {
                 const parent = sys.rooms[room.parent];
