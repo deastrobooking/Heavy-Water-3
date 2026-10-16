@@ -125,12 +125,22 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
                     // The game's palette rotates about the game's joints, in metres; the imported
                     // mesh is in its own units, scaled up afterwards by `imported_scale`.
                     const unit = 1 / descriptor.imported_scale;
-                    for (skin.bones, 0..) |bone, bone_index| {
-                        const source = @as(usize, bone.ranger_joint) * 2;
-                        const r = rest[bone.ranger_joint];
-                        const posed = Model.retargetBone(bone, .{ r.x, r.y, r.z }, ranger_palette[source], ranger_palette[source + 1], unit);
-                        palette[bone_index * 2] = posed.real;
-                        palette[bone_index * 2 + 1] = posed.dual;
+                    if (skin.legacy_bind) |legacy| {
+                        if (legacy.len != skin.bones.len) return error.ImportedRigInvalid;
+                        for (skin.bones, legacy, 0..) |bone, bind, bone_index| {
+                            const source = @as(usize, bone.ranger_joint) * 2;
+                            const posed = Model.retargetLegacyBone(bind, ranger_palette[source], ranger_palette[source + 1]);
+                            palette[bone_index * 2] = posed.real;
+                            palette[bone_index * 2 + 1] = posed.dual;
+                        }
+                    } else {
+                        for (skin.bones, 0..) |bone, bone_index| {
+                            const source = @as(usize, bone.ranger_joint) * 2;
+                            const r = rest[bone.ranger_joint];
+                            const posed = Model.retargetBone(bone, .{ r.x, r.y, r.z }, ranger_palette[source], ranger_palette[source + 1], unit);
+                            palette[bone_index * 2] = posed.real;
+                            palette[bone_index * 2 + 1] = posed.dual;
+                        }
                     }
                     break :blk skin.bones.len;
                 } else slot.ranger.character.skeleton.count();
@@ -154,7 +164,7 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
 
 fn importedVertices(a: std.mem.Allocator, model: *const Model) ![]Ranger.SkinnedVertex {
     const skin = model.skin orelse return error.ImportedRigMissing;
-    if (skin.vertices.len != model.mesh.vertices.len or skin.bones.len == 0 or skin.bones.len > Ranger.max_palette_joints) return error.ImportedRigInvalid;
+    if (skin.vertices.len != model.mesh.vertices.len or skin.bones.len == 0 or skin.bones.len > Ranger.max_palette_joints or (skin.legacy_bind != null and skin.legacy_bind.?.len != skin.bones.len)) return error.ImportedRigInvalid;
     const vertices = try a.alloc(Ranger.SkinnedVertex, model.mesh.vertices.len);
     for (vertices, model.mesh.vertices, skin.vertices) |*out, source, influence| {
         out.* = .{

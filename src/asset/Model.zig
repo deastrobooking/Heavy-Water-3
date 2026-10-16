@@ -6,8 +6,8 @@ const Model = @This();
 ///   magic "HWMS", format u32, vertex_stride u32, vertex_count u32, index_count u32,
 ///   submesh_count u32, material_count u32, bounds_min [3]f32, bounds_max [3]f32,
 ///   materials { base_color [4]f32, name [24]u8 }, submeshes { first_index u32, index_count u32, material u32 },
-///   vertices, indices; v2 adds skin-bone count, per-vertex four influences, and bone palettes.
-/// The decoder retains v1 compatibility; writers emit the current version.
+///   vertices, indices; v2 adds skin count, per-vertex influences, and 36-byte bind-DQ bones;
+///   v3 uses the same influences with 16-byte Ranger-pivot bones. The decoder retains v1/v2.
 pub const magic = "HWMS";
 pub const format_version: u32 = 3;
 pub const max_vertices = 1 << 20;
@@ -40,11 +40,22 @@ skin: ?Skin = null,
 revision: u64 = 0,
 
 pub const SkinVertex = extern struct { joints: [4]u8, weights: [4]f32 };
+/// HWMS v2 stored the source bind correction instead of the source pivot.
+pub const LegacySkinBone = extern struct { real: [4]f32, dual: [4]f32 };
 /// One imported joint. `ranger_joint` is the game joint whose pose drives it; `pivot` is where that
 /// motion rotates, in model space (the bind position of the matched source joint).
 pub const SkinBone = extern struct { ranger_joint: u8, padding: [3]u8 = .{ 0, 0, 0 }, pivot: [3]f32 };
 /// A unit dual quaternion as the skinning palette stores it: rotation, then half-translation times rotation.
 pub const BonePose = struct { real: [4]f32, dual: [4]f32 };
+
+pub fn retargetLegacyBone(bind: LegacySkinBone, real: [4]f32, dual: [4]f32) BonePose {
+    const real_dual = quatMul(real, bind.dual);
+    const dual_real = quatMul(dual, bind.real);
+    return .{
+        .real = quatMul(real, bind.real),
+        .dual = .{ real_dual[0] + dual_real[0], real_dual[1] + dual_real[1], real_dual[2] + dual_real[2], real_dual[3] + dual_real[3] },
+    };
+}
 
 fn quatMul(a: [4]f32, b: [4]f32) [4]f32 {
     return .{
@@ -80,12 +91,13 @@ pub fn retargetBone(bone: SkinBone, rest: [3]f32, real: [4]f32, dual: [4]f32, un
     return .{ .real = real, .dual = .{ d[0] * 0.5, d[1] * 0.5, d[2] * 0.5, d[3] * 0.5 } };
 }
 
-pub const Skin = struct { vertices: []SkinVertex, bones: []SkinBone };
+pub const Skin = struct { vertices: []SkinVertex, bones: []SkinBone, legacy_bind: ?[]LegacySkinBone = null };
 
 pub fn deinit(self: Model, allocator: std.mem.Allocator) void {
     if (self.skin) |skin| {
         allocator.free(skin.vertices);
         allocator.free(skin.bones);
+        if (skin.legacy_bind) |legacy| allocator.free(legacy);
     }
     allocator.free(self.materials);
     allocator.free(self.submeshes);
@@ -105,7 +117,9 @@ pub fn clone(allocator: std.mem.Allocator, source: Model) !Model {
         const influences = try allocator.dupe(SkinVertex, source_skin.vertices);
         errdefer allocator.free(influences);
         const bones = try allocator.dupe(SkinBone, source_skin.bones);
-        break :blk .{ .vertices = influences, .bones = bones };
+        errdefer allocator.free(bones);
+        const legacy_bind: ?[]LegacySkinBone = if (source_skin.legacy_bind) |source_legacy| try allocator.dupe(LegacySkinBone, source_legacy) else null;
+        break :blk .{ .vertices = influences, .bones = bones, .legacy_bind = legacy_bind };
     } else null;
     return .{
         .mesh = .{ .vertices = vertices, .indices = indices },
@@ -148,6 +162,7 @@ pub fn halfExtents(self: Model) [3]f32 {
 
 pub fn encode(self: Model, allocator: std.mem.Allocator) ![]u8 {
     if (self.skin) |skin| {
+        if (skin.legacy_bind != null) return error.LegacySkinNeedsReimport;
         if (skin.bones.len == 0 or skin.bones.len > 128 or skin.vertices.len != self.mesh.vertices.len) return error.InvalidSkinData;
         for (skin.vertices) |influence| {
             var sum: f32 = 0;
@@ -228,7 +243,8 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Model
     for (&result.bounds_max) |*v| v.* = try r.float();
     const bone_count = if (version >= 2) try r.int() else 0;
     if (bone_count > 128) return error.TooLarge;
-    const expected = header_bytes + (if (version >= 2) @as(usize, 4) else 0) + material_count * (16 + name_len) + submesh_count * 12 + vertex_count * @sizeOf(Mesh.Vertex) + index_count * 4 + (if (bone_count > 0) vertex_count * 20 + bone_count * 16 else 0);
+    const bone_stride: usize = if (version == 2) 36 else 16;
+    const expected = header_bytes + (if (version >= 2) @as(usize, 4) else 0) + material_count * (16 + name_len) + submesh_count * 12 + vertex_count * @sizeOf(Mesh.Vertex) + index_count * 4 + (if (bone_count > 0) vertex_count * 20 + bone_count * bone_stride else 0);
     if (bytes.len < expected) return error.Truncated;
     if (bytes.len > expected) return error.TrailingBytes;
 
@@ -284,14 +300,22 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Model
         }
         const bones = try allocator.alloc(SkinBone, bone_count);
         errdefer allocator.free(bones);
-        for (bones) |*bone| {
+        const legacy_bind: ?[]LegacySkinBone = if (version == 2) try allocator.alloc(LegacySkinBone, bone_count) else null;
+        errdefer if (legacy_bind) |legacy| allocator.free(legacy);
+        for (bones, 0..) |*bone, bone_index| {
             bone.ranger_joint = bytes[r.at];
             @memcpy(&bone.padding, bytes[r.at + 1 ..][0..3]);
             r.at += 4;
             if (bone.ranger_joint >= 64) return error.InvalidJoint;
-            for (&bone.pivot) |*v| v.* = try r.float();
+            if (legacy_bind) |legacy| {
+                for (&legacy[bone_index].real) |*v| v.* = try r.float();
+                for (&legacy[bone_index].dual) |*v| v.* = try r.float();
+                bone.pivot = .{ 0, 0, 0 };
+            } else {
+                for (&bone.pivot) |*v| v.* = try r.float();
+            }
         }
-        skin = .{ .vertices = influences, .bones = bones };
+        skin = .{ .vertices = influences, .bones = bones, .legacy_bind = legacy_bind };
     }
     result.mesh = .{ .vertices = vertices, .indices = indices };
     result.submeshes = submeshes;
@@ -374,12 +398,24 @@ test "HWMS v3 round-trips retained influences and older fixtures remain readable
     try std.testing.expectEqualDeep(model.skin.?, decoded.skin.?);
     try std.testing.expectEqual(@as(u8, 3), decoded.skin.?.bones[0].ranger_joint);
 
-    const v2_bytes = try a.dupe(u8, bytes);
+    // HWMS v2 used a 36-byte source-bind DQ per bone; construct that real legacy layout.
+    const v2_bytes = try a.alloc(u8, bytes.len + 20);
     defer a.free(v2_bytes);
+    const bone_at = bytes.len - 16;
+    @memcpy(v2_bytes[0..bone_at], bytes[0..bone_at]);
+    @memcpy(v2_bytes[bone_at .. bone_at + 4], bytes[bone_at .. bone_at + 4]);
+    var v2_at = bone_at + 4;
+    const old_bind = [8]f32{ 0, 0, 0, 1, 0.5, 0, 0, 0 };
+    for (old_bind) |value| {
+        std.mem.writeInt(u32, v2_bytes[v2_at..][0..4], @bitCast(value), .little);
+        v2_at += 4;
+    }
     std.mem.writeInt(u32, v2_bytes[4..8], 2, .little);
     const v2 = try decode(a, v2_bytes);
     defer v2.deinit(a);
-    try std.testing.expectEqualDeep(model.skin.?, v2.skin.?);
+    try std.testing.expectEqual(@as(usize, 1), v2.skin.?.legacy_bind.?.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), v2.skin.?.legacy_bind.?[0].dual[0], 1e-6);
+    try std.testing.expectError(error.LegacySkinNeedsReimport, v2.encode(a));
 
     // A v1 file is the old static payload, without a skin-count word.
     var static_model = try fromMesh(a, try Mesh.cube(a), .{});

@@ -479,6 +479,14 @@ fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: R
     for (roots) |root| try builder.visit(root, identity, 0);
     if (builder.indices.items.len == 0) return error.NoTriangles;
     if (builder.vertices.items.len > Model.max_vertices) return error.TooLarge;
+    if (builder.has_static_rig_vertices) {
+        if (builder.rig_bones.items.len >= 128) return error.TooManyJoints;
+        const root_bone: u8 = @intCast(builder.rig_bones.items.len);
+        try builder.rig_bones.append(arena, .{ .ranger_joint = @intCast(@intFromEnum(GameSkeleton.Joint.root)), .pivot = .{ 0, 0, 0 } });
+        for (builder.rig_vertices.items) |*influence| if (influence.joints[0] == 255) {
+            influence.* = .{ .joints = .{ root_bone, 0, 0, 0 }, .weights = .{ 1, 0, 0, 0 } };
+        };
+    }
 
     // Only the final owned arrays leave the arena.
     const vertices = try allocator.dupe(Mesh.Vertex, builder.vertices.items);
@@ -490,7 +498,7 @@ fn compileFiltered(allocator: std.mem.Allocator, source: []const u8, resolver: R
     const materials = try allocator.dupe(Model.Material, builder.materials.items);
     var skin: ?Model.Skin = null;
     if (retain_rig) {
-        if (builder.rig_bones.items.len == 0 or builder.rig_vertices.items.len != vertices.len) return error.CharacterNeedsSkin;
+        if (builder.rig_skin == null or builder.rig_bones.items.len == 0 or builder.rig_vertices.items.len != vertices.len) return error.CharacterNeedsSkin;
         const rig_vertices = try allocator.dupe(Model.SkinVertex, builder.rig_vertices.items);
         errdefer allocator.free(rig_vertices);
         const rig_bones = try allocator.dupe(Model.SkinBone, builder.rig_bones.items);
@@ -521,6 +529,7 @@ const Builder = struct {
     rig_skin: ?u32 = null,
     rig_vertices: std.ArrayList(Model.SkinVertex) = .empty,
     rig_bones: std.ArrayList(Model.SkinBone) = .empty,
+    has_static_rig_vertices: bool = false,
     rig_bounds_min: [3]f32 = @splat(std.math.inf(f32)),
     rig_bounds_max: [3]f32 = @splat(-std.math.inf(f32)),
     node_world: []const Mat,
@@ -551,28 +560,33 @@ const Builder = struct {
         const uvs: ?View = if (p.attributes.TEXCOORD_0) |t| try self.accessor(t, "VEC2") else null;
         const skin_mats: ?[]const Mat = if (skin_index) |i| if (self.allow_skin_preview) try self.skinMatrices(i) else return error.SkinsUnsupported else null;
         const joints: ?View = if (p.attributes.JOINTS_0) |j| try self.accessor(j, "VEC4") else null;
-        const weights: ?View = if (p.attributes.WEIGHTS_0) |w| try self.accessor(w, "VEC4") else null;
+        const weights: ?View = if (p.attributes.WEIGHTS_0) |w| try self.accessorAllowNormalized(w, "VEC4") else null;
         if ((normals != null and normals.?.count != positions.count) or (uvs != null and uvs.?.count != positions.count)) return error.AttributeCountMismatch;
         if (skin_mats != null and (joints == null or weights == null)) return error.MissingSkinAttributes;
         if ((joints != null and joints.?.count != positions.count) or (weights != null and weights.?.count != positions.count)) return error.AttributeCountMismatch;
         if (positions.component != 5126 or (normals != null and normals.?.component != 5126)) return error.UnsupportedComponentType;
         if (uvs) |u| if (u.component != 5126) return error.UnsupportedComponentType;
-        if (skin_mats != null and (weights.?.component != 5126 or (joints.?.component != 5121 and joints.?.component != 5123))) return error.UnsupportedSkinComponentType;
+        if (skin_mats != null) {
+            const weight_format_ok = (weights.?.component == 5126 and !weights.?.normalized) or ((weights.?.component == 5121 or weights.?.component == 5123) and weights.?.normalized);
+            const joint_format_ok = joints.?.component == 5121 or joints.?.component == 5123;
+            if (!weight_format_ok or !joint_format_ok) return error.UnsupportedSkinComponentType;
+        }
         if (self.retain_rig) {
-            const skin_id = skin_index orelse return error.CharacterNeedsSkin;
-            if (self.rig_skin) |previous| {
-                if (previous != skin_id) return error.MultipleSkinsUnsupported;
-            } else {
-                self.rig_skin = skin_id;
-                const skin = self.doc.skins[skin_id];
-                if (skin.joints.len == 0 or skin.joints.len > 128) return error.TooManyJoints;
-                for (skin.joints) |node_index| {
-                    const match = mappedNodeJoint(self.doc, node_index);
-                    // Rotate about the matched source joint, or the skin's first joint when no
-                    // ancestor is named: the Ranger's own pivots are in its units and do not apply.
-                    const pivot_node = if (match) |m| m.node else skin.joints[0];
-                    const pivot_world = self.node_world[pivot_node];
-                    try self.rig_bones.append(self.arena, .{ .ranger_joint = @intCast(@intFromEnum(if (match) |m| m.joint else GameSkeleton.Joint.root)), .pivot = .{ pivot_world[12], pivot_world[13], pivot_world[14] } });
+            if (skin_index) |skin_id| {
+                if (self.rig_skin) |previous| {
+                    if (previous != skin_id) return error.MultipleSkinsUnsupported;
+                } else {
+                    self.rig_skin = skin_id;
+                    const skin = self.doc.skins[skin_id];
+                    if (skin.joints.len == 0 or skin.joints.len > 128) return error.TooManyJoints;
+                    for (skin.joints) |node_index| {
+                        const match = mappedNodeJoint(self.doc, node_index);
+                        // Rotate about the matched source joint, or the skin's first joint when no
+                        // ancestor is named: the Ranger's own pivots are in its units and do not apply.
+                        const pivot_node = if (match) |m| m.node else skin.joints[0];
+                        const pivot_world = self.node_world[pivot_node];
+                        try self.rig_bones.append(self.arena, .{ .ranger_joint = @intCast(@intFromEnum(if (match) |m| m.joint else GameSkeleton.Joint.root)), .pivot = .{ pivot_world[12], pivot_world[13], pivot_world[14] } });
+                    }
                 }
             }
         }
@@ -651,6 +665,14 @@ const Builder = struct {
             } else {
                 pos = transformPoint(world, positions.vec(3, i));
                 n = if (normals) |view| normalize(transformVector(normal_matrix, view.vec(3, i))) else .{ 0, 1, 0 };
+                if (self.retain_rig) {
+                    self.has_static_rig_vertices = true;
+                    for (0..3) |axis| {
+                        self.rig_bounds_min[axis] = @min(self.rig_bounds_min[axis], pos[axis]);
+                        self.rig_bounds_max[axis] = @max(self.rig_bounds_max[axis], pos[axis]);
+                    }
+                    try self.rig_vertices.append(self.arena, .{ .joints = .{ 255, 0, 0, 0 }, .weights = .{ 1, 0, 0, 0 } });
+                }
             }
             const uv = if (uvs) |u| u.vec(2, i) else [2]f32{ 0, 0 };
             for (pos ++ n ++ uv) |v| if (!std.math.isFinite(v)) return error.NonFiniteValue;
@@ -753,10 +775,19 @@ const Builder = struct {
     }
 
     fn accessor(self: *Builder, index: u32, expected_type: []const u8) !View {
+        return self.accessorWithNormalization(index, expected_type, false);
+    }
+
+    fn accessorAllowNormalized(self: *Builder, index: u32, expected_type: []const u8) !View {
+        return self.accessorWithNormalization(index, expected_type, true);
+    }
+
+    fn accessorWithNormalization(self: *Builder, index: u32, expected_type: []const u8, allow_normalized: bool) !View {
         if (index >= self.doc.accessors.len) return error.InvalidAccessor;
         const a = self.doc.accessors[index];
         if (a.sparse != null) return error.SparseAccessorsUnsupported;
-        if (a.normalized) return error.UnsupportedComponentType;
+        if (a.normalized and !allow_normalized) return error.UnsupportedComponentType;
+        if (a.normalized and a.componentType != 5121 and a.componentType != 5123) return error.UnsupportedComponentType;
         if (!std.mem.eql(u8, a.type, expected_type)) return error.UnexpectedAccessorType;
         const view_index = a.bufferView orelse return error.MissingBufferView;
         if (view_index >= self.doc.bufferViews.len) return error.InvalidBufferView;
@@ -776,7 +807,7 @@ const Builder = struct {
         if (bv.byteOffset > buffer.len or buffer.len - bv.byteOffset < bv.byteLength) return error.BufferViewOutOfRange;
         const bytes = buffer[bv.byteOffset..][0..bv.byteLength];
         if (a.count > 0 and (a.byteOffset > bytes.len or (a.count - 1) * stride + element > bytes.len - a.byteOffset)) return error.AccessorOutOfRange;
-        return .{ .bytes = bytes, .start = a.byteOffset, .stride = stride, .count = a.count, .component = a.componentType };
+        return .{ .bytes = bytes, .start = a.byteOffset, .stride = stride, .count = a.count, .component = a.componentType, .normalized = a.normalized };
     }
 };
 
@@ -786,6 +817,7 @@ const View = struct {
     stride: usize,
     count: usize,
     component: u32,
+    normalized: bool = false,
 
     fn offset(self: View, i: usize) usize {
         return self.start + i * self.stride;
@@ -793,7 +825,16 @@ const View = struct {
 
     fn vec(self: View, comptime n: usize, i: usize) [n]f32 {
         var result: [n]f32 = undefined;
-        for (&result, 0..) |*v, c| v.* = @bitCast(std.mem.readInt(u32, self.bytes[self.offset(i) + c * 4 ..][0..4], .little));
+        const component_size: usize = if (self.component == 5121) 1 else if (self.component == 5123) 2 else 4;
+        const normalized_divisor: f32 = if (self.normalized) (if (self.component == 5121) 255 else 65535) else 1;
+        for (&result, 0..) |*v, c| {
+            const at = self.offset(i) + c * component_size;
+            v.* = switch (self.component) {
+                5121 => @as(f32, @floatFromInt(self.bytes[at])) / normalized_divisor,
+                5123 => @as(f32, @floatFromInt(std.mem.readInt(u16, self.bytes[at..][0..2], .little))) / normalized_divisor,
+                else => @bitCast(std.mem.readInt(u32, self.bytes[at..][0..4], .little)),
+            };
+        }
         return result;
     }
 
@@ -992,6 +1033,35 @@ test "rigged GLB bakes bind geometry and retains mapped influences" {
     try std.testing.expectEqual(model.mesh.vertices.len, weighted);
 }
 
+test "rigged GLB accepts normalized byte skin weights" {
+    const allocator = std.testing.allocator;
+    const source = try minimalSkinnedGltfWithPackedWeights(allocator, true);
+    defer allocator.free(source);
+    var model = try compileRigged(allocator, source, .{});
+    defer model.deinit(allocator);
+    for (model.skin.?.vertices) |influence| {
+        try std.testing.expectApproxEqAbs(@as(f32, 1), influence.weights[0], 1e-6);
+        try std.testing.expectEqual(@as(f32, 0), influence.weights[1]);
+    }
+}
+
+test "rigged GLB assigns static mesh pieces to a root influence" {
+    const allocator = std.testing.allocator;
+    const source = try minimalSkinnedGltf(allocator);
+    defer allocator.free(source);
+    const scene = try std.mem.replaceOwned(u8, allocator, source, "\"nodes\":[0,1]", "\"nodes\":[0,2,1]");
+    defer allocator.free(scene);
+    const mixed = try std.mem.replaceOwned(u8, allocator, scene, "\"nodes\":[{\"name\":\"LeftArm\"},{\"mesh\":0,\"skin\":0}]", "\"nodes\":[{\"name\":\"LeftArm\"},{\"mesh\":0,\"skin\":0},{\"mesh\":0,\"translation\":[0,0,2]}]");
+    defer allocator.free(mixed);
+    var model = try compileRigged(allocator, mixed, .{});
+    defer model.deinit(allocator);
+    const skin = model.skin orelse return error.TestExpectedSkin;
+    try std.testing.expectEqual(@as(usize, 2), skin.bones.len);
+    try std.testing.expectEqual(@as(u8, 1), skin.vertices[0].joints[0]);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), model.mesh.vertices[0].position[2], 1e-6);
+    try std.testing.expectEqual(@as(f32, 1), skin.vertices[0].weights[0]);
+}
+
 test "bundled humanoid GLB imports through the retained rig path" {
     const allocator = std.testing.allocator;
     var model = try compileRigged(allocator, @embedFile("rigged_character.glb"), .{});
@@ -1005,6 +1075,10 @@ test "bundled humanoid GLB imports through the retained rig path" {
 const RangerPaletteLimit = 128;
 
 fn minimalSkinnedGltf(allocator: std.mem.Allocator) ![]u8 {
+    return minimalSkinnedGltfWithPackedWeights(allocator, false);
+}
+
+fn minimalSkinnedGltfWithPackedWeights(allocator: std.mem.Allocator, packed_weights: bool) ![]u8 {
     var bytes: [138]u8 = @splat(0);
     const positions = [_]f32{ 0, 0, 0, 1, 0, 0, 0, 1, 0 };
     const normals = [_]f32{ 0, 0, 1, 0, 0, 1, 0, 0, 1 };
@@ -1013,6 +1087,10 @@ fn minimalSkinnedGltf(allocator: std.mem.Allocator) ![]u8 {
     for (0..3) |i| {
         bytes[72 + i * 4] = 0;
         std.mem.writeInt(u32, bytes[84 + i * 16 ..][0..4], @bitCast(@as(f32, 1)), .little);
+    }
+    if (packed_weights) {
+        @memset(bytes[84..96], 0);
+        for (0..3) |i| bytes[84 + i * 4] = 255;
     }
     for (0..3) |i| std.mem.writeInt(u16, bytes[132 + i * 2 ..][0..2], @intCast(i), .little);
 
@@ -1028,12 +1106,12 @@ fn minimalSkinnedGltf(allocator: std.mem.Allocator) ![]u8 {
         \\"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}},
         \\{{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}},
         \\{{"bufferView":2,"componentType":5121,"count":3,"type":"VEC4"}},
-        \\{{"bufferView":3,"componentType":5126,"count":3,"type":"VEC4"}},
+        \\{{"bufferView":3,"componentType":{d},{s}"count":3,"type":"VEC4"}},
         \\{{"bufferView":4,"componentType":5123,"count":3,"type":"SCALAR"}}],
         \\"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":36}},
-        \\{{"buffer":0,"byteOffset":72,"byteLength":12}},{{"buffer":0,"byteOffset":84,"byteLength":48}},{{"buffer":0,"byteOffset":132,"byteLength":6}}],
+        \\{{"buffer":0,"byteOffset":72,"byteLength":12}},{{"buffer":0,"byteOffset":84,"byteLength":{d}}},{{"buffer":0,"byteOffset":132,"byteLength":6}}],
         \\"buffers":[{{"byteLength":138,"uri":"data:application/octet-stream;base64,{s}"}}]}}
-    , .{encoded});
+    , .{ if (packed_weights) @as(u32, 5121) else 5126, if (packed_weights) "\"normalized\":true," else "", if (packed_weights) @as(u32, 12) else 48, encoded });
     return out.toOwnedSlice();
 }
 
