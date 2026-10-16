@@ -14,6 +14,7 @@ const Material = @import("../render/Material.zig");
 const Input = @import("../engine/Input.zig");
 const Sandbox = @import("Sandbox.zig");
 const Garage = @import("Garage.zig");
+const Shrine = @import("../procedural/Shrine.zig");
 const WildsMeshes = @import("../vehicle/WildsMeshes.zig");
 const Collectibles = @import("Collectibles.zig");
 const Enemies = @import("Enemies.zig");
@@ -1744,6 +1745,52 @@ fn publishObjectiveBeacon(sb: *const Sandbox, out: []World.Prop, start: usize, t
 
 /// Rootdeep vaults grow as a fusion of living rootwork and old machine craft. These exterior
 /// pieces are presentation geometry; puzzle rooms and collision stay in the verified blueprint.
+/// Lab dressing for a shrine's rooms: wall pilasters and glyph panels, ceiling light strips and a
+/// turning hoop per room, inlaid floor lines, and gimbal rings around the seed lamp. All of it is
+/// visual only and stays clear of the walkway, buttons, plates and crates (see `Shrine` layout),
+/// and it is skipped when the player is far away.
+fn dressShrineInterior(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32, k: usize, o: V, l: f32, glow_color: [4]f32) usize {
+    const c = &sb.catalog.content;
+    const eye = sb.player.feet;
+    const centre_z = o[2] + l / 2;
+    if (@abs(eye[0] - o[0]) > 90 or @abs(eye[2] - centre_z) > l / 2 + 90) return start;
+    const rooms: usize = @intFromFloat(l / Shrine.room_length);
+    const stone: [4]f32 = if (k == 0) .{ 0.78, 0.64, 0.44, 1 } else .{ 0.42, 0.7, 0.68, 1 };
+    var n = start;
+    for (0..rooms) |r| {
+        const z0 = @as(f32, @floatFromInt(r)) * Shrine.room_length;
+        const zc = z0 + Shrine.room_length / 2;
+        const budget: usize = 14;
+        if (n + budget > out.len) return n;
+        const pulse = 0.8 + 0.2 * @sin(t * 1.8 + @as(f32, @floatFromInt(r)));
+        for ([_]f32{ -1, 1 }) |side| {
+            for ([_]f32{ -3.9, 3.9 }) |dz| {
+                out[n] = .{ .mesh = c.shrine_pilaster, .transform = .{ .position = R.add(o, .{ side * 4.45, 0, zc + dz }) }, .size = .{ 1.1, 4.1, 1.1 }, .tint = stone };
+                n += 1;
+            }
+            // The right wall of the first room carries the reset button at its middle.
+            if (!(r == 0 and side > 0)) {
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(o, .{ side * 4.93, 2.3, zc }) }, .size = .{ 0.06, 1.7, 2.4 }, .tint = Material.emissive(glow_color, 0.5 * pulse) };
+                n += 1;
+            }
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(o, .{ side * 2.4, 4.38, zc }) }, .size = .{ 0.14, 0.08, 9 }, .tint = Material.emissive(glow_color, 0.9 * pulse) };
+            out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(o, .{ side * 1.15, 0.02, zc }) }, .size = .{ 0.08, 0.03, 9.2 }, .tint = Material.emissive(glow_color, 0.55 * pulse) };
+            n += 2;
+        }
+        const spin = t * 0.4 + @as(f32, @floatFromInt(r));
+        out[n] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = R.add(o, .{ 0, 3.3, zc }) }, .size = .{ 1.3, 1.3, 1.3 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, spin).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 0.9))), .tint = Material.emissive(glow_color, 1.0 * pulse) };
+        n += 1;
+    }
+    // Rings around the seed lamp in the vault room.
+    if (n + 2 <= out.len) {
+        const lamp = R.add(o, .{ 0, 2.6, l - 0.6 });
+        out[n] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = lamp }, .size = .{ 1.15, 1.15, 1.15 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, t * 0.7).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 1.2))), .tint = Material.emissive(glow_color, 1.2) };
+        out[n + 1] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = lamp }, .size = .{ 0.85, 0.85, 0.85 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_z, -t * 0.9).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 0.4))), .tint = Material.emissive(glow_color, 1.0) };
+        n += 2;
+    }
+    return n;
+}
+
 fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
     const c = &sb.catalog.content;
     var n = start;
@@ -1794,6 +1841,13 @@ fn publishShrines(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) u
         if (n == out.len) return n;
         out[n] = .{ .mesh = c.gem, .transform = .{ .position = R.add(o, .{ 0, 11.1, crown_z }) }, .tint = Material.emissive(glow_color, 1.5 + 0.35 * @sin(t * 2.2)), .size = .{ 2.4, 4.2, 2.4 }, .rotation = yawQuat(t * 0.22) };
         n += 1;
+        // Halos hover over the portal: a vertical ring and a tilted gimbal ring turning slowly.
+        if (n + 2 > out.len) return n;
+        const halo = R.add(o, .{ 0, 9.8, 2.2 });
+        out[n] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = halo }, .size = .{ 5.4, 5.4, 5.4 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_x, std.math.pi / 2.0)), .tint = Material.emissive(glow_color, 1.1 + 0.2 * @sin(t * 1.6)) };
+        out[n + 1] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = halo }, .size = .{ 4.2, 4.2, 4.2 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, t * 0.3).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 1.05))), .tint = Material.emissive(metal, 0.9) };
+        n += 2;
+        n = dressShrineInterior(sb, out, n, t, k, o, l, glow_color);
         // A low circuit ring binds the architecture to the Rootdeep's powered seed vault.
         if (!Add.block(out, &n, c.block, R.add(o, .{ 0, 0.16, l - 3 }), .{ 13, 0.16, 0.2 }, Material.emissive(metal, 0.7))) return n;
     }

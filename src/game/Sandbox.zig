@@ -2063,6 +2063,12 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         out[n] = .{ .mesh = self.catalog.content.crate, .transform = .{ .position = self.cratePosition(index) }, .tint = .{ glow, glow, glow, 1 } };
         n += 1;
     }
+    for (new_york_landmarks, 0..) |_, i| {
+        if (n == out.len) return n;
+        const landmark = newYorkLandmark(self.seed, i).?;
+        out[n] = .{ .mesh = self.catalog.content.block, .transform = .{ .position = landmark.position }, .size = landmark.size, .tint = landmark.tint };
+        n += 1;
+    }
     for (&self.machines, 0..) |*placed, m| {
         if (!placed.active) continue;
         const bp = &placed.blueprint;
@@ -4029,11 +4035,22 @@ test "a guest fires their own blaster with the trigger and downs a drone" {
 }
 
 /// Stable regional destinations shared by the map and fast travel.
-pub const travel_count = 3 + Metro.stop_nodes.len;
-pub const travel_labels = [_][]const u8{ "BASE CAMP", "ROOTDEEP 1", "ROOTDEEP 2", "SOUTH LINE", "NORTH LINE", "WEST LINE" };
+pub const detroit_travel_count = 3 + Metro.stop_nodes.len;
+pub const travel_count = detroit_travel_count + 1;
+pub const travel_labels = [_][]const u8{ "BASE CAMP", "ROOTDEEP 1", "ROOTDEEP 2", "SOUTH LINE", "NORTH LINE", "WEST LINE", "NEW YORK CITY" };
+pub const new_york_seed_salt: u64 = 0x4e4557594f524b;
+const NewYorkLandmark = struct { x: f32, z: f32, height: f32, width: f32, depth: f32, tint: [4]f32 };
+const new_york_landmarks = [_]NewYorkLandmark{
+    .{ .x = 1320, .z = -180, .height = 190, .width = 42, .depth = 42, .tint = .{ 0.24, 0.34, 0.40, 1 } },
+    .{ .x = 1375, .z = -205, .height = 138, .width = 34, .depth = 38, .tint = .{ 0.31, 0.37, 0.40, 1 } },
+    .{ .x = 1270, .z = -240, .height = 112, .width = 38, .depth = 32, .tint = .{ 0.37, 0.31, 0.26, 1 } },
+    .{ .x = 1412, .z = -145, .height = 164, .width = 32, .depth = 32, .tint = .{ 0.26, 0.39, 0.42, 1 } },
+    .{ .x = 1240, .z = -130, .height = 96, .width = 30, .depth = 34, .tint = .{ 0.35, 0.35, 0.31, 1 } },
+};
 
 pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
-    if (destination >= 3 and destination < travel_count) {
+    if (destination == detroit_travel_count) return newYorkArrival(self.seed);
+    if (destination >= 3 and destination < detroit_travel_count) {
         const node_id = Metro.destinationNode(destination - 3).?;
         const node = self.catalog.district.nodes[node_id];
         // Station platform top, plus a small clearance for the ranger's feet.
@@ -4042,6 +4059,23 @@ pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
     var point = if (destination == 0 or destination > self.shrines.len) spawn else R.add(self.shrines[destination - 1].origin, .{ 0, 0, -12 });
     point[1] = Terrain.surface(self.seed, point[0], point[2]).height + 0.1;
     return point;
+}
+
+/// Compact hand-authored procedural skyline gives the playable NYC arrival a clear identity.
+pub fn newYorkLandmark(seed: u64, index: usize) ?struct { position: Physics.Vec3, size: Physics.Vec3, tint: [4]f32 } {
+    if (index >= new_york_landmarks.len) return null;
+    const landmark = new_york_landmarks[index];
+    const ground = Terrain.surface(Seed.mix(seed ^ new_york_seed_salt), landmark.x, landmark.z).height;
+    return .{ .position = .{ landmark.x, ground + landmark.height / 2, landmark.z }, .size = .{ landmark.width, landmark.height, landmark.depth }, .tint = landmark.tint };
+}
+
+/// New York's first arrival district is independently seeded and kept in the same local
+/// coordinate frame so streaming, terrain collision, and four-player movement remain shared.
+fn newYorkArrival(seed: u64) Physics.Vec3 {
+    const regional_seed = Seed.mix(seed ^ new_york_seed_salt);
+    const x: f32 = 1320;
+    const z: f32 = -180;
+    return .{ x, Terrain.surface(regional_seed, x, z).height + 0.1, z };
 }
 
 pub fn travelBlocked(self: *const Sandbox, p: usize) ?[]const u8 {
@@ -4057,7 +4091,7 @@ pub fn travelBlocked(self: *const Sandbox, p: usize) ?[]const u8 {
 fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
     const origin = self.travelPoint(destination);
     const shape: Physics.Character = .{};
-    if (destination >= 3) {
+    if (destination >= 3 and destination < detroit_travel_count) {
         var ring: i32 = 0;
         while (ring <= 6) : (ring += 1) {
             var z = -ring;
@@ -4083,12 +4117,13 @@ fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
             while (x <= ring) : (x += 1) {
                 if (@abs(x) != ring and @abs(z) != ring) continue;
                 var point = R.add(origin, .{ @as(f32, @floatFromInt(x)) * 2, 0, @as(f32, @floatFromInt(z)) * 2 });
-                const ground = Terrain.surface(self.seed, point[0], point[2]);
+                const regional_seed = if (destination == detroit_travel_count) Seed.mix(self.seed ^ new_york_seed_salt) else self.seed;
+                const ground = Terrain.surface(regional_seed, point[0], point[2]);
                 if (ground.normal[1] < 0.7) continue;
                 var highest = ground.height;
                 var lowest = ground.height;
                 for ([_]f32{ -shape.radius, shape.radius }) |dx| for ([_]f32{ -shape.radius, shape.radius }) |dz| {
-                    const height = Terrain.surface(self.seed, point[0] + dx, point[2] + dz).height;
+                    const height = Terrain.surface(regional_seed, point[0] + dx, point[2] + dz).height;
                     highest = @max(highest, height);
                     lowest = @min(lowest, height);
                 };
@@ -4166,6 +4201,25 @@ test "regional travel moves only its player, resets motion, and rejects invalid 
     sb.hangar.piloting = false;
     try std.testing.expect(sb.fastTravel(0, 2, &camera));
     try std.testing.expect(R.length(R.sub(sb.travelPoint(2), sb.player.feet)) < 25);
+    try std.testing.expect(sb.fastTravel(0, detroit_travel_count, &camera));
+    try std.testing.expect(R.length(R.sub(sb.travelPoint(detroit_travel_count), sb.player.feet)) < 25);
+}
+
+test "New York has deterministic regional terrain, skyline landmarks, and a safe arrival" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const point = sb.travelPoint(detroit_travel_count);
+    const regional_seed = Seed.mix(sb.seed ^ new_york_seed_salt);
+    try std.testing.expectApproxEqAbs(Terrain.surface(regional_seed, point[0], point[2]).height + 0.1, point[1], 0.001);
+    try std.testing.expect(!std.meta.eql(Terrain.surface(sb.seed, point[0], point[2]), Terrain.surface(regional_seed, point[0], point[2])));
+    try std.testing.expect(newYorkLandmark(sb.seed, 0) != null);
+    try std.testing.expect(newYorkLandmark(sb.seed, new_york_landmarks.len) == null);
+    const safe = travelArrival(&sb, detroit_travel_count) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!sb.physics.overlapsBox(R.add(safe, .{ 0, 0.9, 0 }), .{ 0.4, 0.9, 0.4 }));
 }
 
 test "travel searches around obstructions and leaves state untouched when no arrival fits" {

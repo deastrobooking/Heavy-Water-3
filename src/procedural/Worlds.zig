@@ -15,6 +15,7 @@ pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds,
 pub const Faction = enum { arbor_colony, hive_brood, scalari, gaia_colony };
 pub const CityId = enum(u16) {
     arboris_reach = 0x0101,
+    hudson_reach = 0x0108,
     rootdeep_ward = 0x0102,
     crownfall = 0x0103,
     bridgewell = 0x0104,
@@ -152,11 +153,11 @@ pub fn featurePack(world: Id) *const FeaturePack {
     unreachable;
 }
 
-/// Stable city-region content descriptors; they do not claim that city geometry or world travel
-/// is already playable. The Arbor Frontier has two ocean-region concepts in addition to its five
-/// original canopy and river regions.
+/// Stable city-region content descriptors. NYC/Hudson Reach has a playable fast-travel landing
+/// and procedural landmark skyline; its full mission arc remains future content.
 pub const cities = [_]City{
     .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Detroit Arbor Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Detroit, Michigan reimagined as a canopy city: historic civic towers, riverfront industry, transit bridges, and the first shipyard route." },
+    .{ .id = .hudson_reach, .world = .arbor_frontier, .name = "New York City: Hudson Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A playable Hudson-side arrival district with a dense skyscraper skyline, elevated green routes, and views toward a living harbor." },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },
@@ -232,7 +233,7 @@ pub fn validate() bool {
         city_count[@intFromEnum(entry.world)] += 1;
         for (cities[i + 1 ..]) |other| if (entry.id == other.id) return false;
     }
-    const expected_city_count = [_]u8{ 7, 5, 5 };
+    const expected_city_count = [_]u8{ 8, 5, 5 };
     for (city_count, expected_city_count) |count, expected| if (count != expected) return false;
     if (capitals.len != worlds.len) return false;
     var capital_count: [worlds.len]u8 = @splat(0);
@@ -271,8 +272,8 @@ test "campaign world catalog is bounded, four-player ready, and deterministicall
     try std.testing.expect(worldSeed(4, .hive_homeworld) != worldSeed(4, .gaia));
     try std.testing.expect(arena(.habitat_ruins).reward.geodesic_alloy > 0);
     try std.testing.expect(arena(.brood_heart).reward.brood_enzymes > 0);
-    try std.testing.expectEqual(@as(usize, 17), cities.len);
-    try std.testing.expectEqual(@as(u8, 7), blk: {
+    try std.testing.expectEqual(@as(usize, 18), cities.len);
+    try std.testing.expectEqual(@as(u8, 8), blk: {
         var count: u8 = 0;
         for (cities) |entry| if (entry.world == .arbor_frontier) {
             count += 1;

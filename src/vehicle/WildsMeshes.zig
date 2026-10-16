@@ -205,6 +205,48 @@ pub fn caveTemple(a: Allocator) !RenderMesh {
     return finish(a, &mesh, temple_palette);
 }
 
+/// A unit torus (radius 1) lying flat, for halos and gimbal hoops; scale it to the hoop's size.
+/// The tube is emissive so it reads as a ring of light.
+pub fn hoop(a: Allocator) !RenderMesh {
+    var mesh: cm.Mesh = .{};
+    defer mesh.deinit(a);
+    var loop: [8]Vec2 = undefined;
+    for (&loop, 0..) |*p, i| {
+        const angle = @as(f32, @floatFromInt(i)) / loop.len * m.tau;
+        p.* = .{ .x = 1 + 0.035 * @cos(angle), .y = 0.035 * @sin(angle) };
+    }
+    // White so a prop's tint sets the glow colour per shrine.
+    try prims.lathe(a, &mesh, &loop, 48, .{}, .emissive);
+    return finish(a, &mesh, .{ .paint = .{ 1, 1, 1 }, .accent = .{ 1, 1, 1 }, .lights = .{ 1, 1, 1 } });
+}
+
+/// A unit-height wall pilaster: flared foot, tapering shaft, capital. Scale x
+/// and z to its width and y to its height.
+pub fn pilaster(a: Allocator) !RenderMesh {
+    var mesh: cm.Mesh = .{};
+    defer mesh.deinit(a);
+    const loop = [_]Vec2{
+        .{ .x = 0, .y = 0 },    .{ .x = 0.5, .y = 0 },   .{ .x = 0.5, .y = 0.04 }, .{ .x = 0.36, .y = 0.08 },
+        .{ .x = 0.3, .y = 0.9 }, .{ .x = 0.46, .y = 0.94 }, .{ .x = 0.46, .y = 1 },   .{ .x = 0, .y = 1 },
+    };
+    try prims.lathe(a, &mesh, &loop, 8, .{}, .paint);
+    // White so a prop's tint sets the stone colour per shrine.
+    return finish(a, &mesh, .{ .paint = .{ 1, 1, 1 }, .accent = .{ 1, 1, 1 }, .lights = .{ 1, 1, 1 } });
+}
+
+test "the hoop and pilaster props are unit-sized and finite" {
+    const a = std.testing.allocator;
+    const ring = try hoop(a);
+    defer ring.deinit(a);
+    const post = try pilaster(a);
+    defer post.deinit(a);
+    for (ring.vertices) |v| try std.testing.expect(@abs(v.position[1]) < 0.05 and @abs(v.position[0]) < 1.05);
+    var top: f32 = 0;
+    for (post.vertices) |v| top = @max(top, v.position[1]);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), top, 0.01);
+    for (post.indices) |i| try std.testing.expect(i < post.vertices.len);
+}
+
 test "the temple is a lit, rounded lab, not a box" {
     const a = std.testing.allocator;
     const mesh = try caveTemple(a);

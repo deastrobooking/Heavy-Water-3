@@ -47,6 +47,8 @@ To capture the imported-component window on Metal for visual review:
 MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dcharacter-showcase=46 -Dcapture-frame=120
 ```
 
+`-Dshowcase=60` shows a Rootdeep shrine from outside and `-Dshowcase=77` from inside its first room.
+
 To review the redesigned cave temple (an ancient sanctuary that doubles as a lab) use `-Dshowcase=67` for the wilds set or `-Dshowcase=76` for a close-up of the temple alone.
 
 To see the bundled rigged GLB driven by the game's pose in the world (third person), add `-Dcharacter-showcase=47` and a `-Dcharacter-pose=N` (0 idle, 1 aim, 2 overhead swing, 3 cast, 4 guard) to the same command.

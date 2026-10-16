@@ -1,3 +1,9 @@
+## New York City Hudson Reach travel slice — 2026-10-16
+
+- Added a seventh world-map destination, `NEW YORK CITY`, east of Detroit. It uses independently seeded streamed terrain and vegetation, safe terrain-based arrival, a destination-specific map view, and five simple skyline landmarks around the landing area. `Worlds.zig` now lists Hudson Reach as an eighth Arbor Frontier city region. Detroit generation and existing save fields are unchanged.
+- **Checked:** default `python3 tools/zig.py build check` passed; Zig 0.17 `build check` passed; the headless suite passed 461/461, including deterministic regional terrain, the landmark catalog, safe landing, and solo-player fast travel; `git diff --check` passed.
+- **Not checked:** Metal visual smoke/capture and in-game hands-on travel. NYC's full district, missions, boss, ten discoveries, shops, interiors, and liberation persistence are not implemented; this is the playable arrival/exploration foothold only.
+
 # Local validation
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
@@ -6,7 +12,11 @@ Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned i
 
 ## Cave temple redesign — 2026-10-16
 
-The boxy pillared pavilion (`WildsMeshes.caveTemple`, placed in cave cache rooms) is now an ancient temple that is also a science lab: three round terraces with a stair, a glass reaction chamber holding a glowing core inside three tilted gimbal rings, a seven-column peristyle with glyph bands, lintels and crystal antennae, two resonator coils, two instrument benches with screens, inlaid glowing floor rings and circuit lines, a leaning pylon gate at the entrance and an arc of standing stelae behind. The hovering signal gem now sits over the chamber (`temple_crown`) and turns; the old front trim prop was folded into the mesh. A new test checks finite bounds, valid indices, height, detail count and that a real share of vertices glow. Evidence: captures of showcase 67 and a new close-up showcase 76 under `MTL_DEBUG_LAYER=1`. **Not verified:** a capture inside a cave cache room at the 0.66 scale, the Rootdeep puzzle shrines (rooms are still machine-kit boxes; their exterior portal was left alone), and draw cost of the extra vertices.
+The boxy pillared pavilion (`WildsMeshes.caveTemple`, placed in cave cache rooms) is now an ancient temple that is also a science lab: three round terraces with a stair, a glass reaction chamber holding a glowing core inside three tilted gimbal rings, a seven-column peristyle with glyph bands, lintels and crystal antennae, two resonator coils, two instrument benches with screens, inlaid glowing floor rings and circuit lines, a leaning pylon gate at the entrance and an arc of standing stelae behind. The hovering signal gem now sits over the chamber (`temple_crown`) and turns; the old front trim prop was folded into the mesh. A new test checks finite bounds, valid indices, height, detail count and that a real share of vertices glow. Evidence: captures of showcase 67 and a new close-up showcase 76 under `MTL_DEBUG_LAYER=1`. **Not verified:** a capture inside a cave cache room at the 0.66 scale and draw cost of the extra vertices.
+
+### Rootdeep shrine dressing — 2026-10-16
+
+The puzzle shrines keep their solvable machine-kit rooms (walls, doors, plates, buttons are unchanged, so the verifier and blueprint tests are untouched) and gain visual-only lab and temple dressing in `Frontier.publishShrines` / `dressShrineInterior`: two slowly turning halo rings over the portal; per room, four wall pilasters, glowing wall panels, ceiling light strips, inlaid floor lines and a turning gimbal hoop; and two rings around the seed lamp in the vault room. Two new unit meshes (`shrine_hoop`, `shrine_pilaster`) are registered in the catalog. Interior props are skipped when the player is more than about 90 m away, and everything sits clear of the walkway, buttons, plates and crates. Evidence: captures of showcase 60 (exterior) and the new showcase 77 (inside the first shrine) under `MTL_DEBUG_LAYER=1`. **Not verified:** the second shrine's colours in a capture, a multi-room shrine's furthest rooms, split-screen cost, and any draw-cost measurement. The interior walls themselves are still plain boxes.
 
 ## Imported rig retargeting fix — 2026-10-15
 

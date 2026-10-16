@@ -3,6 +3,7 @@ const Noise = @import("Noise.zig");
 const Biome = @import("Biome.zig");
 const Hydrology = @import("Hydrology.zig");
 const Mesh = @import("../render/Mesh.zig");
+const Seed = @import("Seed.zig");
 pub const cells = 64;
 pub const extent = @import("../world/ChunkKey.zig").extent;
 pub const terrain_vertex_count = (cells + 1) * (cells + 1);
@@ -29,17 +30,20 @@ pub fn fill(seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32
     std.debug.assert(vertices.len == vertex_count and indices.len == index_count);
     const ox = @as(f32, @floatFromInt(cx)) * extent - extent / 2;
     const oz = @as(f32, @floatFromInt(cz)) * extent - extent / 2;
+    // New York's local procedural region starts east of Detroit and owns independent terrain,
+    // rivers, caves and vegetation seeds while retaining the common streaming grid.
+    const regional_seed = if (cx >= 19 and cx <= 23 and cz >= -5 and cz <= -1) Seed.mix(seed ^ 0x4e4557594f524b) else seed;
     for (0..cells + 1) |z| {
         if (cancel) |c| if (c.token.load(.acquire) != c.expected) return false;
         for (0..cells + 1) |x| {
             const wx = ox + @as(f32, @floatFromInt(x)) * 2;
             const wz = oz + @as(f32, @floatFromInt(z)) * 2;
-            const height = Noise.height(seed, wx, wz);
-            const nx = Noise.height(seed, wx - 0.5, wz) - Noise.height(seed, wx + 0.5, wz);
-            const nz = Noise.height(seed, wx, wz - 0.5) - Noise.height(seed, wx, wz + 0.5);
+            const height = Noise.height(regional_seed, wx, wz);
+            const nx = Noise.height(regional_seed, wx - 0.5, wz) - Noise.height(regional_seed, wx + 0.5, wz);
+            const nz = Noise.height(regional_seed, wx, wz - 0.5) - Noise.height(regional_seed, wx, wz + 0.5);
             const inv = 1 / @sqrt(nx * nx + 1 + nz * nz);
             const slope = @sqrt(nx * nx + nz * nz);
-            vertices[z * (cells + 1) + x] = .{ .position = .{ wx, height, wz }, .normal = .{ nx * inv, inv, nz * inv }, .uv = .{ wx / 4, wz / 4 }, .color = Biome.terrainColor(seed, wx, wz, height, slope) };
+            vertices[z * (cells + 1) + x] = .{ .position = .{ wx, height, wz }, .normal = .{ nx * inv, inv, nz * inv }, .uv = .{ wx / 4, wz / 4 }, .color = Biome.terrainColor(regional_seed, wx, wz, height, slope) };
         }
     }
     for (0..cells) |z| {
@@ -49,8 +53,8 @@ pub fn fill(seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32
             @memcpy(indices[base..][0..6], &[_]u32{ a, a + cells + 1, a + 1, a + 1, a + cells + 1, a + cells + 2 });
         }
     }
-    openCaves(seed, ox, oz, vertices, indices);
-    if (!fillRivers(seed, ox, oz, vertices, indices)) return false;
+    openCaves(regional_seed, ox, oz, vertices, indices);
+    if (!fillRivers(regional_seed, ox, oz, vertices, indices)) return false;
     return true;
 }
 
@@ -157,7 +161,6 @@ fn waterVertex(x: f32, y: f32, z: f32, step: usize, side: u32) Mesh.Vertex {
 }
 
 test "streamed chunk includes a real waterfall curtain and joined river surface" {
-    const Seed = @import("Seed.zig");
     const lane_seed = Seed.mix(42 ^ 0x464c4f57);
     const phase = @floor(Seed.unit(lane_seed) * Hydrology.fall_period / 4) * 4;
     const fall_x = Hydrology.fall_period - phase;

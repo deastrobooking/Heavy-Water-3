@@ -1559,8 +1559,9 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         const fz = @as(f32, @floatFromInt(z)) / 12;
         const wx = focus[0] + (fx - 0.5) * span;
         const wz = focus[2] + (fz - 0.5) * depth;
-        const surface = @import("../procedural/Terrain.zig").surface(sb.seed, wx, wz);
-        const biome = @import("../procedural/Biome.zig").sample(sb.seed, wx, wz).color();
+        const region_seed = if (destination == Sandbox.detroit_travel_count) @import("../procedural/Seed.zig").mix(sb.seed ^ Sandbox.new_york_seed_salt) else sb.seed;
+        const surface = @import("../procedural/Terrain.zig").surface(region_seed, wx, wz);
+        const biome = @import("../procedural/Biome.zig").sample(region_seed, wx, wz).color();
         const relief = std.math.clamp(0.55 + surface.normal[0] * 0.3 + surface.normal[2] * 0.25 + surface.height / 350, 0.25, 1);
         const color = [3]f32{ biome[0] * relief, biome[1] * relief, biome[2] * relief };
         c.rect(.{ .x = map.x + map.w * fx, .y = map.y + map.h * fz, .w = map.w / 20 + 1, .h = map.h / 12 + 1 }, .{ color[0] * 0.5, color[1] * 0.6, color[2] * 0.5, 1 });
@@ -1570,7 +1571,8 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         c.rect(.{ .x = map.x + map.w * f, .y = map.y, .w = 1, .h = map.h }, alpha(dim, 0.2));
         c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
     }
-    c.print(map.x + 8, map.y + 8, 1, ink, "{s} / ARBOR REACH", .{District.city_name});
+    const title = if (destination == Sandbox.detroit_travel_count) "NEW YORK CITY / HUDSON REACH" else "DETROIT / ARBOR REACH";
+    c.print(map.x + 8, map.y + 8, 1, ink, "{s}", .{title});
     c.print(map.x + 8, map.y + 23, 0.8, dim, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
     const legend_y = map.y + 39;
     c.text(map.x + 8, legend_y, "N", 0.9, bad);

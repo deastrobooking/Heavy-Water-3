@@ -118,6 +118,9 @@ pub const Content = struct {
     wilds_cabin: MeshHandle,
     wilds_barn: MeshHandle,
     cave_temple: MeshHandle,
+    /// Unit halo ring and wall pilaster that dress the Rootdeep shrines.
+    shrine_hoop: MeshHandle,
+    shrine_pilaster: MeshHandle,
 };
 /// One hover car design: its body, a rotor drawn spinning at each pivot, emissive light strips,
 /// and the mass properties the simulation flies it with.
@@ -285,6 +288,8 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         self.content.wilds_cabin = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.cabin(allocator), .named("mountain cabin", .{ 1, 1, 1, 1 })));
         self.content.wilds_barn = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.barn(allocator), .named("mountain barn", .{ 1, 1, 1, 1 })));
         self.content.cave_temple = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.caveTemple(allocator), .named("rootbound cave sanctuary", .{ 1, 1, 1, 1 })));
+        self.content.shrine_hoop = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.hoop(allocator), .named("shrine hoop", .{ 1, 1, 1, 1 })));
+        self.content.shrine_pilaster = try self.register(allocator, try Model.fromMesh(allocator, try Wilds.pilaster(allocator), .named("shrine pilaster", .{ 1, 1, 1, 1 })));
     }
     {
         const H = @import("../vehicle/HiveMeshes.zig");
@@ -378,6 +383,7 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "helios_habitat_glow", .handle = self.content.helios_habitat_glow },                 .{ .name = "rand_mother", .handle = self.content.rand_mother },
         .{ .name = "rand_mother_glow", .handle = self.content.rand_mother_glow },                       .{ .name = "wilds_cabin", .handle = self.content.wilds_cabin },
         .{ .name = "wilds_barn", .handle = self.content.wilds_barn },                                   .{ .name = "cave_temple", .handle = self.content.cave_temple },
+        .{ .name = "shrine_hoop", .handle = self.content.shrine_hoop },                                 .{ .name = "shrine_pilaster", .handle = self.content.shrine_pilaster },
     };
     for (generated) |g| {
         var full: [64]u8 = undefined;
