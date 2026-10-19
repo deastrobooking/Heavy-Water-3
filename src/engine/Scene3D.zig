@@ -5,6 +5,7 @@ const Catalog = @import("../asset/Catalog.zig");
 const Transform = @import("../world/Transform.zig");
 const World = @import("../world/World.zig");
 const Rotation = @import("../physics/Rotation.zig");
+const Camera = @import("../world/Camera.zig");
 
 pub const Error = error{
     InvalidHandle,
@@ -22,6 +23,62 @@ pub const Options = struct {
     lod: Catalog.MeshHandle = .none,
     lod_distance: f32 = 0,
 };
+
+pub const Ray = struct { origin: [3]f32, direction: [3]f32 };
+pub const Hit = struct { prop_index: usize, distance: f32 };
+
+/// Builds a world ray from normalized viewport coordinates (0..1, origin at top-left).
+/// This matches the game's +Z-forward camera and reversed infinite perspective.
+pub fn screenRay(camera: Camera, aspect: f32, screen: [2]f32) ?Ray {
+    if (!std.math.isFinite(aspect) or aspect <= 0 or !std.math.isFinite(camera.fov) or camera.fov <= 0 or camera.fov >= std.math.pi) return null;
+    for (screen) |v| if (!std.math.isFinite(v)) return null;
+    const f = camera.forward();
+    const forward = [3]f32{ f.x(), f.y(), f.z() };
+    const right = [3]f32{ @cos(camera.yaw), 0, -@sin(camera.yaw) };
+    const up = cross(forward, right);
+    const scale = @tan(camera.fov * 0.5);
+    const x = (screen[0] * 2 - 1) * aspect * scale;
+    const y = (1 - screen[1] * 2) * scale;
+    return .{ .origin = .{ camera.position.x(), camera.position.y(), camera.position.z() }, .direction = normalize(add(forward, add(mul(right, x), mul(up, y)))) };
+}
+
+/// Returns the nearest model-bounds sphere hit among submitted props. This inexpensive broad
+/// pick is intended for editor selection and placement; gameplay collision uses Physics rays.
+pub fn pick(catalog: *const Catalog, props: []const World.Prop, ray: Ray, max_distance: f32) ?Hit {
+    if (!std.math.isFinite(max_distance) or max_distance < 0 or !validRay(ray)) return null;
+    var nearest: ?Hit = null;
+    for (props, 0..) |prop, index| {
+        const entry = catalog.mesh(prop.mesh) orelse continue;
+        if (!entry.ready) continue;
+        const model = entry.model;
+        var radius_squared: f32 = 0;
+        for (0..3) |axis| {
+            const extent = @max(@abs(model.bounds_min[axis]), @abs(model.bounds_max[axis])) * prop.transform.scale * prop.size[axis];
+            radius_squared += extent * extent;
+        }
+        const radius = @sqrt(radius_squared);
+        const to_center = sub(prop.transform.position, ray.origin);
+        const along = dot(to_center, ray.direction);
+        if (along < 0) continue;
+        const perpendicular_squared = dot(to_center, to_center) - along * along;
+        if (perpendicular_squared > radius * radius) continue;
+        const distance = @max(0, along - @sqrt(@max(0, radius * radius - perpendicular_squared)));
+        if (distance > max_distance) continue;
+        if (nearest == null or distance < nearest.?.distance) nearest = .{ .prop_index = index, .distance = distance };
+    }
+    return nearest;
+}
+
+fn add(a: [3]f32, b: [3]f32) [3]f32 { return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] }; }
+fn sub(a: [3]f32, b: [3]f32) [3]f32 { return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] }; }
+fn mul(a: [3]f32, k: f32) [3]f32 { return .{ a[0] * k, a[1] * k, a[2] * k }; }
+fn dot(a: [3]f32, b: [3]f32) f32 { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+fn cross(a: [3]f32, b: [3]f32) [3]f32 { return .{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] }; }
+fn normalize(v: [3]f32) [3]f32 { const length = @sqrt(dot(v, v)); return if (length > 0) mul(v, 1 / length) else .{ 0, 0, 1 }; }
+fn validRay(ray: Ray) bool {
+    for (ray.origin ++ ray.direction) |v| if (!std.math.isFinite(v)) return false;
+    return @abs(dot(ray.direction, ray.direction) - 1) < 0.001;
+}
 
 /// A caller-owned, allocation-free command builder. `props` can be the frame's complete output
 /// slice or a suffix of a larger prop list; `count` is the number appended by this builder.
@@ -159,4 +216,25 @@ test "sphere helper rejects a nonpositive radius without appending" {
     var frame = Frame.init(&catalog, &props);
     try std.testing.expectError(error.InvalidTransform, frame.drawSphere(.{ 0, 0, 0 }, 0, .{ 1, 1, 1, 1 }));
     try std.testing.expectEqual(@as(usize, 0), frame.count);
+}
+
+test "screen rays and bounds picking target the nearest ready prop" {
+    var catalog: Catalog = undefined;
+    try fixtureCatalog(std.testing.allocator, &catalog);
+    defer catalog.deinit(std.testing.allocator);
+    const center = screenRay(.{ .position = @import("mach").math.vec3(0, 0, 0), .yaw = 0, .pitch = 0 }, 16.0 / 9.0, .{ 0.5, 0.5 }).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), center.direction[0], 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), center.direction[1], 0.00001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), center.direction[2], 0.00001);
+    try std.testing.expect(screenRay(.{}, 0, .{ 0.5, 0.5 }) == null);
+
+    const props = [_]World.Prop{
+        .{ .mesh = catalog.content.block, .transform = .{ .position = .{ 0, 0, 12 } }, .tint = .{ 1, 1, 1, 1 } },
+        .{ .mesh = catalog.content.orb, .transform = .{ .position = .{ 0, 0, 5 } }, .tint = .{ 1, 1, 1, 1 } },
+        .{ .mesh = catalog.content.block, .transform = .{ .position = .{ 20, 0, 4 } }, .tint = .{ 1, 1, 1, 1 } },
+    };
+    const hit = pick(&catalog, &props, center, 20).?;
+    try std.testing.expectEqual(@as(usize, 1), hit.prop_index);
+    try std.testing.expectApproxEqAbs(@as(f32, 5) - @sqrt(@as(f32, 0.75)), hit.distance, 0.0001);
+    try std.testing.expect(pick(&catalog, &props, center, 3) == null);
 }

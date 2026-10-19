@@ -2,6 +2,11 @@
 
 - Added `engine/Scene3D.zig`, an allocation-free per-frame builder over caller-owned `World.Prop` storage. It validates catalog mesh and LOD handles/readiness, transform/tint values, and capacity before append; box and sphere helpers use the existing catalog primitives. `Sandbox.publishProps` routes the district, raceway, and NYC landmarks through it. Showcase 78 demonstrates box, sphere, crate, and hover-car model submission with LOD.
 - **Checked:** default `python3 tools/zig.py build check` passed; Zig 0.17 `build check` passed; the default headless suite passed **467/467**; `git diff --check` passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=78 -Dcapture-frame=120` completed on Apple M3 Pro / Metal, with assets ready at 995 ms and a 2560×1600 frame captured to `zig-out/capture.bmp`. The capture was visually inspected; all four helper examples rendered. No Metal API validation messages appeared.
+
+## Scene inspection helpers — 2026-10-16
+
+- Added `Scene3D.screenRay` to map normalized screen points to the game's +Z-forward camera ray, and `Scene3D.pick` to find the nearest ready catalog prop using conservative model bounds spheres. Invalid camera inputs and rays are rejected; unloaded/stale props are skipped. This supports editor selection only; gameplay still uses physics raycasts.
+- **Checked:** default `python3 tools/zig.py build check` passed; Zig 0.17 `build check` passed; default headless suite passed **468/468**; `git diff --check` passed. No renderer or Metal code changed, so the Metal smoke/capture was not rerun.
 - **Not checked:** Zig 0.17 headless suite, Linux/Windows cross-compiles or runtime, and high-volume frame-submission performance. No new backend or asset format was introduced.
 
 ## New York City Hudson Reach travel slice — 2026-10-16
