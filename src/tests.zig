@@ -47,6 +47,7 @@ test {
     _ = @import("render/Visibility.zig");
     _ = @import("machine/Graph.zig");
     _ = @import("world/ChunkKey.zig");
+    _ = @import("world/Region.zig");
     _ = @import("world/Streamer.zig");
     _ = @import("procedural/Biome.zig");
     _ = @import("procedural/Scatter.zig");

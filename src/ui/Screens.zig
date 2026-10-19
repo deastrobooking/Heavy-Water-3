@@ -938,12 +938,14 @@ fn drawEnemyDesign(c: *Canvas, cr: *const Creator, v: Rect) void {
 
 fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
     const doc = cr.imported_doc orelse return;
-    const w = @min(@as(f32, 920), v.w - 32);
+    const w = @min(@as(f32, 720), v.w - 32);
     const h = @min(@as(f32, 620), v.h - 24);
-    const r: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + (v.h - h) / 2, .w = w, .h = h };
+    // Keep the live character in the exposed left strip. The imported model is rendered by the
+    // game scene behind this panel, so centering the editor used to cover the preview entirely.
+    const r: Rect = .{ .x = v.x + v.w - w - 12, .y = v.y + (v.h - h) / 2, .w = w, .h = h };
     panel(c, r, "IMPORTED CHARACTER LIBRARY");
     const rig_label = if (cr.imported_rig_status_len > 0) cr.imported_rig_status[0..cr.imported_rig_status_len] else "NO EXTERNAL RIG  |  BUNDLED CAPTAIN COMPONENTS";
-    c.print(r.x + 18, r.y + 36, 0.76, dim, "LIVE 3D PREVIEW  |  {d} COMPONENTS  |  {s}", .{doc.parts.len, rig_label});
+    c.print(r.x + 18, r.y + 36, 0.76, dim, "LIVE PREVIEW LEFT  |  {d} COMPONENTS  |  {s}", .{doc.parts.len, rig_label});
     button(c, .{ .x = r.x + r.w - 150, .y = r.y + 26, .w = 132, .h = 28 }, "IMPORT GLB", hitId(.imported_import_glb, 0), false);
 
     const filter_names = [_][]const u8{ "ALL", "ARMOR", "SKIN", "EYES", "ENERGY", "NEUTRAL" };
@@ -953,7 +955,7 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
         button(c, tab, name, hitId(.imported_filter, i), cr.imported_filter == i);
     }
 
-    const list = Rect{ .x = r.x + 18, .y = r.y + 94, .w = 380, .h = h - 160 };
+    const list = Rect{ .x = r.x + 18, .y = r.y + 94, .w = @min(@as(f32, 380), (r.w - 60) * 0.45), .h = h - 160 };
     c.rect(list, alpha(panel_fill, 0.5));
     const row_step: f32 = 25;
     const rows: usize = @min(18, @as(usize, @intFromFloat(@max(list.h / row_step, 1))));
@@ -1559,8 +1561,8 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         const fz = @as(f32, @floatFromInt(z)) / 12;
         const wx = focus[0] + (fx - 0.5) * span;
         const wz = focus[2] + (fz - 0.5) * depth;
-        const region_seed = if (destination == Sandbox.detroit_travel_count) @import("../procedural/Seed.zig").mix(sb.seed ^ Sandbox.new_york_seed_salt) else sb.seed;
-        const surface = @import("../procedural/Terrain.zig").surface(region_seed, wx, wz);
+        const region_seed = @import("../world/Region.zig").seedAtPosition(sb.seed, wx, wz);
+        const surface = @import("../procedural/Terrain.zig").surface(sb.seed, wx, wz);
         const biome = @import("../procedural/Biome.zig").sample(region_seed, wx, wz).color();
         const relief = std.math.clamp(0.55 + surface.normal[0] * 0.3 + surface.normal[2] * 0.25 + surface.height / 350, 0.25, 1);
         const color = [3]f32{ biome[0] * relief, biome[1] * relief, biome[2] * relief };
@@ -1571,7 +1573,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         c.rect(.{ .x = map.x + map.w * f, .y = map.y, .w = 1, .h = map.h }, alpha(dim, 0.2));
         c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
     }
-    const title = if (destination == Sandbox.detroit_travel_count) "NEW YORK CITY / HUDSON REACH" else "DETROIT / ARBOR REACH";
+    const title = if (destination == Sandbox.detroit_travel_count) @import("../world/Region.zig").new_york.title else @import("../world/Region.zig").default_title;
     c.print(map.x + 8, map.y + 8, 1, ink, "{s}", .{title});
     c.print(map.x + 8, map.y + 23, 0.8, dim, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
     const legend_y = map.y + 39;
@@ -1635,7 +1637,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = r.w - 24, .h = 26 };
         rowBack(c, row, menu.row == i);
         const on = menu.enabled(i);
-        if (i == 6) {
+        if (i == Menu.frame_row) {
             const label: []const u8 = switch (menu.map_target) { .none => "TRACK TARGET: OFF", .nest => "TRACK TARGET: HIVE NESTS", .cave => "TRACK TARGET: CAVES", .wildkin => "TRACK TARGET: WILDKIN", .wildlife => "TRACK TARGET: CAPTURABLE WILDLIFE" };
             c.text(row.x + 12, row.y + 9, label, 1, if (menu.row == i) accent else ink);
         } else c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);

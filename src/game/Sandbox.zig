@@ -37,6 +37,8 @@ const Metro = @import("../procedural/Metro.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
+const Chunk = @import("../procedural/Chunk.zig");
+const Region = @import("../world/Region.zig");
 const Host = @import("../script/Host.zig");
 const Mod = @import("../mod/Mod.zig");
 const CharacterContent = @import("CharacterContent.zig");
@@ -929,7 +931,7 @@ fn groundHollow(context: ?*const anyopaque, p: Physics.Vec3) bool {
 /// or just above its channel (not on a bridge over it, nor in a cave under it).
 pub fn surroundings(self: *const Sandbox, feet: Physics.Vec3) Player.Environment {
     const terrain = Terrain.surface(self.seed, feet[0], feet[2]);
-    const river = if (Hydrology.waterAt(self.seed, feet[0], feet[2])) |level| (if (feet[1] < level + 0.1 and feet[1] > level - 3) level else null) else null;
+    const river = if (Hydrology.waterAt(Chunk.regionalSeedAt(self.seed, feet[0], feet[2]), feet[0], feet[2])) |level| (if (feet[1] < level + 0.1 and feet[1] > level - 3) level else null) else null;
     if (@abs(feet[1] - terrain.height) >= 0.6) return .{ .ground = .rock, .river = river };
     // Slope as rise over run, from the surface normal (no further height samples).
     const n = terrain.normal;
@@ -2096,7 +2098,12 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and (self.player.mode == .walk or self.player.mode == .fly) and n < out.len) {
-        n = avatar(if (self.creator.open) self.creator.draft else self.profile, .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog, out, n);
+        var preview_pose: Avatar.Pose = .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 };
+        if (self.creator.imported_open) {
+            // The editor is docked right; offset the real character into the exposed left strip.
+            preview_pose.feet = R.add(preview_pose.feet, R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 1, 0, 0 }));
+        }
+        n = avatar(if (self.creator.open) self.creator.draft else self.profile, preview_pose, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog, out, n);
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);
@@ -4039,7 +4046,11 @@ test "a guest fires their own blaster with the trigger and downs a drone" {
 pub const detroit_travel_count = 3 + Metro.stop_nodes.len;
 pub const travel_count = detroit_travel_count + 1;
 pub const travel_labels = [_][]const u8{ "BASE CAMP", "ROOTDEEP 1", "ROOTDEEP 2", "SOUTH LINE", "NORTH LINE", "WEST LINE", "NEW YORK CITY" };
-pub const new_york_seed_salt: u64 = 0x4e4557594f524b;
+/// The world-map row for each destination, in the same order as `travel_labels`.
+pub const travel_menu_labels = [_][]const u8{ "TRAVEL: BASE CAMP", "TRAVEL: ROOTDEEP SHRINE 1", "TRAVEL: ROOTDEEP SHRINE 2", "METRO: SOUTH LINE", "METRO: NORTH LINE", "METRO: WEST LINE", "TRAVEL: NEW YORK CITY" };
+comptime {
+    std.debug.assert(travel_labels.len == travel_count and travel_menu_labels.len == travel_count);
+}
 const NewYorkLandmark = struct { x: f32, z: f32, height: f32, width: f32, depth: f32, tint: [4]f32 };
 const new_york_landmarks = [_]NewYorkLandmark{
     .{ .x = 1320, .z = -180, .height = 190, .width = 42, .depth = 42, .tint = .{ 0.24, 0.34, 0.40, 1 } },
@@ -4066,17 +4077,16 @@ pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
 pub fn newYorkLandmark(seed: u64, index: usize) ?struct { position: Physics.Vec3, size: Physics.Vec3, tint: [4]f32 } {
     if (index >= new_york_landmarks.len) return null;
     const landmark = new_york_landmarks[index];
-    const ground = Terrain.surface(Seed.mix(seed ^ new_york_seed_salt), landmark.x, landmark.z).height;
+    const ground = Terrain.surface(seed, landmark.x, landmark.z).height;
     return .{ .position = .{ landmark.x, ground + landmark.height / 2, landmark.z }, .size = .{ landmark.width, landmark.height, landmark.depth }, .tint = landmark.tint };
 }
 
 /// New York's first arrival district is independently seeded and kept in the same local
 /// coordinate frame so streaming, terrain collision, and four-player movement remain shared.
 fn newYorkArrival(seed: u64) Physics.Vec3 {
-    const regional_seed = Seed.mix(seed ^ new_york_seed_salt);
-    const x: f32 = 1320;
-    const z: f32 = -180;
-    return .{ x, Terrain.surface(regional_seed, x, z).height + 0.1, z };
+    const x = Region.new_york.arrival[0];
+    const z = Region.new_york.arrival[1];
+    return .{ x, Terrain.surface(seed, x, z).height + 0.1, z };
 }
 
 pub fn travelBlocked(self: *const Sandbox, p: usize) ?[]const u8 {
@@ -4118,13 +4128,12 @@ fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
             while (x <= ring) : (x += 1) {
                 if (@abs(x) != ring and @abs(z) != ring) continue;
                 var point = R.add(origin, .{ @as(f32, @floatFromInt(x)) * 2, 0, @as(f32, @floatFromInt(z)) * 2 });
-                const regional_seed = if (destination == detroit_travel_count) Seed.mix(self.seed ^ new_york_seed_salt) else self.seed;
-                const ground = Terrain.surface(regional_seed, point[0], point[2]);
+                const ground = Terrain.surface(self.seed, point[0], point[2]);
                 if (ground.normal[1] < 0.7) continue;
                 var highest = ground.height;
                 var lowest = ground.height;
                 for ([_]f32{ -shape.radius, shape.radius }) |dx| for ([_]f32{ -shape.radius, shape.radius }) |dz| {
-                    const height = Terrain.surface(regional_seed, point[0] + dx, point[2] + dz).height;
+                    const height = Terrain.surface(self.seed, point[0] + dx, point[2] + dz).height;
                     highest = @max(highest, height);
                     lowest = @min(lowest, height);
                 };
@@ -4214,9 +4223,11 @@ test "New York has deterministic regional terrain, skyline landmarks, and a safe
     defer catalog.deinit(std.testing.allocator);
     defer sb.deinit();
     const point = sb.travelPoint(detroit_travel_count);
-    const regional_seed = Seed.mix(sb.seed ^ new_york_seed_salt);
-    try std.testing.expectApproxEqAbs(Terrain.surface(regional_seed, point[0], point[2]).height + 0.1, point[1], 0.001);
-    try std.testing.expect(!std.meta.eql(Terrain.surface(sb.seed, point[0], point[2]), Terrain.surface(regional_seed, point[0], point[2])));
+    const regional_seed = Region.new_york.seed(sb.seed);
+    // Collision queries take the world seed and must land on the regional ground the mesh draws.
+    try std.testing.expectApproxEqAbs(Terrain.surface(sb.seed, point[0], point[2]).height + 0.1, point[1], 0.001);
+    try std.testing.expect(Terrain.surface(sb.seed, point[0], point[2]).height != Terrain.surface(sb.seed, point[0] - 4000, point[2]).height);
+    try std.testing.expectEqual(Chunk.regionalSeedAt(sb.seed, point[0], point[2]), regional_seed);
     try std.testing.expect(newYorkLandmark(sb.seed, 0) != null);
     try std.testing.expect(newYorkLandmark(sb.seed, new_york_landmarks.len) == null);
     const safe = travelArrival(&sb, detroit_travel_count) orelse return error.TestUnexpectedResult;

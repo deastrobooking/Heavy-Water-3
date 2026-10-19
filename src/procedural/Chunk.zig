@@ -5,7 +5,9 @@ const Hydrology = @import("Hydrology.zig");
 const Mesh = @import("../render/Mesh.zig");
 const Seed = @import("Seed.zig");
 pub const cells = 64;
-pub const extent = @import("../world/ChunkKey.zig").extent;
+const ChunkKey = @import("../world/ChunkKey.zig");
+const Region = @import("../world/Region.zig");
+pub const extent = ChunkKey.extent;
 pub const terrain_vertex_count = (cells + 1) * (cells + 1);
 pub const terrain_index_count = cells * cells * 6;
 pub const max_river_lanes = 3;
@@ -15,6 +17,16 @@ pub const river_indices_per_lane = river_ribbons_per_lane * (cells * 6 + 6);
 pub const vertex_count = terrain_vertex_count + max_river_lanes * river_vertices_per_lane;
 pub const index_count = terrain_index_count + max_river_lanes * river_indices_per_lane;
 pub const Cancel = struct { token: *const std.atomic.Value(u64), expected: u64 };
+
+/// The seed of chunk (cx, cz): a region's own, or the world's (see `world/Region.zig`).
+pub fn regionalSeed(seed: u64, cx: i32, cz: i32) u64 {
+    return Region.seedAt(seed, cx, cz);
+}
+
+/// The seed of the chunk that owns world position (x, z), so collision and queries agree with the mesh.
+pub fn regionalSeedAt(seed: u64, x: f32, z: f32) u64 {
+    return Region.seedAtPosition(seed, x, z);
+}
 
 /// Coordinates are integer chunk addresses; shared edges sample identical world positions.
 pub fn generate(allocator: std.mem.Allocator, seed: u64, cx: i32, cz: i32) !Mesh {
@@ -30,9 +42,7 @@ pub fn fill(seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32
     std.debug.assert(vertices.len == vertex_count and indices.len == index_count);
     const ox = @as(f32, @floatFromInt(cx)) * extent - extent / 2;
     const oz = @as(f32, @floatFromInt(cz)) * extent - extent / 2;
-    // New York's local procedural region starts east of Detroit and owns independent terrain,
-    // rivers, caves and vegetation seeds while retaining the common streaming grid.
-    const regional_seed = if (cx >= 19 and cx <= 23 and cz >= -5 and cz <= -1) Seed.mix(seed ^ 0x4e4557594f524b) else seed;
+    const regional_seed = regionalSeed(seed, cx, cz);
     for (0..cells + 1) |z| {
         if (cancel) |c| if (c.token.load(.acquire) != c.expected) return false;
         for (0..cells + 1) |x| {

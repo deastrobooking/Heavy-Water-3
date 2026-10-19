@@ -163,7 +163,7 @@ Acceptance: the benchmark meets its budgets on the M3 Pro; the playtest checklis
 
 ### B. Finish the first Earth city liberation loop (MVP gate)
 
-The combat campaign foundation is playable and has an end state, but the world premise requires two connected halves: clear the Hive from the wilds and expose its human allies inside a sanctuary city. Complete that loop in the existing Frontier before making the other planet and ocean catalogs playable.
+The combat campaign foundation is playable and has an end state, but the world premise requires two connected halves: clear the Hive from the wilds and expose its human allies inside a Hive-occupied city. Complete that loop in the existing Frontier before making the other planet and ocean catalogs playable.
 
 1. Trace the current save, quest, dialogue, evidence/investigation, nest, carrier, and city interaction paths against the liberation loop. Write down only the concrete missing links before implementation.
 2. Connect the city investigation outcome to persistent shared story progress. Keep personal loot, currency, gear, XP, and pet growth in each player's `Kit`.

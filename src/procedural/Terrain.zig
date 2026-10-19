@@ -9,15 +9,17 @@ pub const spacing: f32 = Chunk.extent / Chunk.cells;
 pub const hub_height_upper_bound: f32 = 44;
 pub const Surface = struct { height: f32, normal: [3]f32 };
 
-/// Height and face normal of the rendered triangle under (x, z), matching Chunk.fill's
+/// Takes the world seed and applies the regional one itself. Height and face normal of the rendered triangle under (x, z), matching Chunk.fill's
 /// triangulation exactly, so collision and visible terrain agree to float precision.
-pub fn surface(seed: u64, x: f32, z: f32) Surface {
+pub fn surface(world_seed: u64, x: f32, z: f32) Surface {
     const gx = @floor(x / spacing);
     const gz = @floor(z / spacing);
     const u = x / spacing - gx;
     const v = z / spacing - gz;
     const x0 = gx * spacing;
     const z0 = gz * spacing;
+    // A cell lies wholly inside one chunk, so its centre picks the same regional seed as the mesh.
+    const seed = Chunk.regionalSeedAt(world_seed, x0 + spacing / 2, z0 + spacing / 2);
     const h00 = Noise.height(seed, x0, z0);
     const h10 = Noise.height(seed, x0 + spacing, z0);
     const h01 = Noise.height(seed, x0, z0 + spacing);
@@ -57,4 +59,14 @@ test "surface matches rendered chunk vertices and triangle interiors, including 
         try std.testing.expectApproxEqAbs(p[1], s.height, 0.0001);
         try std.testing.expect(s.normal[1] > 0);
     }
+}
+
+test "New York collision queries use the regional seed the mesh is drawn with" {
+    const world: u64 = 42;
+    const mesh = try Chunk.generate(std.testing.allocator, world, 10, -1);
+    defer mesh.deinit(std.testing.allocator);
+    for (mesh.vertices[0..Chunk.terrain_vertex_count]) |vertex| {
+        try std.testing.expectApproxEqAbs(vertex.position[1], surface(world, vertex.position[0], vertex.position[2]).height, 0.0001);
+    }
+    try std.testing.expect(Chunk.regionalSeed(world, 10, -1) != world);
 }

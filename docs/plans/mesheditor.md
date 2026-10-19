@@ -148,6 +148,7 @@ Sources: [Creator.zig](../../src/game/Creator.zig), [App.zig](../../src/App.zig)
 
 - **State** lives in `Creator`: `imported_doc: ?*Modifiers.Document`, `imported_open`, `imported_selected`, `imported_filter` (6 surface filters), `imported_palette`, `imported_palette_variant`, `imported_status` (`ready`, `unsaved`, `saved`), bounded 64-command undo/redo history, and a 96-byte rig status string.
 - **Keys:** up and down select, left and right cycle the surface, `p` cycles the palette, `c` paints, `h` hides, `z` undoes and `shift-z` redoes, escape or enter closes. Mouse hit areas map to the same methods; history position and undo/redo buttons are visible in the panel.
+- **Live preview:** the in-game avatar uses the imported model and game skinning pipeline. While the imported editor is open, the library panel docks right and the frozen avatar shifts into the exposed left strip, so paint and rig pose edits remain visible.
 - **Files:** the bundled Captain document is `tools/captain/Captain.modifiers.json`; a user override is `saves/captain.modifiers.json`. One imported GLB lives at `saves/imported-character.glb` with `saves/imported-character.modifiers.json` beside it.
 - **Limits:** source GLB at most 64 MiB, sidecar at most 1 MiB, the GLB picker (`hw_choose_open_glb`) exists on macOS only.
 - **Import** (`importCharacterGlb`): `inspect`, reject if there is no skin, `compilePosePreview(.run)`, hash the source, `generate` the document into `mesh_library_arena`, write the GLB and sidecar, `encode` the model into `mesh_library_base`, queue it for install.

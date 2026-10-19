@@ -2188,6 +2188,16 @@ fn exerciseSmoke(self: *App) void {
             self.sandbox.player.setMode(.fly, camera.*);
             camera.position = mach.math.vec3(180, 35, 120);
             camera.yaw = 0.4;
+            // Visit every fast-travel destination; the last (New York) stays loaded for the frames
+            // until stage 2, so its chunks stream and draw under the Metal validation layer.
+            for (0..Sandbox.travel_count) |destination| {
+                if (!self.sandbox.fastTravel(0, destination, camera)) return self.report("SMOKE TRAVEL {s} REFUSED", .{Sandbox.travel_labels[destination]});
+                const feet = self.sandbox.player.feet;
+                // Metro platforms are decks above the ground; only the open-terrain arrival is checked.
+                const ground = @import("procedural/Terrain.zig").surface(self.sandbox.seed, feet[0], feet[2]).height;
+                if (destination == Sandbox.detroit_travel_count and @abs(feet[1] - ground) > 2) return self.report("SMOKE TRAVEL {s} OFF GROUND", .{Sandbox.travel_labels[destination]});
+                std.log.info("Smoke travel {s}: {d:.0} {d:.0} {d:.0}", .{ Sandbox.travel_labels[destination], feet[0], feet[1], feet[2] });
+            }
         },
         2 => {
             self.sandbox.creator.toggleImportedPart();

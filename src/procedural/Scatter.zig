@@ -1,5 +1,6 @@
 const std = @import("std");
 const Seed = @import("Seed.zig");
+const Chunk = @import("Chunk.zig");
 const Noise = @import("Noise.zig");
 const Biome = @import("Biome.zig");
 const Key = @import("../world/ChunkKey.zig");
@@ -9,7 +10,6 @@ const Transform = @import("../world/Transform.zig");
 pub const candidates = 192;
 pub const boulder_candidates = 40;
 pub const capacity = candidates + boulder_candidates;
-pub const new_york_seed_salt: u64 = 0x4e4557594f524b;
 pub const Kind = enum { relic, vegetation, boulder };
 const Vegetation = @import("Vegetation.zig");
 const District = @import("District.zig");
@@ -39,7 +39,7 @@ pub fn allowed(normal_y: f32, kind: Kind) bool {
 }
 
 pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
-    const regional_seed = if (key.x >= 19 and key.x <= 23 and key.z >= -5 and key.z <= -1) Seed.mix(seed ^ new_york_seed_salt) else seed;
+    const regional_seed = Chunk.regionalSeed(seed, key.x, key.z);
     const chunk_seed = Seed.at(regional_seed ^ 0x53434154544552, key.x, key.z);
     var count: usize = 0;
     for (0..candidates) |i| {

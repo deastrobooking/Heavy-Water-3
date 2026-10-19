@@ -1,6 +1,6 @@
 # City content plan: three sub-missions, one boss battle and ten item discoveries per city
 
-**Status:** proposed, 2026-10-15. Documentation only; nothing here is built. The budget comes from the owner (2026-10-15). Every named person, place, boss and item below is a **proposal for the owner to approve or change**, grounded in [Story](../Story.md), [world](../world.md), [city](../city.md) and the code. The [roadmap](../roadmap.md) stays the single plan; this is the detail behind milestone B in [next steps](next-steps.md).
+**Status:** Detroit content draft proposed, 2026-10-15; campaign direction updated 2026-10-19. Documentation only; nothing here is built. The owner has set Detroit and New York City as captured and directed synthetic humanoid warriors to lead their liberation alongside humanity. The Detroit names, boss and discoveries below remain proposals. New York's detailed missions and rewards are intentionally deferred until Detroit's loop is proven. The [roadmap](../roadmap.md) stays the single plan; this is the detail behind milestone B in [next steps](next-steps.md).
 
 **Audience:** the project owner (content), and engineers who will build it. Part 1 to 3 are content; part 4 onward is the technical plan.
 
@@ -85,19 +85,20 @@ Spread: five personal upgrades, two cosmetic or pet items, three shared (story o
 
 Detroit is freed when: the three exposures are set, the surrounding nests and carriers are down, and the boss is defeated. The outcome is a shared story state, saved with the world, plus a visible change (the Hive stain recedes from the industrial belt) and each player's boss reward in their own `Kit`.
 
-## 4. The other Earth cities (outlines)
+## 4. New York City and the other Earth cities (outlines)
 
 These come from each region's role and exploration hook in `Worlds.zig`. They show that the template fits; they are not written content. Write each only when its turn comes.
 
 | City | Role | Government thread | Science thread | Industry thread | Boss idea |
 | --- | --- | --- | --- | --- | --- |
+| **New York City: Hudson Reach** | Captured Hudson-side metropolis; dense towers, elevated green routes, river approaches and transit corridors under Hive occupation | Occupation permits and sealed evacuation routes | A research lab trading city records for Hive protection | Industrial docks and automated supply routes feeding the garrison | A Scalari occupation commander controlling linked skyline relays |
 | Rootdeep Ward | seed vault: buried engineer vaults and machine shrines | a vault warden who sells access | a seed-bank archivist | tomb-salvage guild | a vault guardian machine |
 | Crownfall | observatory over the mountain ranges | a listening-post officer | astronomers hiding signals | high-cable foundries | a Brood carrier siege (the observatory's sky) |
 | Bridgewell | bridge foundries and vehicle test routes | a transit commissioner | an engineering lab | foundry contractors | a titan on the test route (a vehicle chase) |
 | Solace Basin | river locks, waterworks and a landing zone | a water authority | a hydrology institute | lock and pump operators | a river-surge boss |
 | Pelaglass and Sonorous Reef | the two ocean cities | follow the [ocean-cities plan](ocean-cities.md) | | | |
 
-Hive Homeworld and Gaia each have five catalogued regions (for example Varkhoss and Faraday Deep). Per [AGENTS.md](../../AGENTS.md), planets beyond Earth are deferred; the template applies when they are reached.
+The New York hooks are campaign direction only; its mission names, boss encounter, ten discoveries and rewards are not drafted. The current NYC foothold is an arrival district, not a full city. Per [AGENTS.md](../../AGENTS.md), finish Detroit end to end before building New York's loop. Hive Homeworld and Gaia each have five catalogued regions (for example Varkhoss and Faraday Deep). Planets beyond Earth are deferred; the template applies when they are reached.
 
 ## 5. Technical plan
 

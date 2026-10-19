@@ -24,11 +24,13 @@ A good session moves around the loop: a shrine yields a pump blueprint, the pump
 
 ## Two kinds of ground: the wilds and the sanctuary cities
 
-The game changes pace at the city gates.
+The game changes pace between the open wilds and inhabited city districts, even when those districts are occupied.
 - **Outside the sanctuary cities** (the frontier, the mountain caves, the Hive-held zones), Heavy Water is a hack-and-slash. It is fast, readable fights against Hive waves, nests and carriers. Loot drops for each player to keep, and pets and heroes fight alongside. A player's power comes from what they find and fabricate out here.
-- **Inside the sanctuary cities** (the canopy districts), the pace drops to exploring. Players find upgrades, shops and tinkers, talk to people, and uncover how the Hive holds the world: the alliances it has made with scientists and with governments. Evidence found in a city points to the collaborators, and the fights outside its walls are how the party breaks their grip.
+- **Within city districts**, the pace shifts toward exploring. Players find upgrades, shops and tinkers, talk to people, and uncover how the Hive holds the world: the alliances it has made with scientists and with governments. Captured districts add patrols and combat encounters to those routes. Evidence points to the collaborators, while fights in the surrounding wilds break the Hive's outer grip.
 
-**The arc:** free the cities of Earth one by one from the Hive and its human allies, and later the Colonies (Gaia and beyond, see the multi-world direction below). Each city is freed through both halves: the party clears the Hive from the wilds around it and exposes the alliance inside it.
+**The returning assault:** the Hive has overrun Detroit and New York City, and is spreading across Earth. Drone patrols, warrior castes, nests and command relays hold the streets, crossings and industrial districts. The Eight Synthetic Siblings who broke the Hive's first command network return alongside a new generation of synthetic humanoid warriors. They fight with humanity, free the captured cities, and become trusted leaders helping people choose their shared future.
+
+**The liberation arc:** Detroit is the first city loop to complete. New York City is also captured and is the next major Earth front; its existing Hudson-side arrival foothold is not yet a liberated city or a full mission area. Free Earth cities one by one, then the Colonies (Gaia and beyond, see the multi-world direction below). Each city is freed through both halves: clear the Hive in the wilds around it and expose the human alliance inside it. City liberation is a partnership with local people, not a transfer of rule to the synthetic heroes.
 
 **City content budget:** every city carries three sub-missions, one boss battle and ten item discoveries. What each mission, boss and discovery is stays a per-city content decision; the first city's draft and the build plan are in [city content](plans/city-content.md).
 
@@ -98,7 +100,11 @@ Roots draw groundwater, xylem lifts it, and specialized cells enrich deuterium i
 
 ## The canopy city
 
-The first sanctuary city is **Detroit, Michigan**, remembered as the Detroit Arbor Reach. Its skyline keeps historic civic character alongside the canopy future: weathered Gothic stone halls, narrow pointed windows and clustered spires face modern Arbor towers, foundries, rail yards and heavy machine works. The industrial belt is an intentional Hive pressure point, with its exposed utilities and production lines suited to brood sabotage and Scalari occupation. A broad local reach of the river wraps around a dry, wooded Belle Isle, with riverfront promenades and two heavy bridges toward Windsor. Smaller native pines, 6–18 m tall, gather around parks and the outer edge of the city before the canopy forest gives way to the larger fantasy redwoods and Arbors.
+The first canopy city is **Detroit, Michigan**, remembered as the Detroit Arbor Reach. Its skyline keeps historic civic character alongside the canopy future: weathered Gothic stone halls, narrow pointed windows and clustered spires face modern Arbor towers, foundries, rail yards and heavy machine works. The industrial belt is an intentional Hive pressure point, with its exposed utilities and production lines suited to brood sabotage and Scalari occupation. A broad local reach of the river wraps around a dry, wooded Belle Isle, with riverfront promenades and two heavy bridges toward Windsor. Smaller native pines, 6–18 m tall, gather around parks and the outer edge of the city before the canopy forest gives way to the larger fantasy redwoods and Arbors.
+
+Detroit begins under occupation: Hive patrols and nests press against the industrial belt, while human collaborators keep supply routes and relay access open. The canopy districts remain explorable, but the city is not safe or liberated until the party breaks the surrounding force, exposes the collaborators, and defeats the occupation's commander.
+
+**New York City: Hudson Reach** is the second captured Earth city. Its first arrival foothold sits on the Hudson side, with a dense skyline, elevated green routes, and a living harbor. The Hive uses the high-rise canyons, river approaches and transit infrastructure as a layered occupation zone; the local resistance keeps narrow rooftop and maintenance routes open. New York's full city loop follows Detroit's proven liberation structure rather than expanding the first playable slice prematurely.
 
 ### Grafted towers
 
