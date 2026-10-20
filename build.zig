@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const mach_gpu_backend = b.option(MachGpuBackend, "mach_gpu_backend", "Mach GPU backend (default, metal, vulkan, opengl, d3d12)") orelse .default;
     const options = b.addOptions();
-    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-38 hairstyle, 44-45 Solar Mantle, 46 Captain GLB preview, 47 bundled rigged GLB driven by the game pose, 48 vertex tools on that GLB") orelse 0);
+    options.addOption(u8, "character_showcase", b.option(u8, "character-showcase", "Character look: 1-5 armor/class, 6-38 hairstyle, 44-45 Solar Mantle, 46 Captain GLB preview, 47 bundled rigged GLB driven by the game pose, 48 vertex tools on that GLB, 49 the same ending in the weight heatmap") orelse 0);
     options.addOption(u8, "character_view", b.option(u8, "character-view", "Character review camera: 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up") orelse 0);
     options.addOption(u8, "character_pose", b.option(u8, "character-pose", "Character review pose: 0 rest, 1 aim, 2 overhead swing, 3 cast, 4 guard") orelse 0);
     options.addOption(u8, "character_tweak", b.option(u8, "character-tweak", "Character review variations, bits: 1 feminine, 2 height 0.9, 4 height 1.1, 8 open helmet, 16 sealed helmet, 32 visor helmet") orelse 0);

@@ -98,6 +98,7 @@ Options are compiled in, so changing one rebuilds.
 | `-Dcharacter-showcase=40..43` | 0 | The `emberwear` example mod in the creator: 40 hair, face and ink cel style; 41 phoenix armor over a hardsuit; 42 sealed helmet; 43 second hairstyle on the exo rig. |
 | `-Dcharacter-showcase=44..45` | 0 | Solar Mantle with the new crown braid and pilot helmet (44), or tempest sweep and recon helmet (45). |
 | `-Dcharacter-showcase=48` | 0 | Vertex tools on the bundled rigged GLB: the creator's imported library in VERTEX TOOLS mode after a scripted cel-pen fill, accent band, chest sculpt and head selection. |
+| `-Dcharacter-showcase=49` | 0 | As 48, ending with the WEIGHT tool's heatmap for the left upper arm (cold blue to hot red). |
 | `-Dcharacter-showcase=1..5` | 0 | Character look in the creator, front view: scout, sentinel, unarmored masculine, unarmored feminine, Synthetic. |
 | `-Dcharacter-view=0..5` | 0 | Character review camera around the avatar (with `-Dcharacter-showcase`): 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up. The close-ups use the same frame as the creator's head zoom. |
 | `-Dcharacter-pose=0..4` | 0 | Hold an arm pose for armor review: 1 aim, 2 overhead swing, 3 cast (arms raised), 4 guard. |

@@ -54,7 +54,7 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     const w: f32 = @min(340, v.w * 0.44);
     // About 560 units of content; status lines follow it, so a short window scrolls instead of
     // drawing text over the buttons.
-    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 640) };
+    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 668) };
     // The panel first: the canvas has a fixed command budget, and the selection dots take only
     // what the panel leaves.
     defer overlay(c, tools, v, r);
@@ -131,6 +131,19 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     y += 26;
     small(c, x, y, half, "BANDS", std.fmt.bufPrint(&buf, "{d}", .{tools.bands}) catch "", .bands_down, .bands_up);
     button(c, .{ .x = x2, .y = y, .w = half, .h = 22 }, "POSTERIZE", control(.posterize), false);
+    y += 26;
+
+    // Skin weights: the bone (by game joint), the brush operation and the heatmap.
+    var bone_buf: [24]u8 = undefined;
+    small(c, x, y, half, "BONE", upper(&bone_buf, MeshTools.jointName(tools.weight_joint)), .bone_down, .bone_up);
+    const op_label: []const u8 = switch (tools.weight_op) {
+        .add => "ADD",
+        .subtract => "SUBTRACT",
+        .replace => "REPLACE",
+        .smooth => "SMOOTH",
+    };
+    button(c, .{ .x = x2, .y = y, .w = quarter, .h = 22 }, op_label, control(.weight_op), tools.tool == .weight);
+    button(c, .{ .x = x2 + quarter + 4, .y = y, .w = quarter, .h = 22 }, "HEATMAP", control(.weight_view), tools.weight_view);
     y += 30;
 
     // Selection.

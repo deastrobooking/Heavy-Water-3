@@ -308,7 +308,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
         }
         if (options.character_showcase == 46) self.sandbox.profile.body_style = .captain_test;
-        if (options.character_showcase == 47 or options.character_showcase == 48) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
+        if (options.character_showcase >= 47 and options.character_showcase <= 49) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -333,7 +333,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.creator.begin(self.sandbox.profile);
         if (options.character_showcase == 46 and options.capture_frame > 0) self.sandbox.creator.openImported();
-        if (options.character_showcase == 48) {
+        if (options.character_showcase == 48 or options.character_showcase == 49) {
             self.sandbox.creator.openImported();
             self.sandbox.creator.vertex_tools = true;
         }
@@ -3277,6 +3277,8 @@ fn editedMeshPath(self: *const App) []const u8 {
 
 /// Writes the edited mesh (sculpt, paint, pens, topology, skin) beside the part sidecar.
 fn saveEditedMesh(self: *App) bool {
+    // The heatmap borrows the vertex colours; put the real ones back before writing.
+    self.mesh_tools.leaveWeightView();
     const entry = self.catalog.mesh(self.catalog.content.captain_test) orelse return false;
     const bytes = EditedMesh.encode(self.allocator, entry.model) catch |err| {
         self.report("MESH SAVE FAILED {s}", .{@errorName(err)});
@@ -3477,7 +3479,7 @@ fn updateMeshTools(self: *App, renderer: *Renderer) void {
         };
     }
     if (self.mesh_library_bake) |bake| bake.painted = &self.mesh_tools.editor.?.painted;
-    if (options.character_showcase == 48 and !self.tools_showcase_done) self.scriptToolsShowcase();
+    if ((options.character_showcase == 48 or options.character_showcase == 49) and !self.tools_showcase_done) self.scriptToolsShowcase();
     if (self.sandbox.importedPlacement()) |place| {
         self.mesh_tools.base = place.base;
         self.mesh_tools.yaw = place.yaw;
@@ -3590,6 +3592,11 @@ fn scriptToolsShowcase(self: *App) void {
             t.setTool(.move);
         }
     }).run(tools, e, lo, h, centre) catch |err| std.log.err("vertex tools showcase failed: {s}", .{@errorName(err)});
+    if (options.character_showcase == 49) {
+        // 49: the same session ending in the weight heatmap for the left upper arm.
+        tools.weight_joint = @intFromEnum(@import("character/skeleton.zig").Joint.upper_arm_l);
+        _ = tools.control(.weight_view) catch {};
+    }
     std.log.info("Vertex tools showcase: {d} undo steps, {d} vertices selected, {d} vertices in the mesh", .{ e.undo_stack.items.len, e.selectedCount(), e.model.mesh.vertices.len });
 }
 

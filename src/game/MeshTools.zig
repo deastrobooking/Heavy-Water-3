@@ -9,13 +9,14 @@ const Model = @import("../asset/Model.zig");
 const Mesh = @import("../render/Mesh.zig");
 const Camera = @import("../world/Camera.zig");
 const CharacterMesh = @import("../character/mesh.zig");
+const Skeleton = @import("../character/skeleton.zig");
 const MeshTools = @This();
 
 pub const V = MeshEdit.V;
 pub const Ray = struct { origin: V, direction: V };
 
-pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick, gradient };
-pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK", "GRAD" };
+pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick, gradient, weight };
+pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK", "GRAD", "WEIGHT" };
 pub const tool_hints = [_][]const u8{
     "CLICK A VERTEX, SHIFT+CLICK TO ADD, DRAG TO BRUSH-SELECT",
     "DRAG: MOVE, ROTATE OR SCALE THE SELECTION; GRAB AN AXIS HANDLE TO LOCK IT",
@@ -28,6 +29,7 @@ pub const tool_hints = [_][]const u8{
     "CLICK A PIECE TO SELECT IT, THEN TEAR OFF THE SELECTION",
     "CLICK THE MESH TO PICK UP ITS COLOUR AND CEL PEN",
     "DRAG ACROSS THE MODEL: SECOND COLOUR TO FIRST (SELECTION OR ALL)",
+    "DRAG TO PAINT HOW MUCH THE CHOSEN BONE MOVES THE SURFACE",
 };
 
 /// Paint brush presets as data: size, strength, edge hardness and blend in one choice.
@@ -95,6 +97,10 @@ pub const Control = enum(u8) {
     collapse_edge,
     save,
     discard,
+    bone_down,
+    bone_up,
+    weight_op,
+    weight_view,
     swatch_first = 100,
     open = 120,
     _,
@@ -135,6 +141,13 @@ start_vec: V = .{ 1, 0, 0 },
 last_angle: f32 = 0,
 last_factor: f32 = 1,
 last_param: f32 = 0,
+/// The game joint whose skin bone the WEIGHT tool paints (`skeleton.Joint` index, root excluded).
+weight_joint: u8 = @intFromEnum(Skeleton.Joint.upper_arm_l),
+weight_op: MeshEdit.WeightOp = .add,
+/// The heatmap: vertex colours show the chosen bone's weight. The real colours wait in
+/// `color_backup` and come back when the view closes; nothing here is recorded for undo.
+weight_view: bool = false,
+color_backup: []V = &.{},
 /// Gizmo on screen: centre and the three axis tips (normalised), when the move tool has a selection.
 gizmo_screen: ?[4][2]f32 = null,
 blend: MeshEdit.Blend = .mix,
@@ -197,6 +210,7 @@ pub fn bind(self: *MeshTools, model: *Model, mirror: ?*Model) MeshEdit.Error!voi
 
 pub fn unbind(self: *MeshTools) void {
     self.endStroke();
+    self.leaveWeightView();
     if (self.editor) |*e| e.deinit();
     self.editor = null;
     self.allocator.free(self.overlay);
@@ -316,7 +330,7 @@ pub fn refreshOverlay(self: *MeshTools, camera: Camera, aspect: f32) void {
         self.overlay_len += 1;
     }
     const brushes = switch (self.tool) {
-        .select, .draw, .inflate, .smooth, .grab, .paint, .pen => true,
+        .select, .draw, .inflate, .smooth, .grab, .paint, .pen, .weight => true,
         else => false,
     };
     if (!brushes) return;
@@ -415,7 +429,7 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
             self.anchor = h.point;
             self.beginStroke();
         },
-        .draw, .inflate, .smooth, .paint, .pen => {
+        .draw, .inflate, .smooth, .paint, .pen, .weight => {
             self.beginStroke();
             if (hit) |h| try self.dab(h.point);
         },
@@ -441,7 +455,7 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
             try e.move(sub(point, self.anchor));
             self.anchor = point;
         },
-        .draw, .inflate, .smooth, .paint, .pen => if (e.raycast(ray.origin, ray.direction)) |h| {
+        .draw, .inflate, .smooth, .paint, .pen, .weight => if (e.raycast(ray.origin, ray.direction)) |h| {
             self.hover = h.point;
             try self.dab(h.point);
         },
@@ -602,6 +616,27 @@ fn endStroke(self: *MeshTools) void {
 
 fn dab(self: *MeshTools, center: V) MeshEdit.Error!void {
     const e = &(self.editor orelse return);
+    if (self.tool == .weight) {
+        if (self.boneFor(self.weight_joint) == null) {
+            self.setStatus("THIS RIG HAS NO BONE ON {s}", .{jointName(self.weight_joint)});
+            return;
+        }
+        try e.dabWeight(self.weight_joint, mirrorJoint(self.weight_joint), self.weight_op, 1, .{
+            .center = center,
+            .radius = self.radius * self.height(),
+            .strength = self.strength * 0.5,
+            .hardness = self.hardness,
+            .mirror = self.mirror,
+            .masked = self.masked,
+            .facing = if (self.backface) self.view_dir else null,
+        });
+        if (self.weight_view) try self.refreshHeat();
+        return;
+    }
+    if (self.weight_view and (self.tool == .paint or self.tool == .pen)) {
+        self.setStatus("LEAVE WEIGHT VIEW TO PAINT COLOUR", .{});
+        return;
+    }
     const brush: MeshEdit.Brush = switch (self.tool) {
         .draw => .draw,
         .inflate => .inflate,
@@ -628,6 +663,68 @@ fn dab(self: *MeshTools, center: V) MeshEdit.Error!void {
         .mirror = self.mirror,
         .facing = if (self.backface) self.view_dir else null,
     });
+}
+
+/// The skin bone that drives game joint `joint` (the first one mapped to it), if the rig has one.
+pub fn boneFor(self: *const MeshTools, joint: u8) ?u8 {
+    const e = self.editor orelse return null;
+    return e.boneForJoint(joint);
+}
+
+pub fn jointName(joint: u8) []const u8 {
+    if (joint >= Skeleton.humanoid_joint_count) return "?";
+    return @tagName(@as(Skeleton.Joint, @enumFromInt(joint)));
+}
+
+/// The left/right counterpart of a game joint (itself for centre joints).
+pub fn mirrorJoint(joint: u8) u8 {
+    const name = jointName(joint);
+    // Through the enum shim: Zig 0.17 changed enum reflection (see AGENTS.md).
+    inline for (comptime @import("enum_compat").fields(Skeleton.Joint)) |f| {
+        if (std.mem.endsWith(u8, name, "_l") and std.mem.endsWith(u8, f.name, "_r") and std.mem.eql(u8, name[0 .. name.len - 2], f.name[0 .. f.name.len - 2])) return @intCast(f.value);
+        if (std.mem.endsWith(u8, name, "_r") and std.mem.endsWith(u8, f.name, "_l") and std.mem.eql(u8, name[0 .. name.len - 2], f.name[0 .. f.name.len - 2])) return @intCast(f.value);
+    }
+    return joint;
+}
+
+/// Writes the chosen bone's weights into the display colours (cold blue to hot red).
+fn refreshHeat(self: *MeshTools) MeshEdit.Error!void {
+    const e = &(self.editor orelse return);
+    for (e.model.mesh.vertices, 0..) |*v, i| v.color = heat(e.weightOf(@intCast(i), self.weight_joint));
+    try e.markDirty(0);
+}
+
+pub fn heat(w: f32) V {
+    const ramp = MeshEdit.Ramp.three(.{ 0.05, 0.1, 0.45 }, .{ 0.1, 0.85, 0.3 }, .{ 0.95, 0.15, 0.1 });
+    return ramp.sample(w);
+}
+
+fn enterWeightView(self: *MeshTools) MeshEdit.Error!void {
+    if (self.weight_view) return;
+    const e = &(self.editor orelse return);
+    if (e.model.skin == null) {
+        self.setStatus("THIS MESH HAS NO SKIN", .{});
+        return;
+    }
+    const backup = try self.allocator.alloc(V, e.model.mesh.vertices.len);
+    for (e.model.mesh.vertices, backup) |v, *c| c.* = v.color;
+    self.color_backup = backup;
+    self.weight_view = true;
+    try self.refreshHeat();
+}
+
+/// Restores the real colours. Safe to call when the view is closed.
+pub fn leaveWeightView(self: *MeshTools) void {
+    if (!self.weight_view) return;
+    self.weight_view = false;
+    if (self.editor) |*e| {
+        if (self.color_backup.len == e.model.mesh.vertices.len) {
+            for (e.model.mesh.vertices, self.color_backup) |*v, c| v.color = c;
+        }
+        e.markDirty(0) catch {};
+    }
+    self.allocator.free(self.color_backup);
+    self.color_backup = &.{};
 }
 
 fn selectionCentre(self: *const MeshTools) V {
@@ -696,6 +793,14 @@ pub fn setTool(self: *MeshTools, tool: Tool) void {
 pub fn control(self: *MeshTools, c: Control) MeshEdit.Error!Action {
     const e = &(self.editor orelse return if (c == .close) .close else .none);
     if (self.dragging) self.release();
+    if (self.weight_view) switch (c) {
+        .fill_color, .fill_pen, .height_fill, .edge_fill, .posterize, .extrude, .delete_faces, .split_edge, .collapse_edge, .tear_off, .save => {
+            self.setStatus("LEAVE WEIGHT VIEW FIRST", .{});
+            return .none;
+        },
+        .close => self.leaveWeightView(),
+        else => {},
+    };
     switch (c) {
         .radius_down, .radius_up => self.radius = std.math.clamp(self.radius * (if (c == .radius_up) @as(f32, 1.25) else 0.8), 0.005, 0.5),
         .strength_down, .strength_up => self.strength = std.math.clamp(self.strength + (if (c == .strength_up) @as(f32, 0.1) else -0.1), 0.05, 1),
@@ -723,8 +828,29 @@ pub fn control(self: *MeshTools, c: Control) MeshEdit.Error!Action {
             defer e.end() catch {};
             if (c == .fill_color) try e.fillSelection(self.color) else try e.fillSelectionPen(self.pen);
         },
-        .undo => _ = try e.undo(),
-        .redo => _ = try e.redo(),
+        .undo, .redo => {
+            // Undo may restore real colours; step out of the heatmap so they are not lost.
+            const viewing = self.weight_view;
+            self.leaveWeightView();
+            _ = if (c == .undo) try e.undo() else try e.redo();
+            if (viewing) try self.enterWeightView();
+        },
+        .bone_down, .bone_up => {
+            const n: i32 = Skeleton.humanoid_joint_count - 1;
+            self.weight_joint = @intCast(@mod(@as(i32, self.weight_joint) - 1 + (if (c == .bone_up) @as(i32, 1) else -1), n) + 1);
+            if (self.weight_view) try self.refreshHeat();
+            self.setStatus("BONE: {s}{s}", .{ jointName(self.weight_joint), if (self.boneFor(self.weight_joint) == null) " (NOT IN THIS RIG)" else "" });
+        },
+        .weight_op => self.weight_op = switch (self.weight_op) {
+            .add => .subtract,
+            .subtract => .replace,
+            .replace => .smooth,
+            .smooth => .add,
+        },
+        .weight_view => if (self.weight_view) self.leaveWeightView() else {
+            try self.enterWeightView();
+            if (self.tool != .weight) self.setTool(.weight);
+        },
         .tear_off => return .tear_off,
         .save => return .save,
         .discard => return .discard,
@@ -1072,4 +1198,47 @@ test "topology buttons extrude, split, collapse and delete through the tool, wit
     _ = try tools.control(.undo);
     _ = try tools.control(.undo);
     try std.testing.expectEqual(@as(usize, 24), model.mesh.vertices.len);
+}
+
+test "the weight tool paints the chosen game joint's bone, mirrors to its partner, and the heatmap restores colours" {
+    const a = std.testing.allocator;
+    var model = try Model.fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    const influences = try a.alloc(Model.SkinVertex, model.mesh.vertices.len);
+    @memset(influences, .{ .joints = .{ 0, 0, 0, 0 }, .weights = .{ 1, 0, 0, 0 } });
+    const bones = try a.alloc(Model.SkinBone, 3);
+    bones[0] = .{ .ranger_joint = @intFromEnum(Skeleton.Joint.chest), .pivot = .{ 0, 1, 0 } };
+    bones[1] = .{ .ranger_joint = @intFromEnum(Skeleton.Joint.upper_arm_l), .pivot = .{ 0.5, 1.5, 0 } };
+    bones[2] = .{ .ranger_joint = @intFromEnum(Skeleton.Joint.upper_arm_r), .pivot = .{ -0.5, 1.5, 0 } };
+    model.skin = .{ .vertices = influences, .bones = bones };
+    for (model.mesh.vertices) |*v| v.color = .{ 0.2, 0.4, 0.6 };
+    var tools = MeshTools.init(a);
+    defer tools.deinit();
+    try tools.bind(&model, null);
+    try std.testing.expectEqual(@as(u8, @intFromEnum(Skeleton.Joint.upper_arm_r)), mirrorJoint(@intFromEnum(Skeleton.Joint.upper_arm_l)));
+    try std.testing.expectEqual(@as(?u8, 1), tools.boneFor(@intFromEnum(Skeleton.Joint.upper_arm_l)));
+    _ = try tools.control(.weight_view);
+    try std.testing.expect(tools.weight_view);
+    try std.testing.expectEqual(Tool.weight, tools.tool);
+    // Everything is on the chest bone, so arm weight is 0: the heatmap shows cold blue.
+    try std.testing.expectEqual(heat(0), model.mesh.vertices[0].color);
+    tools.radius = 0.6;
+    tools.strength = 1;
+    tools.mirror = true;
+    // Paint the +x top corner region onto the left arm; the mirror paints the right arm at -x.
+    try tools.press(.{ .origin = .{ 0.5, 20, 0 }, .direction = .{ 0, -1, 0 } }, false);
+    tools.release();
+    var left: f32 = 0;
+    var right: f32 = 0;
+    for (0..model.mesh.vertices.len) |i| {
+        left = @max(left, tools.editor.?.weightOf(@intCast(i), @intFromEnum(Skeleton.Joint.upper_arm_l)));
+        right = @max(right, tools.editor.?.weightOf(@intCast(i), @intFromEnum(Skeleton.Joint.upper_arm_r)));
+    }
+    try std.testing.expect(left > 0.3 and right > 0.3);
+    // Colour edits are refused in the view, and leaving it restores the real colours.
+    _ = try tools.control(.fill_color);
+    tools.leaveWeightView();
+    for (model.mesh.vertices) |v| try std.testing.expectEqual([3]f32{ 0.2, 0.4, 0.6 }, v.color);
+    _ = try tools.control(.undo);
+    for (0..model.mesh.vertices.len) |i| try std.testing.expectEqual(@as(f32, 0), tools.editor.?.weightOf(@intCast(i), @intFromEnum(Skeleton.Joint.upper_arm_l)));
 }

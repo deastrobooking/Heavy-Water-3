@@ -1605,3 +1605,14 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
   - The Metal smoke completes 300 frames, and the ReleaseFast build is installed. The user's real `saves/` holds no edited-mesh file afterwards.
 - **Not checked:** DISCARD by hand; a saved edit after the source GLB is replaced by a different rig (refused by the test, not tried in the app); edited saves of the built-in Captain (same code path, not run).
 
+## Weight painting (mesh editor S5) — 2026-10-20
+
+- **Added:** the WEIGHT tool with a joint picker, add/subtract/replace/smooth, mirror to the partner joint, and a heatmap view. Weights are per game joint (summed over every skin bone mapped to it). Skin influences are part of stroke snapshots and of saved edits. `-Dcharacter-showcase=49` ends in the heatmap.
+- **Design fix found while capturing:** the first heatmap measured a single skin bone per joint and lit only part of the upper arm. Retargeting moves every bone of a joint together, so weight is now measured and painted per joint.
+- **Checked:**
+  - New tests pass: joint weights scaling all of a joint's bones together; `setWeight` keeping four influences summing to one and taking the weakest slot; the brush adding, smoothing, mirroring to the partner joint and undoing; refusal without a skin; the tool painting the left arm and mirroring to the right; the heatmap restoring the real colours; colour edits refused in the view.
+  - The suite runs 505/513 with the same 8 failures. Default `build check` passes.
+  - The showcase-49 capture under `MTL_DEBUG_LAYER=1` was inspected. The body reads cold blue for `upper_arm_l` and the upper arm under the shoulder pad reads green to red. A direct read of the GLB's `WEIGHTS_0` confirms `LeftArm` carries about as much weight as `LeftForeArm` (207 against 199 vertex-weights) on a short upper arm, so the small hot region matches the data.
+  - The 0.17 `build check` passes, the Metal smoke completes 300 frames, and the ReleaseFast build is installed.
+- **Not checked:** painting weights by hand and watching the limb deform in the game; auto-weights and the lattice (not built).
+

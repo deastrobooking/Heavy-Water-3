@@ -264,7 +264,10 @@ pub const Gradient = union(enum) {
     curvature: struct { contrast: f32 = 4 },
 };
 
-const Snapshot = struct { vertex: Mesh.Vertex, pen: u8, painted: bool };
+const Snapshot = struct { vertex: Mesh.Vertex, pen: u8, painted: bool, skin: ?Model.SkinVertex = null };
+
+/// How a weight dab changes the chosen bone's influence.
+pub const WeightOp = enum { add, subtract, replace, smooth };
 const VertexChange = struct { index: u32, before: Snapshot, after: Snapshot };
 const TriangleChange = struct { triangle: u32, before: [3]u32, after: [3]u32 };
 /// A whole-mesh copy for topology edits, which change vertex and index counts.
@@ -564,6 +567,9 @@ pub const Editor = struct {
         for (stroke.vertices) |c| {
             m.mesh.vertices[c.index] = self.vertices()[c.index];
             if (self.model.pens) |pens| m.pens.?[c.index] = pens[c.index];
+            if (self.model.skin) |k| if (m.skin) |mk| if (mk.vertices.len == k.vertices.len) {
+                mk.vertices[c.index] = k.vertices[c.index];
+            };
         }
         for (stroke.triangles) |c| m.mesh.indices[c.triangle * 3 ..][0..3].* = self.model.mesh.indices[c.triangle * 3 ..][0..3].*;
     }
@@ -602,6 +608,9 @@ pub const Editor = struct {
             self.vertices()[c.index] = snap.vertex;
             if (self.model.pens) |pens| pens[c.index] = snap.pen;
             self.painted.setValue(c.index, snap.painted);
+            if (snap.skin) |sv| if (self.model.skin) |k| {
+                k.vertices[c.index] = sv;
+            };
             self.dirty.appendAssumeCapacity(c.index);
         }
         for (stroke.triangles) |c| self.model.mesh.indices[c.triangle * 3 ..][0..3].* = if (side == .before) c.before else c.after;
@@ -618,7 +627,7 @@ pub const Editor = struct {
     }
 
     fn snapshot(self: *Editor, v: u32) Snapshot {
-        return .{ .vertex = self.vertices()[v], .pen = if (self.model.pens) |pens| pens[v] else 0, .painted = self.painted.isSet(v) };
+        return .{ .vertex = self.vertices()[v], .pen = if (self.model.pens) |pens| pens[v] else 0, .painted = self.painted.isSet(v), .skin = if (self.model.skin) |k| k.vertices[v] else null };
     }
 
     /// The vertex's cel pen (0 when the model has none).
@@ -643,6 +652,12 @@ pub const Editor = struct {
     }
 
     /// Hands the caller the changed vertex indices (with repeats) and clears the list.
+    /// Marks a vertex for upload without recording it (display-only changes, such as a
+    /// weight heatmap).
+    pub fn markDirty(self: *Editor, v: u32) Error!void {
+        try self.dirty.append(self.allocator, v);
+    }
+
     pub fn takeDirty(self: *Editor) []const u32 {
         const items = self.dirty.items;
         self.dirty.clearRetainingCapacity();
@@ -883,6 +898,83 @@ pub const Editor = struct {
             for (&v.color) |*ch| ch.* = @round(std.math.clamp(ch.*, 0, 1) * n) / n;
             self.painted.set(i);
         }
+    }
+
+    // ---- Skin weights ----------------------------------------------------------------------
+
+    /// How much game joint `joint` drives vertex `v`: the summed weight of every skin bone
+    /// mapped to it (the retarget moves those bones together).
+    pub fn weightOf(self: *const Editor, v: u32, joint: u8) f32 {
+        const k = self.model.skin orelse return 0;
+        const sv = k.vertices[v];
+        var w: f32 = 0;
+        for (sv.joints, sv.weights) |b, x| if (b < k.bones.len and k.bones[b].ranger_joint == joint) {
+            w += x;
+        };
+        return w;
+    }
+
+    /// The first skin bone mapped to `joint` (new influence goes there), if the rig has one.
+    pub fn boneForJoint(self: *const Editor, joint: u8) ?u8 {
+        const k = self.model.skin orelse return null;
+        for (k.bones, 0..) |b, i| if (b.ranger_joint == joint) return @intCast(i);
+        return null;
+    }
+
+    /// Paints how much game joint `joint` drives the surface. Its bones scale together, the
+    /// other influences rescale so the four still sum to one, and a joint not yet among them
+    /// takes the weakest slot on its first bone. Welded copies get the same weights, so a seam
+    /// never splits when the limb bends. `mirror_joint` is painted on the mirrored side.
+    pub fn dabWeight(self: *Editor, joint: u8, mirror_joint: ?u8, op: WeightOp, target: f32, d: Dab) Error!void {
+        if (self.model.skin == null) return error.InvalidMesh;
+        if (self.boneForJoint(joint) == null) return error.InvalidMesh;
+        if (!d.mirror) return self.weightSide(joint, op, target, d, null);
+        const side: f32 = if (d.center[0] >= self.mirror_x) 1 else -1;
+        try self.weightSide(joint, op, target, d, side);
+        var mirrored = d;
+        mirrored.center[0] = 2 * self.mirror_x - d.center[0];
+        if (d.facing) |f| mirrored.facing = .{ -f[0], f[1], f[2] };
+        const other = mirror_joint orelse joint;
+        if (self.boneForJoint(other) == null) return;
+        try self.weightSide(other, op, target, mirrored, -side);
+    }
+
+    fn weightSide(self: *Editor, joint: u8, op: WeightOp, target: f32, d: Dab, side: ?f32) Error!void {
+        const a = self.allocator;
+        var hits: std.ArrayList(u32) = .empty;
+        defer hits.deinit(a);
+        const r2 = d.radius * d.radius;
+        for (self.vertices(), 0..) |v, i| if (dist2(v.position, d.center) <= r2 and (!d.masked or self.selection.isSet(i))) {
+            if (side) |sd| if (if (sd > 0) v.position[0] < self.mirror_x else v.position[0] >= self.mirror_x) continue;
+            if (d.facing) |f| if (dot(v.normal, f) > 0.1) continue;
+            try hits.append(a, @intCast(i));
+        };
+        const next = try a.alloc(f32, hits.items.len);
+        defer a.free(next);
+        for (hits.items, next) |i, *n| {
+            const w = shapedFalloff(@sqrt(dist2(self.vertices()[i].position, d.center)), d.radius, d.hardness) * d.strength;
+            const now = self.weightOf(i, joint);
+            n.* = std.math.clamp(switch (op) {
+                .add => now + w,
+                .subtract => now - w,
+                .replace => now + (target - now) * @min(1, w),
+                .smooth => now + (self.neighbourWeight(i, joint) - now) * @min(1, w),
+            }, 0, 1);
+        }
+        const skin = self.model.skin.?;
+        const first = self.boneForJoint(joint).?;
+        for (hits.items, next) |i, n| for (self.topology.group(i)) |m| {
+            try self.touch(m);
+            setJointWeight(&skin.vertices[m], skin.bones, joint, first, n);
+        };
+    }
+
+    fn neighbourWeight(self: *const Editor, v: u32, joint: u8) f32 {
+        const ns = self.topology.neighborsOf(v);
+        if (ns.len == 0) return self.weightOf(v, joint);
+        var sum: f32 = 0;
+        for (ns) |n| sum += self.weightOf(n, joint);
+        return sum / @as(f32, @floatFromInt(ns.len));
     }
 
     /// Paints every selected vertex one colour (a fill, not a brush).
@@ -1429,6 +1521,55 @@ pub const Editor = struct {
         return true;
     }
 };
+
+/// Sets `bone`'s share of one vertex's four influences to `w`, rescaling the others so the
+/// total stays one. A vertex driven by nothing else keeps the whole weight on `bone`.
+pub fn setWeight(sv: *Model.SkinVertex, bone: u8, w_in: f32) void {
+    var w = std.math.clamp(w_in, 0, 1);
+    var slot: ?usize = null;
+    for (sv.joints, 0..) |j, i| if (j == bone) {
+        slot = i;
+        break;
+    };
+    if (slot == null) {
+        if (w == 0) return;
+        var weakest: usize = 0;
+        for (sv.weights, 0..) |x, i| if (x < sv.weights[weakest]) {
+            weakest = i;
+        };
+        sv.joints[weakest] = bone;
+        sv.weights[weakest] = 0;
+        slot = weakest;
+    }
+    const s = slot.?;
+    var others: f32 = 0;
+    for (sv.weights, 0..) |x, i| if (i != s) {
+        others += x;
+    };
+    if (others < 1e-6) {
+        w = 1;
+    } else for (&sv.weights, 0..) |*x, i| if (i != s) {
+        x.* *= (1 - w) / others;
+    };
+    sv.weights[s] = w;
+}
+
+/// Sets game joint `joint`'s total share of one vertex to `w`: its bones scale together, the
+/// rest rescale to keep the sum one, and a joint with no influence yet starts on `first`.
+pub fn setJointWeight(sv: *Model.SkinVertex, bones: []const Model.SkinBone, joint: u8, first: u8, w_in: f32) void {
+    const w = std.math.clamp(w_in, 0, 1);
+    var mine: f32 = 0;
+    var others: f32 = 0;
+    for (sv.joints, sv.weights) |b, x| {
+        if (b < bones.len and bones[b].ranger_joint == joint) mine += x else others += x;
+    }
+    if (mine < 1e-6) return setWeight(sv, first, w);
+    // Nothing else drives the vertex: the joint keeps it whole.
+    if (others < 1e-6) return;
+    for (sv.joints, &sv.weights) |b, *x| {
+        if (b < bones.len and bones[b].ranger_joint == joint) x.* *= w / mine else x.* *= (1 - w) / others;
+    }
+}
 
 fn inAnySubmesh(submeshes: []const Model.Submesh, t: usize) bool {
     for (submeshes) |sm| if (t * 3 >= sm.first_index and t * 3 < sm.first_index + sm.index_count) return true;
@@ -2023,4 +2164,85 @@ test "splitting and collapsing an edge change the triangle count and stay undoab
     ed.selectVertex(0, true);
     ed.selectVertex(24, true);
     try std.testing.expectError(error.EmptySelection, ed.splitSelectedEdge());
+}
+
+/// A skinned copy of the test model: the grid on bone 0, the cube on bone 1.
+fn skinnedTestModel(allocator: std.mem.Allocator) !Model {
+    var model = try testModel(allocator);
+    errdefer model.deinit(allocator);
+    const influences = try allocator.alloc(Model.SkinVertex, model.mesh.vertices.len);
+    errdefer allocator.free(influences);
+    for (influences, 0..) |*sv, i| sv.* = .{ .joints = .{ if (i < 25) 0 else 1, 0, 0, 0 }, .weights = .{ 1, 0, 0, 0 } };
+    const bones = try allocator.alloc(Model.SkinBone, 2);
+    bones[0] = .{ .ranger_joint = 7, .pivot = .{ 0, 0, 0 } };
+    bones[1] = .{ .ranger_joint = 11, .pivot = .{ 10, 0, 0 } };
+    model.skin = .{ .vertices = influences, .bones = bones };
+    return model;
+}
+
+test "joint weights scale every bone of the joint together" {
+    // Bones 0 and 1 both drive joint 7 (an arm and its armour helper); bone 2 drives joint 3.
+    const bones = [_]Model.SkinBone{ .{ .ranger_joint = 7, .pivot = .{ 0, 0, 0 } }, .{ .ranger_joint = 7, .pivot = .{ 0, 0, 0 } }, .{ .ranger_joint = 3, .pivot = .{ 0, 0, 0 } } };
+    var sv: Model.SkinVertex = .{ .joints = .{ 0, 1, 2, 0 }, .weights = .{ 0.3, 0.3, 0.4, 0 } };
+    setJointWeight(&sv, &bones, 7, 0, 0.9);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.45), sv.weights[0], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.45), sv.weights[1], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), sv.weights[2], 1e-5);
+}
+
+test "setWeight keeps four influences summing to one and takes the weakest slot" {
+    var sv: Model.SkinVertex = .{ .joints = .{ 0, 1, 2, 3 }, .weights = .{ 0.4, 0.3, 0.2, 0.1 } };
+    setWeight(&sv, 1, 0.6);
+    var sum: f32 = 0;
+    for (sv.weights) |x| sum += x;
+    try std.testing.expectApproxEqAbs(@as(f32, 1), sum, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.6), sv.weights[1], 1e-6);
+    // The others kept their proportions (0.4 : 0.2 : 0.1).
+    try std.testing.expectApproxEqAbs(sv.weights[0], 2 * sv.weights[2], 1e-5);
+    // A new bone replaces the weakest influence.
+    setWeight(&sv, 9, 0.5);
+    try std.testing.expectEqual(@as(u8, 9), sv.joints[3]);
+    // A vertex driven by one bone alone keeps it whole.
+    var only: Model.SkinVertex = .{ .joints = .{ 4, 0, 0, 0 }, .weights = .{ 1, 0, 0, 0 } };
+    setWeight(&only, 4, 0.2);
+    try std.testing.expectEqual(@as(f32, 1), only.weights[0]);
+}
+
+test "weight brush adds, smooths and mirrors bone influence, and undoes with the stroke" {
+    const a = std.testing.allocator;
+    var model = try skinnedTestModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // Joint 7 drives the grid (bone 0), joint 11 the cube (bone 1).
+    ed.begin();
+    try ed.dabWeight(11, null, .add, 1, .{ .center = .{ 2, 0, 2 }, .radius = 1.5, .strength = 0.5 });
+    try ed.end();
+    const centre = ed.weightOf(12, 11);
+    try std.testing.expect(centre > 0.4 and centre <= 0.5 + 1e-5);
+    try std.testing.expectApproxEqAbs(1 - centre, ed.weightOf(12, 7), 1e-5);
+    try std.testing.expectEqual(@as(f32, 0), ed.weightOf(0, 11));
+    // Smoothing pulls the peak toward its neighbours.
+    ed.begin();
+    for (0..10) |_| try ed.dabWeight(11, null, .smooth, 0, .{ .center = .{ 2, 0, 2 }, .radius = 3, .strength = 1 });
+    try ed.end();
+    try std.testing.expect(ed.weightOf(12, 11) < centre);
+    // Mirrored across x = 5.25: the dab at x 1 paints joint 11 there and joint 7 at x 9.5, where
+    // the cube's corners are.
+    ed.begin();
+    try ed.dabWeight(11, 7, .replace, 1, .{ .center = .{ 1, 0, 0 }, .radius = 1.2, .strength = 1, .mirror = true });
+    try ed.end();
+    try std.testing.expectApproxEqAbs(@as(f32, 1), ed.weightOf(1, 11), 1e-5);
+    try std.testing.expect(ed.weightOf(25, 7) > 0.5);
+    for (0..3) |_| _ = try ed.undo();
+    try std.testing.expectEqual(@as(f32, 0), ed.weightOf(12, 11));
+    try std.testing.expectEqual(@as(f32, 1), ed.weightOf(25, 11));
+    // A model without a skin refuses weight painting.
+    var plain = try testModel(a);
+    defer plain.deinit(a);
+    var ed2 = try Editor.init(a, &plain);
+    defer ed2.deinit();
+    ed2.begin();
+    try std.testing.expectError(error.InvalidMesh, ed2.dabWeight(0, null, .add, 1, .{ .center = .{ 0, 0, 0 }, .radius = 1, .strength = 1 }));
+    try ed2.end();
 }
