@@ -26,8 +26,9 @@ pub const capacity = 40;
 /// What the upper body is doing on top of the gait: weapon use, throwing, a trooper's strike, or
 /// a low cover posture. `action_t` advances timed actions from 0 to 1.
 pub const Action = enum { none, aim, swing, guard, cast, throw, strike, kick, cover };
-/// Saber arcs: forehand, backhand, overhead finisher, dash cut, aerial, charged wave.
-pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged, rising, downward };
+/// Saber blade paths. The ten chained cuts each have a distinct path; dash, aerial, and charge
+/// remain independent inputs.
+pub const Arc = enum(u8) { forehand, backhand, overhead, dash, aerial, charged, rising, downward, flip, cyclone, thrust, finisher };
 pub const Pose = struct {
     feet: [3]f32,
     yaw: f32,
@@ -399,6 +400,10 @@ pub fn swingDirection(arc: Arc, t: f32) V {
         .charged => heading(m.lerp(r(-150), r(130), e), m.lerp(r(10), r(-5), e)),
         .rising => heading(m.lerp(r(-72), r(52), e), m.lerp(r(-52), r(112), e)),
         .downward => heading(m.lerp(r(-18), r(12), e), m.lerp(r(118), r(-100), e)),
+        .flip => heading(m.lerp(r(-145), r(175), e), m.lerp(r(62), r(-40), e)),
+        .cyclone => heading(m.lerp(r(190), r(-170), e), m.lerp(r(18), r(-14), e)),
+        .thrust => heading(m.lerp(r(-8), r(8), e), m.lerp(r(-6), r(2), e)),
+        .finisher => heading(m.lerp(r(-125), r(28), e), m.lerp(r(108), r(-76), e)),
     };
 }
 
@@ -506,6 +511,29 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
             const d = swingDirection(state.arc, t);
             // The torso turns into the cut.
             p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_y, std.math.atan2(d.x, @max(d.z, 0.1)) * 0.35));
+            switch (state.arc) {
+                .flip => {
+                    p.rotateLocal(sk.Joint.hips.idx(), Q.fromAxisAngle(V.unit_x, 2 * std.math.pi * t));
+                    p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, -0.72));
+                    p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, -0.72));
+                    p.rotateLocal(sk.Joint.shin_l.idx(), Q.fromAxisAngle(V.unit_x, 0.9));
+                    p.rotateLocal(sk.Joint.shin_r.idx(), Q.fromAxisAngle(V.unit_x, 0.9));
+                    p.rotateLocal(sk.Joint.upper_arm_l.idx(), Q.fromAxisAngle(V.unit_z, 0.65));
+                },
+                .cyclone => p.rotateLocal(sk.Joint.hips.idx(), Q.fromAxisAngle(V.unit_y, 2 * std.math.pi * t)),
+                .thrust => {
+                    const drive = smoothstep(0.12, 0.52, t) * (1 - smoothstep(0.68, 1, t));
+                    p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -0.26 * drive));
+                    p.local[sk.Joint.hips.idx()].translation.z += 0.16 * drive;
+                },
+                .finisher => {
+                    const impact = smoothstep(0.48, 0.78, t);
+                    p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, 0.42 * impact));
+                    p.local[sk.Joint.hips.idx()].translation.y -= 0.08 * impact;
+                    p.rotateLocal(sk.Joint.upper_arm_l.idx(), Q.fromAxisAngle(V.unit_z, 0.3 * (1 - impact)));
+                },
+                else => {},
+            }
             pointBone(p, skel, .upper_arm_r, .lower_arm_r, d.add(V.init(-0.25, -0.1, 0)));
             pointBone(p, skel, .lower_arm_r, .hand_r, d);
         },

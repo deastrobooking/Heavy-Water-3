@@ -6,10 +6,11 @@
 //! what they pass), missiles home on the nearest unit, charged shots and missiles burst on
 //! impact, a warp arrow carries the archer to where it lands, and the giant blast is a beam.
 //!
-//! The beam saber is a melee weapon with timed swings: the primary cuts (a three-cut combo, a
-//! dash cut while dashing, a spinning cut in the air; a press during a cut queues the next), a
-//! held primary charges a wave cut, and the alternate guards (the first 0.3 s parries bolts back
-//! at the Hive). Each cut sweeps the blade segment from the player's rig, so it hits what the
+//! The beam saber is a melee weapon with timed swings: the primary chains ten named cuts, with
+//! distinct blade paths for flips, spins, lunges and finishers; dash and aerial cuts remain
+//! available, and a press during a cut queues the next. Holding primary charges a wave cut; the
+//! alternate guards (the first 0.3 s parries bolts back at the Hive). Each cut sweeps the blade
+//! segment from the player's rig, so it hits what the
 //! drawn blade passes through, once per unit per cut, with knockback and stun; it also cuts
 //! bolts out of the air, and a cut started near a unit lunges toward it.
 //!
@@ -112,6 +113,7 @@ pub const Event = union(enum) {
 /// One saber cut in progress.
 pub const Swing = struct {
     arc: Ranger.Arc,
+    move: ?Weapon.ComboMove = null,
     /// Progress 0–1.
     t: f32 = 0,
     duration: f32,
@@ -144,6 +146,7 @@ pub const Stance = struct {
     action: Ranger.Action = .none,
     t: f32 = 0,
     arc: Ranger.Arc = .forehand,
+    move: ?Weapon.ComboMove = null,
     pitch: f32 = 0,
 
     /// `pose` with the weapon's action on its arms.
@@ -224,7 +227,7 @@ pub const Arsenal = struct {
             return .{};
         }
         const k = self.active orelse return .{};
-        if (self.melee.swing) |sw| return .{ .action = .swing, .t = sw.t, .arc = sw.arc };
+        if (self.melee.swing) |sw| return .{ .action = .swing, .t = sw.t, .arc = sw.arc, .move = sw.move };
         return .{ .pitch = self.pitch, .action = switch (k) {
             .beam_saber => if (self.melee.guard != null) .guard else .none,
             .protective_shield => if (self.system.shield.active) .guard else .none,
@@ -578,24 +581,33 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
     const s = &arsenal.system;
     s.slots[0] = slotFor(arsenal, .beam_saber);
     const c = s.attackSaber(aim.dashing, aim.airborne);
-    const base_arc: Ranger.Arc = switch (c.combo) {
-        2 => .backhand,
-        3 => .overhead,
-        4 => .charged,
-        10 => .dash,
-        11 => .aerial,
+    const arc: Ranger.Arc = if (c.combo == Weapon.BeamSaber.charged_combo) .charged else if (aim.saber_down) .downward else if (c.move) |move| switch (move) {
+        .crosscut => .forehand,
+        .return_slash => .backhand,
+        .rising_phoenix => .rising,
+        .falling_star => .overhead,
+        .phantom_step => .dash,
+        .skywheel_flip => .flip,
+        .twin_vortex => .cyclone,
+        .comet_thrust => .thrust,
+        .meteor_break => .downward,
+        .nova_arc => .finisher,
+    } else switch (c.combo) {
+        Weapon.BeamSaber.dash_combo => .dash,
+        Weapon.BeamSaber.aerial_combo => .aerial,
         else => .forehand,
     };
-    const arc: Ranger.Arc = if (base_arc == .charged) .charged else if (aim.saber_down or (aim.airborne and aim.vertical_speed < -3)) .downward else if (aim.airborne and aim.vertical_speed > 2) .rising else base_arc;
-    const heavy = arc == .overhead or arc == .charged or arc == .dash;
+    const heavy = arc == .overhead or arc == .charged or arc == .dash or arc == .downward or arc == .finisher;
     arsenal.melee.swing = .{
         .arc = arc,
+        .move = c.move,
         .duration = switch (arc) {
             .forehand, .backhand => 0.26,
             .overhead => 0.38,
             .dash => 0.22,
-            .aerial, .charged => 0.34,
-            .rising, .downward => 0.34,
+            .aerial, .charged, .rising, .downward, .flip, .cyclone => 0.34,
+            .thrust => 0.30,
+            .finisher => 0.48,
         },
         .damage = c.damage * arsenal.melee_scale,
         .knock = if (heavy) 14 else 6,
@@ -603,14 +615,14 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
     };
     push(out, n, .slash);
     const fwd = flat(aim);
-    if (arc == .overhead and s.slots[0].level >= 2) {
+    if ((arc == .overhead or arc == .finisher) and s.slots[0].level >= 2) {
         const center = R.add(aim.feet, R.add(R.scale(fwd, 2.2), .{ 0, 0.8, 0 }));
         const radius: f32 = if (s.slots[0].level >= 3) 5 else 3.8;
         _ = enemies.strikeArea(center, radius, c.damage * (if (s.slots[0].level >= 3) @as(f32, 0.9) else 0.65), fwd, hive, hn);
         _ = enemies.shock(center, radius, 0.8, 9);
         self.effect(.{ .kind = .burst, .position = center, .life = 0.32, .size = radius, .color = .{ 0.25, 0.9, 1 } });
     }
-    if (arc == .charged or c.combo == 3) {
+    if (arc == .charged or (c.move != null and c.move.? == .nova_arc)) {
         // A charged edge launches a broad, player-coloured crescent; each upgrade widens and
         // sustains the visual and lets the wave travel farther through the Hive.
         const tier = s.slots[0].level;
@@ -886,7 +898,7 @@ test "saber cuts land once per swing, chain through a queued press, charge a wav
     // Each cut hits the trooper once, however many samples overlap it.
     const second = Weapon.WeaponSlot{ .kind = .beam_saber, .element = .solar_lumen, .core = .plasma_edge, .level = 1 };
     const one = second.baseDamage();
-    try std.testing.expectApproxEqAbs(@as(f32, 2000) - one - one * 1.35, enemies.units[0].?.health, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 2000) - one - one * 1.08, enemies.units[0].?.health, 0.01);
 
     // Holding the primary charges; releasing it full cuts a wave that flies on.
     aim.fire = true;

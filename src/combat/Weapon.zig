@@ -71,10 +71,43 @@ pub const WeaponSlot = struct {
     }
 };
 
-pub const SlashResult = struct { damage: f32, radius: f32, combo: u8 };
+/// The ten chained saber techniques. The move name and timing are stable combat content; its
+/// visible pose and blade path are authored together by `Ranger.swingDirection`.
+pub const ComboMove = enum(u8) {
+    crosscut,
+    return_slash,
+    rising_phoenix,
+    falling_star,
+    phantom_step,
+    skywheel_flip,
+    twin_vortex,
+    comet_thrust,
+    meteor_break,
+    nova_arc,
+
+    pub fn label(self: ComboMove) []const u8 {
+        return switch (self) {
+            .crosscut => "CROSSCUT",
+            .return_slash => "RETURN SLASH",
+            .rising_phoenix => "RISING PHOENIX",
+            .falling_star => "FALLING STAR",
+            .phantom_step => "PHANTOM STEP",
+            .skywheel_flip => "SKYWHEEL FLIP",
+            .twin_vortex => "TWIN VORTEX",
+            .comet_thrust => "COMET THRUST",
+            .meteor_break => "METEOR BREAK",
+            .nova_arc => "NOVA ARC",
+        };
+    }
+};
+
+pub const SlashResult = struct { damage: f32, radius: f32, combo: u8, move: ?ComboMove = null };
 
 pub const BeamSaber = struct {
-    pub const max_combo = 3;
+    pub const max_combo = 10;
+    pub const dash_combo: u8 = 240;
+    pub const aerial_combo: u8 = 241;
+    pub const charged_combo: u8 = 242;
     combo_step: u8 = 0,
     combo_window: f32 = 0,
     charge_time: f32 = 0,
@@ -107,7 +140,7 @@ pub const BeamSaber = struct {
             self.charge_time = 0;
             self.is_charging = false;
             self.combo_step = 0;
-            return .{ .damage = slot.baseDamage() * 3.2, .radius = 5.0, .combo = 4 };
+            return .{ .damage = slot.baseDamage() * 3.2, .radius = 5.0, .combo = charged_combo };
         }
 
         self.charge_time = 0;
@@ -115,24 +148,31 @@ pub const BeamSaber = struct {
 
         if (is_dashing) {
             self.combo_step = 0;
-            return .{ .damage = slot.baseDamage() * 1.8, .radius = 3.6, .combo = 10 };
+            return .{ .damage = slot.baseDamage() * 1.8, .radius = 3.6, .combo = dash_combo };
         }
         if (is_airborne) {
             self.combo_step = 0;
-            return .{ .damage = slot.baseDamage() * 1.6, .radius = 3.2, .combo = 11 };
+            return .{ .damage = slot.baseDamage() * 1.6, .radius = 3.2, .combo = aerial_combo };
         }
 
         self.combo_step = (self.combo_step % max_combo) + 1;
         self.combo_window = 0.85;
 
-        const multiplier: f32 = switch (self.combo_step) {
-            1 => 1.0,
-            2 => 1.35,
-            3 => 2.2, // Final heavy finisher
-            else => 1.0,
+        const move: ComboMove = @enumFromInt(self.combo_step - 1);
+        const multiplier: f32 = switch (move) {
+            .crosscut => 1.0,
+            .return_slash => 1.08,
+            .rising_phoenix => 1.16,
+            .falling_star => 1.27,
+            .phantom_step => 1.22,
+            .skywheel_flip => 1.3,
+            .twin_vortex => 1.36,
+            .comet_thrust => 1.45,
+            .meteor_break => 1.68,
+            .nova_arc => 2.2,
         };
-        const radius: f32 = if (self.combo_step == 3) 3.5 else 2.6;
-        return .{ .damage = slot.baseDamage() * multiplier, .radius = radius, .combo = self.combo_step };
+        const radius: f32 = if (move == .nova_arc) 3.8 else 2.6;
+        return .{ .damage = slot.baseDamage() * multiplier, .radius = radius, .combo = self.combo_step, .move = move };
     }
 };
 

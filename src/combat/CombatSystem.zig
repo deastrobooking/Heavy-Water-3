@@ -157,7 +157,7 @@ test "Zero-style beam saber combo chain, dash slash, and charge slash" {
     const slot = combat.slots[0];
     try std.testing.expectEqual(Weapon.WeaponKind.beam_saber, slot.kind);
 
-    // Normal 3-hit combo
+    // The ten-cut chain begins with increasingly committed techniques.
     const hit1 = combat.attackSaber(false, false);
     try std.testing.expectEqual(@as(u8, 1), hit1.combo);
     try std.testing.expect(hit1.damage > 0);
@@ -172,14 +172,14 @@ test "Zero-style beam saber combo chain, dash slash, and charge slash" {
 
     // Dash slash
     const dash_hit = combat.attackSaber(true, false);
-    try std.testing.expectEqual(@as(u8, 10), dash_hit.combo);
+    try std.testing.expectEqual(Weapon.BeamSaber.dash_combo, dash_hit.combo);
     try std.testing.expect(dash_hit.damage > hit1.damage);
 
     // Charge slash
     combat.saber.is_charging = true;
     combat.saber.update(1.5);
     const charge_hit = combat.attackSaber(false, false);
-    try std.testing.expectEqual(@as(u8, 4), charge_hit.combo);
+    try std.testing.expectEqual(Weapon.BeamSaber.charged_combo, charge_hit.combo);
     try std.testing.expect(charge_hit.damage > hit3.damage);
 }
 

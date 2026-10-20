@@ -688,7 +688,7 @@ fn specials(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8, profile: Profil
 
 /// The selected weapon and its charge, above the vitals (weapon tool only).
 fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8) void {
-    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 142, .w = 250, .h = 26 };
+    const r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 154, .w = 250, .h = 38 };
     c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
     var buffer: [24]u8 = undefined;
     const arsenal = &sb.combat.arsenals[player];
@@ -700,6 +700,7 @@ fn weaponLine(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8) void {
         c.text(r.x + 100, r.y + 9, tier, 0.75, alpha(gold, 0.8));
     }
     bar(c, .{ .x = r.x + 160, .y = r.y + 10, .w = 76, .h = 6 }, arsenal.charge(), gold);
+    if (arsenal.stance().move) |move| c.text(r.x + 14, r.y + 24, move.label(), 0.78, Profile.accent_colors[sb.profileOf(player).accent]);
 }
 
 fn prompt(c: *Canvas, v: Rect, text: []const u8, tint: Color) void {
