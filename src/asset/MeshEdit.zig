@@ -193,6 +193,26 @@ pub const Dab = struct {
     /// Only change selected vertices: paint or sculpt inside a selected region without
     /// spilling over its edge.
     masked: bool = false,
+    /// 0 is a soft airbrush edge; toward 1 the full-strength core widens to a hard round edge.
+    hardness: f32 = 0,
+    /// How paint combines with the colour already there.
+    blend: Blend = .mix,
+    /// Repeat the dab mirrored across the model's centre plane (x), for symmetric characters.
+    mirror: bool = false,
+    /// The view direction in model space. When set, vertices facing away from the viewer are
+    /// skipped, so a stroke on the front does not bleed through to the back.
+    facing: ?V = null,
+};
+
+pub const Blend = enum {
+    /// Fade toward the brush colour.
+    mix,
+    /// Darken: tint the existing colour by the brush colour (glazes, shadows, watercolour).
+    multiply,
+    /// Lighten: the inverse of multiply (highlights, glows).
+    screen,
+    /// Pull colour from the neighbours (painterly blending; ignores the brush colour).
+    smudge,
 };
 
 pub const Similar = enum { pen, color };
@@ -229,6 +249,8 @@ pub const Editor = struct {
     open: bool = false,
     /// Vertices whose colour was painted by hand. Part recolours (`Modifiers.Bake`) skip them.
     painted: std.DynamicBitSetUnmanaged,
+    /// The symmetry plane (model x) for mirrored brushes: the centre of the model's bounds.
+    mirror_x: f32 = 0,
     /// A second copy kept in step at the end of every stroke, undo and redo: the base model a
     /// part-appearance bake rebuilds the display from, so a recolour does not undo a sculpt.
     mirror: ?*Model = null,
@@ -242,7 +264,7 @@ pub const Editor = struct {
         errdefer painted.deinit(allocator);
         const weights = try allocator.alloc(f32, model.mesh.vertices.len);
         @memset(weights, 0);
-        return .{ .allocator = allocator, .model = model, .topology = topology, .selection = selection, .weights = weights, .painted = painted };
+        return .{ .allocator = allocator, .model = model, .topology = topology, .selection = selection, .weights = weights, .painted = painted, .mirror_x = (model.bounds_min[0] + model.bounds_max[0]) / 2 };
     }
 
     pub fn deinit(self: *Editor) void {
@@ -530,6 +552,18 @@ pub const Editor = struct {
 
     /// One brush dab. Call repeatedly within a stroke while dragging.
     pub fn dab(self: *Editor, brush: Brush, d: Dab) Error!void {
+        if (!d.mirror) return self.dabSide(brush, d, null);
+        // Each side of the mirror plane is painted once: this dab owns the centre's side and the
+        // mirrored dab owns the other, so a brush crossing the plane is not applied twice there.
+        const side: f32 = if (d.center[0] >= self.mirror_x) 1 else -1;
+        try self.dabSide(brush, d, side);
+        var mirrored = d;
+        mirrored.center[0] = 2 * self.mirror_x - d.center[0];
+        if (d.facing) |f| mirrored.facing = .{ -f[0], f[1], f[2] };
+        try self.dabSide(brush, mirrored, -side);
+    }
+
+    fn dabSide(self: *Editor, brush: Brush, d: Dab, side: ?f32) Error!void {
         if (d.radius <= 0) return;
         if (brush == .pen and d.pen >= Model.max_pens) return error.InvalidMesh;
         const pens: []u8 = if (brush == .pen) try self.ensurePens() else &.{};
@@ -538,6 +572,8 @@ pub const Editor = struct {
         var normal: V = .{ 0, 0, 0 };
         const r2 = d.radius * d.radius;
         for (self.vertices(), 0..) |v, i| if (dist2(v.position, d.center) <= r2 and (!d.masked or self.selection.isSet(i))) {
+            if (side) |sd| if (if (sd > 0) v.position[0] < self.mirror_x else v.position[0] >= self.mirror_x) continue;
+            if (d.facing) |f| if (dot(v.normal, f) > 0.1) continue;
             if (brush == .pen and falloff(@sqrt(dist2(v.position, d.center)), d.radius) < 0.5) continue;
             try hits.append(self.allocator, @intCast(i));
             normal = add(normal, v.normal);
@@ -549,12 +585,17 @@ pub const Editor = struct {
         defer self.allocator.free(targets);
         for (hits.items, targets) |i, *target| {
             const v = self.vertices()[i];
-            const w = falloff(@sqrt(dist2(v.position, d.center)), d.radius) * d.strength;
+            const w = shapedFalloff(@sqrt(dist2(v.position, d.center)), d.radius, d.hardness) * d.strength;
             target.* = switch (brush) {
                 .draw => add(v.position, scale(normal, w * d.radius)),
                 .inflate => add(v.position, scale(v.normal, w * d.radius)),
                 .smooth => lerp(v.position, self.neighbourAverage(i), @min(1, w)),
-                .paint => lerp(v.color, d.color, @min(1, w)),
+                .paint => lerp(v.color, switch (d.blend) {
+                    .mix => d.color,
+                    .multiply => .{ v.color[0] * d.color[0], v.color[1] * d.color[1], v.color[2] * d.color[2] },
+                    .screen => .{ 1 - (1 - v.color[0]) * (1 - d.color[0]), 1 - (1 - v.color[1]) * (1 - d.color[1]), 1 - (1 - v.color[2]) * (1 - d.color[2]) },
+                    .smudge => self.neighbourColour(i),
+                }, @min(1, w)),
                 .pen => v.position,
             };
         }
@@ -612,6 +653,20 @@ pub const Editor = struct {
             };
             if (same) self.selection.set(i);
         }
+    }
+
+    /// Mean colour of `v`'s neighbours (over welded groups: the first copy of each).
+    fn neighbourColour(self: *Editor, v: u32) V {
+        const ns = self.topology.neighborsOf(v);
+        if (ns.len == 0) return self.vertices()[v].color;
+        var sum: V = .{ 0, 0, 0 };
+        for (ns) |n| sum = add(sum, self.vertices()[n].color);
+        return scale(sum, 1 / @as(f32, @floatFromInt(ns.len)));
+    }
+
+    /// The colour and pen at a point on the surface (the eyedropper).
+    pub fn sample(self: *const Editor, v: u32) struct { color: V, pen: u8 } {
+        return .{ .color = self.model.mesh.vertices[v].color, .pen = self.penOf(v) };
     }
 
     fn neighbourAverage(self: *Editor, v: u32) V {
@@ -755,6 +810,15 @@ fn inAnySubmesh(submeshes: []const Model.Submesh, t: usize) bool {
 }
 
 /// Smooth 1-to-0 falloff over [0, radius].
+/// `falloff` with a hard core: `hardness` 0 is the smooth airbrush curve, near 1 the brush is
+/// at full strength almost to its rim.
+pub fn shapedFalloff(distance: f32, radius: f32, hardness: f32) f32 {
+    if (radius <= 0) return if (distance <= 0) 1 else 0;
+    const soft = 1 - std.math.clamp(hardness, 0, 0.95);
+    const x = std.math.clamp((1 - distance / radius) / soft, 0, 1);
+    return x * x * (3 - 2 * x);
+}
+
 pub fn falloff(distance: f32, radius: f32) f32 {
     if (radius <= 0) return if (distance <= 0) 1 else 0;
     const x = std.math.clamp(1 - distance / radius, 0, 1);
@@ -1057,4 +1121,72 @@ test "strokes, undo and redo keep a mirror model in step and track painted verti
     _ = try ed.redo();
     try std.testing.expect(ed.painted.isSet(12));
     try std.testing.expectEqual(@as(u8, 9), base.pens.?[12]);
+}
+
+test "mirrored dabs paint both sides exactly once and backfaces are masked" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // The test model spans x 0..10.5 (grid plus cube), so the mirror plane is x = 5.25.
+    try std.testing.expectApproxEqAbs(@as(f32, 5.25), ed.mirror_x, 1e-5);
+    ed.begin();
+    try ed.dab(.paint, .{ .center = .{ 1, 0, 1 }, .radius = 0.5, .strength = 1, .color = .{ 1, 0, 0 }, .mirror = true });
+    try ed.end();
+    try std.testing.expectEqual([3]f32{ 1, 0, 0 }, model.mesh.vertices[6].color);
+    // The mirror image of (1, 0, 1) is (9.5, 0, 1): no vertex there, so nothing else changed.
+    var painted: usize = 0;
+    for (model.mesh.vertices) |v| painted += @intFromBool(v.color[1] == 0);
+    try std.testing.expectEqual(@as(usize, 1), painted);
+    // The grid faces up; looking up from below (facing +y) masks every grid vertex.
+    ed.begin();
+    try ed.dab(.paint, .{ .center = .{ 2, 0, 2 }, .radius = 3, .strength = 1, .color = .{ 0, 0, 1 }, .facing = .{ 0, 1, 0 } });
+    try ed.end();
+    // No grid vertex turned blue (red stays red, untouched stay white).
+    for (model.mesh.vertices[0..25]) |v| try std.testing.expect(v.color[0] > 0.5);
+    // The same dab seen from above does paint them.
+    ed.begin();
+    try ed.dab(.paint, .{ .center = .{ 2, 0, 2 }, .radius = 3, .strength = 1, .color = .{ 0, 0, 1 }, .facing = .{ 0, -1, 0 } });
+    try ed.end();
+    try std.testing.expect(model.mesh.vertices[12].color[0] < 0.5);
+}
+
+test "blend modes multiply, screen and smudge, and hardness widens the full-strength core" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    for (model.mesh.vertices) |*v| v.color = .{ 0.5, 0.5, 0.5 };
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    ed.begin();
+    try ed.dab(.paint, .{ .center = .{ 0, 0, 0 }, .radius = 0.4, .strength = 1, .color = .{ 0.5, 0.5, 0.5 }, .blend = .multiply });
+    try ed.dab(.paint, .{ .center = .{ 4, 0, 4 }, .radius = 0.4, .strength = 1, .color = .{ 0.5, 0.5, 0.5 }, .blend = .screen });
+    try ed.end();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), model.mesh.vertices[0].color[0], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), model.mesh.vertices[24].color[0], 1e-5);
+    // Smudging the dark corner pulls it toward its grey neighbours.
+    ed.begin();
+    try ed.dab(.paint, .{ .center = .{ 0, 0, 0 }, .radius = 0.4, .strength = 1, .blend = .smudge });
+    try ed.end();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), model.mesh.vertices[0].color[0], 1e-5);
+    // At 80% of the radius a soft brush is nearly spent; a hard one is still at full strength.
+    try std.testing.expect(shapedFalloff(0.8, 1, 0) < 0.15);
+    try std.testing.expect(shapedFalloff(0.8, 1, 0.85) > 0.99);
+}
+
+test "the eyedropper reads colour and pen" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    ed.selectVertex(3, true);
+    ed.begin();
+    try ed.fillSelection(.{ 0.2, 0.3, 0.4 });
+    try ed.fillSelectionPen(9);
+    try ed.end();
+    const got = ed.sample(3);
+    try std.testing.expectEqual([3]f32{ 0.2, 0.3, 0.4 }, got.color);
+    try std.testing.expectEqual(@as(u8, 9), got.pen);
 }

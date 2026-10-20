@@ -14,8 +14,8 @@ const MeshTools = @This();
 pub const V = MeshEdit.V;
 pub const Ray = struct { origin: V, direction: V };
 
-pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split };
-pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT" };
+pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick };
+pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK" };
 pub const tool_hints = [_][]const u8{
     "CLICK A VERTEX, SHIFT+CLICK TO ADD, DRAG TO BRUSH-SELECT",
     "DRAG TO MOVE THE SELECTION; SOFT RADIUS FADES THE PULL",
@@ -26,6 +26,17 @@ pub const tool_hints = [_][]const u8{
     "DRAG TO PAINT VERTEX COLOUR",
     "DRAG TO DRAW A CEL MATERIAL (SHADING AND INK)",
     "CLICK A PIECE TO SELECT IT, THEN TEAR OFF THE SELECTION",
+    "CLICK THE MESH TO PICK UP ITS COLOUR AND CEL PEN",
+};
+
+/// Paint brush presets as data: size, strength, edge hardness and blend in one choice.
+pub const Preset = struct { name: []const u8, radius: f32, strength: f32, hardness: f32, blend: MeshEdit.Blend };
+pub const presets = [_]Preset{
+    .{ .name = "SOFT AIR", .radius = 0.06, .strength = 0.15, .hardness = 0, .blend = .mix },
+    .{ .name = "HARD ROUND", .radius = 0.03, .strength = 1, .hardness = 0.85, .blend = .mix },
+    .{ .name = "WATERCOLOUR", .radius = 0.08, .strength = 0.3, .hardness = 0.1, .blend = .multiply },
+    .{ .name = "HIGHLIGHT", .radius = 0.04, .strength = 0.35, .hardness = 0.4, .blend = .screen },
+    .{ .name = "SMUDGE", .radius = 0.05, .strength = 0.5, .hardness = 0.2, .blend = .smudge },
 };
 
 /// Brush colours offered by the panel; any colour can still be picked up from the mesh.
@@ -55,6 +66,19 @@ pub const Control = enum(u8) {
     redo,
     tear_off,
     close,
+    mirror,
+    backface,
+    hue_down,
+    hue_up,
+    sat_down,
+    sat_up,
+    val_down,
+    val_up,
+    preset_down,
+    preset_up,
+    blend_cycle,
+    hardness_down,
+    hardness_up,
     swatch_first = 60,
     open = 90,
     _,
@@ -72,6 +96,17 @@ radius: f32 = 0.05,
 strength: f32 = 0.3,
 soft: f32 = 0.12,
 color: [3]f32 = swatches[2],
+/// Hue (0..1), saturation and value of `color`, kept separately so hue survives grey.
+hsv: [3]f32 = rgbToHsv(swatches[2]),
+hardness: f32 = 0,
+blend: MeshEdit.Blend = .mix,
+preset: u8 = 0,
+/// Mirror every brush across the model's centre plane.
+mirror: bool = false,
+/// Skip vertices facing away from the camera.
+backface: bool = true,
+/// Model-space direction of the last pointer ray, for backface masking.
+view_dir: V = .{ 0, 0, -1 },
 pen: u8 = @intFromEnum(CharacterMesh.Material.armor),
 masked: bool = false,
 /// World = base + rotateY(yaw) * (scale * model point).
@@ -259,6 +294,7 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
     const ray = self.toModelRay(world_ray);
     const hit = e.raycast(ray.origin, ray.direction);
     self.hover = if (hit) |h| h.point else null;
+    self.view_dir = ray.direction;
     self.dragging = true;
     self.plane_normal = scale(ray.direction, -1);
     switch (self.tool) {
@@ -266,6 +302,15 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
             if (!extend) e.clearSelection();
             if (hit) |h| e.selectVertex(h.vertex, true);
             self.dragging = hit != null;
+        },
+        .pick => {
+            if (hit) |h| {
+                const got = e.sample(h.vertex);
+                self.setColor(got.color);
+                self.pen = got.pen;
+                self.setStatus("PICKED COLOUR AND PEN {s}", .{penName(got.pen)});
+            }
+            self.dragging = false;
         },
         .split => {
             if (!extend) e.clearSelection();
@@ -306,6 +351,7 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
     if (!self.dragging) return self.hoverAt(world_ray);
     const e = &(self.editor orelse return);
     const ray = self.toModelRay(world_ray);
+    self.view_dir = ray.direction;
     switch (self.tool) {
         .select => if (e.raycast(ray.origin, ray.direction)) |h| {
             self.hover = h.point;
@@ -323,7 +369,7 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
             self.hover = h.point;
             try self.dab(h.point);
         },
-        .split => {},
+        .split, .pick => {},
     }
 }
 
@@ -360,7 +406,18 @@ fn dab(self: *MeshTools, center: V) MeshEdit.Error!void {
         .pen => 1,
         else => self.strength * 0.25,
     };
-    try e.dab(brush, .{ .center = center, .radius = self.radius * self.height(), .strength = strength, .color = self.color, .pen = self.pen, .masked = self.masked });
+    try e.dab(brush, .{
+        .center = center,
+        .radius = self.radius * self.height(),
+        .strength = strength,
+        .color = self.color,
+        .pen = self.pen,
+        .masked = self.masked,
+        .hardness = if (brush == .paint) self.hardness else 0,
+        .blend = self.blend,
+        .mirror = self.mirror,
+        .facing = if (self.backface) self.view_dir else null,
+    });
 }
 
 fn selectionCentre(self: *const MeshTools) V {
@@ -373,6 +430,47 @@ fn selectionCentre(self: *const MeshTools) V {
         n += 1;
     }
     return if (n > 0) scale(sum, 1 / n) else sum;
+}
+
+pub fn setColor(self: *MeshTools, rgb: [3]f32) void {
+    self.color = rgb;
+    self.hsv = rgbToHsv(rgb);
+}
+
+pub fn applyPreset(self: *MeshTools, index: u8) void {
+    const p = presets[index];
+    self.preset = index;
+    self.radius = p.radius;
+    self.strength = p.strength;
+    self.hardness = p.hardness;
+    self.blend = p.blend;
+    if (self.tool != .paint) self.setTool(.paint);
+    self.setStatus("BRUSH: {s}", .{p.name});
+}
+
+pub fn rgbToHsv(c: [3]f32) [3]f32 {
+    const hi = @max(c[0], @max(c[1], c[2]));
+    const lo = @min(c[0], @min(c[1], c[2]));
+    const d = hi - lo;
+    var h: f32 = 0;
+    if (d > 1e-6) {
+        if (hi == c[0]) {
+            h = @mod((c[1] - c[2]) / d, 6);
+        } else if (hi == c[1]) {
+            h = (c[2] - c[0]) / d + 2;
+        } else h = (c[0] - c[1]) / d + 4;
+        h /= 6;
+    }
+    return .{ h, if (hi > 1e-6) d / hi else 0, hi };
+}
+
+pub fn hsvToRgb(hsv: [3]f32) [3]f32 {
+    const h = @mod(hsv[0], 1) * 6;
+    const c = hsv[2] * hsv[1];
+    const x = c * (1 - @abs(@mod(h, 2) - 1));
+    const m = hsv[2] - c;
+    const rgb: [3]f32 = if (h < 1) .{ c, x, 0 } else if (h < 2) .{ x, c, 0 } else if (h < 3) .{ 0, c, x } else if (h < 4) .{ 0, x, c } else if (h < 5) .{ x, 0, c } else .{ c, 0, x };
+    return .{ rgb[0] + m, rgb[1] + m, rgb[2] + m };
 }
 
 // ---- Panel and keys ----------------------------------------------------------------------
@@ -420,10 +518,28 @@ pub fn control(self: *MeshTools, c: Control) MeshEdit.Error!Action {
         .tear_off => return .tear_off,
         .close => return .close,
         .open => {},
+        .mirror => self.mirror = !self.mirror,
+        .backface => self.backface = !self.backface,
+        .hue_down, .hue_up => {
+            self.hsv[0] = @mod(self.hsv[0] + (if (c == .hue_up) @as(f32, 1) else -1) / 24.0, 1);
+            self.color = hsvToRgb(self.hsv);
+        },
+        .sat_down, .sat_up, .val_down, .val_up => {
+            const k: usize = if (c == .sat_down or c == .sat_up) 1 else 2;
+            const up = c == .sat_up or c == .val_up;
+            self.hsv[k] = std.math.clamp(self.hsv[k] + (if (up) @as(f32, 0.1) else -0.1), 0, 1);
+            self.color = hsvToRgb(self.hsv);
+        },
+        .preset_down, .preset_up => {
+            const n: i32 = @intCast(presets.len);
+            self.applyPreset(@intCast(@mod(@as(i32, self.preset) + (if (c == .preset_up) @as(i32, 1) else -1), n)));
+        },
+        .blend_cycle => self.blend = @enumFromInt(@as(u2, @intFromEnum(self.blend)) +% 1),
+        .hardness_down, .hardness_up => self.hardness = std.math.clamp(self.hardness + (if (c == .hardness_up) @as(f32, 0.1) else -0.1), 0, 0.95),
         else => {
             const row = @intFromEnum(c);
             if (row >= @intFromEnum(Control.swatch_first) and row < @intFromEnum(Control.swatch_first) + swatches.len) {
-                self.color = swatches[row - @intFromEnum(Control.swatch_first)];
+                self.setColor(swatches[row - @intFromEnum(Control.swatch_first)]);
             } else if (row < tool_labels.len) self.setTool(@enumFromInt(row));
         },
     }
@@ -559,4 +675,35 @@ test "panel controls clamp brush settings and pick tools and swatches" {
     _ = try tools.control(.pen_down);
     try std.testing.expectEqual(@intFromEnum(CharacterMesh.Material.accent), tools.pen);
     try std.testing.expectEqual(Action.close, try tools.control(.close));
+}
+
+test "HSV round-trips, presets set the brush, and the pick tool reads the mesh" {
+    for (swatches) |c| {
+        const back = hsvToRgb(rgbToHsv(c));
+        for (c, back) |want, got| try std.testing.expectApproxEqAbs(want, got, 1e-5);
+    }
+    const a = std.testing.allocator;
+    var model = try Model.fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    var tools = try testTools(&model);
+    defer tools.deinit();
+    _ = try tools.control(.preset_up);
+    try std.testing.expectEqual(Tool.paint, tools.tool);
+    try std.testing.expectEqual(MeshEdit.Blend.mix, tools.blend);
+    try std.testing.expectEqual(@as(f32, 0.85), tools.hardness);
+    // Hue steps keep saturation and value.
+    const before = tools.hsv;
+    _ = try tools.control(.hue_up);
+    try std.testing.expectApproxEqAbs(before[1], rgbToHsv(tools.color)[1], 1e-4);
+    // Paint the top face, then pick it back up after changing colour.
+    tools.setColor(.{ 0.1, 0.6, 0.2 });
+    tools.radius = 1;
+    const top = tools.toWorldPoint(.{ 0, 2, 0 });
+    const down: Ray = .{ .origin = .{ top[0], 20, top[2] }, .direction = .{ 0, -1, 0 } };
+    try tools.press(down, false);
+    tools.release();
+    tools.setColor(.{ 1, 1, 1 });
+    tools.setTool(.pick);
+    try tools.press(down, false);
+    try std.testing.expect(tools.color[1] > tools.color[0]);
 }

@@ -978,8 +978,8 @@ fn pointAt(self: *App, click: bool) void {
 fn creatorKey(self: *App, key: mach.Core.KeyButtonID, shift: bool) void {
     if (self.sandbox.creator.imported_open and self.sandbox.creator.vertex_tools) {
         const tag = @tagName(key);
-        const digits = [_][]const u8{ "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" };
-        for (digits, 0..) |d, i| if (std.mem.eql(u8, tag, d)) return self.meshToolControl(@enumFromInt(i));
+        const digits = [_][]const u8{ "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "zero" };
+        for (digits, 0..) |d, i| if (std.mem.eql(u8, tag, d) and i < MeshTools.tool_labels.len) return self.meshToolControl(@enumFromInt(i));
         switch (key) {
             .z => self.meshToolControl(if (shift) .redo else .undo),
             .left_bracket => self.meshToolControl(.radius_down),

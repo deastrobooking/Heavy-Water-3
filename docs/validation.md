@@ -1553,11 +1553,19 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
     - At the last commit (old retarget), the bundled rigged GLB stands with splayed, stretched legs and a tilted, torn body.
     - With this change it stands in a clean A-pose.
     - With `-Dcharacter-pose=2` it performs the overhead swing with the arm, forearm and shoulder pad connected.
-  - Suite, smoke and install: see the next line.
+  - The suite runs 486/494, and every test from this pass passes. Of the 8 failures, 6 predate this work (Field LOD, Chunk seed, cave mouth, Hive meshes, Skies, Pets); 2 come from another session's uncommitted edits to `Worlds.zig` and `Player.zig`.
+  - The Metal smoke completes 300 frames.
+  - The ReleaseFast build is installed.
 - **Not checked:**
   - Hands-on play feel of the fades, landing and strides.
   - Real Rigify, VRoid and Unreal files: only names are tested, and VRoid files usually fail earlier on morph targets.
   - Fingers, which follow the hand.
   - Turn lean and strafing gaits, foot IK, distinct swim/stomp/board/hang poses, and Wildkin quadruped and wing motion.
   - Remaining GUI items: the library panel at UI scale above 1, a pad path into the library and creator tabs, and the Heroes narrow layout.
+
+## Stylization painting core (mesh editor S1) — 2026-10-20
+
+- **Added:** mirror-X symmetry for every brush (each side of the centre plane painted once), front-only masking, brush hardness, paint blend modes (mix, multiply, screen, smudge), the PICK eyedropper tool, five brush presets, an HSV colour picker, and a re-laid-out tool bar (10 tools, two steppers per row). Plan: [mesh editor](plans/mesheditor.md) section 0.1.
+- **Checked:** new tests pass. They cover mirrored dabs (once per side), backface masking (masked from below, painted from above), multiply/screen/smudge values, hardness at 80% radius, eyedropper colour and pen, HSV round-trips, presets, picking colour back off the mesh, and a panel layout test at 1280×720 and 853×480 (no overlapping hits, within the canvas and hit budgets). The suite runs 491/499; the 8 failures are the same as in the entry above (6 predate this work, 2 come from another session's Worlds and Player edits). Default and 0.17 `build check` pass. The Metal smoke completes 300 frames. The `-Dcharacter-showcase=48` capture was inspected and the new tool bar renders without overlap. The ReleaseFast build is installed.
+- **Not checked:** painting by hand with a mouse; symmetry on a model whose bounds are not centred on its own mirror plane (the plane is the bounds centre); pen-tablet pressure (not implemented).
 
