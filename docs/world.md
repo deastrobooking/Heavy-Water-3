@@ -104,11 +104,11 @@ The first canopy city is **Detroit, Michigan**, remembered as the Detroit Arbor 
 
 Detroit begins under occupation: Hive patrols and nests press against the industrial belt, while human collaborators keep supply routes and relay access open. The canopy districts remain explorable, but the city is not safe or liberated until the party breaks the surrounding force, exposes the collaborators, and defeats the occupation's commander.
 
-**New York City: Hudson Reach** is the second captured Earth city. Its first arrival foothold sits on the Hudson side, with a dense skyline, elevated green routes, and a living harbor. The Hive uses the high-rise canyons, river approaches and transit infrastructure as a layered occupation zone; the local resistance keeps narrow rooftop and maintenance routes open. New York's full city loop follows Detroit's proven liberation structure rather than expanding the first playable slice prematurely.
+**New York City: Hudson Reach** is the second captured Earth city. Its first arrival foothold sits on the Hudson side, with about twenty 2,500–3,500 ft towers in varied stone and glass palettes, planted roofs, elevated green routes, and a living harbor. The Hive uses the high-rise canyons, river approaches and transit infrastructure as a layered occupation zone; the local resistance keeps narrow rooftop and maintenance routes open. New York's full city loop follows Detroit's proven liberation structure rather than expanding the first playable slice prematurely.
 
 ### Grafted towers
 
-Modern skyscrapers rise between trunks, founded on buttress roots and braced by branches that grow into steel collars. Towers are procedural: a footprint, a floor-plate profile, facade modules, and anchor points where branches and bridges attach.
+Modern skyscrapers rise between trunks, founded on buttress roots and braced by branches that grow into steel collars. Each city's megatower district targets about twenty principal towers, 760–1,070 m (2,500–3,500 ft) tall. Towers are procedural: a footprint, a floor-plate profile, facade modules, and anchor points where branches and bridges attach. The skyline mixes marble white stone, warm desert stone, weathered grey stone, glass, hanging vines, ivy and moss. Roofs open into walkable gardens and kiosks; broad suspension skyways connect tower crowns and widen into little neighborhoods with shops, light housing and planted public terraces. Floating horizontal and vertical platforms, adjustable lifts, ramps and giant bridge pylons make the ascent a platforming route, with several ways to climb rather than one mandatory shaft.
 
 ### Bridge roads
 
@@ -119,11 +119,11 @@ Bridge roads are the city's streets. A standard section, from edge to edge:
 - Walkway with market bays: 3 m
 - Rails and planters: 0.5 m each side
 
-That is about 14 m of deck. Grades stay at 6% or less so vehicles and pedestrians share them comfortably. Long spans hang from **vine cables** (living suspension, thickened over years) between trunk and tower anchors. Junctions where roads meet a trunk become plazas wrapped around the bark. Shops are stalls and kiosks in the walkway bays, and they sell the parts and blueprints the other loops use.
+That is about 14 m of deck. Grades stay at 6% or less so vehicles and pedestrians share them comfortably. Long spans hang from **vine cables** (living suspension, thickened over years) between trunk and tower anchors. The crown-level skyways are separate, much wider public routes carried between skyscraper tops; they use giant steel, cable and Arbor-root supports, and flare into planted market terraces. Junctions where roads meet a trunk become plazas wrapped around the bark. Shops are stalls and kiosks in the walkway bays, and they sell the parts and blueprints the other loops use.
 
 ### District life
 
-Districts differ in purpose and mood: markets, workshops, gardens, residences, docks. Traffic follows lane graphs on the bridge roads, pedestrians follow walkway graphs, and both respond to what the player builds or breaks.
+Districts differ in purpose and mood: markets, workshops, gardens, residences, docks. Traffic follows lane graphs on the bridge roads, pedestrians follow walkway graphs, and both respond to what the player builds or breaks. Before liberation, Scalari and Hive assailants occupy streets, towers and skyways while civilians flee toward safe interiors and evacuation lifts. Clearing a city means pushing the occupation out of all of its vertical layers and exposing its human collaborators inside.
 
 ## The ocean cities
 

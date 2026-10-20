@@ -7,9 +7,14 @@ const Model = @This();
 ///   submesh_count u32, material_count u32, bounds_min [3]f32, bounds_max [3]f32,
 ///   materials { base_color [4]f32, name [24]u8 }, submeshes { first_index u32, index_count u32, material u32 },
 ///   vertices, indices; v2 adds skin count, per-vertex influences, and 36-byte bind-DQ bones;
-///   v3 uses the same influences with 16-byte Ranger-pivot bones. The decoder retains v1/v2.
+///   v3 uses the same influences with 16-byte Ranger-pivot bones; v4 appends one cel-pen byte per
+///   vertex after everything else. `encode` writes v3 when a model has no pens, so unpainted
+///   models stay byte-identical. The decoder retains v1–v3.
 pub const magic = "HWMS";
-pub const format_version: u32 = 3;
+pub const format_version: u32 = 4;
+/// Cel pens are indices into the character cel table (`character/mesh.zig` `Material`); this
+/// bound only rejects garbage, and the renderer clamps to the materials it has.
+pub const max_pens = 64;
 pub const max_vertices = 1 << 20;
 pub const max_submeshes = 16;
 pub const max_materials = 16;
@@ -36,6 +41,9 @@ materials: []Material,
 bounds_min: [3]f32,
 bounds_max: [3]f32,
 skin: ?Skin = null,
+/// Optional per-vertex cel pen (which cel material shades and inks the vertex). Null draws every
+/// vertex with pen 0, as imports did before pens existed.
+pens: ?[]u8 = null,
 /// CPU-side mutation counter used by live character slots; not part of the saved format.
 revision: u64 = 0,
 
@@ -99,6 +107,7 @@ pub fn deinit(self: Model, allocator: std.mem.Allocator) void {
         allocator.free(skin.bones);
         if (skin.legacy_bind) |legacy| allocator.free(legacy);
     }
+    if (self.pens) |pens| allocator.free(pens);
     allocator.free(self.materials);
     allocator.free(self.submeshes);
     self.mesh.deinit(allocator);
@@ -121,7 +130,14 @@ pub fn clone(allocator: std.mem.Allocator, source: Model) !Model {
         const legacy_bind: ?[]LegacySkinBone = if (source_skin.legacy_bind) |source_legacy| try allocator.dupe(LegacySkinBone, source_legacy) else null;
         break :blk .{ .vertices = influences, .bones = bones, .legacy_bind = legacy_bind };
     } else null;
+    errdefer if (skin) |s| {
+        allocator.free(s.vertices);
+        allocator.free(s.bones);
+        if (s.legacy_bind) |legacy| allocator.free(legacy);
+    };
+    const pens: ?[]u8 = if (source.pens) |p| try allocator.dupe(u8, p) else null;
     return .{
+        .pens = pens,
         .mesh = .{ .vertices = vertices, .indices = indices },
         .submeshes = submeshes,
         .materials = materials,
@@ -177,11 +193,15 @@ pub fn encode(self: Model, allocator: std.mem.Allocator) ![]u8 {
             for (bone.pivot) |v| if (!std.math.isFinite(v)) return error.InvalidSkinData;
         }
     }
+    if (self.pens) |pens| {
+        if (pens.len != self.mesh.vertices.len) return error.InvalidPens;
+        for (pens) |p| if (p >= max_pens) return error.InvalidPens;
+    }
     var out: std.Io.Writer.Allocating = .init(allocator);
     defer out.deinit();
     const w = &out.writer;
     try w.writeAll(magic);
-    for ([_]u32{ format_version, @sizeOf(Mesh.Vertex), @intCast(self.mesh.vertices.len), @intCast(self.mesh.indices.len), @intCast(self.submeshes.len), @intCast(self.materials.len) }) |v| try w.writeInt(u32, v, .little);
+    for ([_]u32{ if (self.pens != null) format_version else 3, @sizeOf(Mesh.Vertex), @intCast(self.mesh.vertices.len), @intCast(self.mesh.indices.len), @intCast(self.submeshes.len), @intCast(self.materials.len) }) |v| try w.writeInt(u32, v, .little);
     for (self.bounds_min ++ self.bounds_max) |v| try w.writeInt(u32, @bitCast(v), .little);
     try w.writeInt(u32, if (self.skin) |s| @intCast(s.bones.len) else 0, .little);
     for (self.materials) |m| {
@@ -205,10 +225,11 @@ pub fn encode(self: Model, allocator: std.mem.Allocator) ![]u8 {
             for (bone.pivot) |v| try w.writeInt(u32, @bitCast(v), .little);
         }
     }
+    if (self.pens) |pens| try w.writeAll(pens);
     return out.toOwnedSlice();
 }
 
-pub const DecodeError = error{ NotAModel, UnsupportedVersion, UnsupportedVertexLayout, Truncated, TrailingBytes, TooLarge, InvalidIndex, InvalidSubmesh, InvalidMaterial, InvalidJoint, InvalidSkinWeights, NonFiniteValue, OutOfMemory };
+pub const DecodeError = error{ NotAModel, UnsupportedVersion, UnsupportedVertexLayout, Truncated, TrailingBytes, TooLarge, InvalidIndex, InvalidSubmesh, InvalidMaterial, InvalidJoint, InvalidSkinWeights, InvalidPens, NonFiniteValue, OutOfMemory };
 
 const Reader = struct {
     bytes: []const u8,
@@ -244,7 +265,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Model
     const bone_count = if (version >= 2) try r.int() else 0;
     if (bone_count > 128) return error.TooLarge;
     const bone_stride: usize = if (version == 2) 36 else 16;
-    const expected = header_bytes + (if (version >= 2) @as(usize, 4) else 0) + material_count * (16 + name_len) + submesh_count * 12 + vertex_count * @sizeOf(Mesh.Vertex) + index_count * 4 + (if (bone_count > 0) vertex_count * 20 + bone_count * bone_stride else 0);
+    const expected = header_bytes + (if (version >= 2) @as(usize, 4) else 0) + material_count * (16 + name_len) + submesh_count * 12 + vertex_count * @sizeOf(Mesh.Vertex) + index_count * 4 + (if (bone_count > 0) vertex_count * 20 + bone_count * bone_stride else 0) + (if (version >= 4) @as(usize, vertex_count) else 0);
     if (bytes.len < expected) return error.Truncated;
     if (bytes.len > expected) return error.TrailingBytes;
 
@@ -317,6 +338,19 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Model
         }
         skin = .{ .vertices = influences, .bones = bones, .legacy_bind = legacy_bind };
     }
+    errdefer if (skin) |s| {
+        allocator.free(s.vertices);
+        allocator.free(s.bones);
+        if (s.legacy_bind) |legacy| allocator.free(legacy);
+    };
+    result.pens = if (version >= 4) blk: {
+        const pens = try allocator.dupe(u8, bytes[r.at..][0..vertex_count]);
+        for (pens) |p| if (p >= max_pens) {
+            allocator.free(pens);
+            return error.InvalidPens;
+        };
+        break :blk pens;
+    } else null;
     result.mesh = .{ .vertices = vertices, .indices = indices };
     result.submeshes = submeshes;
     result.materials = materials;
@@ -445,4 +479,31 @@ test "runtime model decode cleans up on allocation failure" {
     const bytes = try model.encode(std.testing.allocator);
     defer std.testing.allocator.free(bytes);
     try std.testing.checkAllAllocationFailures(std.testing.allocator, decodeProbe, .{bytes});
+}
+
+test "HWMS v4 carries per-vertex cel pens; unpainted models still write v3" {
+    const a = std.testing.allocator;
+    var model = try fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    const plain = try model.encode(a);
+    defer a.free(plain);
+    try std.testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, plain[4..8], .little));
+    model.pens = try a.alloc(u8, model.mesh.vertices.len);
+    for (model.pens.?, 0..) |*p, i| p.* = @intCast(i % 5);
+    const painted = try model.encode(a);
+    defer a.free(painted);
+    try std.testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, painted[4..8], .little));
+    const back = try decode(a, painted);
+    defer back.deinit(a);
+    try std.testing.expectEqualSlices(u8, model.pens.?, back.pens.?);
+    const copy = try clone(a, back);
+    defer copy.deinit(a);
+    try std.testing.expectEqualSlices(u8, model.pens.?, copy.pens.?);
+    const bad = try a.dupe(u8, painted);
+    defer a.free(bad);
+    bad[bad.len - 1] = max_pens;
+    try std.testing.expectError(error.InvalidPens, decode(a, bad));
+    try std.testing.expectError(error.Truncated, decode(a, painted[0 .. painted.len - 1]));
+    model.pens.?[0] = max_pens;
+    try std.testing.expectError(error.InvalidPens, model.encode(a));
 }

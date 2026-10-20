@@ -1,6 +1,6 @@
-//! The sky city's skyline: steel-and-glass skyscrapers rising from the forest floor around and
-//! through the district, plus one tower beside each tower plaza, joined to it by a walkable sky
-//! lobby at deck level. Placement is seeded and validated. Towers keep clear of every road,
+//! The sky city's skyline: stone and steel skyscrapers rising from the forest floor around and
+//! through the district, plus roof gardens and suspension skyways above the canopy. Placement is
+//! seeded and validated. Towers keep clear of every road,
 //! trunk spur, and plaza-to-plaza route a player could still bridge, as well as plazas, trunks,
 //! the spawn area, and each other, so they shape the city without blocking any route through it.
 const std = @import("std");
@@ -13,6 +13,9 @@ const V = R.Vec3;
 
 pub const max_buildings = 24;
 pub const target_skyline = 18;
+pub const skyline_min_height: f32 = 762; // about 2,500 ft
+pub const skyline_max_height: f32 = 1067; // about 3,500 ft
+pub const skyway_deck_height: f32 = 950;
 pub const Architecture = enum { modern, gothic, industrial };
 /// No tower within this distance of the new-game spawn.
 pub const spawn_clearance: f32 = 110;
@@ -46,12 +49,15 @@ const palettes = [_]struct { body: V, band: V, fin: V, glass: V }{
     .{ .body = .{ 0.26, 0.28, 0.34 }, .band = .{ 0.60, 0.64, 0.70 }, .fin = .{ 0.85, 0.55, 0.30 }, .glass = .{ 0.24, 0.51, 0.62 } },
     .{ .body = .{ 0.39, 0.38, 0.35 }, .band = .{ 0.18, 0.19, 0.21 }, .fin = .{ 0.64, 0.57, 0.43 }, .glass = .{ 0.78, 0.62, 0.36 } },
     .{ .body = .{ 0.22, 0.26, 0.29 }, .band = .{ 0.12, 0.15, 0.17 }, .fin = .{ 0.67, 0.34, 0.18 }, .glass = .{ 0.31, 0.44, 0.47 } },
+    .{ .body = .{ 0.82, 0.82, 0.77 }, .band = .{ 0.66, 0.68, 0.64 }, .fin = .{ 0.90, 0.87, 0.77 }, .glass = .{ 0.27, 0.61, 0.65 } },
+    .{ .body = .{ 0.69, 0.49, 0.31 }, .band = .{ 0.51, 0.34, 0.22 }, .fin = .{ 0.87, 0.67, 0.42 }, .glass = .{ 0.29, 0.53, 0.53 } },
+    .{ .body = .{ 0.39, 0.42, 0.40 }, .band = .{ 0.27, 0.32, 0.28 }, .fin = .{ 0.50, 0.55, 0.45 }, .glass = .{ 0.25, 0.52, 0.57 } },
 };
 
 fn paletteFor(style: Architecture, seed_palette: usize) u8 {
     return switch (style) {
-        .modern => @intCast(seed_palette % 4),
-        .gothic => 4,
+        .modern => @intCast(seed_palette % palettes.len),
+        .gothic => if (seed_palette % 2 == 0) 4 else 8,
         .industrial => 5,
     };
 }
@@ -157,7 +163,7 @@ pub fn generate(layout: *District.Layout) void {
         var b: Building = .{
             .base = .{ at[0], Terrain.surface(layout.seed, at[0], at[2]).height, at[2] },
             .half = if (architecture == .industrial) .{ half, half * 0.82 } else .{ half, half },
-            .roof = node.position[1] + (if (architecture == .industrial) @as(f32, 44) else 60) + (if (architecture == .industrial) @as(f32, 48) else 90) * Rand.unit(&h),
+            .roof = skyway_deck_height + @as(f32, @floatFromInt(i - 1)) * 8,
             .tiers = if (architecture == .industrial) 1 else 2 + @as(u8, @intFromFloat(Rand.unit(&h) * 1.99)),
             .palette = paletteFor(architecture, i),
             .architecture = architecture,
@@ -177,14 +183,14 @@ pub fn generate(layout: *District.Layout) void {
         const tall = Rand.unit(&h);
         const architecture = architectureAt(x, z, Rand.unit(&h));
         const radius_scale: f32 = if (architecture == .industrial) 1.35 else 1;
-        const height_base: f32 = if (architecture == .industrial) 38 else if (architecture == .gothic) 55 else 50;
-        const height_range: f32 = if (architecture == .industrial) 70 else 210;
+        const height_base: f32 = if (architecture == .industrial) 90 else skyline_min_height;
+        const height_range: f32 = if (architecture == .industrial) 240 else skyline_max_height - skyline_min_height;
         var b: Building = .{
             .base = .{ x, ground, z },
             .half = .{ (9 + 9 * Rand.unit(&h)) * radius_scale, (9 + 9 * Rand.unit(&h)) * radius_scale },
             .roof = ground + height_base + height_range * tall * tall,
             .tiers = if (architecture == .industrial) 1 + @as(u8, @intFromFloat(Rand.unit(&h) * 1.99)) else 1 + @as(u8, @intFromFloat(Rand.unit(&h) * 2.99)),
-            .palette = paletteFor(architecture, @intFromFloat(Rand.unit(&h) * 4)),
+            .palette = paletteFor(architecture, @intFromFloat(Rand.unit(&h) * @as(f32, @floatFromInt(palettes.len)))),
             .architecture = architecture,
         };
         b.spire = b.roof + switch (architecture) {
@@ -304,6 +310,26 @@ pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void
             }
         },
     }
+    // Stone towers carry hanging gardens down their facades. The narrow green runs leave the
+    // windows legible and read as vines from the ground instead of a solid green wall.
+    if (b.palette >= 6 and b.architecture != .industrial) {
+        const ivy: V = .{ 0.22, 0.43, 0.25 };
+        for ([_]f32{ -0.76, -0.28, 0.20, 0.66, 0.88 }) |u| {
+            const top_y = b.roof - 8;
+            const drop = 70 + @abs(u) * 45;
+            const x = b.base[0] + u * b.half[0];
+            const sign: f32 = if (u < 0) -1 else 1;
+            const side: V = if (@abs(u) > 0.6)
+                .{ x + sign * (b.half[0] + 0.18), top_y, b.base[2] + b.half[1] * 0.32 }
+            else
+                .{ x, top_y, b.base[2] + b.half[1] + 0.24 };
+            const end = R.add(side, .{ 0.4 * @sin(u * 6), -@min(drop, top_y - b.base[1] - 8), 0 });
+            try Bridges.beam(out, side, end, 1.8, ivy, false);
+            const ledge = R.add(side, .{ 0, -2, 0 });
+            try out.add(.{ .center = ledge, .size = .{ 5.5, 1.2, 2.8 }, .color = .{ 0.25, 0.48, 0.27 }, .solid = false });
+        }
+    }
+    if (b.architecture != .industrial) try roofGarden(b, out);
     if (b.plaza) |i| {
         // Sky lobby: a walkable deck from the plaza edge to the tower at plaza level.
         const node = layout.nodes[i].position;
@@ -313,7 +339,123 @@ pub fn geometry(layout: *const District.Layout, b: Building, out: anytype) !void
         const s: District.Span = .{ .a = from, .b = to };
         try out.add(.{ .center = R.add(s.point(0.5), .{ 0, -0.5, 0 }), .size = .{ 8, 1, s.length() }, .rotation = s.rotation(), .color = .{ 0.44, 0.48, 0.41 } });
         try out.add(.{ .center = R.add(to, .{ 0, 4.5, 0 }), .size = .{ 8, 0.4, 3 }, .rotation = s.rotation(), .color = p.fin });
+        if (i == 1) try skyways(layout, out);
     }
+}
+
+fn plazaTower(layout: *const District.Layout, plaza: usize) ?Building {
+    for (layout.buildings[0..layout.building_count]) |building| if (building.plaza == @as(?u8, @intCast(plaza))) return building;
+    return null;
+}
+
+fn roofGarden(b: Building, out: anytype) !void {
+    const deck: V = .{ b.base[0], b.roof + 0.7, b.base[2] };
+    try out.add(.{ .center = deck, .size = .{ b.half[0] * 2 + 16, 1.4, b.half[1] * 2 + 16 }, .color = .{ 0.24, 0.35, 0.29 } });
+    for ([_]f32{ -1, 1 }) |sx| for ([_]f32{ -1, 1 }) |sz| {
+        const x = b.base[0] + sx * (b.half[0] + 5.5);
+        const z = b.base[2] + sz * (b.half[1] + 5.5);
+        try out.add(.{ .center = .{ x, b.roof + 2, z }, .size = .{ 9, 1.2, 9 }, .color = .{ 0.22, 0.48, 0.28 } });
+        try out.add(.{ .center = .{ x, b.roof + 5.2, z }, .size = .{ 4.5, 5.2, 4.5 }, .color = palettes[b.palette].glass, .solid = false });
+    };
+    // A sheltered kiosk gives each roof terrace a reason to be a place, not just a landing.
+    try out.add(.{ .center = .{ b.base[0], b.roof + 3.8, b.base[2] }, .size = .{ 9, 6.2, 7 }, .color = palettes[b.palette].body });
+    try out.add(.{ .center = .{ b.base[0], b.roof + 4, b.base[2] + 3.6 }, .size = .{ 6.5, 3.4, 0.2 }, .color = palettes[b.palette].glass, .solid = false });
+}
+
+fn skyways(layout: *const District.Layout, out: anytype) !void {
+    var connected: [max_buildings]bool = @splat(false);
+    var start: ?usize = null;
+    for (layout.buildings[0..layout.building_count], 0..) |building, index| if (building.plaza == 1) {
+        start = index;
+        break;
+    };
+    connected[start orelse return] = true;
+    for (1..layout.building_count) |_| {
+        var best: f32 = std.math.inf(f32);
+        var from: usize = 0;
+        var to: usize = 0;
+        for (layout.buildings[0..layout.building_count], 0..) |a, ai| {
+            if (!connected[ai]) continue;
+            if (a.architecture == .industrial and a.plaza == null) continue;
+            for (layout.buildings[0..layout.building_count], 0..) |b, bi| {
+                if (connected[bi] or ai == bi) continue;
+                if (b.architecture == .industrial and b.plaza == null) continue;
+                const dx = b.base[0] - a.base[0];
+                const dz = b.base[2] - a.base[2];
+                const distance = @sqrt(dx * dx + dz * dz);
+                if (distance < best) {
+                    best = distance;
+                    from = ai;
+                    to = bi;
+                }
+            }
+        }
+        if (!std.math.isFinite(best)) break;
+        connected[to] = true;
+        try skywaySpan(layout.buildings[from], layout.buildings[to], out);
+    }
+    // A short return link between the three market towers closes the parkour loop.
+    const links = [_][2]usize{ .{ 1, 3 }, .{ 3, 5 }, .{ 5, 1 } };
+    for (links) |link| {
+        const a = plazaTower(layout, link[0]) orelse continue;
+        const b = plazaTower(layout, link[1]) orelse continue;
+        try skywaySpan(a, b, out);
+    }
+}
+
+fn skywaySpan(a: Building, b: Building, out: anytype) !void {
+        const span: District.Span = .{ .a = .{ a.base[0], a.roof + 1.4, a.base[2] }, .b = .{ b.base[0], b.roof + 1.4, b.base[2] } };
+        const q = span.rotation();
+        const length = span.length();
+        if (length < 30) return;
+        try out.add(.{ .center = span.point(0.5), .size = .{ 32, 1.4, length }, .rotation = q, .color = .{ 0.30, 0.38, 0.36 } });
+        // Gate pylons mark each landing and carry the visible suspension loads outside the path.
+        for ([_]f32{ 0, 1 }) |t| for ([_]f32{ -17, 17 }) |side| {
+            const base = R.add(span.point(t), R.rotate(q, .{ side, 1.4, 0 }));
+            const top = R.add(base, .{ 0, 42, 0 });
+            try out.add(.{ .center = R.add(base, .{ 0, 21, 0 }), .size = .{ 2.8, 42, 2.8 }, .rotation = q, .color = .{ 0.66, 0.69, 0.65 } });
+            try Bridges.beam(out, base, top, 1.4, .{ 0.74, 0.80, 0.78 }, false);
+        };
+        for ([_]f32{ -15.5, 15.5 }) |side| {
+            const offset = R.rotate(q, .{ side, 2.4, 0 });
+            try out.add(.{ .center = R.add(span.point(0.5), offset), .size = .{ 0.6, 4.8, length }, .rotation = q, .color = .{ 0.38, 0.48, 0.46 } });
+            const rail = R.rotate(q, .{ side, 5.1, 0 });
+            try out.add(.{ .center = R.add(span.point(0.5), rail), .size = .{ 0.35, 0.35, length }, .rotation = q, .color = .{ 0.22, 0.75, 0.78 }, .solid = false });
+        }
+        // Three broad sky terraces break each long span into garden, market, and parkour rooms.
+        for ([_]f32{ 0.25, 0.5, 0.75 }, 0..) |t, i| {
+            const center = span.point(t);
+            try out.add(.{ .center = center, .size = .{ 48, 1.8, 42 }, .rotation = q, .color = if (i == 1) .{ 0.34, 0.34, 0.30 } else .{ 0.20, 0.38, 0.26 } });
+            for ([_]f32{ -15, 15 }) |side| {
+                const planter = R.add(center, R.rotate(q, .{ side, 1.7, 0 }));
+                try out.add(.{ .center = planter, .size = .{ 8, 1.8, 24 }, .rotation = q, .color = .{ 0.24, 0.52, 0.30 } });
+            }
+            if (i == 1) {
+                const kiosk = R.add(center, R.rotate(q, .{ 0, 4.5, 0 }));
+                try out.add(.{ .center = kiosk, .size = .{ 12, 7.2, 10 }, .rotation = q, .color = palettes[2].body });
+                const glass = R.add(kiosk, R.rotate(q, .{ 0, 0, 5.1 }));
+                try out.add(.{ .center = glass, .size = .{ 8.5, 4.5, 0.2 }, .rotation = q, .color = palettes[2].glass, .solid = false });
+            }
+        }
+        // Cable arcs and hangers give the skywalks a suspension-bridge silhouette.
+        const height: f32 = @min(44, length * 0.08);
+        for ([_]f32{ -13, 13 }) |side| {
+            var previous = R.add(span.point(0), R.rotate(q, .{ side, 0.8, 0 }));
+            for (1..17) |step| {
+                const t = @as(f32, @floatFromInt(step)) / 16;
+                const rise = 0.8 + height * (1 - 4 * (t - 0.5) * (t - 0.5));
+                const next = R.add(span.point(t), R.rotate(q, .{ side, rise, 0 }));
+                try Bridges.beam(out, previous, next, 0.32, .{ 0.74, 0.80, 0.78 }, false);
+                previous = next;
+            }
+            for (1..16) |step| {
+                const t = @as(f32, @floatFromInt(step)) / 16;
+                const rise = 0.8 + height * (1 - 4 * (t - 0.5) * (t - 0.5));
+                const top = R.add(span.point(t), R.rotate(q, .{ side, rise, 0 }));
+                const foot = R.add(span.point(t), R.rotate(q, .{ side, 0.8, 0 }));
+                try Bridges.beam(out, foot, top, 0.12, .{ 0.78, 0.82, 0.80 }, false);
+            }
+        }
 }
 
 /// Braced steel legs under a free-standing plaza (the Arbor junctions).

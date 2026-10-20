@@ -2033,9 +2033,20 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         };
     }
     for (new_york_landmarks, 0..) |_, i| {
-        if (scene.count == out.len) return scene.count;
+        if (scene.count + 8 >= out.len) return scene.count;
         const landmark = newYorkLandmark(self.seed, i).?;
         scene.drawBox(landmark.position, landmark.size, landmark.tint) catch unreachable;
+        const roof = landmark.position[1] + landmark.size[1] * 0.5;
+        const glass: [4]f32 = .{ 0.21, 0.56, 0.61, 1 };
+        const garden: [4]f32 = .{ 0.24, 0.45, 0.28, 1 };
+        for ([_]f32{ -0.32, 0.32 }) |u| {
+            scene.drawBox(.{ landmark.position[0] + u * landmark.size[0], landmark.position[1], landmark.position[2] + landmark.size[2] * 0.5 + 0.15 }, .{ 2.8, landmark.size[1] * 0.78, 0.3 }, glass) catch unreachable;
+        }
+        scene.drawBox(.{ landmark.position[0], roof + 0.8, landmark.position[2] }, .{ landmark.size[0] + 7, 1.6, landmark.size[2] + 7 }, garden) catch unreachable;
+        scene.drawBox(.{ landmark.position[0], roof + 4, landmark.position[2] }, .{ 8, 6, 7 }, .{ 0.78, 0.80, 0.73, 1 }) catch unreachable;
+        for ([_]f32{ -1, 1 }) |side| {
+            scene.drawBox(.{ landmark.position[0] + side * landmark.size[0] * 0.34, roof + 2.4, landmark.position[2] }, .{ 7, 1.8, 12 }, garden) catch unreachable;
+        }
     }
     var n = scene.count;
     for (self.bridges) |maybe| if (maybe) |bridge| {
@@ -2099,11 +2110,12 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and (self.player.mode == .walk or self.player.mode == .fly) and n < out.len) {
         var preview_pose: Avatar.Pose = .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 };
-        if (self.creator.imported_open) {
-            // The editor is docked right; offset the real character into the exposed left strip.
-            preview_pose.feet = R.add(preview_pose.feet, R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 1, 0, 0 }));
-        }
+        preview_pose.feet = self.importedPreviewFeet();
+        const first = n;
         n = avatar(if (self.creator.open) self.creator.draft else self.profile, preview_pose, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog, out, n);
+        if (self.creator.vertex_tools and n > first) if (out[first].character) |*drawn| {
+            drawn.imported_bind_pose = true;
+        };
     }
     const night = Sky.at(Sky.timeOfDay(self.tick)).night;
     n = self.life.publish(&self.physics, self.catalog, night, out, n);
@@ -2234,6 +2246,25 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);
+}
+
+/// Where the player's own body stands: in the imported-mesh editor it steps aside into the strip
+/// the docked panel leaves visible.
+fn importedPreviewFeet(self: *const Sandbox) Physics.Vec3 {
+    if (!self.creator.imported_open) return self.player.feet;
+    return R.add(self.player.feet, R.rotate(R.axisAngle(.{ 0, 1, 0 }, self.body_yaw), .{ 1, 0, 0 }));
+}
+
+/// The imported character's placement as drawn (`avatar` and `Characters` agree on it): world =
+/// base + rotateY(yaw) * (scale * model point). Null when no imported mesh is ready.
+pub fn importedPlacement(self: *const Sandbox) ?struct { base: Physics.Vec3, yaw: f32, scale: f32 } {
+    const entry = self.catalog.mesh(self.catalog.content.captain_test) orelse return null;
+    if (!entry.ready) return null;
+    const profile = if (self.creator.open) self.creator.draft else self.profile;
+    const model_height = @max(entry.model.bounds_max[1] - entry.model.bounds_min[1], 0.01);
+    const scale = 1.8 * profile.height / model_height;
+    const feet = self.importedPreviewFeet();
+    return .{ .base = .{ feet[0], feet[1] - entry.model.bounds_min[1] * scale, feet[2] }, .yaw = self.body_yaw, .scale = scale };
 }
 
 fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8, catalog: *const Catalog, out: []World.Prop, start: usize) usize {
@@ -4082,11 +4113,26 @@ pub const travel_labels = blk: {
 };
 const NewYorkLandmark = struct { x: f32, z: f32, height: f32, width: f32, depth: f32, tint: [4]f32 };
 const new_york_landmarks = [_]NewYorkLandmark{
-    .{ .x = 250000, .z = 0, .height = 190, .width = 42, .depth = 42, .tint = .{ 0.24, 0.34, 0.40, 1 } },
-    .{ .x = 250055, .z = -25, .height = 138, .width = 34, .depth = 38, .tint = .{ 0.31, 0.37, 0.40, 1 } },
-    .{ .x = 249950, .z = -60, .height = 112, .width = 38, .depth = 32, .tint = .{ 0.37, 0.31, 0.26, 1 } },
-    .{ .x = 250092, .z = 35, .height = 164, .width = 32, .depth = 32, .tint = .{ 0.26, 0.39, 0.42, 1 } },
-    .{ .x = 249920, .z = 50, .height = 96, .width = 30, .depth = 34, .tint = .{ 0.35, 0.35, 0.31, 1 } },
+    .{ .x = 250040, .z = 38, .height = 950, .width = 58, .depth = 58, .tint = .{ 0.24, 0.34, 0.40, 1 } },
+    .{ .x = 250068, .z = -38, .height = 830, .width = 46, .depth = 52, .tint = .{ 0.31, 0.37, 0.40, 1 } },
+    .{ .x = 249930, .z = -74, .height = 790, .width = 52, .depth = 44, .tint = .{ 0.37, 0.31, 0.26, 1 } },
+    .{ .x = 250118, .z = 48, .height = 1020, .width = 44, .depth = 44, .tint = .{ 0.26, 0.39, 0.42, 1 } },
+    .{ .x = 249900, .z = 72, .height = 870, .width = 42, .depth = 48, .tint = .{ 0.35, 0.35, 0.31, 1 } },
+    .{ .x = 249760, .z = -236, .height = 820, .width = 48, .depth = 52, .tint = .{ 0.81, 0.80, 0.73, 1 } },
+    .{ .x = 249850, .z = -236, .height = 990, .width = 42, .depth = 46, .tint = .{ 0.66, 0.48, 0.33, 1 } },
+    .{ .x = 249940, .z = -236, .height = 875, .width = 56, .depth = 48, .tint = .{ 0.39, 0.43, 0.39, 1 } },
+    .{ .x = 250030, .z = -236, .height = 1040, .width = 44, .depth = 54, .tint = .{ 0.82, 0.83, 0.77, 1 } },
+    .{ .x = 250120, .z = -236, .height = 905, .width = 50, .depth = 46, .tint = .{ 0.70, 0.51, 0.34, 1 } },
+    .{ .x = 250210, .z = -236, .height = 1060, .width = 46, .depth = 50, .tint = .{ 0.40, 0.43, 0.40, 1 } },
+    .{ .x = 249760, .z = 236, .height = 1010, .width = 46, .depth = 48, .tint = .{ 0.38, 0.41, 0.39, 1 } },
+    .{ .x = 249850, .z = 236, .height = 865, .width = 50, .depth = 50, .tint = .{ 0.81, 0.81, 0.75, 1 } },
+    .{ .x = 249940, .z = 236, .height = 950, .width = 44, .depth = 56, .tint = .{ 0.68, 0.48, 0.32, 1 } },
+    .{ .x = 250030, .z = 236, .height = 790, .width = 54, .depth = 48, .tint = .{ 0.40, 0.44, 0.41, 1 } },
+    .{ .x = 250120, .z = 236, .height = 1030, .width = 48, .depth = 44, .tint = .{ 0.81, 0.82, 0.77, 1 } },
+    .{ .x = 250210, .z = 236, .height = 930, .width = 50, .depth = 54, .tint = .{ 0.69, 0.50, 0.32, 1 } },
+    .{ .x = 249805, .z = 0, .height = 1065, .width = 42, .depth = 52, .tint = .{ 0.38, 0.42, 0.39, 1 } },
+    .{ .x = 250175, .z = 0, .height = 875, .width = 52, .depth = 46, .tint = .{ 0.80, 0.81, 0.75, 1 } },
+    .{ .x = 250260, .z = -110, .height = 970, .width = 44, .depth = 50, .tint = .{ 0.70, 0.50, 0.33, 1 } },
 };
 
 pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {

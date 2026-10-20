@@ -45,6 +45,10 @@ imported_dirty_ids: [imported_history_capacity]u32 = @splat(0),
 imported_dirty_len: usize = 0,
 imported_dirty_all: bool = false,
 imported_open: bool = false,
+/// The vertex tools replace the part list while editing the imported mesh itself.
+vertex_tools: bool = false,
+/// Owned by `App`; re-pointed every frame like `imported_doc`.
+mesh_tools: ?*const @import("MeshTools.zig") = null,
 imported_selected: usize = 0,
 imported_filter: u8 = 0,
 imported_palette: Modifiers.Palette = .eyes,

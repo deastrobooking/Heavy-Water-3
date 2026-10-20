@@ -29,6 +29,8 @@ const Loader = @import("asset/Loader.zig");
 const Profile = @import("game/Profile.zig");
 const MeshModifiers = @import("asset/Modifiers.zig");
 const MeshModel = @import("asset/Model.zig");
+const MeshTools = @import("game/MeshTools.zig");
+const ToolEvent = union(enum) { press: struct { ray: MeshTools.Ray, extend: bool }, drag: MeshTools.Ray, release, control: MeshTools.Control };
 const Life = @import("city/Life.zig");
 const Market = @import("city/Market.zig");
 const Menu = @import("ui/Menu.zig");
@@ -155,6 +157,15 @@ mesh_library_arena: std.heap.ArenaAllocator = undefined,
 mesh_library: MeshModifiers.Document = undefined,
 mesh_library_bake: ?*MeshModifiers.Bake = null,
 mesh_library_preview_dirty: bool = false,
+/// Vertex tools on the imported mesh. Pointer events queue here and apply in `publish`, where the
+/// model may be mutated safely (the renderer reads it under the snapshot mutex).
+mesh_tools: MeshTools = undefined,
+tool_events: [32]ToolEvent = undefined,
+tool_event_len: usize = 0,
+tool_camera: ?@import("world/Camera.zig") = null,
+tool_aspect: f32 = 16.0 / 9.0,
+orbit_held: bool = false,
+tools_showcase_done: bool = false,
 queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
@@ -194,6 +205,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
     self.catalog = &world.catalog;
     self.mesh_library_arena = std.heap.ArenaAllocator.init(allocator);
+    self.mesh_tools = MeshTools.init(allocator);
     const saved_library = std.Io.Dir.cwd().readFileAlloc(io, "saves/captain.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20)) catch null;
     const source_library_bytes = try std.Io.Dir.cwd().readFileAlloc(io, "tools/captain/Captain.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20));
     const source_library = try std.json.parseFromSliceLeaky(MeshModifiers.Document, self.mesh_library_arena.allocator(), source_library_bytes, .{});
@@ -288,7 +300,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
         }
         if (options.character_showcase == 46) self.sandbox.profile.body_style = .captain_test;
-        if (options.character_showcase == 47) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
+        if (options.character_showcase == 47 or options.character_showcase == 48) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -313,6 +325,10 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.creator.begin(self.sandbox.profile);
         if (options.character_showcase == 46 and options.capture_frame > 0) self.sandbox.creator.openImported();
+        if (options.character_showcase == 48) {
+            self.sandbox.creator.openImported();
+            self.sandbox.creator.vertex_tools = true;
+        }
         // 47 reviews the live pose, so it needs the world view rather than the designer window.
         if (options.character_showcase == 47) {
             self.sandbox.creator.open = false;
@@ -909,6 +925,7 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.imported_open = false;
         },
         .imported_save => if (click) self.saveMeshLibrary(),
+        .mesh_tool => if (click) self.meshToolControl(@enumFromInt(row)),
         .fab_tab => if (sb.shop) |*shop| if (click) {
             shop.tab = row;
             shop.row = 0;
@@ -933,6 +950,19 @@ fn pointAt(self: *App, click: bool) void {
 
 /// While the creator is open, every key goes to it.
 fn creatorKey(self: *App, key: mach.Core.KeyButtonID, shift: bool) void {
+    if (self.sandbox.creator.imported_open and self.sandbox.creator.vertex_tools) {
+        const tag = @tagName(key);
+        const digits = [_][]const u8{ "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" };
+        for (digits, 0..) |d, i| if (std.mem.eql(u8, tag, d)) return self.meshToolControl(@enumFromInt(i));
+        switch (key) {
+            .z => self.meshToolControl(if (shift) .redo else .undo),
+            .left_bracket => self.meshToolControl(.radius_down),
+            .right_bracket => self.meshToolControl(.radius_up),
+            .escape => self.meshToolControl(.close),
+            else => {},
+        }
+        return;
+    }
     if (self.sandbox.creator.imported_open and key == .z) {
         self.creatorInput(if (shift) .redo else .undo);
         self.mesh_library_preview_dirty = true;
@@ -1153,12 +1183,25 @@ pub fn update(self: *App, core: *mach.Core) void {
             .special_3 => self.actions.special_3 = true,
         },
         .mouse_release => |mouse| switch (mouse.button) {
-            .left => self.fire_held = false,
-            .right => self.alt_held = false,
+            .left => {
+                self.fire_held = false;
+                if (self.meshToolsActive()) self.queueToolEvent(.release);
+            },
+            .right => {
+                self.alt_held = false;
+                self.orbit_held = false;
+            },
             else => {},
         },
         .mouse_press => |mouse| if (self.uiActive()) {
-            if (mouse.button == .left) self.pointAt(true);
+            if (self.meshToolsActive() and self.hitUnderPointer() == null) {
+                // Over the 3D view, not the panel: the press goes to the active tool.
+                switch (mouse.button) {
+                    .left => if (self.pointerRay()) |ray| self.queueToolEvent(.{ .press = .{ .ray = ray, .extend = mouse.mods.shift } }),
+                    .right => self.orbit_held = true,
+                    else => {},
+                }
+            } else if (mouse.button == .left) self.pointAt(true);
         } else switch (mouse.button) {
             .left => if (self.captured) {
                 self.fire_held = true;
@@ -1189,12 +1232,18 @@ pub fn update(self: *App, core: *mach.Core) void {
             self.engine.input.look_y += @as(f32, @floatCast(motion.dy)) * sensitivity * (if (self.menu.settings.invert_y) @as(f32, -1) else 1);
         },
         .mouse_scroll => |wheel| if (self.uiActive()) {
-            self.ui_scroll_free -= wheel.yoffset * 24;
+            if (self.meshToolsActive() and self.hitUnderPointer() == null) {
+                self.mesh_tools.zoom(@floatCast(wheel.yoffset));
+            } else self.ui_scroll_free -= wheel.yoffset * 24;
         },
         .mouse_motion => |motion| {
             // Window points to canvas units (the canvas is `ui_height` units tall).
             const scale = self.ui_height / @max(self.window_height, 1);
+            const previous = self.pointer;
             self.pointer = .{ @as(f32, @floatCast(motion.pos.x)) * scale, @as(f32, @floatCast(motion.pos.y)) * scale };
+            if (self.meshToolsActive()) {
+                if (self.orbit_held) self.mesh_tools.orbit(self.pointer[0] - previous[0], self.pointer[1] - previous[1]) else if (self.pointerRay()) |ray| self.queueToolEvent(.{ .drag = ray });
+            }
             if (self.uiActive()) self.pointAt(false);
         },
         else => {},
@@ -2797,6 +2846,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.installImportedCharacter();
     self.sandbox.creator.imported_doc = &self.mesh_library;
     self.applyMeshLibraryPreview(renderer);
+    self.updateMeshTools(renderer);
     self.pumpReload(renderer);
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
@@ -2810,7 +2860,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.views[0].camera.yaw = std.math.pi;
         renderer.views[0].camera.pitch = if (close) -0.12 else -0.202;
     }
-    if (options.character_showcase > 0) {
+    if (options.character_showcase > 0 and options.character_showcase != 48) {
         const feet = self.sandbox.player.feet;
         // Orbit the avatar for review: angle from the front, camera distance and look height.
         const angle: f32 = switch (options.character_view) {
@@ -3180,6 +3230,7 @@ fn chooseAndImportCharacter(self: *App) void {
 
 fn installImportedCharacter(self: *App) void {
     const model = self.queued_character_model orelse return;
+    self.mesh_tools.unbind();
     self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
         model.deinit(self.allocator);
         self.queued_character_model = null;
@@ -3187,6 +3238,185 @@ fn installImportedCharacter(self: *App) void {
         return;
     };
     self.queued_character_model = null;
+}
+
+fn meshToolsActive(self: *const App) bool {
+    return self.sandbox.creator.open and self.sandbox.creator.imported_open and self.sandbox.creator.vertex_tools and self.mesh_tools.active;
+}
+
+/// The topmost GUI hit under the pointer, if any.
+fn hitUnderPointer(self: *const App) ?u16 {
+    var i = self.hit_len;
+    while (i > 0) {
+        i -= 1;
+        if (self.hits[i].rect.contains(self.pointer[0], self.pointer[1])) return self.hits[i].id;
+    }
+    return null;
+}
+
+/// The world ray under the pointer, from the camera the tools last aimed.
+fn pointerRay(self: *const App) ?MeshTools.Ray {
+    const camera = self.tool_camera orelse return null;
+    const canvas_w = self.ui_height * self.tool_aspect;
+    const ray = @import("engine/Scene3D.zig").screenRay(camera, self.tool_aspect, .{ self.pointer[0] / canvas_w, self.pointer[1] / self.ui_height }) orelse return null;
+    return .{ .origin = ray.origin, .direction = ray.direction };
+}
+
+fn queueToolEvent(self: *App, event: ToolEvent) void {
+    // Consecutive drags collapse to the latest; a full queue keeps the newest press/release.
+    if (event == .drag and self.tool_event_len > 0 and self.tool_events[self.tool_event_len - 1] == .drag) {
+        self.tool_events[self.tool_event_len - 1] = event;
+        return;
+    }
+    if (self.tool_event_len == self.tool_events.len) return;
+    self.tool_events[self.tool_event_len] = event;
+    self.tool_event_len += 1;
+}
+
+fn meshToolControl(self: *App, c: MeshTools.Control) void {
+    if (c == .open) {
+        self.sandbox.creator.vertex_tools = true;
+        // The part bake (whose base copy the tools keep in step) is built by the preview pass.
+        self.mesh_library_preview_dirty = true;
+        return;
+    }
+    self.queueToolEvent(.{ .control = c });
+}
+
+/// Binds the tools to the imported mesh, aims the orbit camera, applies queued pointer events and
+/// uploads what they changed. Runs in `publish`, after the part preview.
+fn updateMeshTools(self: *App, renderer: *Renderer) void {
+    const creator = &self.sandbox.creator;
+    creator.mesh_tools = &self.mesh_tools;
+    if (!(creator.open and creator.imported_open and creator.vertex_tools)) {
+        if (self.mesh_tools.active) self.mesh_tools.unbind();
+        if (!(creator.open and creator.imported_open)) creator.vertex_tools = false;
+        self.tool_event_len = 0;
+        self.tool_camera = null;
+        self.orbit_held = false;
+        return;
+    }
+    const handle = &self.catalog.content.captain_test;
+    const entry = self.catalog.meshMut(handle.*) orelse return;
+    if (!entry.ready) return;
+    if (!self.mesh_tools.bound(&entry.model)) {
+        const mirror: ?*MeshModel = if (self.mesh_library_bake) |bake| &bake.pristine else null;
+        self.mesh_tools.bind(&entry.model, mirror) catch |err| {
+            self.report("VERTEX TOOLS FAILED {s}", .{@errorName(err)});
+            creator.vertex_tools = false;
+            return;
+        };
+    }
+    if (self.mesh_library_bake) |bake| bake.painted = &self.mesh_tools.editor.?.painted;
+    if (options.character_showcase == 48 and !self.tools_showcase_done) self.scriptToolsShowcase();
+    if (self.sandbox.importedPlacement()) |place| {
+        self.mesh_tools.base = place.base;
+        self.mesh_tools.yaw = place.yaw;
+        self.mesh_tools.model_scale = place.scale;
+    }
+    for (self.tool_events[0..self.tool_event_len]) |event| {
+        const result = switch (event) {
+            .press => |p| self.mesh_tools.press(p.ray, p.extend),
+            .drag => |ray| self.mesh_tools.drag(ray),
+            .release => self.mesh_tools.release(),
+            .control => |c| self.applyToolAction(self.mesh_tools.control(c) catch |err| blk: {
+                self.report("VERTEX TOOLS {s}", .{@errorName(err)});
+                break :blk .none;
+            }),
+        };
+        result catch |err| self.report("VERTEX TOOLS {s}", .{@errorName(err)});
+        if (!self.mesh_tools.active) break;
+    }
+    self.tool_event_len = 0;
+    if (!self.mesh_tools.active) return;
+    const editor = &self.mesh_tools.editor.?;
+    const dirty = editor.takeDirty();
+    if (dirty.len > 0 or editor.indices_dirty) {
+        entry.model.revision +%= 1;
+        renderer.queueMeshPatch(.{ .handle = handle.*, .model = &entry.model, .all_vertices = true, .all_indices = editor.indices_dirty });
+        editor.indices_dirty = false;
+        creator.imported_status = .unsaved;
+    }
+    const width: f32 = @floatFromInt(if (renderer.width == 0) 1280 else renderer.width);
+    const height: f32 = @floatFromInt(if (renderer.height == 0) 800 else renderer.height);
+    self.tool_aspect = width / height;
+    self.mesh_tools.aim(&self.engine.camera);
+    self.tool_camera = self.engine.camera;
+    self.mesh_tools.refreshOverlay(self.engine.camera, self.tool_aspect);
+}
+
+/// `-Dcharacter-showcase=48`: the same edits a player makes with the panel, for a capture: the
+/// upper body filled with the armour cel pen in blue, a glowing accent band at the waist, a
+/// sculpted bulge on the chest, and the head left selected to show the selection overlay.
+fn scriptToolsShowcase(self: *App) void {
+    self.tools_showcase_done = true;
+    const tools = &self.mesh_tools;
+    const e = &tools.editor.?;
+    const lo = e.model.bounds_min;
+    const hi = e.model.bounds_max;
+    const h = hi[1] - lo[1];
+    const centre: MeshTools.V = .{ (lo[0] + hi[0]) / 2, 0, (lo[2] + hi[2]) / 2 };
+    const Material = @import("character/mesh.zig").Material;
+    const script = struct {
+        fn band(editor: *@import("asset/MeshEdit.zig").Editor, from: f32, to: f32) void {
+            editor.clearSelection();
+            for (editor.model.mesh.vertices, 0..) |v, i| if (v.position[1] >= from and v.position[1] < to) editor.selection.set(i);
+        }
+    };
+    (struct {
+        fn run(t: *MeshTools, ed: *@import("asset/MeshEdit.zig").Editor, l: [3]f32, height: f32, c: MeshTools.V) !void {
+            script.band(ed, l[1] + 0.55 * height, l[1] + 0.82 * height);
+            ed.begin();
+            try ed.fillSelectionPen(@intFromEnum(Material.armor));
+            try ed.fillSelection(MeshTools.swatches[6]);
+            try ed.end();
+            script.band(ed, l[1] + 0.5 * height, l[1] + 0.54 * height);
+            ed.begin();
+            try ed.fillSelectionPen(@intFromEnum(Material.accent));
+            try ed.fillSelection(MeshTools.swatches[3]);
+            try ed.end();
+            // Sculpt the chest: aim at it from in front (either facing) and dab the draw brush.
+            const chest_y = l[1] + 0.68 * height;
+            for ([_]f32{ 1, -1 }) |side| {
+                if (ed.raycast(.{ c[0], chest_y, c[2] + side * height * 3 }, .{ 0, 0, -side })) |hit| {
+                    ed.begin();
+                    for (0..6) |_| try ed.dab(.draw, .{ .center = hit.point, .radius = 0.08 * height, .strength = 0.05 });
+                    try ed.end();
+                    break;
+                }
+            }
+            script.band(ed, l[1] + 0.86 * height, l[1] + 2 * height);
+            t.setTool(.pen);
+        }
+    }).run(tools, e, lo, h, centre) catch |err| std.log.err("vertex tools showcase failed: {s}", .{@errorName(err)});
+    std.log.info("Vertex tools showcase: {d} undo steps, {d} vertices selected", .{ e.undo_stack.items.len, e.selectedCount() });
+}
+
+fn applyToolAction(self: *App, action: MeshTools.Action) void {
+    switch (action) {
+        .none => {},
+        .close => {
+            self.mesh_tools.unbind();
+            self.sandbox.creator.vertex_tools = false;
+        },
+        .tear_off => self.tearOffPart(),
+    }
+}
+
+/// Saves the selected faces as a standalone runtime model under saves/parts and removes them
+/// from the edited mesh (undoable).
+fn tearOffPart(self: *App) void {
+    var part = self.mesh_tools.tearOff(self.allocator) catch |err| {
+        if (err == error.EmptySelection) return self.report("SELECT A PIECE TO TEAR OFF", .{});
+        return self.report("TEAR OFF FAILED {s}", .{@errorName(err)});
+    };
+    defer part.deinit(self.allocator);
+    const bytes = part.encode(self.allocator) catch |err| return self.report("PART SAVE FAILED {s}", .{@errorName(err)});
+    defer self.allocator.free(bytes);
+    var path_buffer: [64]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buffer, "saves/parts/part-{d}.hwmesh", .{self.mesh_tools.parts_saved}) catch unreachable;
+    Save.writeFile(self.io, path, bytes) catch |err| return self.report("PART SAVE FAILED {s}", .{@errorName(err)});
+    self.report("PART SAVED {s}  ({d} VERTICES)", .{ path, part.mesh.vertices.len });
 }
 
 /// The catalog's immutable source snapshot and part lookup caches live for the editor session;
@@ -3244,6 +3474,9 @@ fn applyMeshLibraryPreview(self: *App, renderer: *Renderer) void {
 }
 
 fn destroyMeshLibraryBake(self: *App) void {
+    // The vertex tools mirror their edits into the bake's base copy; let go of it first. They
+    // rebind to whatever mesh is current on the next frame.
+    self.mesh_tools.unbind();
     if (self.mesh_library_bake) |bake| {
         bake.deinit(self.allocator);
         self.allocator.destroy(bake);
@@ -3343,6 +3576,7 @@ pub fn stop(self: *App) void {
     if (self.loader) |l| l.destroy();
     if (self.reload) |r| r.destroy();
     if (self.test_mode_save) |baseline| self.allocator.free(baseline);
+    self.mesh_tools.deinit();
     self.destroyMeshLibraryBake();
     if (self.queued_character_model) |model| model.deinit(self.allocator);
     self.mesh_library_arena.deinit();

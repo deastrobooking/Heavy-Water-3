@@ -240,6 +240,9 @@ pub const Bake = struct {
     slots: PartSlots,
     vertices: PartVertices,
     triangles: PartTriangles,
+    /// Vertices painted by hand in the vertex editor keep the base model's colour instead of
+    /// their part colour. Owned by the editor; null when nothing is painted.
+    painted: ?*const std.DynamicBitSetUnmanaged = null,
 
     pub fn init(allocator: std.mem.Allocator, source: Model, doc: Document) !Bake {
         if (!validDocument(doc)) return error.InvalidModifiers;
@@ -293,7 +296,8 @@ pub const Bake = struct {
         if (part.color) |color| if (!validColor(color)) return error.InvalidPartColor;
         for (self.vertices.of(slot)) |vertex_index| {
             const vertex = &model.mesh.vertices[vertex_index];
-            vertex.color = partColor(doc, part);
+            const hand_painted = if (self.painted) |p| vertex_index < p.bit_length and p.isSet(vertex_index) else false;
+            vertex.color = if (hand_painted) self.pristine.mesh.vertices[vertex_index].color else partColor(doc, part);
         }
         for (self.triangles.of(slot)) |offset_u32| {
             const offset: usize = offset_u32;

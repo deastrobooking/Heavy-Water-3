@@ -142,6 +142,10 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
                             palette[bone_index * 2 + 1] = posed.dual;
                         }
                     }
+                    if (descriptor.imported_bind_pose) for (0..skin.bones.len) |bone_index| {
+                        palette[bone_index * 2] = .{ 0, 0, 0, 1 };
+                        palette[bone_index * 2 + 1] = .{ 0, 0, 0, 0 };
+                    };
                     break :blk skin.bones.len;
                 } else slot.ranger.character.skeleton.count();
                 encoder.writeBuffer(self.skinning.?.palette, @as(u64, i) * Ranger.palette_bytes, palette[0 .. joints * 2]);
@@ -166,14 +170,16 @@ fn importedVertices(a: std.mem.Allocator, model: *const Model) ![]Ranger.Skinned
     const skin = model.skin orelse return error.ImportedRigMissing;
     if (skin.vertices.len != model.mesh.vertices.len or skin.bones.len == 0 or skin.bones.len > Ranger.max_palette_joints or (skin.legacy_bind != null and skin.legacy_bind.?.len != skin.bones.len)) return error.ImportedRigInvalid;
     const vertices = try a.alloc(Ranger.SkinnedVertex, model.mesh.vertices.len);
-    for (vertices, model.mesh.vertices, skin.vertices) |*out, source, influence| {
+    for (vertices, model.mesh.vertices, skin.vertices, 0..) |*out, source, influence, i| {
+        // A painted cel pen picks the vertex's cel material; unpainted imports keep pen 0 (skin).
+        const pen: u8 = if (model.pens) |pens| @min(pens[i], CelStyle.material_count - 1) else 0;
         out.* = .{
             .position = source.position,
             .normal = source.normal,
             .color = source.color,
             .joints = influence.joints,
             .weights = influence.weights,
-            .kind = .{ 0, 0, 0, 0 },
+            .kind = .{ pen, 0, 0, 0 },
             .face_uv = .{ -1, -1 },
             .eye_geometry = .{ 0.14, 0.56, 0.025, 1 },
             .eye_style = .{ 0, 0.5, 2, 0 },

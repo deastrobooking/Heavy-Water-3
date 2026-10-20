@@ -40,7 +40,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -142,7 +142,9 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     c.beginScroll(hud.scroll);
     defer c.endScroll();
     if (sb.creator.open) {
-        if (sb.creator.imported_open) {
+        if (sb.creator.imported_open and sb.creator.vertex_tools) {
+            @import("MeshToolsPanel.zig").draw(c, &sb.creator, hud.view);
+        } else if (sb.creator.imported_open) {
             drawImportedComponents(c, &sb.creator, hud.view);
         } else if (sb.creator.enemy_design_open) {
             drawEnemyDesign(c, &sb.creator, hud.view);
@@ -464,6 +466,11 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
     const rows: f32 = @floatFromInt(Menu.controls_column);
     const r = menuRect(c, 780, 170 + rows * 21);
     panel(c, r, "CONTROLS");
+    const keyboard_tab: Rect = .{ .x = r.x + r.w - 250, .y = r.y + 12, .w = 104, .h = 25 };
+    const gamepad_tab: Rect = .{ .x = r.x + r.w - 138, .y = r.y + 12, .w = 120, .h = 25 };
+    rowBack(c, keyboard_tab, true);
+    c.text(keyboard_tab.x + 16, keyboard_tab.y + 8, "KEYBOARD", 0.9, accent);
+    button(c, gamepad_tab, "GAMEPAD", hitId(.menu, Menu.controls_gamepad), false);
     const b = menu.settings.bindings;
     for (0..Bindings.count) |i| {
         const column: f32 = @floatFromInt(i / Menu.controls_column);
@@ -498,6 +505,11 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
 fn drawPadControls(c: *Canvas, menu: *const Menu) void {
     const r = menuRect(c, 880, 650);
     panel(c, r, "CONTROLLER MAPPING");
+    const keyboard_tab: Rect = .{ .x = r.x + r.w - 250, .y = r.y + 12, .w = 104, .h = 25 };
+    const gamepad_tab: Rect = .{ .x = r.x + r.w - 138, .y = r.y + 12, .w = 120, .h = 25 };
+    button(c, keyboard_tab, "KEYBOARD", hitId(.menu, Menu.pad_keyboard_tab), false);
+    rowBack(c, gamepad_tab, true);
+    c.text(gamepad_tab.x + 22, gamepad_tab.y + 8, "GAMEPAD", 0.9, accent);
     c.text(r.x + 24, r.y + 34, "STANDARD AND GENERIC HID GAMEPADS CAN BE REMAPPED; SETTINGS SAVE AUTOMATICALLY", 0.92, dim);
     const mapping = menu.settings.pad_mapping;
     for (0..PadBindings.action_count) |i| {
@@ -948,6 +960,7 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
     const rig_label = if (cr.imported_rig_status_len > 0) cr.imported_rig_status[0..cr.imported_rig_status_len] else "NO EXTERNAL RIG  |  BUNDLED CAPTAIN COMPONENTS";
     c.print(r.x + 18, r.y + 36, 0.76, dim, "LIVE PREVIEW LEFT  |  {d} COMPONENTS  |  {s}", .{doc.parts.len, rig_label});
     button(c, .{ .x = r.x + r.w - 150, .y = r.y + 26, .w = 132, .h = 28 }, "IMPORT GLB", hitId(.imported_import_glb, 0), false);
+    button(c, .{ .x = r.x + r.w - 300, .y = r.y + 26, .w = 142, .h = 28 }, "VERTEX TOOLS", hitId(.mesh_tool, @intFromEnum(@import("../game/MeshTools.zig").Control.open)), false);
 
     const filter_names = [_][]const u8{ "ALL", "ARMOR", "SKIN", "EYES", "ENERGY", "NEUTRAL" };
     const tab_w: f32 = @min(112, (r.w - 40) / @as(f32, @floatFromInt(filter_names.len)));
@@ -1550,13 +1563,14 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const span: f32 = switch (menu.map_zoom) {
         0 => 1400,
         1 => 2800,
-        else => 5600,
+        2 => 5600,
+        else => 560000,
     };
     const depth = span * map.h / map.w;
     const player_position = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
     const tracked = trackedTarget(menu.map_target, sb, player_position, menu.hero_player);
     const destination = if (menu.row < Sandbox.travel_count) menu.row else menu.map_destination;
-    const focus = if (tracked) |target| target.position else if (menu.map_frame_destination) sb.travelPoint(destination) else player_position;
+    const focus = if (tracked) |target| target.position else if (menu.row < Sandbox.travel_count or menu.map_frame_destination) sb.travelPoint(destination) else player_position;
     for (0..12) |z| for (0..20) |x| {
         const fx = @as(f32, @floatFromInt(x)) / 20;
         const fz = @as(f32, @floatFromInt(z)) / 12;
@@ -1650,7 +1664,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
             c.print(row.x + row.w - 175, row.y + 9, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
         }
     }
-    c.text(r.x + 22, r.y + r.h - 24, "ENTER CYCLE TARGET / LEFT FRAME / RIGHT ZOOM / ESC BACK", 1, dim);
+    c.text(r.x + 22, r.y + r.h - 24, "ENTER CYCLE TARGET / LEFT FRAME / RIGHT ZOOM OUT / ESC BACK", 1, dim);
 }
 
 test "clustered and offscreen map markers retain separate labels inside the map" {

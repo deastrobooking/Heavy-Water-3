@@ -50,6 +50,9 @@ pub const Draw = struct {
     imported_generation: u16 = 0,
     imported_revision: u64 = 0,
     imported_scale: f32 = 1,
+    /// Draw the imported mesh exactly as stored (identity skin palette), for the vertex tools:
+    /// what the tools pick is then what is on screen.
+    imported_bind_pose: bool = false,
 };
 character: gen.Character,
 instance: gen.Instance,

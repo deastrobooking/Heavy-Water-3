@@ -91,7 +91,8 @@ pub const pad_export = pad_preset_slot + 1;
 pub const pad_import = pad_export + 1;
 pub const pad_reset = pad_import + 1;
 pub const pad_back = pad_reset + 1;
-pub const pad_controls_rows = pad_back + 1;
+pub const pad_keyboard_tab = pad_back + 1;
+pub const pad_controls_rows = pad_keyboard_tab + 1;
 pub const pad_controls_column = (PadBindings.action_count + 1) / 2;
 
 const Parent = struct { screen: Screen, row: u8 };
@@ -227,7 +228,7 @@ pub fn key(self: *Menu, k: Key) Command {
         return .none;
     }
     if (self.screen == .world_map and (k == .left or k == .right)) {
-        self.map_zoom = @intCast(std.math.clamp(@as(i32, self.map_zoom) + @as(i32, if (k == .right) -1 else 1), 0, 2));
+        self.map_zoom = @intCast(std.math.clamp(@as(i32, self.map_zoom) + @as(i32, if (k == .right) -1 else 1), 0, 3));
         return .none;
     }
     if (self.screen == .quest_log and k == .confirm) return self.back();
@@ -353,6 +354,7 @@ fn padControlsKey(self: *Menu, k: Key) Command {
                 return .settings_changed;
             },
             pad_back => return self.back(),
+            pad_keyboard_tab => return self.back(),
             else => {},
         },
     }
@@ -643,7 +645,7 @@ test "map zoom stays bounded and preserves destination selection" {
     for (0..8) |_| _ = m.key(.right);
     try std.testing.expectEqual(@as(u8, 0), m.map_zoom);
     for (0..8) |_| _ = m.key(.left);
-    try std.testing.expectEqual(@as(u8, 2), m.map_zoom);
+    try std.testing.expectEqual(@as(u8, 3), m.map_zoom);
     try std.testing.expectEqual(@as(u8, 2), m.row);
 }
 
