@@ -25,6 +25,7 @@ const Encounters = @import("../game/Encounters.zig");
 const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
 const District = @import("../procedural/District.zig");
+const CityGeography = @import("../procedural/CityGeography.zig");
 const Enemies = @import("../game/Enemies.zig");
 const EnemyDesign = @import("../game/EnemyDesign.zig");
 pub const Rect = Canvas.Rect;
@@ -1707,11 +1708,11 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
 
 const EarthCity = struct { name: []const u8, latitude: f32, longitude: f32, travel_label: ?[]const u8 };
 const earth_cities = [_]EarthCity{
-    .{ .name = "DETROIT", .latitude = 42.33, .longitude = -83.05, .travel_label = "BASE CAMP" },
-    .{ .name = "CHICAGO", .latitude = 41.88, .longitude = -87.63, .travel_label = "CHICAGO" },
-    .{ .name = "NEW YORK", .latitude = 40.71, .longitude = -74.00, .travel_label = "NEW YORK CITY" },
-    .{ .name = "LOS ANGELES", .latitude = 34.05, .longitude = -118.24, .travel_label = null },
-    .{ .name = "ANTARCTICA", .latitude = -82.0, .longitude = 0, .travel_label = "ANTARCTICA" },
+    .{ .name = "DETROIT", .latitude = CityGeography.detroit.latitude, .longitude = CityGeography.detroit.longitude, .travel_label = "BASE CAMP" },
+    .{ .name = "CHICAGO", .latitude = CityGeography.chicago.latitude, .longitude = CityGeography.chicago.longitude, .travel_label = "CHICAGO" },
+    .{ .name = "NEW YORK", .latitude = CityGeography.new_york.latitude, .longitude = CityGeography.new_york.longitude, .travel_label = "NEW YORK CITY" },
+    .{ .name = "LOS ANGELES", .latitude = CityGeography.los_angeles.latitude, .longitude = CityGeography.los_angeles.longitude, .travel_label = null },
+    .{ .name = "ANTARCTICA", .latitude = CityGeography.antarctica.latitude, .longitude = CityGeography.antarctica.longitude, .travel_label = "ANTARCTICA" },
 };
 
 fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: Rect, map: Rect, destination: usize) void {

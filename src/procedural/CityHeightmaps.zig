@@ -1,6 +1,7 @@
 //! Approximate, exaggerated terrain profiles for playable city regions with heightmap sources.
 const Heightmap = @import("Heightmap.zig");
 const Noise = @import("Noise.zig");
+const CityGeography = @import("CityGeography.zig");
 const Region = @import("../world/Region.zig");
 const ChunkKey = @import("../world/ChunkKey.zig");
 
@@ -17,19 +18,13 @@ const detroit_center = Region.detroit.arrival;
 const nyc_center = Region.new_york.arrival;
 const chicago_center = Region.chicago.arrival;
 const antarctica_center = Region.antarctica.arrival;
-// These source PNGs have no embedded georeferencing, so map their documented export
-// bounds to the downtown arrivals. The bounds are the active EPSG:4326 boxes in the
-// terrain-generation instructions; row zero is north, matching Heightmap.sample's -Z.
-// X is linear in longitude; Y uses Web Mercator because the export images use EPSG:3857.
-// Detroit downtown (42.3314, -83.0458), bbox (-83.68, 42.05, -82.70, 42.75).
-const detroit_anchor_x: f32 = 17657.14;
-const detroit_anchor_z: f32 = 11920.73;
-// Lower Manhattan / NYC downtown (40.7128, -74.0060), bbox (-74.45, 40.45, -73.55, 41.12).
-const nyc_anchor_x: f32 = -1066.67;
-const nyc_anchor_z: f32 = 17433.96;
-// Chicago downtown (41.8781, -87.6298), bbox (-88.30, 41.50, -87.30, 42.24).
-const chicago_anchor_x: f32 = 27232.0;
-const chicago_anchor_z: f32 = -1519.90;
+// Source row zero is north, mapping to negative Z in Heightmap.sample.
+const detroit_anchor_x = (CityGeography.detroit_raster_anchor.anchor_u - 0.5) * detroit_map.settings.world_width;
+const detroit_anchor_z = (CityGeography.detroit_raster_anchor.anchor_v - 0.5) * detroit_map.settings.world_depth;
+const nyc_anchor_x = (CityGeography.new_york_raster_anchor.anchor_u - 0.5) * nyc_map.settings.world_width;
+const nyc_anchor_z = (CityGeography.new_york_raster_anchor.anchor_v - 0.5) * nyc_map.settings.world_depth;
+const chicago_anchor_x = (CityGeography.chicago_raster_anchor.anchor_u - 0.5) * chicago_map.settings.world_width;
+const chicago_anchor_z = (CityGeography.chicago_raster_anchor.anchor_v - 0.5) * chicago_map.settings.world_depth;
 // This continent raster has no georeferencing; use its center as the subglacial Hive landing.
 const antarctica_anchor_x: f32 = 0;
 const antarctica_anchor_z: f32 = 0;
