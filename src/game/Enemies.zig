@@ -84,8 +84,9 @@ pub fn fieldPatrolNest(_: usize) u8 {
 /// Stable private slot for the renewable Scalari patrol, near spawn or roaming in the Wilds.
 pub const training_nest: u8 = max_nests - 2;
 comptime {
-    // Blades and dashes remember nests cut per swing in a u16.
-    std.debug.assert(max_nests <= 16);
+    // Blades and dashes remember regular nests cut per swing in a u16. The last two slots are
+    // non-campaign encounter anchors (field patrol and arena), so only the regular limit matters.
+    std.debug.assert(regular_nest_limit <= 16);
 }
 pub const max_units = 32;
 /// Cave nests field troopers only (fliers have no room), at most this many.
@@ -176,7 +177,7 @@ pub const Guard = enum { none, guard, parry };
 pub const Event = union(enum) {
     shot: V,
     player_hit: struct { player: u8, damage: f32, from: V },
-    unit_down: struct { kind: Kind, position: V },
+    unit_down: struct { kind: Kind, nest: u8, position: V },
     nest_down: struct { nest: u8, position: V },
     /// A parried bolt flies back (the caller turns it into a player shot).
     deflected: struct { player: u8, position: V, velocity: V },
@@ -941,7 +942,7 @@ fn damageUnit(self: *Enemies, i: usize, damage: f32, out: []Event, n: *usize) vo
         u.state_timer = 4;
     }
     if (u.health <= 0) {
-        if (n.* < out.len) out[n.*] = .{ .unit_down = .{ .kind = u.kind, .position = u.center() } };
+        if (n.* < out.len) out[n.*] = .{ .unit_down = .{ .kind = u.kind, .nest = u.nest, .position = u.center() } };
         n.* += 1;
         self.units[i] = null;
     }

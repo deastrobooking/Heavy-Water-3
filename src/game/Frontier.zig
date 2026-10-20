@@ -433,6 +433,25 @@ fn placeDungeons(sb: *Sandbox) void {
     }
 }
 
+fn startK2Encounter(sb: *Sandbox, cave_index: u8) void {
+    if (cave_index >= sb.caves.count or sb.caves.systems[cave_index].range != @import("../procedural/Mountains.zig").count or sb.progress.hasFlag("k2_black_summit_down")) return;
+    var nest_index: ?u8 = null;
+    var cave_ordinal: usize = 0;
+    for (sb.enemies.nests[0..sb.enemies.nest_count], 0..) |nest, i| if (nest.cave) {
+        if (cave_ordinal == cave_index) {
+            nest_index = @intCast(i);
+            break;
+        }
+        cave_ordinal += 1;
+    };
+    const nest = nest_index orelse return;
+    const heart = sb.caves.systems[cave_index].heart();
+    for (sb.enemies.units) |maybe| if (maybe) |unit| if (unit.kind == .scalari_titan and unit.nest == nest) return;
+    _ = sb.enemies.spawnAt(.scalari_titan, nest, .{ heart.center[0] - 8, heart.floor, heart.center[2] - 6 }, 1);
+    _ = sb.enemies.spawnAt(.scalari_stinger, nest, .{ heart.center[0] + 8, heart.floor, heart.center[2] + 4 }, 1);
+    _ = sb.enemies.spawnAt(.scalari_hybrid, nest, .{ heart.center[0] + 2, heart.floor, heart.center[2] + 10 }, 1);
+}
+
 /// Cave colliders are built the first time a player comes within 150 m of a system (a few
 /// milliseconds each in release builds), and stay. Entering a system is announced once.
 fn stepCaves(sb: *Sandbox) void {
@@ -464,7 +483,8 @@ fn stepCaves(sb: *Sandbox) void {
             var flag: [20]u8 = undefined;
             const first = !sb.progress.hasFlag(std.fmt.bufPrint(&flag, "cave_{d}_found", .{inside.?}) catch unreachable);
             sb.progress.setFlag(std.fmt.bufPrint(&flag, "cave_{d}_found", .{inside.?}) catch unreachable);
-            if (p == 0) sb.say("{s}{s}", .{ Caves.name(inside.?), if (first) ": a new cave" else "" });
+            if (p == 0) sb.say("{s}{s}", .{ Caves.systemName(&sb.caves, inside.?), if (first) ": a new cave" else "" });
+            if (p == 0) startK2Encounter(sb, inside.?);
             if (first) sb.cue(.vault, null);
         }
         sb.cave_inside[p] = inside;
@@ -660,6 +680,15 @@ fn nestFlag(buffer: []u8, nest: u8) []const u8 {
     return std.fmt.bufPrint(buffer, "nest_{d}_down", .{nest}) catch unreachable;
 }
 
+fn caveSystemForNest(sb: *const Sandbox, nest_index: u8) ?u8 {
+    if (nest_index >= sb.enemies.nest_count or !sb.enemies.nests[nest_index].cave) return null;
+    var cave: u8 = 0;
+    for (sb.enemies.nests[0..nest_index]) |nest| if (nest.cave) {
+        cave += 1;
+    };
+    return if (cave < sb.caves.count) cave else null;
+}
+
 /// Hive outcomes: drops, flags, and hits on players.
 fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
     switch (e) {
@@ -679,7 +708,12 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
         .unit_down => |u| {
             const random = sb.enemies.rng.random();
             const scalari = Enemies.isScalari(u.kind);
-            const xp: u32 = switch (u.kind) {
+            const k2_boss = blk: {
+                if (u.kind != .scalari_titan) break :blk false;
+                const cave = caveSystemForNest(sb, u.nest) orelse break :blk false;
+                break :blk sb.caves.systems[cave].range == @import("../procedural/Mountains.zig").count;
+            };
+            const xp: u32 = if (k2_boss) 1200 else switch (u.kind) {
                 .scalari_scout => 30,
                 .scalari_stinger => 55,
                 .scalari_titan => 300,
@@ -735,6 +769,10 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             }
             robotLearns(sb, u.position);
             sb.cue(.boom, u.position);
+            if (k2_boss) {
+                sb.progress.setFlag("k2_black_summit_down");
+                sb.say("BLACK-SUMMIT TITAN disabled: K2 mechworks cleared", .{});
+            }
             if (scalari) {
                 sb.progress.setFlag("scalari_fought");
                 sb.say("scalari {s} down: +{d} XP", .{ @tagName(u.kind), xp });
@@ -764,7 +802,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 sb.progress.setFlag("cave_cleared");
                 for (0..2) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 0.75, 1, 3 }));
                 sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, -3 }));
-                sb.say("{s} cleared: the hive heart is broken", .{Sandbox.Caves.name(@intCast(cave))});
+                sb.say("{s} cleared: the hive heart is broken", .{Sandbox.Caves.systemName(&sb.caves, @intCast(cave))});
             } else {
                 for (0..4) |k| sb.collectibles.drop(.hive_alloy, R.add(n.position, .{ @as(f32, @floatFromInt(k)) * 1.5 - 2, 1, 5 }));
                 sb.collectibles.drop(.rotor_core, R.add(n.position, .{ 0, 1, 6.5 }));
@@ -2227,8 +2265,10 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
     const eye = sb.player.feet;
     // Four working-looking farmsteads sit on the cityward approach to the mountain paths.
     // Their simple field geometry and outbuildings make the transition from metro to Wilds legible.
-    var farm_ranges: [@import("../procedural/Mountains.zig").count]bool = @splat(false);
+    const mountain_count = @import("../procedural/Mountains.zig").count;
+    var farm_ranges: [mountain_count]bool = @splat(false);
     for (sb.caves.systems[0..sb.caves.count]) |*sys| {
+        if (sys.range >= mountain_count) continue;
         if (farm_ranges[sys.range]) continue;
         const farm: V = R.add(sys.entrance, R.scale(sys.inward, -155));
         const dx = farm[0] - eye[0];
@@ -2278,13 +2318,41 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
             const uphill = Terrain.surface(sb.seed, gate_at[0] + sys.inward[0] * 6, gate_at[2] + sys.inward[2] * 6).height - Terrain.surface(sb.seed, gate_at[0], gate_at[2]).height;
             const lean = std.math.clamp(std.math.atan2(uphill, 6.0) * 0.3, 0, 0.25);
             const gate_facing = m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, lean));
-            out[n] = .{ .mesh = sb.catalog.content.cave_gate, .transform = .{ .position = .{ gate_at[0], gate_at[1] - 0.5, gate_at[2] } }, .rotation = quat(gate_facing), .tint = .{ 1, 1, 1, 1 } };
+            const k2 = sys.range == mountain_count;
+            out[n] = .{ .mesh = sb.catalog.content.cave_gate, .transform = .{ .position = .{ gate_at[0], gate_at[1] - 0.5, gate_at[2] } }, .rotation = quat(gate_facing), .tint = if (k2) .{ 0.28, 0.46, 0.57, 1 } else .{ 1, 1, 1, 1 } };
             n += 1;
+            if (k2 and n + 6 <= out.len) {
+                const dark_metal: [4]f32 = .{ 0.12, 0.22, 0.3, 1 };
+                const signal = Material.emissive(.{ 0.28, 0.82, 1, 1 }, 1.15);
+                for ([_]f32{ -4.4, 4.4 }) |side| {
+                    out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(gate_at, .{ side, 4.6, 0 }) }, .size = .{ 0.7, 9.2, 0.8 }, .tint = dark_metal };
+                    out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(gate_at, .{ side, 4.6, -0.55 }) }, .size = .{ 0.18, 8.1, 0.12 }, .tint = signal };
+                    n += 2;
+                }
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(gate_at, .{ 0, 9.1, 0 }) }, .size = .{ 9.4, 0.7, 1 }, .tint = dark_metal };
+                out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(gate_at, .{ 0, 8.5, -0.58 }) }, .size = .{ 7, 0.13, 0.1 }, .tint = signal };
+                n += 2;
+            }
         }
         if (d > 160) continue;
         // Crystals cluster around each chamber's walls, in the system's hue.
         const hue = Caves.veinHue(@intCast(i));
         for (sys.rooms[0..sys.room_count], 0..) |room, r| {
+            if (sys.range == mountain_count and r > 0 and n + 5 <= out.len) {
+                const beam_y = room.floor + room.radii[1] * 1.45 - 0.9;
+                const post_h = beam_y - room.floor;
+                const post_tint: [4]f32 = .{ 0.12, 0.23, 0.31, 1 };
+                const signal = Material.emissive(.{ 0.3, 0.78, 1, 1 }, 0.82);
+                for ([_]f32{ -room.radii[0] * 0.68, room.radii[0] * 0.68 }) |side| {
+                    out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ room.center[0] + side, room.floor + post_h / 2, room.center[2] } }, .size = .{ 0.52, post_h, 0.65 }, .tint = post_tint };
+                    out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ room.center[0] + side, room.floor + post_h * 0.55, room.center[2] + 0.38 } }, .size = .{ 0.12, post_h * 0.48, 0.1 }, .tint = signal };
+                    n += 2;
+                }
+                if (n < out.len) {
+                    out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ room.center[0], beam_y, room.center[2] } }, .size = .{ room.radii[0] * 1.5, 0.38, 0.7 }, .tint = post_tint };
+                    n += 1;
+                }
+            }
             if (room.role == .cache and n + 2 <= out.len) {
                 const parent = sys.rooms[room.parent];
                 const toward = R.sub(parent.center, room.center);

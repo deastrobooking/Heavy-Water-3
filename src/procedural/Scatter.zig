@@ -42,6 +42,7 @@ pub fn allowed(normal_y: f32, kind: Kind) bool {
 pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
     const regional_seed = Chunk.regionalSeed(seed, key.x, key.z);
     const antarctic = Region.antarctica.contains(key.x, key.z);
+    const alpine_glacier = Region.k2.contains(key.x, key.z);
     const chunk_seed = Seed.at(regional_seed ^ 0x53434154544552, key.x, key.z);
     var count: usize = 0;
     for (0..candidates) |i| {
@@ -50,7 +51,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const z = @as(f32, @floatFromInt(key.z)) * Key.extent + Seed.unit(Seed.mix(h)) * 124 - 62;
         const kind: Kind = if (i % 7 == 0) .relic else .vegetation;
         // The subglacial approach is a wind-carved ice sheet; preserve salvage, clear the forest.
-        if (antarctic and kind == .vegetation) continue;
+        if ((antarctic or alpine_glacier) and kind == .vegetation) continue;
         if (kind == .relic and nearSpawn(x, z, spawn_relic_clearing)) continue;
         const biome = Biome.sample(regional_seed, x, z);
         const nx = CityHeightmaps.heightAt(seed, x - 0.5, z) - CityHeightmaps.heightAt(seed, x + 0.5, z);
@@ -91,7 +92,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const cover = Biome.cover(regional_seed, x, z, height, @sqrt(nx * nx + nz * nz));
         // Rocky, high and dry ground carries the most stone; lush meadow the least.
         const alpine = std.math.clamp((height - 8) / 30, 0, 1);
-        const chance = if (antarctic) @as(f32, 0.32) else 0.12 + 0.35 * cover.weights.arid + 0.45 * alpine + 0.4 * cover.exposed;
+        const chance = if (antarctic or alpine_glacier) @as(f32, 0.32) else 0.12 + 0.35 * cover.weights.arid + 0.45 * alpine + 0.4 * cover.exposed;
         if (Seed.unit(Seed.mix(h +% 2)) > chance) continue;
         const size = Seed.unit(Seed.mix(h +% 1));
         // Mostly knee-high stones, with the odd boulder taller than a ranger.
@@ -106,7 +107,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
             .kind = .boulder,
             .variant = @intCast(Seed.mix(h +% 4) % Vegetation.boulder_count),
             .transform = .{ .position = .{ x, height - 0.05 * scale, z }, .scale = scale },
-            .tint = if (antarctic) .{ 0.5 * shade, 0.75 * shade, 0.98 * shade, -2 } else frosted(tint, cover.snow * 0.8, stone ++ [_]f32{1}),
+            .tint = if (antarctic) .{ 0.5 * shade, 0.75 * shade, 0.98 * shade, -2 } else if (alpine_glacier) .{ 0.58 * shade, 0.78 * shade, 0.95 * shade, -2 } else frosted(tint, cover.snow * 0.8, stone ++ [_]f32{1}),
         };
         count += 1;
     }

@@ -1,6 +1,8 @@
 const std = @import("std");
 const Noise = @import("Noise.zig");
 const Seed = @import("Seed.zig");
+const Region = @import("../world/Region.zig");
+const ChunkKey = @import("../world/ChunkKey.zig");
 pub const Weights = struct {
     arid: f32,
     meadow: f32,
@@ -39,12 +41,14 @@ pub const Kind = enum { grass, sand, marsh, rock, snow };
 
 /// Altitude and exposed steep faces transition through alpine stone into permanent snow.
 pub fn cover(seed: u64, x: f32, z: f32, height: f32, slope: f32) Cover {
+    const key = ChunkKey.fromPosition(x, z);
+    const k2 = Region.k2.contains(key.x, key.z);
     const alpine = std.math.clamp((height - 12) / 24, 0, 1);
     const exposed = std.math.clamp((slope - 0.72) / 0.9, 0, 1) * alpine;
     // The great ranges carry their snow higher, on their peaks rather than their flanks.
     const range = @import("Mountains.zig").sample(seed, x, z).influence;
-    const snowline = 27 + range * 165 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
-    const snow = std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
+    const snowline = if (k2) @as(f32, 4160) + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 115 else 27 + range * 165 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
+    const snow = if (k2) @max(0.72, std.math.clamp((height - snowline) / 90, 0, 1)) else std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
     return .{ .weights = sample(seed, x, z), .exposed = exposed, .snow = snow };
 }
 
@@ -59,12 +63,16 @@ pub fn coverAt(seed: u64, x: f32, z: f32) Cover {
 pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
     const c = cover(seed, x, z, height, slope);
     const base = c.weights.color();
-    const rock = [3]f32{ 0.42, 0.48, 0.49 };
-    const snow_color = [3]f32{ 0.86, 0.91, 0.94 };
+    const key = ChunkKey.fromPosition(x, z);
+    const k2 = Region.k2.contains(key.x, key.z);
+    const rock = if (k2) [3]f32{ 0.31, 0.39, 0.45 } else [3]f32{ 0.42, 0.48, 0.49 };
+    const snow_color = if (k2) [3]f32{ 0.68, 0.84, 0.94 } else [3]f32{ 0.86, 0.91, 0.94 };
+    const ice = [3]f32{ 0.28, 0.52, 0.67 };
     var result: [3]f32 = undefined;
     for (&result, 0..) |*channel, i| {
         const alpine_color = base[i] * (1 - c.exposed) + rock[i] * c.exposed;
-        channel.* = alpine_color * (1 - c.snow) + snow_color[i] * c.snow;
+        const bare = if (k2) alpine_color * 0.28 + ice[i] * 0.72 else alpine_color;
+        channel.* = bare * (1 - c.snow) + snow_color[i] * c.snow;
     }
     return result;
 }

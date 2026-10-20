@@ -20,11 +20,13 @@ const Seed = @import("Seed.zig");
 const Noise = @import("Noise.zig");
 const Mountains = @import("Mountains.zig");
 const Biome = @import("Biome.zig");
+const CityHeightmaps = @import("CityHeightmaps.zig");
+const Region = @import("../world/Region.zig");
 const Mesh = @import("../render/Mesh.zig");
 
 pub const V = [3]f32;
 pub const per_range = 2;
-pub const max_systems = Mountains.count * per_range;
+pub const max_systems = Mountains.count * per_range + 1;
 pub const max_rooms = 7;
 /// Lattice spacing of the cave mesh.
 pub const cell: f32 = 1;
@@ -126,7 +128,7 @@ pub fn cached(seed: u64) *const Layout {
 }
 
 fn terrain(seed: u64, x: f32, z: f32) f32 {
-    return Noise.height(seed, x, z);
+    return CityHeightmaps.heightAt(seed, x, z);
 }
 
 /// The cave systems for a seed: a few thousand terrain samples, well under a millisecond in
@@ -141,7 +143,68 @@ pub fn layout(seed: u64) Layout {
             result.count += 1;
         }
     };
+    if (planK2(seed)) |system| {
+        result.systems[result.count] = system;
+        result.count += 1;
+    }
     return result;
+}
+
+/// The K2 expedition's Scalari mechworks: a sheltered entry chamber feeds through service
+/// galleries, a cache spur and two descending works floors to the Titan's buried hangar.
+fn planK2(seed: u64) ?System {
+    const landing = Region.k2.arrival;
+    const inward_x: f32 = 0.675;
+    const inward_z: f32 = -0.738;
+    const inward: V = .{ inward_x, 0, inward_z };
+    const entry: V = .{ landing[0], terrain(seed, landing[0], landing[1]), landing[1] };
+    var sys: System = .{ .range = Mountains.count, .entrance = entry, .inward = inward, .noise = Seed.mix(seed ^ 0x4b325f524f434b) };
+
+    const mouth_at = add(entry, scale(inward, 22));
+    const mouth_floor = entry[1] - 1.5;
+    const mouth_radii: V = .{ 9, 5.5, 9 };
+    sys.rooms[0] = .{ .center = .{ mouth_at[0], mouth_floor + mouth_radii[1] * 0.45, mouth_at[2] }, .radii = mouth_radii, .floor = mouth_floor, .role = .mouth };
+    sys.room_count = 1;
+    const mouth_radius: f32 = 3;
+    sys.tunnels[0] = .{ .a = add(.{ entry[0], entry[1] + mouth_radius * floor_drop, entry[2] }, scale(inward, -6)), .b = .{ mouth_at[0], mouth_floor + mouth_radius * floor_drop, mouth_at[2] }, .radius = mouth_radius };
+    sys.tunnel_count = 1;
+
+    const lateral: V = .{ -inward_z, 0, inward_x };
+    const room_specs = [_]struct { center: V, radii: V, parent: u8, role: Role, fall: f32 }{
+        .{ .center = add(entry, scale(inward, 68)), .radii = .{ 12, 5.5, 12 }, .parent = 0, .role = .hall, .fall = 20 },
+        .{ .center = add(entry, scale(inward, 130)), .radii = .{ 14, 6, 13 }, .parent = 1, .role = .hall, .fall = 18 },
+        .{ .center = add(add(entry, scale(inward, 130)), scale(lateral, 42)), .radii = .{ 11, 5, 10 }, .parent = 2, .role = .cache, .fall = 8 },
+        .{ .center = add(entry, scale(inward, 198)), .radii = .{ 15, 6, 14 }, .parent = 2, .role = .hall, .fall = 20 },
+        .{ .center = add(entry, scale(inward, 260)), .radii = .{ 18, 9, 16 }, .parent = 4, .role = .heart, .fall = 22 },
+    };
+    for (room_specs) |spec| {
+        const ground = minGround(seed, spec.center[0], spec.center[2], spec.radii[0], spec.radii[2]);
+        const cover = spec.radii[1] * 1.45 + min_cover + 2;
+        const desired = sys.rooms[spec.parent].floor - spec.fall;
+        const floor = @min(desired, ground - cover);
+        const room: Room = .{ .center = .{ spec.center[0], floor + spec.radii[1] * 0.45, spec.center[2] }, .radii = spec.radii, .floor = floor, .parent = spec.parent, .role = spec.role };
+        if (!fits(seed, &sys, room)) return null;
+        const tunnel_radius: f32 = 2.8;
+        const parent = sys.rooms[spec.parent];
+        sys.rooms[sys.room_count] = room;
+        sys.tunnels[sys.tunnel_count] = .{
+            .a = .{ parent.center[0], parent.floor + tunnel_radius * floor_drop, parent.center[2] },
+            .b = .{ room.center[0], room.floor + tunnel_radius * floor_drop, room.center[2] },
+            .radius = tunnel_radius,
+        };
+        sys.room_count += 1;
+        sys.tunnel_count += 1;
+    }
+    bounds(&sys);
+    return sys;
+}
+
+fn minGround(seed: u64, x: f32, z: f32, rx: f32, rz: f32) f32 {
+    var low = terrain(seed, x, z);
+    for ([_][2]f32{ .{ rx, 0 }, .{ -rx, 0 }, .{ 0, rz }, .{ 0, -rz } }) |offset| {
+        low = @min(low, terrain(seed, x + offset[0], z + offset[1]));
+    }
+    return low;
 }
 
 fn plan(seed: u64, s: u64, ri: u8, range: Mountains.Range, k: usize) ?System {
@@ -393,13 +456,14 @@ fn occlusion(sys: *const System, p: V, normal: V) f32 {
 fn rockColor(sys: *const System, hue: [3]f32, p: V, normal: V) [3]f32 {
     const strata_noise = noise3(sys.noise ^ 0x535452, p[0] * 0.05, p[1] * 0.12, p[2] * 0.05);
     const band = 0.5 + 0.5 * @sin(p[1] * 0.85 + strata_noise * 5.0);
-    const warm: [3]f32 = .{ 0.36, 0.3, 0.24 };
-    const slate: [3]f32 = .{ 0.16, 0.17, 0.2 };
+    const k2 = sys.range == Mountains.count;
+    const warm: [3]f32 = if (k2) .{ 0.23, 0.34, 0.42 } else .{ 0.36, 0.3, 0.24 };
+    const slate: [3]f32 = if (k2) .{ 0.08, 0.15, 0.22 } else .{ 0.16, 0.17, 0.2 };
     var color: V = .{ slate[0] + (warm[0] - slate[0]) * band, slate[1] + (warm[1] - slate[1]) * band, slate[2] + (warm[2] - slate[2]) * band };
     // Floors gather pale dust, with a mottled edge.
     const dust_noise = noise3(sys.noise ^ 0x445553, p[0] * 0.3, p[1] * 0.3, p[2] * 0.3);
     const floor = std.math.clamp((normal[1] - 0.55) * 2.2, 0, 1) * (0.55 + 0.45 * dust_noise);
-    const dust: [3]f32 = .{ 0.46, 0.4, 0.31 };
+    const dust: [3]f32 = if (k2) .{ 0.36, 0.55, 0.68 } else .{ 0.46, 0.4, 0.31 };
     for (0..3) |a| color[a] += (dust[a] - color[a]) * floor;
     // Crevices and corners are darker; open faces keep their colour.
     const shade = 1 - 0.55 * occlusion(sys, p, normal);
@@ -591,6 +655,11 @@ pub fn floorSpot(sys: *const System, room: u8, k: usize, count: usize, ring: f32
 pub fn name(index: u8) []const u8 {
     const names = [_][]const u8{ "Hollowdeep", "Glimmerwell", "Stonethroat", "Ashen Vault", "Echo Halls", "Lumen Grotto", "Rimefang", "Sunken Choir" };
     return names[index % names.len];
+}
+
+pub fn systemName(caves: *const Layout, index: u8) []const u8 {
+    if (index < caves.count and caves.systems[index].range == Mountains.count) return "Black-Summit Works";
+    return name(index);
 }
 
 test "every range opens cave systems with a mouth, chambers under rock, and a heart" {
