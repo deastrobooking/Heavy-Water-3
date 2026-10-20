@@ -168,6 +168,9 @@ orbit_held: bool = false,
 tools_showcase_done: bool = false,
 /// Vertex edits made since the imported mesh was installed; they are not written to disk yet.
 vertex_edits_pending: bool = false,
+/// Set after a topology edit: the part library no longer matches the mesh, so its preview
+/// bake is not rebuilt until a mesh is imported or installed again.
+mesh_library_detached: bool = false,
 queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
@@ -3335,6 +3338,7 @@ fn installImportedCharacter(self: *App) void {
     const model = self.queued_character_model orelse return;
     self.mesh_tools.unbind();
     self.vertex_edits_pending = false;
+    self.mesh_library_detached = false;
     self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
         model.deinit(self.allocator);
         self.queued_character_model = null;
@@ -3434,6 +3438,26 @@ fn updateMeshTools(self: *App, renderer: *Renderer) void {
     self.tool_event_len = 0;
     if (!self.mesh_tools.active) return;
     const editor = &self.mesh_tools.editor.?;
+    if (editor.topology_changed) {
+        // Vertex and index counts changed: re-register the model so the renderer rebuilds its
+        // buffers (a new handle generation), and let go of the part library, whose part ids
+        // were keyed to the old vertices.
+        editor.topology_changed = false;
+        _ = editor.takeDirty();
+        editor.indices_dirty = false;
+        if (self.mesh_library_bake) |bake| {
+            bake.deinit(self.allocator);
+            self.allocator.destroy(bake);
+            self.mesh_library_bake = null;
+        }
+        if (!self.mesh_library_detached) self.report("TOPOLOGY CHANGED: PART LIBRARY DETACHED FROM THIS MESH", .{});
+        self.mesh_library_detached = true;
+        self.vertex_edits_pending = true;
+        creator.imported_status = .unsaved;
+        const copy = MeshModel.clone(self.allocator, entry.model) catch |err| return self.report("TOPOLOGY UPDATE FAILED {s}", .{@errorName(err)});
+        self.catalog.replaceHandle(self.allocator, handle, copy) catch |err| return self.report("TOPOLOGY UPDATE FAILED {s}", .{@errorName(err)});
+        // `replaceHandle` reuses the entry's storage, so the editor's model pointer stays valid.
+    }
     const dirty = editor.takeDirty();
     if (dirty.len > 0 or editor.indices_dirty) {
         entry.model.revision +%= 1;
@@ -3452,7 +3476,8 @@ fn updateMeshTools(self: *App, renderer: *Renderer) void {
 
 /// `-Dcharacter-showcase=48`: the same edits a player makes with the panel, for a capture: the
 /// upper body filled with the armour cel pen in blue, a glowing accent band at the waist, a
-/// sculpted bulge on the chest, and the head left selected to show the selection overlay.
+/// sculpted bulge on the chest, an edges-and-cavities pass, and the head left selected under the move
+/// gizmo to show the selection overlay.
 fn scriptToolsShowcase(self: *App) void {
     self.tools_showcase_done = true;
     const tools = &self.mesh_tools;
@@ -3487,6 +3512,10 @@ fn scriptToolsShowcase(self: *App) void {
                     ed.begin();
                     for (0..6) |_| try ed.dab(.draw, .{ .center = hit.point, .radius = 0.08 * height, .strength = 0.05 });
                     try ed.end();
+                    // Topology (S4): extrude a small chest patch outward, as an emblem plate.
+                    ed.clearSelection();
+                    ed.selectFacesInSphere(hit.point, 0.035 * height, true);
+                    _ = ed.extrudeSelectedFaces(0.02 * height) catch |err| std.log.warn("showcase extrude: {s}", .{@errorName(err)});
                     break;
                 }
             }
@@ -3496,10 +3525,11 @@ fn scriptToolsShowcase(self: *App) void {
             try ed.gradientFill(.{ .curvature = .{ .contrast = 6 } }, @import("asset/MeshEdit.zig").Ramp.two(.{ 0.02, 0.03, 0.06 }, .{ 0.9, 0.95, 1 }), 0.85);
             try ed.end();
             script.band(ed, l[1] + 0.86 * height, l[1] + 2 * height);
-            t.setTool(.pen);
+            // End on the move gizmo so the capture shows the handles on the selected head.
+            t.setTool(.move);
         }
     }).run(tools, e, lo, h, centre) catch |err| std.log.err("vertex tools showcase failed: {s}", .{@errorName(err)});
-    std.log.info("Vertex tools showcase: {d} undo steps, {d} vertices selected", .{ e.undo_stack.items.len, e.selectedCount() });
+    std.log.info("Vertex tools showcase: {d} undo steps, {d} vertices selected, {d} vertices in the mesh", .{ e.undo_stack.items.len, e.selectedCount(), e.model.mesh.vertices.len });
 }
 
 fn applyToolAction(self: *App, action: MeshTools.Action) void {
@@ -3533,6 +3563,10 @@ fn tearOffPart(self: *App) void {
 /// normal appearance edits update only the selected component's CPU and GPU ranges.
 fn applyMeshLibraryPreview(self: *App, renderer: *Renderer) void {
     if (!self.mesh_library_preview_dirty) return;
+    if (self.mesh_library_detached) {
+        self.mesh_library_preview_dirty = false;
+        return;
+    }
     const handle = &self.catalog.content.captain_test;
     const entry = self.catalog.meshMut(handle.*) orelse return;
     if (!entry.ready) return;

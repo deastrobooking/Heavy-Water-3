@@ -18,7 +18,7 @@ pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, s
 pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK", "GRAD" };
 pub const tool_hints = [_][]const u8{
     "CLICK A VERTEX, SHIFT+CLICK TO ADD, DRAG TO BRUSH-SELECT",
-    "DRAG TO MOVE THE SELECTION; SOFT RADIUS FADES THE PULL",
+    "DRAG: MOVE, ROTATE OR SCALE THE SELECTION; GRAB AN AXIS HANDLE TO LOCK IT",
     "DRAG TO BUILD UP THE SURFACE",
     "DRAG TO PUFF THE SURFACE OUTWARD",
     "DRAG TO RELAX BUMPS",
@@ -87,12 +87,23 @@ pub const Control = enum(u8) {
     posterize,
     bands_down,
     bands_up,
+    select_mode,
+    gizmo_mode,
+    extrude,
+    delete_faces,
+    split_edge,
+    collapse_edge,
     swatch_first = 100,
     open = 120,
     _,
 };
 
 pub const Action = enum { none, tear_off, close };
+pub const SelectMode = enum { vertex, face, edge };
+pub const Gizmo = enum { move, rotate, scale };
+/// Gizmo handle length and pick radius, as fractions of the model's height.
+pub const handle_length: f32 = 0.16;
+pub const handle_pick: f32 = 0.025;
 pub const max_overlay = 512;
 
 allocator: std.mem.Allocator,
@@ -112,6 +123,18 @@ color2: [3]f32 = swatches[1],
 radial: bool = false,
 /// Posterize band count.
 bands: u8 = 4,
+select_mode: SelectMode = .vertex,
+gizmo: Gizmo = .move,
+/// The axis (0 x, 1 y, 2 z) a gizmo drag is constrained to, or null for a free drag.
+axis: ?u2 = null,
+/// Pivot of the current gizmo drag and its running measures.
+pivot: V = .{ 0, 0, 0 },
+start_vec: V = .{ 1, 0, 0 },
+last_angle: f32 = 0,
+last_factor: f32 = 1,
+last_param: f32 = 0,
+/// Gizmo on screen: centre and the three axis tips (normalised), when the move tool has a selection.
+gizmo_screen: ?[4][2]f32 = null,
 blend: MeshEdit.Blend = .mix,
 preset: u8 = 0,
 /// Mirror every brush across the model's centre plane.
@@ -270,7 +293,16 @@ pub fn project(camera: Camera, aspect: f32, w: V) ?[2]f32 {
 pub fn refreshOverlay(self: *MeshTools, camera: Camera, aspect: f32) void {
     self.overlay_len = 0;
     self.ring = null;
+    self.gizmo_screen = null;
     const e = self.editor orelse return;
+    if (self.tool == .move) if (e.selectionBounds()) |b| gizmo: {
+        // While dragging the pivot stays where the drag began.
+        const centre = if (self.dragging) self.pivot else b.center;
+        var points: [4][2]f32 = undefined;
+        points[0] = project(camera, aspect, self.toWorldPoint(centre)) orelse break :gizmo;
+        for (0..3) |k| points[k + 1] = project(camera, aspect, self.toWorldPoint(add(centre, scale(unitAxis(@intCast(k)), handle_length * self.height())))) orelse break :gizmo;
+        self.gizmo_screen = points;
+    };
     const count = e.selection.count();
     const stride = @max(1, count / max_overlay + 1);
     var it = e.selection.iterator(.{});
@@ -315,7 +347,7 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
     switch (self.tool) {
         .select => {
             if (!extend) e.clearSelection();
-            if (hit) |h| e.selectVertex(h.vertex, true);
+            if (hit) |h| self.selectHit(e, h);
             self.dragging = hit != null;
         },
         .gradient => {
@@ -345,13 +377,31 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
             self.dragging = false;
         },
         .move => {
-            if (e.selectedCount() == 0) if (hit) |h| e.selectVertex(h.vertex, true);
-            if (e.selectedCount() == 0) {
+            if (e.selectedCount() == 0) if (hit) |h| self.selectHit(e, h);
+            const bounds = e.selectionBounds() orelse {
                 self.dragging = false;
                 return;
-            }
+            };
             try e.prepareSoft(self.soft * self.height());
-            self.anchor = if (hit) |h| h.point else self.selectionCentre();
+            self.pivot = bounds.center;
+            self.axis = self.pickAxis(ray);
+            self.anchor = if (hit) |h| h.point else bounds.center;
+            switch (self.gizmo) {
+                .move => if (self.axis) |k| {
+                    self.last_param = closestOnLine(self.pivot, unitAxis(k), ray);
+                },
+                .rotate => {
+                    const n = if (self.axis) |k| unitAxis(k) else self.plane_normal;
+                    const p = planeHit(ray, self.pivot, n) orelse self.anchor;
+                    self.start_vec = sub(p, self.pivot);
+                    self.last_angle = 0;
+                },
+                .scale => {
+                    const p = planeHit(ray, self.pivot, self.plane_normal) orelse self.anchor;
+                    self.start_vec = sub(p, self.pivot);
+                    self.last_factor = 1;
+                },
+            }
             self.beginStroke();
         },
         .grab => {
@@ -378,9 +428,10 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
     switch (self.tool) {
         .select => if (e.raycast(ray.origin, ray.direction)) |h| {
             self.hover = h.point;
-            e.selectSphere(h.point, self.radius * self.height(), true);
+            if (self.select_mode == .face) e.selectFacesInSphere(h.point, self.radius * self.height(), true) else e.selectSphere(h.point, self.radius * self.height(), true);
         },
-        .move, .grab => {
+        .move => try self.dragGizmo(e, ray),
+        .grab => {
             const denom = dot(ray.direction, self.plane_normal);
             if (@abs(denom) < 1e-6) return;
             const t = dot(sub(self.anchor, ray.origin), self.plane_normal) / denom;
@@ -417,6 +468,122 @@ fn applyGradient(self: *MeshTools) MeshEdit.Error!void {
     e.begin();
     defer e.end() catch {};
     try e.gradientFill(g, ramp, self.strength);
+}
+
+fn topologyEdit(self: *MeshTools, e: *MeshEdit.Editor, c: Control) MeshEdit.Error!void {
+    switch (c) {
+        .extrude => {
+            const n = try e.extrudeSelectedFaces(0.04 * self.height());
+            // The new cap is selected: hand straight over to the gizmo to pull it.
+            self.gizmo = .move;
+            self.setTool(.move);
+            self.setStatus("EXTRUDED {d} FACES; DRAG TO PULL", .{n});
+        },
+        .delete_faces => self.setStatus("DELETED {d} FACES", .{try e.deleteSelectedFaces()}),
+        .split_edge => {
+            try e.splitSelectedEdge();
+            self.setStatus("EDGE SPLIT", .{});
+        },
+        .collapse_edge => {
+            try e.collapseSelectedEdge();
+            self.setStatus("EDGE COLLAPSED", .{});
+        },
+        else => unreachable,
+    }
+}
+
+fn selectHit(self: *MeshTools, e: *MeshEdit.Editor, h: MeshEdit.Hit) void {
+    switch (self.select_mode) {
+        .vertex => e.selectVertex(h.vertex, true),
+        .face => e.selectFace(h.triangle, true),
+        .edge => for (e.nearestEdge(h.triangle, h.point)) |v| e.selectVertex(v, true),
+    }
+}
+
+/// The gizmo handle the ray passes closest to (within the pick radius), if any.
+fn pickAxis(self: *const MeshTools, ray: Ray) ?u2 {
+    const reach = handle_length * self.height();
+    var best: ?u2 = null;
+    var best_d = handle_pick * self.height();
+    for (0..3) |k| {
+        // The inner quarter of every handle meets at the pivot; clicking there is a free drag.
+        const dir = unitAxis(@intCast(k));
+        // A handle seen end-on cannot be dragged along; leave it to the free drag.
+        if (@abs(dot(dir, ray.direction)) > 0.95) continue;
+        const d = raySegmentDistance(ray, add(self.pivot, scale(dir, reach * 0.25)), add(self.pivot, scale(dir, reach)));
+        if (d < best_d) {
+            best_d = d;
+            best = @intCast(k);
+        }
+    }
+    return best;
+}
+
+fn dragGizmo(self: *MeshTools, e: *MeshEdit.Editor, ray: Ray) MeshEdit.Error!void {
+    switch (self.gizmo) {
+        .move => if (self.axis) |k| {
+            const param = closestOnLine(self.pivot, unitAxis(k), ray);
+            try e.move(scale(unitAxis(k), param - self.last_param));
+            self.last_param = param;
+        } else {
+            const point = planeHit(ray, self.anchor, self.plane_normal) orelse return;
+            try e.move(sub(point, self.anchor));
+            self.anchor = point;
+        },
+        .rotate => {
+            const n = if (self.axis) |k| unitAxis(k) else self.plane_normal;
+            const p = planeHit(ray, self.pivot, n) orelse return;
+            const v = sub(p, self.pivot);
+            const angle = std.math.atan2(dot(cross(self.start_vec, v), n), dot(self.start_vec, v));
+            try e.rotate(self.pivot, n, angle - self.last_angle);
+            self.last_angle = angle;
+        },
+        .scale => {
+            const p = planeHit(ray, self.pivot, self.plane_normal) orelse return;
+            const start = @sqrt(dot(self.start_vec, self.start_vec));
+            if (start < 1e-6) return;
+            const factor = std.math.clamp(@sqrt(dot(sub(p, self.pivot), sub(p, self.pivot))) / start, 0.05, 20);
+            const ratio = factor / self.last_factor;
+            var f: V = .{ ratio, ratio, ratio };
+            if (self.axis) |k| f = .{ if (k == 0) ratio else 1, if (k == 1) ratio else 1, if (k == 2) ratio else 1 };
+            try e.scaleBy(self.pivot, f);
+            self.last_factor = factor;
+        },
+    }
+}
+
+fn unitAxis(k: u2) V {
+    return .{ if (k == 0) 1 else 0, if (k == 1) 1 else 0, if (k == 2) 1 else 0 };
+}
+
+fn planeHit(ray: Ray, point: V, normal: V) ?V {
+    const denom = dot(ray.direction, normal);
+    if (@abs(denom) < 1e-6) return null;
+    const t = dot(sub(point, ray.origin), normal) / denom;
+    return add(ray.origin, scale(ray.direction, t));
+}
+
+/// Parameter along the line `origin + s * dir` closest to the ray.
+fn closestOnLine(origin: V, dir: V, ray: Ray) f32 {
+    const w = sub(origin, ray.origin);
+    const b = dot(dir, ray.direction);
+    const d = dot(dir, w);
+    const e = dot(ray.direction, w);
+    const denom = 1 - b * b;
+    if (@abs(denom) < 1e-6) return 0;
+    return (b * e - d) / denom;
+}
+
+fn raySegmentDistance(ray: Ray, a: V, b: V) f32 {
+    const ab = sub(b, a);
+    const len = @sqrt(dot(ab, ab));
+    if (len < 1e-9) return std.math.inf(f32);
+    const dir = scale(ab, 1 / len);
+    const s = std.math.clamp(closestOnLine(a, dir, ray), 0, len);
+    const p = add(a, scale(dir, s));
+    const t = @max(0, dot(sub(p, ray.origin), ray.direction));
+    const q = add(ray.origin, scale(ray.direction, t));
+    return @sqrt(dot(sub(p, q), sub(p, q)));
 }
 
 fn beginStroke(self: *MeshTools) void {
@@ -581,6 +748,28 @@ pub fn control(self: *MeshTools, c: Control) MeshEdit.Error!Action {
             self.color2 = keep;
         },
         .gradient_mode => self.radial = !self.radial,
+        .extrude, .delete_faces, .split_edge, .collapse_edge => {
+            self.topologyEdit(e, c) catch |err| switch (err) {
+                error.EmptySelection => self.setStatus("{s}", .{switch (c) {
+                    .extrude, .delete_faces => "SELECT WHOLE FACES FIRST",
+                    else => "SELECT THE TWO ENDS OF ONE EDGE",
+                }}),
+                else => return err,
+            };
+        },
+        .select_mode => self.select_mode = switch (self.select_mode) {
+            .vertex => .face,
+            .face => .edge,
+            .edge => .vertex,
+        },
+        .gizmo_mode => {
+            self.gizmo = switch (self.gizmo) {
+                .move => .rotate,
+                .rotate => .scale,
+                .scale => .move,
+            };
+            if (self.tool != .move) self.setTool(.move);
+        },
         .bands_down, .bands_up => self.bands = std.math.clamp(if (c == .bands_up) self.bands + 1 else self.bands - 1, 2, 8),
         .height_fill, .edge_fill, .posterize => {
             e.begin();
@@ -801,4 +990,82 @@ test "the gradient tool drags a ramp, and height, edge and posterize fills are s
     try std.testing.expectEqual([3]f32{ 0, 0, 1 }, tools.color);
     for (0..10) |_| _ = try tools.control(.bands_up);
     try std.testing.expectEqual(@as(u8, 8), tools.bands);
+}
+
+test "face and edge select modes, and the gizmo moves along an axis, rotates and scales" {
+    const a = std.testing.allocator;
+    var model = try Model.fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    var tools = MeshTools.init(a);
+    defer tools.deinit();
+    try tools.bind(&model, null);
+    const down = struct {
+        fn at(x: f32, z: f32) Ray {
+            return .{ .origin = .{ x, 20, z }, .direction = .{ 0, -1, 0 } };
+        }
+    }.at;
+    tools.select_mode = .face;
+    tools.setTool(.select);
+    try tools.press(down(0.1, 0.1), false);
+    tools.release();
+    try std.testing.expectEqual(@as(usize, 1), tools.editor.?.selectedFaceCount());
+    tools.select_mode = .edge;
+    try tools.press(down(0.49, 0), false);
+    tools.release();
+    try std.testing.expect(tools.editor.?.selectedCount() >= 2 and tools.editor.?.selectedFaceCount() == 0);
+    // Select the whole top face and drag its X handle: the face moves along x only.
+    tools.select_mode = .face;
+    tools.editor.?.clearSelection();
+    for (0..2) |t| tools.editor.?.selectFace(@intCast(4 * 2 + t), true);
+    tools.soft = 0;
+    tools.setTool(.move);
+    const top = tools.editor.?.selectionBounds().?.center;
+    const reach = handle_length * tools.height();
+    // A ray looking along -z through the middle of the X handle.
+    const handle_ray: Ray = .{ .origin = .{ top[0] + reach * 0.6, top[1], 10 }, .direction = .{ 0, 0, -1 } };
+    try tools.press(handle_ray, false);
+    try std.testing.expectEqual(@as(?u2, 0), tools.axis);
+    try tools.drag(.{ .origin = .{ top[0] + reach * 0.6 + 0.5, top[1] + 3, 10 }, .direction = .{ 0, 0, -1 } });
+    tools.release();
+    const moved = tools.editor.?.selectionBounds().?.center;
+    try std.testing.expectApproxEqAbs(top[0] + 0.5, moved[0], 1e-3);
+    try std.testing.expectApproxEqAbs(top[1], moved[1], 1e-3);
+    // Scale mode, free: dragging twice as far from the pivot doubles the face.
+    _ = try tools.control(.gizmo_mode);
+    _ = try tools.control(.gizmo_mode);
+    try std.testing.expectEqual(Gizmo.scale, tools.gizmo);
+    const before = tools.editor.?.selectionBounds().?;
+    const c = before.center;
+    try tools.press(.{ .origin = .{ c[0] + 0.3, c[1] + 0.2, 10 }, .direction = .{ 0, 0, -1 } }, false);
+    try std.testing.expect(tools.axis == null);
+    try tools.drag(.{ .origin = .{ c[0] + 0.6, c[1] + 0.4, 10 }, .direction = .{ 0, 0, -1 } });
+    tools.release();
+    const after = tools.editor.?.selectionBounds().?;
+    try std.testing.expectApproxEqAbs(2 * (before.max[0] - before.min[0]), after.max[0] - after.min[0], 1e-3);
+    // Undo restores, one step per drag.
+    _ = try tools.control(.undo);
+    _ = try tools.control(.undo);
+    try std.testing.expectApproxEqAbs(top[0], tools.editor.?.selectionBounds().?.center[0], 1e-4);
+}
+
+test "topology buttons extrude, split, collapse and delete through the tool, with one undo each" {
+    const a = std.testing.allocator;
+    var model = try Model.fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    var tools = MeshTools.init(a);
+    defer tools.deinit();
+    try tools.bind(&model, null);
+    // Nothing selected: refused with a hint, nothing changed.
+    _ = try tools.control(.extrude);
+    try std.testing.expectEqual(@as(usize, 24), model.mesh.vertices.len);
+    // Extrude the top face: the tool switches to the move gizmo with the cap selected.
+    for (0..2) |t| tools.editor.?.selectFace(@intCast(4 * 2 + t), true);
+    _ = try tools.control(.extrude);
+    try std.testing.expectEqual(Tool.move, tools.tool);
+    try std.testing.expect(model.mesh.vertices.len > 24);
+    try std.testing.expect(tools.editor.?.topology_changed);
+    _ = try tools.control(.delete_faces);
+    _ = try tools.control(.undo);
+    _ = try tools.control(.undo);
+    try std.testing.expectEqual(@as(usize, 24), model.mesh.vertices.len);
 }

@@ -54,7 +54,7 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     const w: f32 = @min(340, v.w * 0.44);
     // About 560 units of content; status lines follow it, so a short window scrolls instead of
     // drawing text over the buttons.
-    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 580) };
+    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 640) };
     // The panel first: the canvas has a fixed command budget, and the selection dots take only
     // what the panel leaves.
     defer overlay(c, tools, v, r);
@@ -135,13 +135,35 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
 
     // Selection.
     const e = tools.editor;
-    c.print(x, y, 0.7, dim, "SELECTION  {d} VERTICES", .{if (e) |ed| ed.selectedCount() else 0});
+    if (e) |ed| {
+        if (ed.selectionBounds()) |b| {
+            const size = [3]f32{ b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2] };
+            c.print(x, y, 0.62, dim, "{d} VERTS  {d} FACES  {d:.2} x {d:.2} x {d:.2}", .{ ed.selectedCount(), ed.selectedFaceCount(), size[0], size[1], size[2] });
+        } else c.text(x, y, "NOTHING SELECTED (FILLS APPLY TO THE WHOLE MESH)", 0.62, dim);
+    }
     y += 16;
+    const mode_label: []const u8 = switch (tools.select_mode) {
+        .vertex => "SELECT: VERTICES",
+        .face => "SELECT: FACES",
+        .edge => "SELECT: EDGES",
+    };
+    const gizmo_label: []const u8 = switch (tools.gizmo) {
+        .move => "GIZMO: MOVE",
+        .rotate => "GIZMO: ROTATE",
+        .scale => "GIZMO: SCALE",
+    };
+    button(c, .{ .x = x, .y = y, .w = half, .h = 22 }, mode_label, control(.select_mode), false);
+    button(c, .{ .x = x2, .y = y, .w = half, .h = 22 }, gizmo_label, control(.gizmo_mode), tools.tool == .move);
+    y += 26;
     for ([_]MeshTools.Control{ .grow, .linked, .invert, .clear }, [_][]const u8{ "GROW", "PIECE", "INVERT", "CLEAR" }, 0..) |ctl, label, i| {
         button(c, .{ .x = x + @as(f32, @floatFromInt(i)) * (quarter + 4), .y = y, .w = quarter, .h = 22 }, label, control(ctl), false);
     }
     y += 26;
     for ([_]MeshTools.Control{ .same_pen, .same_color, .fill_color, .fill_pen }, [_][]const u8{ "SAME PEN", "SAME COL", "FILL COL", "FILL PEN" }, 0..) |ctl, label, i| {
+        button(c, .{ .x = x + @as(f32, @floatFromInt(i)) * (quarter + 4), .y = y, .w = quarter, .h = 22 }, label, control(ctl), false);
+    }
+    y += 26;
+    for ([_]MeshTools.Control{ .extrude, .delete_faces, .split_edge, .collapse_edge }, [_][]const u8{ "EXTRUDE", "DELETE", "SPLIT EDGE", "COLLAPSE" }, 0..) |ctl, label, i| {
         button(c, .{ .x = x + @as(f32, @floatFromInt(i)) * (quarter + 4), .y = y, .w = quarter, .h = 22 }, label, control(ctl), false);
     }
     y += 26;
@@ -163,6 +185,23 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
 
 /// Selected vertices as dots and the brush as a ring, over the 3D view.
 fn overlay(c: *Canvas, tools: *const MeshTools, v: Rect, panel: Rect) void {
+    // The gizmo first, so its handles are never thinned out by a large selection.
+    if (tools.gizmo_screen) |g| {
+        const colors = [_]Color{ .{ 0.95, 0.3, 0.3, 1 }, .{ 0.4, 0.9, 0.4, 1 }, .{ 0.35, 0.55, 1, 1 } };
+        const cx = v.x + g[0][0] * v.w;
+        const cy = v.y + g[0][1] * v.h;
+        for (colors, 1..) |color, k| {
+            const tx = v.x + g[k][0] * v.w;
+            const ty = v.y + g[k][1] * v.h;
+            const steps = 12;
+            for (0..steps + 1) |i| {
+                const f = @as(f32, @floatFromInt(i)) / steps;
+                const size: f32 = if (i == steps) 7 else 3;
+                c.rect(.{ .x = cx + (tx - cx) * f - size / 2, .y = cy + (ty - cy) * f - size / 2, .w = size, .h = size }, color);
+            }
+        }
+        c.rect(.{ .x = cx - 4, .y = cy - 4, .w = 8, .h = 8 }, ink);
+    }
     const ring_cost = 40;
     const room = Canvas.capacity -| c.len -| ring_cost -| 8;
     const points = tools.overlay[0..tools.overlay_len];

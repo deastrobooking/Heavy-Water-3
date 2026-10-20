@@ -267,12 +267,48 @@ pub const Gradient = union(enum) {
 const Snapshot = struct { vertex: Mesh.Vertex, pen: u8, painted: bool };
 const VertexChange = struct { index: u32, before: Snapshot, after: Snapshot };
 const TriangleChange = struct { triangle: u32, before: [3]u32, after: [3]u32 };
+/// A whole-mesh copy for topology edits, which change vertex and index counts.
+const MeshCopy = struct {
+    vertices: []Mesh.Vertex,
+    indices: []u32,
+    submeshes: []Model.Submesh,
+    pens: ?[]u8,
+    skin: ?[]Model.SkinVertex,
+
+    fn take(allocator: std.mem.Allocator, model: Model) Error!MeshCopy {
+        const vertices = try allocator.dupe(Mesh.Vertex, model.mesh.vertices);
+        errdefer allocator.free(vertices);
+        const indices = try allocator.dupe(u32, model.mesh.indices);
+        errdefer allocator.free(indices);
+        const submeshes = try allocator.dupe(Model.Submesh, model.submeshes);
+        errdefer allocator.free(submeshes);
+        const pens: ?[]u8 = if (model.pens) |p| try allocator.dupe(u8, p) else null;
+        errdefer if (pens) |p| allocator.free(p);
+        const skin: ?[]Model.SkinVertex = if (model.skin) |k| try allocator.dupe(Model.SkinVertex, k.vertices) else null;
+        return .{ .vertices = vertices, .indices = indices, .submeshes = submeshes, .pens = pens, .skin = skin };
+    }
+
+    fn deinit(self: MeshCopy, allocator: std.mem.Allocator) void {
+        allocator.free(self.vertices);
+        allocator.free(self.indices);
+        allocator.free(self.submeshes);
+        if (self.pens) |p| allocator.free(p);
+        if (self.skin) |k| allocator.free(k);
+    }
+};
+
 const Stroke = struct {
     vertices: []VertexChange,
     triangles: []TriangleChange,
+    /// Set for topology edits: the whole mesh before and after.
+    shape: ?struct { before: MeshCopy, after: MeshCopy } = null,
     fn deinit(self: Stroke, allocator: std.mem.Allocator) void {
         allocator.free(self.vertices);
         allocator.free(self.triangles);
+        if (self.shape) |sh| {
+            sh.before.deinit(allocator);
+            sh.after.deinit(allocator);
+        }
     }
 };
 
@@ -294,6 +330,9 @@ pub const Editor = struct {
     open_vertices: std.AutoArrayHashMapUnmanaged(u32, Snapshot) = .empty,
     open_triangles: std.AutoArrayHashMapUnmanaged(u32, [3]u32) = .empty,
     open: bool = false,
+    /// Set when a topology edit (or its undo) changed vertex or index counts: the owner must
+    /// re-register the model (new GPU buffers) and drop anything keyed to the old vertex ids.
+    topology_changed: bool = false,
     /// Vertices whose colour was painted by hand. Part recolours (`Modifiers.Bake`) skip them.
     painted: std.DynamicBitSetUnmanaged,
     /// The symmetry plane (model x) for mirrored brushes: the centre of the model's bounds.
@@ -415,6 +454,71 @@ pub const Editor = struct {
         self.selection.toggleAll();
     }
 
+    /// Selects (or deselects) the corners of triangle `t`, with their welded copies.
+    pub fn selectFace(self: *Editor, t: u32, on: bool) void {
+        for (self.model.mesh.indices[t * 3 ..][0..3]) |v| self.selectVertex(v, on);
+    }
+
+    /// The edge of triangle `t` nearest `point`, as its two corner vertices.
+    pub fn nearestEdge(self: *const Editor, t: u32, point: V) [2]u32 {
+        const tri = self.model.mesh.indices[t * 3 ..][0..3];
+        var best: [2]u32 = .{ tri[0], tri[1] };
+        var best_d = std.math.inf(f32);
+        for ([_][2]u32{ .{ tri[0], tri[1] }, .{ tri[1], tri[2] }, .{ tri[2], tri[0] } }) |e| {
+            const a = self.model.mesh.vertices[e[0]].position;
+            const b = self.model.mesh.vertices[e[1]].position;
+            const ab = sub(b, a);
+            const k = std.math.clamp(dot(sub(point, a), ab) / @max(dot(ab, ab), 1e-12), 0, 1);
+            const d = dist2(point, add(a, scale(ab, k)));
+            if (d < best_d) {
+                best_d = d;
+                best = e;
+            }
+        }
+        return best;
+    }
+
+    /// Selects (or deselects) every face whose centre lies within `radius` of `center`.
+    pub fn selectFacesInSphere(self: *Editor, center: V, radius: f32, on: bool) void {
+        const verts = self.model.mesh.vertices;
+        const idx = self.model.mesh.indices;
+        const r2 = radius * radius;
+        var t: u32 = 0;
+        while (t * 3 < idx.len) : (t += 1) {
+            const tri = idx[t * 3 ..][0..3];
+            if (tri[0] == tri[1] and tri[1] == tri[2]) continue;
+            const c = scale(add(add(verts[tri[0]].position, verts[tri[1]].position), verts[tri[2]].position), 1.0 / 3.0);
+            if (dist2(c, center) <= r2) self.selectFace(t, on);
+        }
+    }
+
+    /// Faces whose three corners are all selected.
+    pub fn selectedFaceCount(self: *const Editor) usize {
+        var n: usize = 0;
+        for (0..self.model.mesh.indices.len / 3) |t| n += @intFromBool(self.triangleSelected(t));
+        return n;
+    }
+
+    /// Bounds and centre of the selected vertices, or null when nothing is selected.
+    pub fn selectionBounds(self: *const Editor) ?struct { min: V, max: V, center: V } {
+        var lo: V = @splat(std.math.inf(f32));
+        var hi: V = @splat(-std.math.inf(f32));
+        var sum: V = .{ 0, 0, 0 };
+        var n: f32 = 0;
+        var it = self.selection.iterator(.{});
+        while (it.next()) |i| {
+            const p = self.model.mesh.vertices[i].position;
+            for (0..3) |k| {
+                lo[k] = @min(lo[k], p[k]);
+                hi[k] = @max(hi[k], p[k]);
+            }
+            sum = add(sum, p);
+            n += 1;
+        }
+        if (n == 0) return null;
+        return .{ .min = lo, .max = hi, .center = scale(sum, 1 / n) };
+    }
+
     // ---- Strokes and history ---------------------------------------------------------------
 
     /// Starts an undo step. Every change until `end` is one step.
@@ -491,6 +595,7 @@ pub const Editor = struct {
     }
 
     fn applyStroke(self: *Editor, stroke: Stroke, comptime side: enum { before, after }) Error!void {
+        if (stroke.shape) |sh| return self.restoreShape(if (side == .before) sh.before else sh.after);
         try self.dirty.ensureUnusedCapacity(self.allocator, stroke.vertices.len);
         for (stroke.vertices) |c| {
             const snap = if (side == .before) c.before else c.after;
@@ -590,6 +695,38 @@ pub const Editor = struct {
         for (self.weights, 0..) |w, i| if (w > 0) {
             try self.touch(@intCast(i));
             self.vertices()[i].position = add(self.vertices()[i].position, scale(delta, w));
+            try moved.append(self.allocator, @intCast(i));
+        };
+        try self.refreshNormals(moved.items);
+    }
+
+    /// Rotates every weighted vertex about `center` around unit `axis` by `angle` times its
+    /// weight (the soft selection fades the twist). Call within a stroke.
+    pub fn rotate(self: *Editor, center: V, axis: V, angle: f32) Error!void {
+        var moved: std.ArrayList(u32) = .empty;
+        defer moved.deinit(self.allocator);
+        const n = normalize(axis);
+        for (self.weights, 0..) |w, i| if (w > 0) {
+            try self.touch(@intCast(i));
+            const a = angle * w;
+            const q: [4]f32 = .{ n[0] * @sin(a / 2), n[1] * @sin(a / 2), n[2] * @sin(a / 2), @cos(a / 2) };
+            const p = self.vertices()[i].position;
+            self.vertices()[i].position = add(center, rotateByQuat(q, sub(p, center)));
+            try moved.append(self.allocator, @intCast(i));
+        };
+        try self.refreshNormals(moved.items);
+    }
+
+    /// Scales every weighted vertex about `center` per axis, blended toward 1 by its weight.
+    pub fn scaleBy(self: *Editor, center: V, factor: V) Error!void {
+        var moved: std.ArrayList(u32) = .empty;
+        defer moved.deinit(self.allocator);
+        for (self.weights, 0..) |w, i| if (w > 0) {
+            try self.touch(@intCast(i));
+            const p = self.vertices()[i].position;
+            var out: V = undefined;
+            for (0..3) |k| out[k] = center[k] + (p[k] - center[k]) * (1 + (factor[k] - 1) * w);
+            self.vertices()[i].position = out;
             try moved.append(self.allocator, @intCast(i));
         };
         try self.refreshNormals(moved.items);
@@ -823,6 +960,367 @@ pub const Editor = struct {
         }
     }
 
+    // ---- Topology edits ---------------------------------------------------------------------
+
+    /// Replaces the model's arrays with copies of `copy` and rebuilds everything keyed to
+    /// vertex ids. Used by undo and redo of topology edits.
+    fn restoreShape(self: *Editor, copy: MeshCopy) Error!void {
+        const fresh = try MeshCopy.take(self.allocator, .{ .mesh = .{ .vertices = copy.vertices, .indices = copy.indices }, .submeshes = copy.submeshes, .materials = &.{}, .bounds_min = undefined, .bounds_max = undefined, .pens = copy.pens, .skin = if (copy.skin) |k| .{ .vertices = k, .bones = &.{} } else null });
+        self.install(fresh);
+        try self.afterTopologyChange();
+    }
+
+    /// Takes ownership of `copy`'s arrays as the model's mesh (freeing the old ones).
+    fn install(self: *Editor, copy: MeshCopy) void {
+        const a = self.allocator;
+        const m = self.model;
+        a.free(m.mesh.vertices);
+        a.free(m.mesh.indices);
+        a.free(m.submeshes);
+        if (m.pens) |p| a.free(p);
+        m.mesh = .{ .vertices = copy.vertices, .indices = copy.indices };
+        m.submeshes = copy.submeshes;
+        m.pens = copy.pens;
+        if (m.skin) |*k| {
+            if (copy.skin) |sv| {
+                a.free(k.vertices);
+                k.vertices = sv;
+            }
+        } else if (copy.skin) |sv| a.free(sv);
+    }
+
+    fn afterTopologyChange(self: *Editor) Error!void {
+        const n = self.model.mesh.vertices.len;
+        var topology = try Topology.init(self.allocator, self.model.mesh);
+        errdefer topology.deinit(self.allocator);
+        const weights = try self.allocator.realloc(self.weights, n);
+        self.weights = weights;
+        @memset(self.weights, 0);
+        try self.selection.resize(self.allocator, n, false);
+        try self.painted.resize(self.allocator, n, false);
+        self.topology.deinit(self.allocator);
+        self.topology = topology;
+        self.dirty.clearRetainingCapacity();
+        self.indices_dirty = true;
+        self.topology_changed = true;
+        // The mirror's counts no longer match; its owner (the part bake) is now stale.
+        self.mirror = null;
+    }
+
+    /// Commits a rebuilt mesh: `list` holds every candidate vertex (old ones first, then any
+    /// new ones, with their pens and skin influences), `tris` the triangles per submesh as
+    /// indices into `list`. Unused vertices are dropped. `select` (indices into `list`) is the
+    /// selection afterwards. One undo step.
+    fn rebuild(self: *Editor, list: []const Mesh.Vertex, pens: ?[]const u8, skin: ?[]const Model.SkinVertex, tris: []const []const u32, select: []const u32) Error!void {
+        std.debug.assert(!self.open);
+        const a = self.allocator;
+        var total: usize = 0;
+        for (tris) |t| total += t.len;
+        if (total == 0) return error.EmptySelection;
+        const remap = try a.alloc(u32, list.len);
+        defer a.free(remap);
+        @memset(remap, std.math.maxInt(u32));
+        var count: u32 = 0;
+        for (tris) |t| for (t) |v| if (remap[v] == std.math.maxInt(u32)) {
+            remap[v] = count;
+            count += 1;
+        };
+        if (count > Model.max_vertices) return error.InvalidMesh;
+        const before = try MeshCopy.take(a, self.model.*);
+        errdefer before.deinit(a);
+        const new_vertices = try a.alloc(Mesh.Vertex, count);
+        errdefer a.free(new_vertices);
+        const new_pens: ?[]u8 = if (pens != null) try a.alloc(u8, count) else null;
+        errdefer if (new_pens) |p| a.free(p);
+        const new_skin: ?[]Model.SkinVertex = if (skin != null) try a.alloc(Model.SkinVertex, count) else null;
+        errdefer if (new_skin) |k| a.free(k);
+        for (remap, 0..) |r, v| if (r != std.math.maxInt(u32)) {
+            new_vertices[r] = list[v];
+            if (new_pens) |p| p[r] = pens.?[v];
+            if (new_skin) |k| k[r] = skin.?[v];
+        };
+        const indices = try a.alloc(u32, total);
+        errdefer a.free(indices);
+        var submeshes: std.ArrayList(Model.Submesh) = .empty;
+        defer submeshes.deinit(a);
+        var at: u32 = 0;
+        for (tris, 0..) |t, sm| {
+            if (t.len == 0) continue;
+            for (t, 0..) |v, k| indices[at + k] = remap[v];
+            try submeshes.append(a, .{ .first_index = at, .index_count = @intCast(t.len), .material = self.model.submeshes[sm].material });
+            at += @intCast(t.len);
+        }
+        const owned_submeshes = try submeshes.toOwnedSlice(a);
+        errdefer a.free(owned_submeshes);
+        try self.undo_stack.ensureUnusedCapacity(a, 1);
+        self.install(.{ .vertices = new_vertices, .indices = indices, .submeshes = owned_submeshes, .pens = new_pens, .skin = new_skin });
+        try self.afterTopologyChange();
+        const after = try MeshCopy.take(a, self.model.*);
+        for (self.redo_stack.items) |st| st.deinit(a);
+        self.redo_stack.clearRetainingCapacity();
+        if (self.undo_stack.items.len == max_history) self.undo_stack.orderedRemove(0).deinit(a);
+        self.undo_stack.appendAssumeCapacity(.{ .vertices = &.{}, .triangles = &.{}, .shape = .{ .before = before, .after = after } });
+        for (select) |v| if (remap[v] != std.math.maxInt(u32)) self.selection.set(remap[v]);
+        for (self.model.mesh.vertices, 0..) |_, i| self.painted.setValue(i, false);
+    }
+
+    /// The current mesh as candidate lists (old vertices first) and per-submesh triangle lists,
+    /// for an edit to extend. Callers own the lists.
+    const Work = struct {
+        list: std.ArrayList(Mesh.Vertex) = .empty,
+        pens: ?std.ArrayList(u8) = null,
+        skin: ?std.ArrayList(Model.SkinVertex) = null,
+        tris: [Model.max_submeshes]std.ArrayList(u32) = @splat(.empty),
+        select: std.ArrayList(u32) = .empty,
+
+        fn deinit(self: *Work, a: std.mem.Allocator) void {
+            self.list.deinit(a);
+            if (self.pens) |*p| p.deinit(a);
+            if (self.skin) |*k| k.deinit(a);
+            for (&self.tris) |*t| t.deinit(a);
+            self.select.deinit(a);
+        }
+
+        /// Appends a copy of vertex `from` (with its pen and skin) and returns its list index.
+        fn copyVertex(self: *Work, a: std.mem.Allocator, from: u32, vertex: Mesh.Vertex) Error!u32 {
+            try self.list.append(a, vertex);
+            if (self.pens) |*p| try p.append(a, p.items[from]);
+            if (self.skin) |*k| try k.append(a, k.items[from]);
+            return @intCast(self.list.items.len - 1);
+        }
+    };
+
+    fn startWork(self: *Editor) Error!Work {
+        const a = self.allocator;
+        var w: Work = .{};
+        errdefer w.deinit(a);
+        try w.list.appendSlice(a, self.model.mesh.vertices);
+        if (self.model.pens) |p| {
+            w.pens = .empty;
+            try w.pens.?.appendSlice(a, p);
+        }
+        if (self.model.skin) |k| {
+            w.skin = .empty;
+            try w.skin.?.appendSlice(a, k.vertices);
+        }
+        return w;
+    }
+
+    fn submeshOf(self: *const Editor, t: usize) usize {
+        for (self.model.submeshes, 0..) |sm, i| if (t * 3 >= sm.first_index and t * 3 < sm.first_index + sm.index_count) return i;
+        return 0;
+    }
+
+    fn finish(self: *Editor, w: *Work) Error!void {
+        var lists: [Model.max_submeshes][]const u32 = undefined;
+        for (0..self.model.submeshes.len) |i| lists[i] = w.tris[i].items;
+        try self.rebuild(w.list.items, if (w.pens) |p| p.items else null, if (w.skin) |k| k.items else null, lists[0..self.model.submeshes.len], w.select.items);
+    }
+
+    /// Deletes the faces whose corners are all selected (and any vertex left unused).
+    pub fn deleteSelectedFaces(self: *Editor) Error!usize {
+        const a = self.allocator;
+        var w = try self.startWork();
+        defer w.deinit(a);
+        var removed: usize = 0;
+        for (0..self.model.mesh.indices.len / 3) |t| {
+            if (self.triangleSelected(t)) {
+                removed += 1;
+                continue;
+            }
+            try w.tris[self.submeshOf(t)].appendSlice(a, self.model.mesh.indices[t * 3 ..][0..3]);
+        }
+        if (removed == 0) return error.EmptySelection;
+        self.selection.unsetAll();
+        try self.finish(&w);
+        return removed;
+    }
+
+    /// Extrudes the selected faces as one region by `distance` along their mean normal: the
+    /// faces move out on new vertices and walls join their boundary back to the old ones. The
+    /// new cap stays selected, ready for the gizmo.
+    pub fn extrudeSelectedFaces(self: *Editor, distance: f32) Error!usize {
+        const a = self.allocator;
+        const idx = self.model.mesh.indices;
+        var faces: std.ArrayList(u32) = .empty;
+        defer faces.deinit(a);
+        var normal: V = .{ 0, 0, 0 };
+        for (0..idx.len / 3) |t| if (self.triangleSelected(t)) {
+            try faces.append(a, @intCast(t));
+            normal = add(normal, faceNormal(self.model.mesh, @intCast(t)));
+        };
+        if (faces.items.len == 0) return error.EmptySelection;
+        const offset = scale(normalize(normal), distance);
+        // Boundary edges: welded edges used by exactly one selected face.
+        var edge_uses: std.AutoHashMapUnmanaged([2]u32, u32) = .empty;
+        defer edge_uses.deinit(a);
+        for (faces.items) |t| {
+            const tri = idx[t * 3 ..][0..3];
+            for (0..3) |k| {
+                const ea = self.topology.weld[tri[k]];
+                const eb = self.topology.weld[tri[(k + 1) % 3]];
+                const key: [2]u32 = if (ea < eb) .{ ea, eb } else .{ eb, ea };
+                const entry = try edge_uses.getOrPut(a, key);
+                entry.value_ptr.* = if (entry.found_existing) entry.value_ptr.* + 1 else 1;
+            }
+        }
+        var w = try self.startWork();
+        defer w.deinit(a);
+        var copy_of: std.AutoHashMapUnmanaged(u32, u32) = .empty;
+        defer copy_of.deinit(a);
+        var in_region = try std.DynamicBitSetUnmanaged.initEmpty(a, idx.len / 3);
+        defer in_region.deinit(a);
+        for (faces.items) |t| in_region.set(t);
+        for (0..idx.len / 3) |t| {
+            const tri = idx[t * 3 ..][0..3];
+            const sm = self.submeshOf(t);
+            if (!in_region.isSet(t)) {
+                try w.tris[sm].appendSlice(a, tri);
+                continue;
+            }
+            var cap: [3]u32 = undefined;
+            for (tri, &cap) |v, *c| {
+                const entry = try copy_of.getOrPut(a, v);
+                if (!entry.found_existing) {
+                    var moved = self.model.mesh.vertices[v];
+                    moved.position = add(moved.position, offset);
+                    entry.value_ptr.* = try w.copyVertex(a, v, moved);
+                    try w.select.append(a, entry.value_ptr.*);
+                }
+                c.* = entry.value_ptr.*;
+            }
+            try w.tris[sm].appendSlice(a, &cap);
+            // Walls along boundary edges: (a, b, b') and (a, b', a') keep the outward winding.
+            for (0..3) |k| {
+                const va = tri[k];
+                const vb = tri[(k + 1) % 3];
+                const ea = self.topology.weld[va];
+                const eb = self.topology.weld[vb];
+                const key: [2]u32 = if (ea < eb) .{ ea, eb } else .{ eb, ea };
+                if (edge_uses.get(key).? != 1) continue;
+                const ca = copy_of.get(va).?;
+                const cb = copy_of.get(vb).?;
+                try w.tris[sm].appendSlice(a, &.{ va, vb, cb, va, cb, ca });
+            }
+        }
+        self.selection.unsetAll();
+        try self.finish(&w);
+        try self.recomputeAllNormals();
+        return faces.items.len;
+    }
+
+    /// Splits the edge between the two selected vertex groups at its midpoint, dividing every
+    /// triangle along it in two. The new midpoint vertices are selected.
+    pub fn splitSelectedEdge(self: *Editor) Error!void {
+        const a = self.allocator;
+        const ends = try self.selectedEdge();
+        var w = try self.startWork();
+        defer w.deinit(a);
+        var mids: std.AutoHashMapUnmanaged([2]u32, u32) = .empty;
+        defer mids.deinit(a);
+        const idx = self.model.mesh.indices;
+        var split: usize = 0;
+        for (0..idx.len / 3) |t| {
+            const tri = idx[t * 3 ..][0..3];
+            const sm = self.submeshOf(t);
+            var k_found: ?usize = null;
+            for (0..3) |k| {
+                const ra = self.topology.weld[tri[k]];
+                const rb = self.topology.weld[tri[(k + 1) % 3]];
+                if ((ra == ends[0] and rb == ends[1]) or (ra == ends[1] and rb == ends[0])) k_found = k;
+            }
+            const k = k_found orelse {
+                try w.tris[sm].appendSlice(a, tri);
+                continue;
+            };
+            const va = tri[k];
+            const vb = tri[(k + 1) % 3];
+            const vc = tri[(k + 2) % 3];
+            const key: [2]u32 = if (va < vb) .{ va, vb } else .{ vb, va };
+            const entry = try mids.getOrPut(a, key);
+            if (!entry.found_existing) {
+                const pa = self.model.mesh.vertices[va];
+                const pb = self.model.mesh.vertices[vb];
+                var m = pa;
+                m.position = lerp(pa.position, pb.position, 0.5);
+                m.normal = normalize(add(pa.normal, pb.normal));
+                m.color = lerp(pa.color, pb.color, 0.5);
+                m.uv = .{ (pa.uv[0] + pb.uv[0]) / 2, (pa.uv[1] + pb.uv[1]) / 2 };
+                entry.value_ptr.* = try w.copyVertex(a, va, m);
+                try w.select.append(a, entry.value_ptr.*);
+            }
+            const mid = entry.value_ptr.*;
+            try w.tris[sm].appendSlice(a, &.{ va, mid, vc, mid, vb, vc });
+            split += 1;
+        }
+        if (split == 0) return error.EmptySelection;
+        self.selection.unsetAll();
+        try self.finish(&w);
+    }
+
+    /// Collapses the edge between the two selected vertex groups to its midpoint: both ends
+    /// meet there and the triangles along the edge disappear.
+    pub fn collapseSelectedEdge(self: *Editor) Error!void {
+        const a = self.allocator;
+        const ends = try self.selectedEdge();
+        const pa = self.model.mesh.vertices[ends[0]].position;
+        const pb = self.model.mesh.vertices[ends[1]].position;
+        const mid = lerp(pa, pb, 0.5);
+        var w = try self.startWork();
+        defer w.deinit(a);
+        for (self.topology.group(ends[0])) |v| w.list.items[v].position = mid;
+        for (self.topology.group(ends[1])) |v| w.list.items[v].position = mid;
+        const idx = self.model.mesh.indices;
+        for (0..idx.len / 3) |t| {
+            const tri = idx[t * 3 ..][0..3];
+            var has_a = false;
+            var has_b = false;
+            for (tri) |v| {
+                const r = self.topology.weld[v];
+                if (r == ends[0]) has_a = true;
+                if (r == ends[1]) has_b = true;
+            }
+            // Triangles spanning the edge collapse to slivers: drop them.
+            if (has_a and has_b) continue;
+            try w.tris[self.submeshOf(t)].appendSlice(a, tri);
+        }
+        for (self.topology.group(ends[0])) |v| try w.select.append(a, v);
+        self.selection.unsetAll();
+        try self.finish(&w);
+        try self.recomputeAllNormals();
+    }
+
+    /// The two selected welded groups joined by an edge, as their representatives.
+    fn selectedEdge(self: *const Editor) Error![2]u32 {
+        var reps: [2]u32 = undefined;
+        var n: usize = 0;
+        var it = self.selection.iterator(.{});
+        while (it.next()) |i| {
+            const r = self.topology.weld[i];
+            if (n > 0 and reps[0] == r) continue;
+            if (n == 1 and reps[1] == r) continue;
+            if (n == 2) return error.EmptySelection;
+            reps[n] = r;
+            n += 1;
+        }
+        if (n != 2) return error.EmptySelection;
+        for (self.topology.neighborsOf(reps[0])) |nb| if (nb == reps[1]) return reps;
+        return error.EmptySelection;
+    }
+
+    /// Normals of every vertex from its own triangles (after a topology edit).
+    fn recomputeAllNormals(self: *Editor) Error!void {
+        for (self.model.mesh.vertices, 0..) |*v, i| {
+            var n: V = .{ 0, 0, 0 };
+            for (self.topology.trianglesOf(@intCast(i))) |t| n = add(n, faceNormal(self.model.mesh, t));
+            if (dot(n, n) > 1e-20) v.normal = normalize(n);
+        }
+        // Keep the undo copy in step with the recomputed normals.
+        if (self.undo_stack.items.len > 0) if (self.undo_stack.items[self.undo_stack.items.len - 1].shape) |sh| {
+            @memcpy(sh.after.vertices, self.model.mesh.vertices);
+        };
+    }
+
     // ---- Tearing a mesh apart --------------------------------------------------------------
 
     /// Copies the triangles whose three corners are selected into a new standalone model (the
@@ -976,6 +1474,12 @@ fn intersect(o: V, d: V, a: V, b: V, c: V) ?f32 {
     if (v < 0 or u + v > 1) return null;
     const t = dot(e2, q) * inv;
     return if (t > 0) t else null;
+}
+
+fn rotateByQuat(q: [4]f32, v: V) V {
+    const u: V = .{ q[0], q[1], q[2] };
+    const t = scale(cross(u, v), 2);
+    return add(add(v, scale(t, q[3])), cross(u, t));
 }
 
 fn add(a: V, b: V) V {
@@ -1389,4 +1893,134 @@ test "curvature marks ridges positive and cavities negative" {
     try ed.end();
     try std.testing.expect(model.mesh.vertices[12].color[0] > 0.8);
     try std.testing.expect(model.mesh.vertices[6].color[0] < 0.2);
+}
+
+test "face and edge selection, selection bounds, and soft rotate and scale about the centre" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    const hit = ed.raycast(.{ 0.3, 5, 0.2 }, .{ 0, -1, 0 }) orelse return error.TestUnexpectedResult;
+    ed.selectFace(hit.triangle, true);
+    try std.testing.expectEqual(@as(usize, 3), ed.selectedCount());
+    try std.testing.expectEqual(@as(usize, 1), ed.selectedFaceCount());
+    // The point (0.3, 0, 0.02) is nearest the edge along z = 0 from vertex 0 to vertex 1.
+    const edge = ed.nearestEdge(hit.triangle, .{ 0.3, 0, 0.02 });
+    try std.testing.expect((edge[0] == 0 and edge[1] == 1) or (edge[0] == 1 and edge[1] == 0));
+    ed.clearSelection();
+    ed.selectFacesInSphere(.{ 2, 0, 2 }, 1, true);
+    try std.testing.expect(ed.selectedFaceCount() >= 4);
+    const b = ed.selectionBounds() orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 2), b.center[0], 0.2);
+    // Select the cube and spin it a quarter turn about its own centre on y.
+    ed.clearSelection();
+    ed.selectVertex(25, true);
+    try ed.selectLinked();
+    try ed.prepareSoft(0);
+    const box = ed.selectionBounds().?;
+    ed.begin();
+    try ed.rotate(box.center, .{ 0, 1, 0 }, std.math.pi / 2.0);
+    try ed.end();
+    const after = ed.selectionBounds().?;
+    for (box.center, after.center) |x, y| try std.testing.expectApproxEqAbs(x, y, 1e-4);
+    // A unit cube turned 90 degrees keeps its footprint.
+    try std.testing.expectApproxEqAbs(box.max[0] - box.min[0], after.max[0] - after.min[0], 1e-4);
+    ed.begin();
+    try ed.scaleBy(box.center, .{ 2, 1, 1 });
+    try ed.end();
+    const wide = ed.selectionBounds().?;
+    try std.testing.expectApproxEqAbs(2 * (box.max[0] - box.min[0]), wide.max[0] - wide.min[0], 1e-4);
+    try std.testing.expectApproxEqAbs(box.max[1] - box.min[1], wide.max[1] - wide.min[1], 1e-4);
+    // The grid did not move.
+    try std.testing.expectEqual(@as(f32, 0), model.mesh.vertices[0].position[0]);
+    _ = try ed.undo();
+    _ = try ed.undo();
+    const back = ed.selectionBounds().?;
+    for (box.min, back.min) |x, y| try std.testing.expectApproxEqAbs(x, y, 1e-5);
+}
+
+test "delete faces removes them and unused vertices, and undo restores the exact mesh" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    const vertices_before = model.mesh.vertices.len;
+    const indices_before = model.mesh.indices.len;
+    // Select the cube island and delete it.
+    ed.selectVertex(25, true);
+    try ed.selectLinked();
+    try std.testing.expectEqual(@as(usize, 12), try ed.deleteSelectedFaces());
+    try std.testing.expect(ed.topology_changed);
+    try std.testing.expectEqual(@as(usize, 25), model.mesh.vertices.len);
+    try std.testing.expectEqual(@as(usize, 96), model.mesh.indices.len);
+    try std.testing.expectEqual(@as(usize, 25), ed.topology.weld.len);
+    try std.testing.expect(ed.raycast(.{ 10, 5, 0 }, .{ 0, -1, 0 }) == null);
+    _ = try ed.undo();
+    try std.testing.expectEqual(vertices_before, model.mesh.vertices.len);
+    try std.testing.expectEqual(indices_before, model.mesh.indices.len);
+    try std.testing.expect(ed.raycast(.{ 10, 5, 0 }, .{ 0, -1, 0 }) != null);
+    _ = try ed.redo();
+    try std.testing.expectEqual(@as(usize, 25), model.mesh.vertices.len);
+    ed.clearSelection();
+    try std.testing.expectError(error.EmptySelection, ed.deleteSelectedFaces());
+}
+
+test "extruding a grid patch raises a cap with walls and keeps the surface closed" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // The two triangles of the grid cell between (1,1) and (2,2).
+    ed.selectVertex(6, true);
+    ed.selectVertex(7, true);
+    ed.selectVertex(11, true);
+    ed.selectVertex(12, true);
+    try std.testing.expectEqual(@as(usize, 2), try ed.extrudeSelectedFaces(0.5));
+    // Four new cap vertices, two cap triangles kept, four walls of two triangles each.
+    try std.testing.expectEqual(@as(usize, 25 + 24 + 4), model.mesh.vertices.len);
+    try std.testing.expectEqual(@as(usize, (32 + 12 + 8) * 3), model.mesh.indices.len);
+    try std.testing.expectEqual(@as(usize, 4), ed.selectedCount());
+    var it = ed.selection.iterator(.{});
+    while (it.next()) |i| try std.testing.expectApproxEqAbs(@as(f32, 0.5), model.mesh.vertices[i].position[1], 1e-5);
+    // A ray down onto the patch hits the raised cap; walls face outward (normals not pointing in).
+    const hit = ed.raycast(.{ 1.5, 5, 1.4 }, .{ 0, -1, 0 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 4.5), hit.distance, 1e-4);
+    const side = ed.raycast(.{ 1.5, 0.25, -5 }, .{ 0, 0, 1 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectApproxEqAbs(@as(f32, 6), side.distance, 1e-4);
+    try std.testing.expect(faceNormal(model.mesh, side.triangle)[2] < 0);
+    _ = try ed.undo();
+    try std.testing.expectEqual(@as(usize, 49), model.mesh.vertices.len);
+}
+
+test "splitting and collapsing an edge change the triangle count and stay undoable" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // Interior edge between grid vertices 7 (1,0,1)... use 6 (1,0,1) and 7 (2,0,1).
+    ed.selectVertex(6, true);
+    ed.selectVertex(7, true);
+    const tris_before = model.mesh.indices.len / 3;
+    try ed.splitSelectedEdge();
+    try std.testing.expectEqual(tris_before + 2, model.mesh.indices.len / 3);
+    try std.testing.expectEqual(@as(usize, 1), ed.selectedCount());
+    var it = ed.selection.iterator(.{});
+    const mid = it.next().?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), model.mesh.vertices[mid].position[0], 1e-6);
+    _ = try ed.undo();
+    try std.testing.expectEqual(tris_before, model.mesh.indices.len / 3);
+    ed.clearSelection();
+    ed.selectVertex(6, true);
+    ed.selectVertex(7, true);
+    try ed.collapseSelectedEdge();
+    try std.testing.expectEqual(tris_before - 2, model.mesh.indices.len / 3);
+    // Not an edge: two far-apart vertices are refused.
+    ed.clearSelection();
+    ed.selectVertex(0, true);
+    ed.selectVertex(24, true);
+    try std.testing.expectError(error.EmptySelection, ed.splitSelectedEdge());
 }

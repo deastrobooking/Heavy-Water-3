@@ -1575,3 +1575,22 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** new tests pass: ramp sampling, linear/radial/height fills respecting the selection, posterize to two bands and its rejection of one band, one undo step per fill, curvature sign on a peak, a pit and a cube corner, the GRAD drag on a turned and scaled model, and panel fills as single undo steps. The suite runs 494/502 with the same 8 failures. The showcase-48 capture under `MTL_DEBUG_LAYER=1` was inspected: ridges and plate edges are lightened, crevices darkened, and the panel fits. The 0.17 `build check` passes. The Metal smoke exited 0 and reached stage 9 (this run printed no closing "Smoke complete" line). The ReleaseFast build is installed.
 - **Not checked:** using the GRAD tool by hand; curvature on very dense meshes (it scans every vertex's ring, without caching).
 
+## Selection modes and gizmo (mesh editor S3) — 2026-10-20
+
+- **Added:** vertex, face and edge selection modes; a move/rotate/scale gizmo on the MOVE tool with axis handles; selection counts and size in the panel. Showcase 48 now ends on the move gizmo.
+- **Bugs found while testing, fixed:** clicking at the selection centre picked an axis (every handle starts at the pivot), and looking straight down an axis picked that handle, whose drag cannot move anything. The inner quarter of each handle and handles within about 18° of the view direction are no longer pickable. The existing "move tool drags the clicked corner" test caught both.
+- **Checked:** new tests pass: face pick and face-in-sphere selection, nearest edge, selection bounds, soft rotate and per-axis scale about the centre with one-step undo, the face/edge select modes through the tool, an X-handle drag that moves only along x, and a free scale that doubles the face. The suite runs 496/504 with the same 8 failures. The showcase-48 capture under `MTL_DEBUG_LAYER=1` was inspected: the three handles on the selected head, the info line and the mode buttons. The 0.17 `build check` passes and the Metal smoke completes 300 frames; the shared run below covers the install.
+- **Not checked:** rotating and scaling by hand with a mouse; the gizmo on very small or very large selections (the handle length is a fixed share of the model's height).
+
+## Topology operations (mesh editor S4) — 2026-10-20
+
+- **Added:** delete faces, extrude faces (as one region, with walls, the cap left selected for the gizmo), split edge and collapse edge, each one undo step holding the whole mesh before and after. After a topology edit the app re-registers the model with the catalog (new GPU buffers for the static and skinned paths) and detaches the part library, whose part ids belonged to the old vertices; a one-time message says so.
+- **Checked:**
+  - New tests pass: delete with vertex compaction and exact undo and redo, refusal with no faces selected; an extrude producing the expected vertex and triangle counts, a raised cap and outward-facing walls (checked with rays); split adding two triangles with a midpoint and its undo; collapse removing two triangles; a non-edge refused; and the topology buttons through the tool. The suite runs 500/508 with the same 8 failures.
+  - The showcase-48 capture under `MTL_DEBUG_LAYER=1` now extrudes a chest patch. The log shows the mesh at 5,704 vertices and the detach message, and the GPU-skinned character rendered after the rebuild with no validation error.
+  - The 0.17 `build check` passes, the Metal smoke completes 300 frames, and the ReleaseFast build is installed.
+- **Not checked:**
+  - Extrude, split and collapse by hand.
+  - Topology edits on a mesh whose welded seams split a selected region (walls follow welded edges; seam copies inside the region move together).
+  - Memory on very large meshes: every topology edit keeps two whole-mesh copies in the undo history (up to 64 steps).
+
