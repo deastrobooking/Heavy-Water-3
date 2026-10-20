@@ -2998,6 +2998,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.hud_lines[1].set("{d:.1} M/S  POWER {d:.0}%  WASD DRIVE  SPACE BRAKE  X / CLICK EXIT", .{ placed.vehicle.?.forwardSpeed(&sandbox.physics), placed.machine.satisfaction(motor) * 100 });
     } else if (sandbox.held) |i| {
         renderer.hud_lines[1].set("HOLDING CRATE {d}  CLICK DROP", .{i});
+    } else if (sandbox.player.boostTier() > 0) {
+        renderer.hud_lines[1].set("BOOST x{d}  {d:.0} M/S  {d:.1} KM UP", .{ @as(u32, 1) << @intCast(sandbox.player.boostTier()), @sqrt(sandbox.player.velocity[0] * sandbox.player.velocity[0] + sandbox.player.velocity[1] * sandbox.player.velocity[1] + sandbox.player.velocity[2] * sandbox.player.velocity[2]), sandbox.player.feet[1] / 1000 });
     } else switch (sandbox.target) {
         .prop => |i| renderer.hud_lines[1].set("CRATE {d}  X / CLICK GRAB", .{i}),
         .relic => |r| renderer.hud_lines[1].set("YOUNG TREE {d}:{d}:{d}  X / CLICK HARVEST", .{ r.ref.x, r.ref.z, r.ref.id }),

@@ -10,6 +10,11 @@ const Input = @import("../engine/Input.zig");
 const Biome = @import("../procedural/Biome.zig");
 const Player = @This();
 pub const Mode = enum { walk, fly };
+/// Held boost in free-fly or suit flight doubles the speed every this many seconds.
+pub const boost_tier_seconds: f32 = 1.2;
+/// Highest boost tier (speed x 2^tier). Terrain streaming, haze and f32 precision limit how far this
+/// can go; raise it only as those do (see docs/plans/flight-speed.md).
+pub const max_boost_tier: u32 = 3;
 pub const Traversal = enum { grapple, hover_jet, flight, hoverboard, energy_skate };
 pub const Motion = enum { idle, run, sprint, jump, long_jump, backflip, fall, roll, stomp, wall_slide, climb, hang, mantle, jet, hover, glide, dash, board, skate, grapple_zip, grapple_swing, swim };
 pub const eye_height: f32 = 1.62;
@@ -96,6 +101,9 @@ dash_direction: V = .{ 0, 0, 1 },
 flight_tap_window: f32 = 0,
 flight_tap_count: u8 = 0,
 flight_engaged: bool = false,
+/// Seconds boost has been held in powered flight. Every `boost_tier_seconds` adds a tier, and each
+/// tier doubles the flight speed.
+boost_hold: f32 = 0,
 boost_timer: f32 = 0,
 boost_cooldown: f32 = 0,
 landing: f32 = 0,
@@ -135,6 +143,18 @@ pub fn exitFlight(self: *Player, camera: *Camera) void {
     self.flight_engaged = false;
     self.motion = .fall;
     camera.position = self.eye();
+}
+/// The current boost tier, 0 when boost is not held in flight.
+pub fn boostTier(self: *const Player) u32 {
+    return @min(max_boost_tier, @as(u32, @intFromFloat(self.boost_hold / boost_tier_seconds)));
+}
+fn boostScale(tier: u32) f32 {
+    return @floatFromInt(@as(u32, 1) << @intCast(tier));
+}
+/// How fast velocity may change toward a flight target: never slower than `base`, and scaled to the
+/// speeds involved so a tier change (or letting go) settles in about a second at any tier.
+fn flightAccel(self: *const Player, base: f32, target_speed: f32) f32 {
+    return @max(base, 1.2 * @max(target_speed, R.length(self.velocity)));
 }
 fn approach(current: V, target: V, amount: f32) V {
     const delta = R.sub(target, current);
@@ -209,8 +229,9 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         const raw = R.add(R.add(R.scale(forward, input.forward), R.scale(right, input.right)), .{ 0, vertical, 0 });
         const magnitude = R.length(raw);
         const direction = if (magnitude > 0.05) R.scale(raw, 1 / magnitude) else R.scale(forward, 0.72);
-        const speed: f32 = if (input.fast) 55 else 28;
-        self.velocity = approach(self.velocity, R.scale(direction, speed), (if (input.fast) @as(f32, 56) else 38) * dt);
+        self.boost_hold = if (input.fast) self.boost_hold + dt else 0;
+        const speed: f32 = if (input.fast) 55 * boostScale(self.boostTier()) else 28;
+        self.velocity = approach(self.velocity, R.scale(direction, speed), self.flightAccel(if (input.fast) 56 else 38, speed) * dt);
         self.grounded = false;
         self.support = .none;
         self.motion = .jet;
@@ -219,6 +240,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         self.previous_jump = input.jump;
         return;
     }
+    if (!self.flight_engaged) self.boost_hold = 0;
     if (self.grounded) {
         self.jumped_since_ground = false;
         self.air_assist_engaged = false;
@@ -563,9 +585,10 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                 const flight_length = R.length(flight_raw);
                 const flight_strength = @min(1, flight_length);
                 const flight_dir = if (flight_length > 0.05) R.scale(flight_raw, 1 / flight_length) else @as(V, .{ 0, 0, 0 });
-                const flight_speed: f32 = if (input.fast) 52 else if (input.forward < -0.1) 18 else 32;
+                self.boost_hold = if (input.fast and flight_strength >= 0.05) self.boost_hold + dt else 0;
+                const flight_speed: f32 = if (input.fast) 52 * boostScale(self.boostTier()) else if (input.forward < -0.1) 18 else 32;
                 const target_velocity = R.scale(flight_dir, flight_speed * flight_strength);
-                self.velocity = approach(self.velocity, target_velocity, (if (input.fast) @as(f32, 44) else 32) * dt);
+                self.velocity = approach(self.velocity, target_velocity, self.flightAccel(if (input.fast) 44 else 32, flight_speed * flight_strength) * dt);
                 self.grounded = false;
                 self.motion = .jet;
                 const burn: f32 = if (flight_strength < 0.05) 1.2 else if (input.fast) 6 else 3.2;
@@ -634,13 +657,16 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     }
     camera.position = self.eye();
 }
+const max_move_substeps: f32 = 128;
 fn move(self: *Player, physics: *Physics, dt: f32) void {
     const carry = if (self.grounded) physics.velocity(self.support) orelse V{ 0, 0, 0 } else V{ 0, 0, 0 };
     const start = self.feet;
     const movement = R.scale(R.add(R.add(self.velocity, self.knockback), carry), dt);
     // Substeps prevent high-speed dashes and zip pulls crossing thin decks/walls.
-    const count: usize = @intFromFloat(@max(1, @ceil(R.length(movement) / 0.18)));
-    for (0..@min(count, 64)) |_| {
+    // The cap bounds the cost at boost-tier speeds; the move is split by the capped count, so a long
+    // step still covers its full distance (it used to fall short above the old 64-step cap).
+    const count: usize = @intFromFloat(@min(max_move_substeps, @max(1, @ceil(R.length(movement) / 0.18))));
+    for (0..count) |_| {
         const result = physics.moveCharacter(self.shape, self.feet, R.scale(movement, 1 / @as(f32, @floatFromInt(count))), self.grounded and self.velocity[1] <= 0);
         self.feet = result.feet;
         self.grounded = result.grounded;
@@ -871,4 +897,47 @@ test "a river deep enough floats a walker into a swim, and the bank walks them o
     // Back on dry ground the swim ends.
     runIn(&p, &physics, &camera, .{}, .{}, 90);
     try std.testing.expect(p.motion != .swim and p.grounded and p.wading == 0);
+}
+
+test "held boost doubles free-fly speed every tier and letting go drops back" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .position = math.vec3(0, 3000, 0) };
+    var player: Player = .{ .mode = .fly };
+    player.setMode(.fly, camera);
+    const forward: Input = .{ .forward = 1, .fast = true };
+    runFor(&player, &physics, &camera, forward, 60);
+    try std.testing.expectEqual(@as(u32, 0), player.boostTier());
+    try std.testing.expectApproxEqAbs(@as(f32, 55), R.length(player.velocity), 1);
+    var expected: f32 = 55;
+    for (1..max_boost_tier + 1) |tier| {
+        runFor(&player, &physics, &camera, forward, @intFromFloat(boost_tier_seconds * 60));
+        expected *= 2;
+        try std.testing.expectEqual(@as(u32, @intCast(tier)), player.boostTier());
+        try std.testing.expectApproxEqRel(expected, R.length(player.velocity), 0.03);
+    }
+    // The tier is capped, and a step this long still covers its whole distance (the substep cap).
+    const before = player.feet;
+    runFor(&player, &physics, &camera, forward, 60);
+    try std.testing.expectEqual(max_boost_tier, player.boostTier());
+    try std.testing.expectApproxEqRel(expected, R.length(R.sub(player.feet, before)), 0.03);
+    runFor(&player, &physics, &camera, .{ .forward = 1 }, 120);
+    try std.testing.expectEqual(@as(u32, 0), player.boostTier());
+    try std.testing.expectApproxEqAbs(@as(f32, 28), R.length(player.velocity), 1);
+}
+
+test "suit flight boost doubles each tier too and costs the same fuel" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{ .position = math.vec3(0, 3000, 0) };
+    var player: Player = .{ .feet = .{ 0, 3000, 0 }, .traversal = .flight, .flight_engaged = true };
+    player.setMode(.walk, camera);
+    player.feet = .{ 0, 3000, 0 };
+    player.traversal = .flight;
+    player.flight_engaged = true;
+    const forward: Input = .{ .forward = 1, .fast = true };
+    runIn(&player, &physics, &camera, forward, .{}, @intFromFloat(boost_tier_seconds * 60 * 2 + 40));
+    try std.testing.expectEqual(@as(u32, 2), player.boostTier());
+    try std.testing.expectApproxEqRel(@as(f32, 52 * 4), R.length(player.velocity), 0.05);
+    try std.testing.expect(player.fuel < player.suit.fuel_max);
 }
