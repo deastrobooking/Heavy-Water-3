@@ -1629,3 +1629,9 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Notes:** a mid-edge control point has no pull at the exact corners (quadratic Bernstein), so bending a box's corners needs the corner points; this is deliberate and the test uses the corners.
 - **Not checked:** dragging the lattice by hand; lattice on a skinned mesh while posing (it moves rest positions only); very dense meshes. The 0.17 `build check` passes, the Metal smoke completes 300 frames, and the ReleaseFast build is installed.
 
+## Metro terrain alignment — 2026-10-20
+
+- **Changed:** aligned Detroit, NYC, and Chicago heightmap samples to downtown arrival coordinates using the active geographic export bounds in the terrain-generation instructions. This replaces the centered Detroit raster and guessed NYC/Chicago pixel anchors. Updated the landscape plan and Earth README with the projection and regeneration notes. The existing 2048×2048 PNGs and HWMH imports were retained; no re-export was needed.
+- **Checked:** `python3 tools/zig.py build check` passes. The source images are 2048×2048, 16-bit grayscale. The NYC and Chicago imported settings remain 160 km square / 700 m and 550 m relief; Detroit remains 120 km square / 380 m relief.
+- **Not checked:** a live visual review of the revised arrival terrain, precise consistency of the original PNGs with their active bbox scripts (the PNGs have no georeferencing metadata), or the global Earth maps on the globe. The globe still uses its procedural land outline; the new global maps are documented as unused runtime assets.
+

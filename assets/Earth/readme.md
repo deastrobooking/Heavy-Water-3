@@ -70,4 +70,11 @@ fn main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
 Global Equirectangular UV Mapping (Planet Earth)When mapping earth_land_only_16bit.png or earth_topobathy_16bit.png onto a 3D sphere, use standard Equirectangular UV mapping equations derived from geographic coordinates $(\text{lat}, \text{lon})$:Python# Convert Latitude/Longitude to UV Texture Coordinates [0.0, 1.0]
 u = (longitude + 180.0) / 360.0
 v = (90.0 - latitude) / 180.0
-For global topobathy maps, consult planet_earth_manifest.json to find the exact 
+
+For global topobathy maps, consult `planet_earth_manifest.json` for the elevation range and sea-level encoding.
+
+## Heavy Water integration status
+
+The three metro rasters currently used by the game are stored at `assets/{detroit,nyc,chicago}_metro_heightmap_16bit.png`. Their export instructions specify geographic bounds, but the PNG files do not retain georeferencing metadata. The game records the active bounds and downtown anchor offsets in `src/procedural/CityHeightmaps.zig`; re-export is not needed to align the existing Detroit, NYC, or Chicago arrivals. If a raster is regenerated with a different bbox (including NYC's tighter alternate bbox), update those offsets too.
+
+The global `earth_land_only_16bit.png`, `earth_topobathy_16bit.png`, and `earth_land_mask_8bit.png` are not currently sampled by the in-game globe, which still uses a coarse procedural land outline. `planet_earth_manifest.json` describes the global map's projection and elevation range; these files are not metro heightmaps and should not be substituted into the local terrain importer.

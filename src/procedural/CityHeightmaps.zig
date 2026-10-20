@@ -17,14 +17,19 @@ const detroit_center = Region.detroit.arrival;
 const nyc_center = Region.new_york.arrival;
 const chicago_center = Region.chicago.arrival;
 const antarctica_center = Region.antarctica.arrival;
-// The NYC raster has open water at its image center. Anchor the Hudson Reach arrival to
-// the nearby low coastal pixel (785, 1010), keeping the skyline on land.
-const nyc_anchor_x: f32 = (785.0 / 2047.0 - 0.5) * 160000;
-const nyc_anchor_z: f32 = (1010.0 / 2047.0 - 0.5) * 160000;
-// The Chicago source has no georeferencing. Anchor the map near its lakefront at an
-// approximate downtown pixel; this preserves the dark Lake Michigan shelf east of arrival.
-const chicago_anchor_x: f32 = (1200.0 / 2047.0 - 0.5) * 160000;
-const chicago_anchor_z: f32 = (1000.0 / 2047.0 - 0.5) * 160000;
+// These source PNGs have no embedded georeferencing, so map their documented export
+// bounds to the downtown arrivals. The bounds are the active EPSG:4326 boxes in the
+// terrain-generation instructions; row zero is north, matching Heightmap.sample's -Z.
+// X is linear in longitude; Y uses Web Mercator because the export images use EPSG:3857.
+// Detroit downtown (42.3314, -83.0458), bbox (-83.68, 42.05, -82.70, 42.75).
+const detroit_anchor_x: f32 = 17657.14;
+const detroit_anchor_z: f32 = 11920.73;
+// Lower Manhattan / NYC downtown (40.7128, -74.0060), bbox (-74.45, 40.45, -73.55, 41.12).
+const nyc_anchor_x: f32 = -1066.67;
+const nyc_anchor_z: f32 = 17433.96;
+// Chicago downtown (41.8781, -87.6298), bbox (-88.30, 41.50, -87.30, 42.24).
+const chicago_anchor_x: f32 = 27232.0;
+const chicago_anchor_z: f32 = -1519.90;
 // This continent raster has no georeferencing; use its center as the subglacial Hive landing.
 const antarctica_anchor_x: f32 = 0;
 const antarctica_anchor_z: f32 = 0;
@@ -47,8 +52,8 @@ pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
             return blendToFallback(antarctica_map, x - antarctica_center[0] + antarctica_anchor_x, z - antarctica_center[1] + antarctica_anchor_z, height, seed, x, z);
         }
     }
-    const dx = x - detroit_center[0];
-    const dz = z - detroit_center[1];
+    const dx = x - detroit_center[0] + detroit_anchor_x;
+    const dz = z - detroit_center[1] + detroit_anchor_z;
     if (sampleMap(detroit_map, dx, dz)) |height| return blendToFallback(detroit_map, dx, dz, height, seed, x, z);
     return fallbackHeight(seed, x, z);
 }
