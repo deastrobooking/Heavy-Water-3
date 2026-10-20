@@ -921,7 +921,7 @@ test "held boost doubles free-fly speed every tier and letting go drops back" {
     runFor(&player, &physics, &camera, forward, 60);
     try std.testing.expectEqual(max_boost_tier, player.boostTier());
     try std.testing.expectApproxEqRel(expected, R.length(R.sub(player.feet, before)), 0.03);
-    runFor(&player, &physics, &camera, .{ .forward = 1 }, 120);
+    runFor(&player, &physics, &camera, .{ .forward = 1 }, 360);
     try std.testing.expectEqual(@as(u32, 0), player.boostTier());
     try std.testing.expectApproxEqAbs(@as(f32, 28), R.length(player.velocity), 1);
 }

@@ -62,10 +62,12 @@ test "surface matches rendered chunk vertices and triangle interiors, including 
 
 test "New York collision queries use the regional seed the mesh is drawn with" {
     const world: u64 = 42;
-    const mesh = try Chunk.generate(std.testing.allocator, world, 10, -1);
+    const Region = @import("../world/Region.zig");
+    const key = @import("../world/ChunkKey.zig").fromPosition(Region.new_york.arrival[0], Region.new_york.arrival[1]);
+    const mesh = try Chunk.generate(std.testing.allocator, world, key.x, key.z);
     defer mesh.deinit(std.testing.allocator);
     for (mesh.vertices[0..Chunk.terrain_vertex_count]) |vertex| {
         try std.testing.expectApproxEqAbs(vertex.position[1], surface(world, vertex.position[0], vertex.position[2]).height, 0.0001);
     }
-    try std.testing.expect(Chunk.regionalSeed(world, 10, -1) != world);
+    try std.testing.expect(Chunk.regionalSeed(world, key.x, key.z) != world);
 }
