@@ -1594,10 +1594,16 @@ fn trackedTarget(kind: Menu.MapTarget, sb: *const Sandbox, from: [3]f32, player:
     return best;
 }
 
+/// Vertical step of the world-map rows (a row is this minus 3 units tall).
+const map_row_step: f32 = 24;
+
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const r = menuRect(c, @min(720, c.width - 30), @min(690, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
-    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - (if (menu.map_zoom == 3) @as(f32, 450) else 390) };
+    // The rows (every travel destination, the frame row and RESUME) set the map's height, so the
+    // list always fits: the panel used to overflow once there were more than eight rows.
+    const rows_h = @as(f32, @floatFromInt(Menu.map_items.len)) * map_row_step;
+    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = @max(60, r.h - (55 + 40 + rows_h + 63 + (if (menu.map_zoom == 3) @as(f32, 60) else 0))) };
     c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
     const span: f32 = switch (menu.map_zoom) {
         0 => 1400,
@@ -1689,19 +1695,19 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     }
     c.print(r.x + 22, map.y + map.h + 15, 1, ink, "P{d} / GOLD: DESTINATION / {s} VIEW", .{ menu.hero_player + 1, if (menu.map_frame_destination) "DESTINATION" else "PLAYER" });
     for (Menu.map_items, 0..) |item, i| {
-        const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = r.w - 24, .h = 26 };
+        const row: Rect = .{ .x = r.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * map_row_step, .w = r.w - 24, .h = map_row_step - 3 };
         rowBack(c, row, menu.row == i);
         const on = menu.enabled(i);
         if (i == Menu.frame_row) {
             const label: []const u8 = switch (menu.map_target) { .none => "TRACK TARGET: OFF", .nest => "TRACK TARGET: HIVE NESTS", .cave => "TRACK TARGET: CAVES", .wildkin => "TRACK TARGET: WILDKIN", .wildlife => "TRACK TARGET: CAPTURABLE WILDLIFE" };
-            c.text(row.x + 12, row.y + 9, label, 1, if (menu.row == i) accent else ink);
-        } else c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
+            c.text(row.x + 12, row.y + 6, label, 1, if (menu.row == i) accent else ink);
+        } else c.text(row.x + 12, row.y + 6, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
         if (on) c.hit(row, hitId(.menu, i));
         if (i < Sandbox.travel_count) {
             const point = sb.travelPoint(i);
             const dx = point[0] - player_position[0];
             const dz = point[2] - player_position[2];
-            c.print(row.x + row.w - 175, row.y + 9, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
+            c.print(row.x + row.w - 175, row.y + 6, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
         }
     }
     c.text(r.x + 22, r.y + r.h - 24, "ENTER CYCLE TARGET / LEFT FRAME / RIGHT ZOOM OUT / ESC BACK", 1, dim);
@@ -1783,19 +1789,19 @@ fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: 
     c.centered(center_x, map.y + map.h - 16, "24 CITIES: BIOME COLOR  /  10 MOUNTAINS: BLUE  /  6 STRONGHOLDS: VIOLET  /  GOLD: PLAYABLE", 0.72, dim);
 
     for (Menu.map_items, 0..) |item, i| {
-        const row: Rect = .{ .x = panel_rect.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = panel_rect.w - 24, .h = 26 };
+        const row: Rect = .{ .x = panel_rect.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * map_row_step, .w = panel_rect.w - 24, .h = map_row_step - 3 };
         rowBack(c, row, menu.row == i);
         const on = menu.enabled(i);
         if (i == Menu.frame_row) {
-            c.text(row.x + 12, row.y + 9, "TRACK TARGET / FRAME MAP", 1, if (menu.row == i) accent else ink);
-        } else c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
+            c.text(row.x + 12, row.y + 6, "TRACK TARGET / FRAME MAP", 1, if (menu.row == i) accent else ink);
+        } else c.text(row.x + 12, row.y + 6, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
         if (on) c.hit(row, hitId(.menu, i));
         if (i < Sandbox.travel_count) {
             const point = sb.travelPoint(i);
             const player = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
             const dx = point[0] - player[0];
             const dz = point[2] - player[2];
-            c.print(row.x + row.w - 175, row.y + 9, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
+            c.print(row.x + row.w - 175, row.y + 6, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
         }
     }
     c.text(panel_rect.x + 22, panel_rect.y + panel_rect.h - 24, "SELECT A DESTINATION BELOW  /  ENTER TRAVEL  /  ESC BACK", 1, dim);

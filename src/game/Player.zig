@@ -365,7 +365,10 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         const swim_direction = if (swim_length > 0.05) R.scale(swim_raw, 1 / @max(1, swim_length)) else @as(V, @splat(0));
         const swim_speed: f32 = if (swim_boost) 18 else 5.2;
         const target = R.scale(swim_direction, swim_speed);
-        const buoyancy = if (swim_length > 0.05) 0 else std.math.clamp((top - 0.72 - self.feet[1]) * 3, -2.5, 3);
+        // The water lifts a swimmer toward the surface unless they are steering up or down: any
+        // input used to switch this off, so swimming forward at level pitch never surfaced.
+        const steering_vertically = vertical != 0 or @abs(swim_direction[1]) > 0.35;
+        const buoyancy = if (steering_vertically) 0 else std.math.clamp((top - 0.72 - self.feet[1]) * 3, -2.5, 3);
         self.velocity = approach(self.velocity, .{ target[0], target[1] + buoyancy, target[2] }, (if (swim_boost) @as(f32, 24) else 16) * dt);
         self.move(physics, dt);
         camera.position = self.eye();

@@ -132,7 +132,7 @@ pub fn generate(seed: u64, archetype: Archetype) Layout {
         const dx: i16 = @as(i16, to[0]) - from[0];
         const dz: i16 = @as(i16, to[1]) - from[1];
         const side: Side = if (dx > 0) .east else if (dx < 0) .west else if (dz > 0) .north else .south;
-        const connector = if (result.rooms[parent].floor_y == result.rooms[index].floor_y) .corridor else switch (archetype) {
+        const connector: Connector = if (result.rooms[parent].floor_y == result.rooms[index].floor_y) .corridor else switch (archetype) {
             .scalari_mechworks => .lift,
             .hive_broodworks => .resin_tube,
             .mountain_vault => .vertical_shaft,

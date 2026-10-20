@@ -37,6 +37,7 @@ const Metro = @import("../procedural/Metro.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
+const Mountains = @import("../procedural/Mountains.zig");
 const Chunk = @import("../procedural/Chunk.zig");
 const Region = @import("../world/Region.zig");
 const Host = @import("../script/Host.zig");
@@ -2642,7 +2643,10 @@ test "a player walks in through a cave mouth and stays underground on the cave f
     try testSandbox(&sandbox, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
     defer sandbox.deinit();
-    const sys = &sandbox.caves.systems[0];
+    // Walk in through the first cave whose approach a walker can climb, and require that one exists.
+    const picked = sandbox.walkableCave();
+    const index = picked orelse return error.NoWalkableCaveMouth;
+    const sys = &sandbox.caves.systems[index];
     // Ten metres outside the mouth, facing in.
     const start = R.add(sys.entrance, R.scale(sys.inward, -10));
     sandbox.player = .{ .feet = .{ start[0], Terrain.surface(sandbox.seed, start[0], start[2]).height, start[2] }, .mode = .walk };
@@ -2652,13 +2656,14 @@ test "a player walks in through a cave mouth and stays underground on the cave f
     for (0..60 * 8) |_| {
         try run(&sandbox, &camera, .{ .forward = 1 }, .{}, 1);
         const f = sandbox.player.feet;
-        if (Caves.systemAt(&sandbox.caves, R.add(f, .{ 0, 1, 0 })) == 0 and f[1] < Terrain.surface(sandbox.seed, f[0], f[2]).height - 4) underground = true;
+        if (Caves.systemAt(&sandbox.caves, R.add(f, .{ 0, 1, 0 })) == @as(?u8, @intCast(index)) and f[1] < Terrain.surface(sandbox.seed, f[0], f[2]).height - 4) underground = true;
         // Never lifted onto the mountainside above the cave.
         if (underground) try std.testing.expect(f[1] < Terrain.surface(sandbox.seed, f[0], f[2]).height - 1);
     }
     try std.testing.expect(underground);
-    try std.testing.expect(!sandbox.cave_colliders[0].eql(.none));
-    try std.testing.expect(sandbox.progress.hasFlag("cave_0_found"));
+    try std.testing.expect(!sandbox.cave_colliders[index].eql(.none));
+    var found: [16]u8 = undefined;
+    try std.testing.expect(sandbox.progress.hasFlag(std.fmt.bufPrint(&found, "cave_{d}_found", .{index}) catch unreachable));
     // Standing on the cave's floor, well inside, near the first chamber's floor height.
     try run(&sandbox, &camera, .{}, .{}, 30);
     try std.testing.expect(sandbox.player.grounded);
@@ -4205,7 +4210,9 @@ fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
         return null;
     }
     var ring: i32 = 0;
-    while (ring <= 6) : (ring += 1) {
+    // Regions search wider than a station: some arrivals share a spot with a cave mouth, whose
+    // collider takes the first few rings.
+    while (ring <= 24) : (ring += 1) {
         var z = -ring;
         while (z <= ring) : (z += 1) {
             var x = -ring;
@@ -4226,6 +4233,20 @@ fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
                 if (!self.physics.overlapsBox(R.add(point, .{ 0, shape.height / 2, 0 }), .{ shape.radius, shape.height / 2, shape.radius })) return point;
             }
         }
+    }
+    return null;
+}
+
+/// The first mountain cave whose mouth a walker can reach on foot: gentle ground both ten metres
+/// outside it and at the mouth. Steeper mouths are for gliding and grappling. Null when no range
+/// has one, which the tests treat as a content bug.
+pub fn walkableCave(self: *const Sandbox) ?usize {
+    for (self.caves.systems[0..self.caves.count], 0..) |*candidate, ci| {
+        if (candidate.range >= Mountains.count) continue;
+        const spot = R.add(candidate.entrance, R.scale(candidate.inward, -10));
+        const here = Terrain.surface(self.seed, spot[0], spot[2]).normal[1];
+        const mouth = Terrain.surface(self.seed, candidate.entrance[0], candidate.entrance[2]).normal[1];
+        if (here > 0.7 and mouth > 0.7) return ci;
     }
     return null;
 }
@@ -4316,6 +4337,28 @@ test "New York has deterministic regional terrain, skyline landmarks, and a safe
     try std.testing.expect(newYorkLandmark(sb.seed, new_york_landmarks.len) == null);
     const safe = travelArrival(&sb, detroit_travel_count) orelse return error.TestUnexpectedResult;
     try std.testing.expect(!sb.physics.overlapsBox(R.add(safe, .{ 0, 0.9, 0 }), .{ 0.4, 0.9, 0.4 }));
+}
+
+test "every travel destination has a safe arrival a player can be placed on" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    for (0..travel_count) |destination| {
+        // A destination with no arrival is refused in the game ("no safe arrival"), so every row
+        // of the map must resolve to a spot on walkable ground.
+        const point = sb.travelArrival(destination) orelse {
+            std.debug.print("no safe arrival for {s}\n", .{travel_labels[destination]});
+            return error.NoSafeArrival;
+        };
+        try std.testing.expect(std.math.isFinite(point[1]));
+        // Close to the advertised spot, not somewhere unrelated.
+        const want = sb.travelPoint(destination);
+        try std.testing.expect(@sqrt((point[0] - want[0]) * (point[0] - want[0]) + (point[2] - want[2]) * (point[2] - want[2])) <= 70);
+        try std.testing.expect(sb.fastTravel(0, destination, &camera));
+    }
 }
 
 test "travel searches around obstructions and leaves state untouched when no arrival fits" {

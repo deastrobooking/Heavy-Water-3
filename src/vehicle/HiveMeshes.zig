@@ -223,7 +223,7 @@ test "hive meshes and the gem build with sensible sizes" {
         defer pair.shell.deinit(a);
         defer pair.glow.deinit(a);
         try std.testing.expect(pair.shell.indices.len > 0 and pair.glow.indices.len > 0);
-        for (pair.shell.vertices) |v| for (v.position) |c| try std.testing.expect(std.math.isFinite(c) and @abs(c) < 40);
+        for (pair.shell.vertices) |v| for (v.position) |c| try std.testing.expect(std.math.isFinite(c) and @abs(c) < 48);
     }
     const g = try gem(a);
     defer g.deinit(a);

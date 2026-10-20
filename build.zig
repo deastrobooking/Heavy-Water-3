@@ -152,7 +152,8 @@ pub fn build(b: *std.Build) void {
         run.addArgs(args);
     }
     b.step("run", "Explore the engine test world").dependOn(&run.step);
-    const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }) });
+    const test_filters = b.option([]const []const u8, "test-filter", "Only run tests whose name contains this text (repeat the option for several)") orelse &.{};
+    const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }), .filters = test_filters });
     tests.root_module.addImport("mach", mach.module("mach"));
     tests.root_module.addImport("enum_compat", enum_compat);
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });

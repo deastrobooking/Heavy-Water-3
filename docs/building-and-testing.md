@@ -16,7 +16,7 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 | `python3 tools/zig.py build` | Builds and installs the game to `zig-out/bin/heavy-water` (Debug unless `-Doptimize` is given). |
 | `python3 tools/zig.py build run` | Builds and runs the game from the build cache (not the installed copy). |
 | `python3 tools/zig.py build check` | Compiles the application without running it. |
-| `python3 tools/zig.py build test` | Runs every deterministic test, headless. Add `--summary all` to see the pass count. |
+| `python3 tools/zig.py build test` | Runs every deterministic test, headless. Add `--summary all` to see the pass count, and `-Dtest-filter="part of a test name"` (repeatable) to run only matching tests in seconds instead of minutes. |
 | `python3 tools/zig.py build assets` | Compiles source assets (glTF models, blueprints, and the modifier-baked Captain preview) into `zig-out/assets/`. |
 | `python3 tools/zig.py build import` | Creates missing `.meta` sidecars (new GUIDs) and refreshes source hashes under `assets/source`. Run it after adding or changing a source asset. |
 | `zig-out/bin/asset-compiler trace <source.glb|source.gltf> <source.meta> <report.json>` | Writes a GUID/hash-linked inventory of scene parts, material slots, dependencies, authored/generated normals, skin joint names/hierarchy and importer gaps. Build the tool with `python3 tools/zig.py build` first. |

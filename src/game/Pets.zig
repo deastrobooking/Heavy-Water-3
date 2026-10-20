@@ -672,21 +672,25 @@ test "a pet follows its ranger, fights the Hive near them, and the moth mends" {
     defer physics.deinit();
     for (std.enums.values(Species)) |species| {
         var pets: Pets = .{};
-        pets.summon(0, species, .{ 0, 0, 0 }, 1);
+        // Everything stands on the terrain, which near the origin is the Detroit raster.
+        pets.summon(0, species, .{ 0, Terrain.surface(1, 0, 0).height, 0 }, 1);
         var enemies: Enemies = .{};
         var skies: Skies = .{};
-        const ctx: Context = .{ .owner = .{ 20, 0, 0 }, .owner_yaw = 0, .level = 1, .seed = 1, .physics = &physics, .skies = &skies };
+        const ctx: Context = .{ .owner = .{ 20, Terrain.surface(1, 20, 0).height, 0 }, .owner_yaw = 0, .level = 1, .seed = 1, .physics = &physics, .skies = &skies };
         var hive: [16]Enemies.Event = undefined;
         var hn: usize = 0;
         var events: [8]Event = undefined;
         // It catches up with the ranger and settles beside them.
         for (0..240) |_| _ = pets.step(0, ctx, &enemies, 1.0 / 60.0, &hive, &hn, &events);
         const p = pets.out[0].?;
-        try std.testing.expect(R.length(R.sub(.{ p.position[0], 0, p.position[2] }, ctx.owner)) < 2.5);
-        if (info(species).flies) try std.testing.expect(p.position[1] > 1.5) else try std.testing.expectApproxEqAbs(@as(f32, 0), p.position[1], 0.01);
+        try std.testing.expect(R.length(R.sub(.{ p.position[0], ctx.owner[1], p.position[2] }, ctx.owner)) < 2.5);
+        // Walkers stand on the terrain (the Detroit raster near the origin), not at y = 0.
+        const stand = Terrain.surface(ctx.seed, p.position[0], p.position[2]).height;
+        if (info(species).flies) try std.testing.expect(p.position[1] > stand + 1.5) else try std.testing.expectApproxEqAbs(stand, p.position[1], 0.01);
         // A drone near the ranger is attacked until it falls.
-        const nest = enemies.addArenaNest(.{ 60, 0, 60 });
-        try std.testing.expect(enemies.spawnAt(.trooper, nest, .{ 26, 0, 4 }, 1));
+        const foe_at: [3]f32 = .{ 26, Terrain.surface(ctx.seed, 26, 4).height, 4 };
+        const nest = enemies.addArenaNest(.{ 60, Terrain.surface(ctx.seed, 60, 60).height, 60 });
+        try std.testing.expect(enemies.spawnAt(.trooper, nest, foe_at, 1));
         var attacks: usize = 0;
         var mends: usize = 0;
         var downed = false;
@@ -702,7 +706,7 @@ test "a pet follows its ranger, fights the Hive near them, and the moth mends" {
             if (downed) break;
             // Keep the trooper in place: this tests the pet, not the Hive.
             for (&enemies.units) |*u| if (u.*) |*unit| {
-                unit.position = .{ 26, 0, 4 };
+                unit.position = foe_at;
                 unit.cooldown = 10;
             };
         }

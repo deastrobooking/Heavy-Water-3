@@ -1232,6 +1232,11 @@ test "dragonflies are fragile interceptors and bomber raids can be defended or l
     sky = Skies.init(72, .{ 0, 0, 0 }, &.{});
     sky.carriers[0].alive = false;
     sky.carriers[1].alive = false;
+    // Without a district the default plazas sit at y = 0, but near the origin the terrain is the
+    // Detroit raster (about 113 m) and wasps stay 24 m clear of it, so a bomber could never reach
+    // a plaza underground. Real plazas come from the district, high in the canopy; hang these
+    // 60 m above the ground, like them.
+    for (&sky.market_plazas) |*plaza_point| plaza_point[1] = Terrain.surface(72, plaza_point[0], plaza_point[2]).height + 60;
     const plaza = sky.market_plazas[1];
     sky.raid_active = true;
     sky.raid_plaza = 1;

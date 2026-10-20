@@ -243,7 +243,13 @@ test "plans cull by frustum and distance, pick LOD by distance, and merge contig
     }
     try std.testing.expectEqual(p.instances[0] + p.instances[1], covered);
     try std.testing.expect(p.run_count < p.visible_cells);
-    // Looking straight up sees no cells.
-    const up: Camera = .{ .position = math.vec3(eye[0], eye[1], eye[2]), .yaw = 0, .pitch = 1.5 };
-    try std.testing.expectEqual(@as(usize, 0), f.plan(eye, up.viewProjection(1.5)).visible_cells);
+    // Looking straight up from above every cell sees none. Instances follow the terrain, which
+    // near the origin is the Detroit raster (well above y = 60), so the eye must clear the tops.
+    var ceiling: f32 = 0;
+    for (f.cells) |cell| if (cell.count > 0) {
+        ceiling = @max(ceiling, cell.center[1] + cell.radius);
+    };
+    const high: [3]f32 = .{ eye[0], ceiling + 10, eye[2] };
+    const up: Camera = .{ .position = math.vec3(high[0], high[1], high[2]), .yaw = 0, .pitch = 1.5 };
+    try std.testing.expectEqual(@as(usize, 0), f.plan(high, up.viewProjection(1.5)).visible_cells);
 }

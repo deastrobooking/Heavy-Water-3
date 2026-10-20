@@ -26,6 +26,10 @@ const Mesh = @import("../render/Mesh.zig");
 
 pub const V = [3]f32;
 pub const per_range = 2;
+/// Steepest approach slope (rise over run) a preferred cave mouth may have; the walkable limit is
+/// about 1.33 (normal.y 0.6), so this leaves a margin.
+const max_approach_slope: f32 = 0.8;
+
 pub const max_systems = Mountains.count * per_range + 1;
 pub const max_rooms = 7;
 /// Lattice spacing of the cave mesh.
@@ -220,16 +224,29 @@ fn plan(seed: u64, s: u64, ri: u8, range: Mountains.Range, k: usize) ?System {
     const sign: f32 = if ((k + ri) % 2 == 0) 1 else -1;
     const out: [2]f32 = .{ (b[1] - a[1]) / dl * sign, -(b[0] - a[0]) / dl * sign };
     // Walk in from the flank's foot to the first point a quarter of the way up the massif.
+    // Prefer a mouth a walker can climb to: the first point on the flank that is high enough and
+    // whose approach slope stays under `max_approach_slope`. A range with no such point keeps its
+    // first high-enough point (reachable by gliding or grappling), so it still gets its caves.
     var d = range.half_width * 0.95;
     var mouth: ?[2]f32 = null;
+    var steep: ?[2]f32 = null;
     while (d > range.half_width * 0.25) : (d -= 6) {
         const x = spine[0] + out[0] * d;
         const z = spine[1] + out[1] * d;
         if (Mountains.height(seed, x, z) > range.peak * 0.22) {
-            mouth = .{ x, z };
-            break;
+            if (steep == null) steep = .{ x, z };
+            // The slope over the 30 m approach outside the mouth (where the walker arrives) and the
+            // 16 m into the rock.
+            const outside = terrain(seed, x + out[0] * 30, z + out[1] * 30);
+            const inside = terrain(seed, x - out[0] * 16, z - out[1] * 16);
+            const here = terrain(seed, x, z);
+            if (@abs(here - outside) / 30 <= max_approach_slope and @abs(inside - here) / 16 <= max_approach_slope * 1.25) {
+                mouth = .{ x, z };
+                break;
+            }
         }
     }
+    if (mouth == null) mouth = steep;
     const m = mouth orelse return null;
     const inward: V = .{ -out[0], 0, -out[1] };
     var sys: System = .{ .range = ri, .entrance = .{ m[0], terrain(seed, m[0], m[1]), m[1] }, .inward = inward, .noise = Seed.mix(s ^ 0x524f434b) };

@@ -216,7 +216,12 @@ test "generation repeats for the same seed and changes with a different seed" {
     defer c.deinit(std.testing.allocator);
     try std.testing.expectEqualSlices(Mesh.Vertex, a.vertices, b.vertices);
     try std.testing.expectEqualSlices(u32, a.indices, b.indices);
-    try std.testing.expect(a.vertices[0].position[1] != c.vertices[0].position[1]);
+    // Terrain near the origin follows the Detroit raster, so the seed no longer moves the ground
+    // there; it still drives the surface colour and everything the regional seed feeds (rivers,
+    // caves, scatter).
+    var differs = false;
+    for (a.vertices, c.vertices) |x, y| differs = differs or !std.meta.eql(x.color, y.color) or x.position[1] != y.position[1];
+    try std.testing.expect(differs);
 }
 
 fn allocationProbe(allocator: std.mem.Allocator) !void {

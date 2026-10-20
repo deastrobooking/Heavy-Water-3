@@ -174,6 +174,8 @@ vertex_edits_pending: bool = false,
 mesh_library_detached: bool = false,
 /// Look for saved vertex edits once the mesh they apply to is installed.
 edited_mesh_check: bool = true,
+/// Scripted smoke checks that failed; a nonzero count fails the smoke run at exit.
+smoke_failures: u32 = 0,
 queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
@@ -2210,6 +2212,14 @@ fn project(camera: @import("world/Camera.zig"), view: Screens.Rect, point: [3]f3
     return .{ view.x + (nx * 0.5 + 0.5) * view.w, view.y + (0.5 - ny * 0.5) * view.h };
 }
 
+/// A failed scripted-smoke check: logged like a status message, and counted so the run exits
+/// nonzero at the end. (These used to be status text only, so a refused travel destination or a
+/// missed cave walk-in still ended with a clean exit.)
+fn smokeFail(self: *App, comptime fmt: []const u8, args: anytype) void {
+    self.smoke_failures += 1;
+    self.report(fmt, args);
+}
+
 fn report(self: *App, comptime fmt: []const u8, args: anytype) void {
     self.status.set(fmt, args);
     self.status_until = self.engine.time.tick + 4 * 60;
@@ -2375,11 +2385,11 @@ fn exerciseSmoke(self: *App) void {
             // Visit every fast-travel destination; the last (New York) stays loaded for the frames
             // until stage 2, so its chunks stream and draw under the Metal validation layer.
             for (0..Sandbox.travel_count) |destination| {
-                if (!self.sandbox.fastTravel(0, destination, camera)) return self.report("SMOKE TRAVEL {s} REFUSED", .{Sandbox.travel_labels[destination]});
+                if (!self.sandbox.fastTravel(0, destination, camera)) return self.smokeFail("SMOKE TRAVEL {s} REFUSED", .{Sandbox.travel_labels[destination]});
                 const feet = self.sandbox.player.feet;
                 // Metro platforms are decks above the ground; only the open-terrain arrival is checked.
                 const ground = @import("procedural/Terrain.zig").surface(self.sandbox.seed, feet[0], feet[2]).height;
-                if (Sandbox.travel_destinations[destination].kind == .region and @abs(feet[1] - ground) > 2) return self.report("SMOKE TRAVEL {s} OFF GROUND", .{Sandbox.travel_labels[destination]});
+                if (Sandbox.travel_destinations[destination].kind == .region and @abs(feet[1] - ground) > 2) return self.smokeFail("SMOKE TRAVEL {s} OFF GROUND", .{Sandbox.travel_labels[destination]});
                 std.log.info("Smoke travel {s}: {d:.0} {d:.0} {d:.0}", .{ Sandbox.travel_labels[destination], feet[0], feet[1], feet[2] });
             }
         },
@@ -2416,9 +2426,9 @@ fn exerciseSmoke(self: *App) void {
         4 => {
             // In-memory save/restore round trip; never touches the user's save file.
             const held = self.sandbox.held;
-            const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE SAVE {s}", .{@errorName(err)});
+            const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE SAVE {s}", .{@errorName(err)});
             defer self.allocator.free(bytes);
-            self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE LOAD {s}", .{@errorName(err)});
+            self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE LOAD {s}", .{@errorName(err)});
             std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machineCount(), bytes.len });
             // Build a powered lamp circuit directly through the tool APIs, then drive.
             self.smokeBuild();
@@ -2466,10 +2476,10 @@ fn exerciseSmoke(self: *App) void {
         9 => {
             std.log.info("Smoke co-op: P2 at {d:.1} {d:.1} {d:.1}, motion {s}", .{ self.sandbox.guests[0].player.feet[0], self.sandbox.guests[0].player.feet[1], self.sandbox.guests[0].player.feet[2], @tagName(self.sandbox.guests[0].player.motion) });
             self.sandbox.leaveGuest(0);
-            _ = self.sandbox.addBridge(.{ .a = 0, .b = 3 }) catch |err| return self.report("SMOKE BRIDGE {s}", .{@errorName(err)});
-            const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.report("SMOKE CITY SAVE {s}", .{@errorName(err)});
+            _ = self.sandbox.addBridge(.{ .a = 0, .b = 3 }) catch |err| return self.smokeFail("SMOKE BRIDGE {s}", .{@errorName(err)});
+            const bytes = self.sandbox.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE CITY SAVE {s}", .{@errorName(err)});
             defer self.allocator.free(bytes);
-            self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.report("SMOKE CITY LOAD {s}", .{@errorName(err)});
+            self.sandbox.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE CITY LOAD {s}", .{@errorName(err)});
             var trips: u32 = 0;
             for (self.sandbox.life.cars) |slot| if (slot) |car| {
                 trips += car.trips;
@@ -2818,7 +2828,8 @@ fn smokeCaves(self: *App) void {
     for (Mountains.ranges(sb.seed)) |r| for (r.spine) |p| {
         tallest = @max(tallest, Terrain.surface(sb.seed, p[0], p[1]).height);
     };
-    const sys = &sb.caves.systems[0];
+    const cave_index = sb.walkableCave() orelse return self.smokeFail("SMOKE CAVES: NO CAVE MOUTH A WALKER CAN REACH", .{});
+    const sys = &sb.caves.systems[cave_index];
     const outside = R3.add(sys.entrance, R3.scale(sys.inward, -10));
     sb.player = .{ .feet = .{ outside[0], Terrain.surface(sb.seed, outside[0], outside[2]).height, outside[2] }, .mode = .walk };
     sb.view = .first;
@@ -2829,7 +2840,7 @@ fn smokeCaves(self: *App) void {
     for (0..60 * 8) |_| {
         sb.step(&camera, .{ .forward = 1 }, .{}, 1.0 / 60.0) catch break;
         const f = sb.player.feet;
-        if (Sandbox.Caves.systemAt(&sb.caves, R3.add(f, .{ 0, 1, 0 })) == 0 and f[1] < Terrain.surface(sb.seed, f[0], f[2]).height - 4) underground = true;
+        if (Sandbox.Caves.systemAt(&sb.caves, R3.add(f, .{ 0, 1, 0 })) == @as(?u8, @intCast(cave_index)) and f[1] < Terrain.surface(sb.seed, f[0], f[2]).height - 4) underground = true;
     }
     const f = sb.player.feet;
     var built: usize = 0;
@@ -2840,6 +2851,7 @@ fn smokeCaves(self: *App) void {
     sb.player = keep_player;
     sb.view = keep_view;
     sb.cave_inside = @splat(null);
+    if (!underground) self.smokeFail("SMOKE CAVES: WALK-IN NEVER REACHED UNDERGROUND", .{});
     sb.enemies.units = @splat(null);
 }
 
@@ -2849,7 +2861,7 @@ fn smokeSap(self: *App) void {
     const radius = sb.tree(1).genome.base_radius;
     for ([_]f32{ -3, 3 }) |z| {
         const point: [3]f32 = .{ origin[0] + radius + 2, origin[1], origin[2] + z };
-        _ = sb.spawnMachine(null, sb.catalog.content.sap_beacon.*, point, 0, false) catch |err| return self.report("SMOKE SAP {s}", .{@errorName(err)});
+        _ = sb.spawnMachine(null, sb.catalog.content.sap_beacon.*, point, 0, false) catch |err| return self.smokeFail("SMOKE SAP {s}", .{@errorName(err)});
     }
 }
 
@@ -2862,15 +2874,15 @@ fn smokeBuild(self: *App) void {
         const x = base.x() + 3 + @as(f32, @floatFromInt(i)) * 1.5;
         const z = base.z() - 3;
         const point = .{ x, @import("procedural/Terrain.zig").surface(sb.seed, x, z).height + 0.7, z };
-        refs[i] = sb.addWorkshopDevice(Build.kitDevice(item, @tagName(item)), point) catch |err| return self.report("SMOKE BUILD {s}", .{@errorName(err)});
+        refs[i] = sb.addWorkshopDevice(Build.kitDevice(item, @tagName(item)), point) catch |err| return self.smokeFail("SMOKE BUILD {s}", .{@errorName(err)});
     }
     const w = refs[0].machine;
     const bp = &sb.machines[w].blueprint;
     for ([_][2]usize{ .{ 0, 3 }, .{ 1, 2 }, .{ 2, 3 } }) |pair| {
         var buffer: [Build.max_candidates]@import("machine/Blueprint.zig").Wire = undefined;
         const n = Build.candidates(sb, refs[pair[0]], refs[pair[1]], &buffer);
-        if (n == 0) return self.report("SMOKE WIRE NONE", .{});
-        bp.connect(buffer[0].from, buffer[0].to) catch |err| return self.report("SMOKE WIRE {s}", .{@errorName(err)});
+        if (n == 0) return self.smokeFail("SMOKE WIRE NONE", .{});
+        bp.connect(buffer[0].from, buffer[0].to) catch |err| return self.smokeFail("SMOKE WIRE {s}", .{@errorName(err)});
     }
     sb.machines[w].machine.reconfigure();
     sb.press = refs[1];
@@ -2880,7 +2892,7 @@ fn smokeBuild(self: *App) void {
     sb.exported = null;
     sb.tools = .{};
     const copy_origin = .{ base.x() + 3, @import("procedural/Terrain.zig").surface(sb.seed, base.x() + 3, base.z() - 8).height, base.z() - 8 };
-    const copy = sb.spawnMachine(null, sb.prefabs[sb.prefab_count - 1], copy_origin, 1, false) catch |err| return self.report("SMOKE COPY {s}", .{@errorName(err)});
+    const copy = sb.spawnMachine(null, sb.prefabs[sb.prefab_count - 1], copy_origin, 1, false) catch |err| return self.smokeFail("SMOKE COPY {s}", .{@errorName(err)});
     std.log.info("Smoke build: workshop devices={d} wires={d}; prefab {s} placed in slot {d}", .{ bp.device_count, bp.wire_count, sb.prefabs[sb.prefab_count - 1].name(), copy });
 }
 
@@ -3847,6 +3859,10 @@ pub fn stop(self: *App) void {
     if (self.queued_character_model) |model| model.deinit(self.allocator);
     self.mesh_library_arena.deinit();
     if (options.reload_smoke and !self.reload_smoke_passed) @panic("Reload smoke did not reach GPU acceptance");
+    if (self.smoke_failures > 0) {
+        std.log.err("{d} smoke check(s) failed; see the SMOKE lines above", .{self.smoke_failures});
+        @panic("Smoke checks failed");
+    }
     defer self.sandbox.deinit();
     // The app thread has exited, so the sandbox can be read safely.
     if (self.smoke_rover_start) |origin| {

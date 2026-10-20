@@ -252,7 +252,7 @@ pub fn validate() bool {
         city_count[@intFromEnum(entry.world)] += 1;
         for (cities[i + 1 ..]) |other| if (entry.id == other.id) return false;
     }
-    const expected_city_count = [_]u8{ 9, 5, 5 };
+    const expected_city_count = [_]u8{ 11, 5, 5 };
     for (city_count, expected_city_count) |count, expected| if (count != expected) return false;
     if (capitals.len != worlds.len) return false;
     var capital_count: [worlds.len]u8 = @splat(0);
@@ -291,8 +291,8 @@ test "campaign world catalog is bounded, four-player ready, and deterministicall
     try std.testing.expect(worldSeed(4, .hive_homeworld) != worldSeed(4, .gaia));
     try std.testing.expect(arena(.habitat_ruins).reward.geodesic_alloy > 0);
     try std.testing.expect(arena(.brood_heart).reward.brood_enzymes > 0);
-    try std.testing.expectEqual(@as(usize, 19), cities.len);
-    try std.testing.expectEqual(@as(u8, 9), blk: {
+    try std.testing.expectEqual(@as(usize, 21), cities.len);
+    try std.testing.expectEqual(@as(u8, 11), blk: {
         var count: u8 = 0;
         for (cities) |entry| if (entry.world == .arbor_frontier) {
             count += 1;

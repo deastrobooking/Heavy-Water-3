@@ -1,6 +1,7 @@
 //! Approximate, exaggerated terrain profiles for playable city regions with heightmap sources.
 const Heightmap = @import("Heightmap.zig");
 const Noise = @import("Noise.zig");
+const Mountains = @import("Mountains.zig");
 const CityGeography = @import("CityGeography.zig");
 const Region = @import("../world/Region.zig");
 const ChunkKey = @import("../world/ChunkKey.zig");
@@ -59,7 +60,10 @@ pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
     }
     const dx = x - detroit_center[0] + detroit_anchor_x;
     const dz = z - detroit_center[1] + detroit_anchor_z;
-    if (sampleMap(detroit_map, dx, dz)) |height| return blendToFallback(detroit_map, dx, dz, height, seed, x, z);
+    // The four procedural mountain ranges ring the hub (1.3 to 1.7 km out, nothing beyond 2.6 km).
+    // The raster replaced the noise terrain they were added to, so lay them back on top: their
+    // caves, nests and the cave tests were authored against this relief.
+    if (sampleMap(detroit_map, dx, dz)) |height| return blendToFallback(detroit_map, dx, dz, height, seed, x, z) + Mountains.height(seed, x, z);
     return fallbackHeight(seed, x, z);
 }
 
