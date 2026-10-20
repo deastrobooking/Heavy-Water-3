@@ -16,6 +16,7 @@ pub const Faction = enum { arbor_colony, hive_brood, scalari, gaia_colony };
 pub const CityId = enum(u16) {
     arboris_reach = 0x0101,
     hudson_reach = 0x0108,
+    chicago_reach = 0x0109,
     rootdeep_ward = 0x0102,
     crownfall = 0x0103,
     bridgewell = 0x0104,
@@ -163,11 +164,11 @@ pub fn featurePack(world: Id) *const FeaturePack {
     unreachable;
 }
 
-/// Stable city-region content descriptors. NYC/Hudson Reach has a playable fast-travel landing
-/// and procedural landmark skyline; its full mission arc remains future content.
+/// Stable city-region content descriptors.
 pub const cities = [_]City{
     .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Detroit Arbor Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Detroit, Michigan reimagined as a canopy city: historic civic towers, riverfront industry, transit bridges, and the first shipyard route.", .region = .{ .title = "DETROIT / ARBOR REACH", .salt = 0, .chunks = .{ std.math.minInt(i32), std.math.minInt(i32), std.math.maxInt(i32), std.math.maxInt(i32) }, .arrival = .{ 0, -58 } } },
     .{ .id = .hudson_reach, .world = .arbor_frontier, .name = "New York City: Hudson Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A playable Hudson-side arrival on the enlarged, terraformed New York landmass, with a dense skyline, elevated green routes, and views toward a living harbor.", .region = .{ .title = "NEW YORK CITY / HUDSON REACH", .salt = 0x4e4557594f524b, .chunks = .{ 1328, -626, 2578, 625 }, .arrival = .{ 250000, 0 }, .travel_label = "NEW YORK CITY" } },
+    .{ .id = .chicago_reach, .world = .arbor_frontier, .name = "Chicago: Lakeshore Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A new Great Lakes landing shaped by the Chicago elevation raster; the city districts and liberation loop are still being built.", .region = .{ .title = "CHICAGO / LAKESHORE REACH", .salt = 0x4348494341474f, .chunks = .{ -3438, -625, -2188, 625 }, .arrival = .{ -360000, 0 }, .travel_label = "CHICAGO" } },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },

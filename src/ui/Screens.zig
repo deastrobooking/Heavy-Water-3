@@ -41,7 +41,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -1588,7 +1588,7 @@ fn trackedTarget(kind: Menu.MapTarget, sb: *const Sandbox, from: [3]f32, player:
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const r = menuRect(c, @min(720, c.width - 30), @min(690, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
-    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - 390 };
+    const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = r.h - (if (menu.map_zoom == 3) @as(f32, 450) else 390) };
     c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
     const span: f32 = switch (menu.map_zoom) {
         0 => 1400,
@@ -1600,6 +1600,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const player_position = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
     const tracked = trackedTarget(menu.map_target, sb, player_position, menu.hero_player);
     const destination = if (menu.row < Sandbox.travel_count) menu.row else menu.map_destination;
+    if (menu.map_zoom == 3) return drawPlanetMap(c, menu, sb, r, map, destination);
     const focus = if (tracked) |target| target.position else if (menu.row < Sandbox.travel_count or menu.map_frame_destination) sb.travelPoint(destination) else player_position;
     for (0..12) |z| for (0..20) |x| {
         const fx = @as(f32, @floatFromInt(x)) / 20;
@@ -1695,6 +1696,118 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         }
     }
     c.text(r.x + 22, r.y + r.h - 24, "ENTER CYCLE TARGET / LEFT FRAME / RIGHT ZOOM OUT / ESC BACK", 1, dim);
+}
+
+const EarthCity = struct { name: []const u8, latitude: f32, longitude: f32, travel_label: ?[]const u8 };
+const earth_cities = [_]EarthCity{
+    .{ .name = "DETROIT", .latitude = 42.33, .longitude = -83.05, .travel_label = "BASE CAMP" },
+    .{ .name = "CHICAGO", .latitude = 41.88, .longitude = -87.63, .travel_label = "CHICAGO" },
+    .{ .name = "NEW YORK", .latitude = 40.71, .longitude = -74.00, .travel_label = "NEW YORK CITY" },
+    .{ .name = "LOS ANGELES", .latitude = 34.05, .longitude = -118.24, .travel_label = null },
+};
+
+fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: Rect, map: Rect, destination: usize) void {
+    c.rect(map, .{ 0.012, 0.035, 0.075, 1 });
+    c.hit(map, hitId(.planet_globe, 0));
+    const radius = @min(map.h * 0.43, map.w * 0.24);
+    const center_x = map.x + map.w / 2;
+    const center_y = map.y + map.h * 0.46;
+    const pi: f32 = std.math.pi;
+    const latitude_steps: usize = 18;
+    const longitude_steps: usize = 32;
+    for (0..latitude_steps) |yi| {
+        const lat = -pi / 2 + (@as(f32, @floatFromInt(yi)) + 0.5) * pi / @as(f32, @floatFromInt(latitude_steps));
+        const lat_deg = lat * 180 / pi;
+        const cell_h = radius * pi / @as(f32, @floatFromInt(latitude_steps)) * 1.12;
+        for (0..longitude_steps) |xi| {
+            const lon = -pi + (@as(f32, @floatFromInt(xi)) + 0.5) * 2 * pi / @as(f32, @floatFromInt(longitude_steps));
+            const lon_deg = lon * 180 / pi;
+            const point = globePoint(lat, lon, menu.globe_yaw, menu.globe_pitch);
+            if (point[2] <= 0) continue;
+            const px = center_x + point[0] * radius;
+            const py = center_y - point[1] * radius;
+            if (px < map.x or px > map.x + map.w or py < map.y + 28 or py > map.y + map.h) continue;
+            const cell_w = radius * 2 * pi / @as(f32, @floatFromInt(longitude_steps)) * @cos(lat) * 1.15;
+            const lit = 0.58 + 0.3 * point[2] + 0.12 * @max(point[1], 0);
+            const color: [4]f32 = if (isLand(lat_deg, lon_deg))
+                .{ 0.22 * lit, 0.42 * lit, 0.26 * lit, 1 }
+            else
+                .{ 0.035 * lit, 0.23 * lit, 0.42 * lit, 1 };
+            c.rect(.{ .x = px - cell_w / 2, .y = py - cell_h / 2, .w = cell_w + 1, .h = cell_h + 1 }, color);
+        }
+    }
+    for (earth_cities) |city| {
+        const lat = city.latitude * pi / 180;
+        const lon = city.longitude * pi / 180;
+        const point = globePoint(lat, lon, menu.globe_yaw, menu.globe_pitch);
+        if (point[2] <= 0) continue;
+        const px = center_x + point[0] * radius;
+        const py = center_y - point[1] * radius;
+        const selected = if (city.travel_label) |label| destinationNamed(destination, label) else false;
+        const color = if (city.travel_label == null) alpha(dim, 0.8) else if (selected) accent else gold;
+        const size: f32 = if (selected) 9 else 5;
+        c.rect(.{ .x = px - size / 2, .y = py - size / 2, .w = size, .h = size }, color);
+        if (selected) c.frame(.{ .x = px - size / 2 - 3, .y = py - size / 2 - 3, .w = size + 6, .h = size + 6 }, 1, accent);
+    }
+    c.print(map.x + 8, map.y + 8, 0.9, ink, "EARTH  /  DRAG TO ROTATE  /  LEFT-RIGHT TO ZOOM", .{});
+    c.centered(center_x, map.y + map.h - 16, "DETROIT / CHICAGO / NEW YORK / LOS ANGELES (LATER)", 0.78, dim);
+
+    for (Menu.map_items, 0..) |item, i| {
+        const row: Rect = .{ .x = panel_rect.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = panel_rect.w - 24, .h = 26 };
+        rowBack(c, row, menu.row == i);
+        const on = menu.enabled(i);
+        if (i == Menu.frame_row) {
+            c.text(row.x + 12, row.y + 9, "TRACK TARGET / FRAME MAP", 1, if (menu.row == i) accent else ink);
+        } else c.text(row.x + 12, row.y + 9, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
+        if (on) c.hit(row, hitId(.menu, i));
+        if (i < Sandbox.travel_count) {
+            const point = sb.travelPoint(i);
+            const player = if (menu.hero_player == 0 or menu.hero_player > 3) sb.player.feet else sb.guests[menu.hero_player - 1].player.feet;
+            const dx = point[0] - player[0];
+            const dz = point[2] - player[2];
+            c.print(row.x + row.w - 175, row.y + 9, 0.8, dim, "{d:.0}M / ALT {d:.0}M", .{ @sqrt(dx * dx + dz * dz), point[1] });
+        }
+    }
+    c.text(panel_rect.x + 22, panel_rect.y + panel_rect.h - 24, "SELECT A DESTINATION BELOW  /  ENTER TRAVEL  /  ESC BACK", 1, dim);
+}
+
+fn destinationNamed(destination: usize, label: []const u8) bool {
+    return destination < Sandbox.travel_count and std.mem.eql(u8, Sandbox.travel_destinations[destination].label, label);
+}
+
+fn globePoint(latitude: f32, longitude: f32, yaw: f32, pitch: f32) [3]f32 {
+    const x = @cos(latitude) * @sin(longitude);
+    const y = @sin(latitude);
+    const z = @cos(latitude) * @cos(longitude);
+    const cy = @cos(yaw);
+    const sy = @sin(yaw);
+    const cp = @cos(pitch);
+    const sp = @sin(pitch);
+    const rx = x * cy - z * sy;
+    const rz = x * sy + z * cy;
+    return .{ rx, y * cp - rz * sp, y * sp + rz * cp };
+}
+
+fn isLand(latitude: f32, longitude: f32) bool {
+    const north_america = [_][2]f32{ .{ -168, 72 }, .{ -145, 70 }, .{ -128, 56 }, .{ -112, 50 }, .{ -96, 50 }, .{ -82, 25 }, .{ -97, 8 }, .{ -116, 25 }, .{ -130, 48 }, .{ -155, 55 } };
+    const south_america = [_][2]f32{ .{ -81, 12 }, .{ -66, 10 }, .{ -48, -4 }, .{ -36, -18 }, .{ -53, -56 }, .{ -72, -42 }, .{ -79, -10 } };
+    const eurasia = [_][2]f32{ .{ -12, 36 }, .{ -10, 58 }, .{ 15, 72 }, .{ 45, 66 }, .{ 65, 72 }, .{ 100, 70 }, .{ 135, 58 }, .{ 165, 60 }, .{ 178, 48 }, .{ 145, 38 }, .{ 120, 20 }, .{ 104, 6 }, .{ 74, 8 }, .{ 57, 28 }, .{ 42, 38 }, .{ 30, 34 }, .{ 20, 42 }, .{ 8, 36 } };
+    const africa = [_][2]f32{ .{ -18, 35 }, .{ 8, 37 }, .{ 36, 29 }, .{ 51, 11 }, .{ 42, -12 }, .{ 32, -34 }, .{ 16, -35 }, .{ 2, -28 }, .{ -9, -3 }, .{ -17, 15 } };
+    const australia = [_][2]f32{ .{ 112, -11 }, .{ 132, -10 }, .{ 154, -25 }, .{ 145, -39 }, .{ 116, -35 }, .{ 112, -22 } };
+    const greenland = [_][2]f32{ .{ -54, 84 }, .{ -22, 78 }, .{ -38, 59 }, .{ -60, 61 } };
+    return pointInPolygon(latitude, longitude, &north_america) or pointInPolygon(latitude, longitude, &south_america) or pointInPolygon(latitude, longitude, &eurasia) or pointInPolygon(latitude, longitude, &africa) or pointInPolygon(latitude, longitude, &australia) or pointInPolygon(latitude, longitude, &greenland) or latitude < -72;
+}
+
+fn pointInPolygon(latitude: f32, longitude: f32, polygon: []const [2]f32) bool {
+    var inside = false;
+    var previous = polygon.len - 1;
+    for (polygon, 0..) |current, index| {
+        const a = current;
+        const b = polygon[previous];
+        if ((a[1] > latitude) != (b[1] > latitude) and longitude < (b[0] - a[0]) * (latitude - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+        previous = index;
+    }
+    return inside;
 }
 
 test "clustered and offscreen map markers retain separate labels inside the map" {

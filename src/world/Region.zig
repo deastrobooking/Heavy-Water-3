@@ -42,6 +42,7 @@ fn cityRegion(comptime id: Worlds.CityId) Region {
 /// intentionally absent until they have terrain and a safe arrival.
 pub const detroit = cityRegion(.arboris_reach);
 pub const new_york = cityRegion(.hudson_reach);
+pub const chicago = cityRegion(.chicago_reach);
 pub const all = blk: {
     var count: usize = 0;
     for (Worlds.cities) |city| if (city.region != null) {

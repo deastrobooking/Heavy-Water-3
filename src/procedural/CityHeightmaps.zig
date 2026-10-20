@@ -1,4 +1,4 @@
-//! Approximate, exaggerated terrain profiles for the playable Detroit and New York regions.
+//! Approximate, exaggerated terrain profiles for playable city regions with heightmap sources.
 const Heightmap = @import("Heightmap.zig");
 const Noise = @import("Noise.zig");
 const Region = @import("../world/Region.zig");
@@ -6,15 +6,22 @@ const ChunkKey = @import("../world/ChunkKey.zig");
 
 const detroit_bytes = @embedFile("../assets/detroit_terrain.hwmh");
 const nyc_bytes = @embedFile("../assets/nyc_terrain.hwmh");
+const chicago_bytes = @embedFile("../assets/chicago_terrain.hwmh");
 const detroit_map = Heightmap.view(detroit_bytes) catch unreachable;
 const nyc_map = Heightmap.view(nyc_bytes) catch unreachable;
+const chicago_map = Heightmap.view(chicago_bytes) catch unreachable;
 
 const detroit_center = Region.detroit.arrival;
 const nyc_center = Region.new_york.arrival;
+const chicago_center = Region.chicago.arrival;
 // The NYC raster has open water at its image center. Anchor the Hudson Reach arrival to
 // the nearby low coastal pixel (785, 1010), keeping the skyline on land.
 const nyc_anchor_x: f32 = (785.0 / 2047.0 - 0.5) * 160000;
 const nyc_anchor_z: f32 = (1010.0 / 2047.0 - 0.5) * 160000;
+// The Chicago source has no georeferencing. Anchor the map near its lakefront at an
+// approximate downtown pixel; this preserves the dark Lake Michigan shelf east of arrival.
+const chicago_anchor_x: f32 = (1200.0 / 2047.0 - 0.5) * 160000;
+const chicago_anchor_z: f32 = (1000.0 / 2047.0 - 0.5) * 160000;
 const blend_width: f32 = 9000;
 
 pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
@@ -22,6 +29,11 @@ pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
     if (Region.new_york.contains(key.x, key.z)) {
         if (sampleMap(nyc_map, x - nyc_center[0] + nyc_anchor_x, z - nyc_center[1] + nyc_anchor_z)) |height| {
             return blendToFallback(nyc_map, x - nyc_center[0] + nyc_anchor_x, z - nyc_center[1] + nyc_anchor_z, height, seed, x, z);
+        }
+    }
+    if (Region.chicago.contains(key.x, key.z)) {
+        if (sampleMap(chicago_map, x - chicago_center[0] + chicago_anchor_x, z - chicago_center[1] + chicago_anchor_z)) |height| {
+            return blendToFallback(chicago_map, x - chicago_center[0] + chicago_anchor_x, z - chicago_center[1] + chicago_anchor_z, height, seed, x, z);
         }
     }
     const dx = x - detroit_center[0];

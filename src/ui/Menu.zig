@@ -99,6 +99,9 @@ const Parent = struct { screen: Screen, row: u8 };
 
 screen: Screen = .none,
 map_zoom: u8 = 1,
+globe_yaw: f32 = -1.25,
+globe_pitch: f32 = 0.12,
+globe_dragging: bool = false,
 map_frame_destination: bool = false,
 map_destination: u8 = 0,
 map_target: MapTarget = .none,
@@ -263,6 +266,11 @@ pub fn key(self: *Menu, k: Key) Command {
         },
     }
     return .none;
+}
+
+pub fn rotateGlobe(self: *Menu, dx: f32, dy: f32) void {
+    self.globe_yaw += dx * 0.008;
+    self.globe_pitch = std.math.clamp(self.globe_pitch + dy * 0.008, -1.25, 1.25);
 }
 
 fn controlsKey(self: *Menu, k: Key) Command {

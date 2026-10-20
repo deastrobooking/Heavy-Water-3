@@ -860,7 +860,7 @@ fn pointAt(self: *App, click: bool) void {
     const sb = &self.sandbox;
     // Only the top layer takes the mouse: a menu over a panel blocks the panel beneath.
     const menu_area = switch (Screens.hitArea(hit)) {
-        .menu, .setting_left, .setting_right => true,
+        .menu, .setting_left, .setting_right, .planet_globe => true,
         else => false,
     };
     if (menu_area != (self.menu.screen != .none)) return;
@@ -869,6 +869,7 @@ fn pointAt(self: *App, click: bool) void {
             self.menu.select(row);
             if (click and self.menu.row == row) self.menuKey(.confirm);
         },
+        .planet_globe => {},
         .setting_left, .setting_right => {
             self.menu.select(row);
             if (click) self.menuKey(if (Screens.hitArea(hit) == .setting_left) .left else .right);
@@ -1196,6 +1197,7 @@ pub fn update(self: *App, core: *mach.Core) void {
         .mouse_release => |mouse| switch (mouse.button) {
             .left => {
                 self.fire_held = false;
+                self.menu.globe_dragging = false;
                 if (self.meshToolsActive()) self.queueToolEvent(.release);
             },
             .right => {
@@ -1205,7 +1207,9 @@ pub fn update(self: *App, core: *mach.Core) void {
             else => {},
         },
         .mouse_press => |mouse| if (self.uiActive()) {
-            if (self.meshToolsActive() and self.hitUnderPointer() == null) {
+            if (mouse.button == .left and self.menu.screen == .world_map and self.menu.map_zoom == 3 and self.hitUnderPointer() != null and Screens.hitArea(self.hitUnderPointer().?) == .planet_globe) {
+                self.menu.globe_dragging = true;
+            } else if (self.meshToolsActive() and self.hitUnderPointer() == null) {
                 // Over the 3D view, not the panel: the press goes to the active tool.
                 switch (mouse.button) {
                     .left => if (self.pointerRay()) |ray| self.queueToolEvent(.{ .press = .{ .ray = ray, .extend = mouse.mods.shift } }),
@@ -1252,7 +1256,9 @@ pub fn update(self: *App, core: *mach.Core) void {
             const scale = self.ui_height / @max(self.window_height, 1);
             const previous = self.pointer;
             self.pointer = .{ @as(f32, @floatCast(motion.pos.x)) * scale, @as(f32, @floatCast(motion.pos.y)) * scale };
-            if (self.meshToolsActive()) {
+            if (self.menu.globe_dragging and self.menu.screen == .world_map) {
+                self.menu.rotateGlobe(self.pointer[0] - previous[0], self.pointer[1] - previous[1]);
+            } else if (self.meshToolsActive()) {
                 if (self.orbit_held) self.mesh_tools.orbit(self.pointer[0] - previous[0], self.pointer[1] - previous[1]) else if (self.pointerRay()) |ray| self.queueToolEvent(.{ .drag = ray });
             }
             if (self.uiActive()) self.pointAt(false);
@@ -1512,7 +1518,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1844,6 +1850,13 @@ fn guiShowcase(self: *App, v: u32) void {
             self.engine.camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
             self.engine.camera.yaw = 0;
             self.engine.camera.pitch = -0.32;
+        },
+        81 => {
+            self.menu.open(.pause);
+            self.menu.open(.world_map);
+            self.menu.map_zoom = 3;
+            self.menu.row = 0;
+            self.menu.map_destination = 0;
         },
         29 => {
             sb.progress.vehicles = 0b111;

@@ -1475,7 +1475,14 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Added:** O in the build tool opens a popup with horizontal and vertical 16 m square decks and 1 m / 10 m height adjustments from the aimed surface, clamped to −1,000…+1,200 m. Platforms are saved as ordinary body-plate machines. Their placement preview now renders the body device and permits unsupported placement at the chosen offset; overlap and player collision checks still apply. P remains prefab capture.
 - **Checked:** default `python3 tools/zig.py build check` and `git diff --check` passed. `MTL_DEBUG_LAYER=1` ReleaseSafe showcase 80 captured frame 120 and exited cleanly with Metal API Validation enabled; the popup is readable and the aimed platform preview is visible, red where it overlaps nearby geometry.
 - **Not checked:** hands-on input and placement, save/reload in the game, and headless tests. The existing elevator ride test remains the current evidence for elevator operation; it does not prove a continuous ascent route through the new skyline.
-- **Still open:** playable route walkability across the crown loop, Hive patrols on elevated skyways, civilian flight from threats, and adding a Chicago raster.
+- **Still open:** playable route walkability across the crown loop, Hive patrols on elevated skyways, and civilian flight from threats.
+
+## Chicago heightmap and rotating Earth map — 2026-10-20
+
+- **Added:** converted `assets/chicago_metro_heightmap_16bit.png` to `src/assets/chicago_terrain.hwmh` at 160 km square / 550 m relief. The Chicago region is centered near the lakefront (arrival x −360 km), uses the same height sampler for terrain, collision and scatter as Detroit/NYC, and appears as a fast-travel destination. The raster has no georeferencing; its approximate lakefront anchor is pixel (1200, 1000).
+- **Added:** at the world map's widest zoom, a rotatable Earth globe shows Detroit, Chicago, NYC, and a future LA marker. Drag rotates the globe; the existing destination rows select and travel to the playable landings. Planet view reduces its globe panel height to keep the destination list and footer clear.
+- **Checked:** default `python3 tools/zig.py build check`; `MTL_DEBUG_LAYER=1` ReleaseSafe showcase 81 captured frame 120 and exited cleanly with Metal API Validation enabled. The capture shows the globe and Chicago travel row. `git diff --check` passed.
+- **Not checked:** hands-on globe dragging or Chicago travel/save behavior; headless tests were not run. Chicago has heightmapped terrain and an arrival but no dedicated city skyline, missions, or liberation content. LA is still not a travel destination.
 
 ## Per-vertex cel pens (E1b) — 2026-10-19
 
