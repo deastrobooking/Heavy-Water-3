@@ -41,8 +41,10 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe };
 pub fn hitId(area: Area, row: usize) u16 {
+    // The row is one byte; lists longer than that pass `row & 0xff` and resolve it on click.
+    std.debug.assert(row < 256);
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
 pub fn hitArea(id: u16) Area {
@@ -929,9 +931,14 @@ fn drawEnemyDesign(c: *Canvas, cr: *const Creator, v: Rect) void {
     c.rect(.{ .x = r.x + 218, .y = palette_y + 3, .w = 30, .h = 18 }, EnemyDesign.colors[@intFromEnum(cr.enemy_design.palette)].glow);
     c.text(r.x + 262, palette_y + 8, EnemyDesign.palette_names[@intFromEnum(cr.enemy_design.palette)], 0.9, ink);
     button(c, .{ .x = r.x + 402, .y = palette_y, .w = 24, .h = 24 }, ">", hitId(.enemy_palette_right, 0), false);
-    c.text(r.x + 22, palette_y + 37, "BLACK / PURPLE / PINK / RED / SILVER  •  COLORWAYS ARE ENCOUNTER READY", 0.76, dim);
+    c.text(r.x + 22, palette_y + 34, "7 FINISHES INCLUDE SILVER / MOSS STEEL / AMBER CARAPACE", 0.72, dim);
+    const style_y = palette_y + 51;
+    c.text(r.x + 22, style_y + 8, "LAYER STYLE", 0.84, dim);
+    button(c, .{ .x = r.x + 115, .y = style_y, .w = 24, .h = 24 }, "<", hitId(.enemy_style_left, 0), false);
+    c.text(r.x + 150, style_y + 8, EnemyDesign.layer_style_names[@intFromEnum(cr.enemy_design.layer_style)], 0.88, ink);
+    button(c, .{ .x = r.x + 402, .y = style_y, .w = 24, .h = 24 }, ">", hitId(.enemy_style_right, 0), false);
     const labels = [_][]const u8{ "FRAME", "HEAD", "SHOULDERS", "ARMS", "LEGS", "BACK UNIT", "WEAPON" };
-    var y = palette_y + 58;
+    var y = palette_y + 85;
     for (labels, 0..) |label, i| {
         const part: EnemyDesign.Part = @enumFromInt(i);
         const row: Rect = .{ .x = r.x + 18, .y = y, .w = r.w - 36, .h = 37 };
@@ -946,7 +953,7 @@ fn drawEnemyDesign(c: *Canvas, cr: *const Creator, v: Rect) void {
         button(c, .{ .x = row.x + row.w - 30, .y = row.y + 5, .w = 22, .h = 26 }, ">", hitId(.enemy_right, i), false);
         y += 40;
     }
-    c.text(r.x + 22, r.y + r.h - 35, "SIEGE BODIES JOIN PLAZA RAIDS WITH HIVE INSECT DRONES", 0.8, alpha(accent, 0.85));
+    c.text(r.x + 22, r.y + r.h - 35, "P: PALETTE  /  L: LAYER STYLE  /  SIEGE FRAMES JOIN PLAZA RAIDS", 0.78, alpha(accent, 0.85));
     button(c, .{ .x = r.x + r.w - 134, .y = r.y + r.h - 43, .w = 112, .h = 28 }, "BACK", hitId(.enemy_forge, 0), false);
 }
 
@@ -986,7 +993,7 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
         if (rank >= first_rank and row < rows) {
             const item: Rect = .{ .x = list.x + 4, .y = list.y + 4 + @as(f32, @floatFromInt(row)) * row_step, .w = list.w - 8, .h = row_step - 2 };
             rowBack(c, item, index == cr.imported_selected);
-            c.hit(item, hitId(.imported_part, index));
+            c.hit(item, hitId(.imported_part, index & 0xff));
             var label: [48]u8 = undefined;
             const name = pretty(&label, part.label);
             c.text(item.x + 9, item.y + 7, name, 0.82, if (!part.enabled) bad else if (index == cr.imported_selected) accent else ink);
@@ -1704,6 +1711,7 @@ const earth_cities = [_]EarthCity{
     .{ .name = "CHICAGO", .latitude = 41.88, .longitude = -87.63, .travel_label = "CHICAGO" },
     .{ .name = "NEW YORK", .latitude = 40.71, .longitude = -74.00, .travel_label = "NEW YORK CITY" },
     .{ .name = "LOS ANGELES", .latitude = 34.05, .longitude = -118.24, .travel_label = null },
+    .{ .name = "ANTARCTICA", .latitude = -82.0, .longitude = 0, .travel_label = "ANTARCTICA" },
 };
 
 fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: Rect, map: Rect, destination: usize) void {
@@ -1750,7 +1758,7 @@ fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: 
         if (selected) c.frame(.{ .x = px - size / 2 - 3, .y = py - size / 2 - 3, .w = size + 6, .h = size + 6 }, 1, accent);
     }
     c.print(map.x + 8, map.y + 8, 0.9, ink, "EARTH  /  DRAG TO ROTATE  /  LEFT-RIGHT TO ZOOM", .{});
-    c.centered(center_x, map.y + map.h - 16, "DETROIT / CHICAGO / NEW YORK / LOS ANGELES (LATER)", 0.78, dim);
+    c.centered(center_x, map.y + map.h - 16, "DETROIT / CHICAGO / NEW YORK / ANTARCTICA / LOS ANGELES (LATER)", 0.78, dim);
 
     for (Menu.map_items, 0..) |item, i| {
         const row: Rect = .{ .x = panel_rect.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = panel_rect.w - 24, .h = 26 };

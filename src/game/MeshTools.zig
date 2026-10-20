@@ -117,7 +117,7 @@ pub fn bind(self: *MeshTools, model: *Model, mirror: ?*Model) MeshEdit.Error!voi
     self.overlay = overlay;
     self.overlay_len = 0;
     self.active = true;
-    self.setStatus("{d} VERTICES  |  RIGHT-DRAG ORBIT  WHEEL ZOOM", .{model.mesh.vertices.len});
+    self.setStatus("{d} VERTICES", .{model.mesh.vertices.len});
 }
 
 pub fn unbind(self: *MeshTools) void {
@@ -380,7 +380,8 @@ fn selectionCentre(self: *const MeshTools) V {
 pub fn setTool(self: *MeshTools, tool: Tool) void {
     self.release();
     self.tool = tool;
-    self.setStatus("{s}: {s}", .{ tool_labels[@intFromEnum(tool)], tool_hints[@intFromEnum(tool)] });
+    // The hint is already on the panel under the tool buttons.
+    self.setStatus("TOOL: {s}", .{tool_labels[@intFromEnum(tool)]});
 }
 
 /// A panel button or shortcut. Returns what `App` must do (file output, closing).

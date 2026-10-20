@@ -1349,6 +1349,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishShrines(sb, out, n, t);
     n = publishObjectiveBeacon(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
+    n = publishAntarcticPerimeter(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);
     if (room(out, n, 3)) {
@@ -1420,8 +1421,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     for (sb.enemies.units) |slot| if (slot) |u| if (Enemies.isGround(u.kind)) {
         if (u.kind == .scalari_scout or u.kind == .scalari_miner) continue;
         if (u.kind == .scalari_titan) {
-            if (!room(out, n, 20)) break;
-            n += scalariTitan(out[n..], c.block, c.gem, u.position, u.yaw, t, u.flash, sb.creator.enemy_design);
+            if (!room(out, n, 40)) break;
+            n += scalariTitan(out[n..], c.block, c.orb, c.spike, c.gem, u.position, u.yaw, t, u.flash, sb.creator.enemy_design);
             continue;
         }
         const d = R.sub(u.position, sb.player.feet);
@@ -1661,6 +1662,86 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         };
         n += 1;
     };
+    return n;
+}
+
+/// The Subglacial Hive's first surface approach is ringed by high ice ramparts and
+/// autonomous Scalari scorpion sentries. Their orbital patrol stays legible on arrival.
+fn publishAntarcticPerimeter(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const center = Region.antarctica.arrival;
+    const dx = sb.player.feet[0] - center[0];
+    const dz = sb.player.feet[2] - center[1];
+    if (dx * dx + dz * dz > 900 * 900) return start;
+
+    const c = &sb.catalog.content;
+    var n = start;
+    const wall_tint = Material.ice(.{ 0.60, 0.80, 0.97, 1 });
+    const wall_top = Material.ice(.{ 0.82, 0.91, 1.0, 1 });
+    for (0..4) |face| {
+        for (0..8) |segment| {
+            if (n + 4 > out.len) return n;
+            const along = (@as(f32, @floatFromInt(segment)) - 3.5) * 38;
+            const along_axis: V = if (face < 2) .{ along, 0, 0 } else .{ 0, 0, along };
+            const side_offset: V = switch (face) {
+                0 => .{ 0, 0, -152 },
+                1 => .{ 0, 0, 152 },
+                2 => .{ -152, 0, 0 },
+                else => .{ 152, 0, 0 },
+            };
+            const x = center[0] + along_axis[0] + side_offset[0];
+            const z = center[1] + along_axis[2] + side_offset[2];
+            const ground = Terrain.surface(sb.seed, x, z).height;
+            const wall_yaw = yawQuat(if (face >= 2) std.math.pi * 0.5 else 0);
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ x, ground + 23, z } }, .tint = wall_tint, .size = .{ 37, 46, 11 }, .rotation = wall_yaw };
+            out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ x, ground + 44, z } }, .tint = wall_top, .size = .{ 37, 2.2, 11.5 }, .rotation = wall_yaw };
+            out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ x, ground + 13, z } }, .tint = Material.emissive(.{ 0.15, 0.70, 1.0, 1 }, 0.3 + 0.18 * @sin(t * 1.2 + @as(f32, @floatFromInt(segment)))), .size = .{ 35, 0.32, 11.7 }, .rotation = wall_yaw };
+            n += 3;
+            if (segment % 2 == 0) {
+                out[n] = .{ .mesh = c.spike, .transform = .{ .position = .{ x, ground + 49, z } }, .tint = wall_top, .size = .{ 7, 13, 7 }, .rotation = wall_yaw };
+                n += 1;
+            }
+        }
+    }
+
+    const local = struct {
+        fn at(origin: V, q: [4]f32, p: V) V {
+            return R.add(origin, R.rotate(q, p));
+        }
+    }.at;
+    for (0..2) |patrol| {
+        if (n + 24 > out.len) return n;
+        const phase = t * 0.13 + @as(f32, @floatFromInt(patrol)) * std.math.pi;
+        const px = center[0] + @cos(phase) * 116;
+        const pz = center[1] + @sin(phase) * 116;
+        const ground = Terrain.surface(sb.seed, px, pz).height;
+        const yaw = phase + std.math.pi * 0.5;
+        const orientation = yawQuat(yaw);
+        const base: V = .{ px, ground, pz };
+        const dark: [4]f32 = if (patrol == 0) .{ 0.12, 0.16, 0.23, 1 } else .{ 0.18, 0.22, 0.28, 1 };
+        out[n] = .{ .mesh = c.orb, .transform = .{ .position = local(base, orientation, .{ 0, 2.0, 0 }) }, .tint = dark, .size = .{ 7.4, 2.7, 10.5 }, .rotation = orientation };
+        out[n + 1] = .{ .mesh = c.orb, .transform = .{ .position = local(base, orientation, .{ 0, 2.4, 4.8 }) }, .tint = Material.ice(.{ 0.42, 0.64, 0.82, 1 }), .size = .{ 4.4, 2.2, 4.6 }, .rotation = orientation };
+        out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = local(base, orientation, .{ 0, 3.05, 0.2 }) }, .tint = Material.emissive(.{ 0.92, 0.13, 0.08, 1 }, 0.8 + 0.16 * @sin(t * 3 + @as(f32, @floatFromInt(patrol)))), .size = .{ 2.8, 0.22, 6.8 }, .rotation = orientation };
+        n += 3;
+        for (0..6) |leg| {
+            const side: f32 = if (leg % 2 == 0) -1 else 1;
+            const pair: f32 = @floatFromInt(leg / 2);
+            const gait = @sin(t * 6 + pair * std.math.pi + side * std.math.pi) * 0.34;
+            const anchor: V = .{ side * 3.0, 1.35 + gait, 2.3 - pair * 2.6 };
+            const splay = yaw + side * (0.76 + pair * 0.10);
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = local(base, orientation, anchor) }, .tint = dark, .size = .{ 1.0, 1.35, 5.2 }, .rotation = yawQuat(splay) };
+            out[n + 1] = .{ .mesh = c.spike, .transform = .{ .position = local(base, orientation, .{ side * 5.0, 0.45 + gait, 2.1 - pair * 2.6 }) }, .tint = dark, .size = .{ 0.9, 1.4, 1.1 }, .rotation = yawQuat(splay) };
+            n += 2;
+        }
+        for (0..3) |joint| {
+            const j: f32 = @floatFromInt(joint);
+            out[n] = .{ .mesh = c.orb, .transform = .{ .position = local(base, orientation, .{ 0, 3.1 + j * 1.0, -4.0 - j * 1.35 }) }, .tint = if (joint == 2) dark else Material.ice(.{ 0.34, 0.58, 0.78, 1 }), .size = .{ 2.4 - j * 0.38, 1.75, 2.7 - j * 0.35 }, .rotation = orientation };
+            n += 1;
+        }
+        out[n] = .{ .mesh = c.spike, .transform = .{ .position = local(base, orientation, .{ 0, 6.2, -8.0 }) }, .tint = Material.emissive(.{ 1, 0.16, 0.04, 1 }, 0.95 + 0.05 * @sin(t * 4)), .size = .{ 1.15, 3.6, 1.15 }, .rotation = orientation };
+        out[n + 1] = .{ .mesh = c.orb, .transform = .{ .position = local(base, orientation, .{ -0.78, 2.55, 6.65 }) }, .tint = Material.emissive(.{ 1, 0.1, 0.06, 1 }, 0.9), .size = .{ 0.65, 0.48, 0.36 }, .rotation = orientation };
+        out[n + 2] = .{ .mesh = c.orb, .transform = .{ .position = local(base, orientation, .{ 0.78, 2.55, 6.65 }) }, .tint = Material.emissive(.{ 1, 0.1, 0.06, 1 }, 0.9), .size = .{ 0.65, 0.48, 0.36 }, .rotation = orientation };
+        n += 3;
+    }
     return n;
 }
 
@@ -2265,7 +2346,7 @@ const scalari_hybrid_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing
 
 /// Transformer-scale Scalari siege frame assembled from independent armor modules. Its palette
 /// and part selections are shared with the Character Designer's Hive Forge panel.
-fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, at: V, yaw: f32, t: f32, flash: f32, design: EnemyDesign.Design) usize {
+fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, orb: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, at: V, yaw: f32, t: f32, flash: f32, design: EnemyDesign.Design) usize {
     const palette = EnemyDesign.colors[@intFromEnum(design.palette)];
     const frame = EnemyDesign.module(.frame, design.frame);
     const shoulders = EnemyDesign.module(.shoulders, design.shoulders);
@@ -2321,7 +2402,59 @@ fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHa
     const weapon_x: f32 = if (design.arms == 2) 1.72 else 1.48;
     out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ weapon_x, 2.05, 0.82 }) }, .tint = if (design.weapon == 1) palette.glow else accent_color, .size = .{ if (design.weapon == 2) @as(f32, 0.26) else 0.42, if (design.weapon == 2) @as(f32, 1.45) else 0.5, weapon.scale * 1.2 }, .rotation = orientation };
     n += 1;
+
+    switch (design.layer_style) {
+        .brushed_metal => {
+            // Dark, rounded bearing housings break up the plate masses; exposed bright struts
+            // make the layered shells read as machined armor on a moving frame.
+            for ([8]V{
+                .{ -1.18, 3.82, 0.18 }, .{ 1.18, 3.82, 0.18 },
+                .{ -1.47, 2.52, 0.28 }, .{ 1.47, 2.52, 0.28 },
+                .{ -0.67, 1.34, 0.23 }, .{ 0.67, 1.34, 0.23 },
+                .{ -0.67, 0.72, 0.24 }, .{ 0.67, 0.72, 0.24 },
+            }) |joint| titanLayer(out, &n, orb, at, joint, .{ 0.42, 0.42, 0.42 }, orientation, palette.joint);
+            for ([4]struct { at: V, size: V }{
+                .{ .at = .{ -1.35, 2.85, 0.35 }, .size = .{ 0.18, 0.62, 0.2 } },
+                .{ .at = .{ 1.35, 2.85, 0.35 }, .size = .{ 0.18, 0.62, 0.2 } },
+                .{ .at = .{ -0.67, 1.05, 0.38 }, .size = .{ 0.17, 0.52, 0.16 } },
+                .{ .at = .{ 0.67, 1.05, 0.38 }, .size = .{ 0.17, 0.52, 0.16 } },
+            }) |strut| titanLayer(out, &n, block, at, strut.at, strut.size, orientation, palette.trim);
+            titanLayer(out, &n, orb, at, .{ 0, 3.32, 0.83 }, .{ 1.72, 0.72, 0.22 }, orientation, palette.accent);
+        },
+        .insectoid_carapace => {
+            // Smooth overlapping plates, a segmented abdomen, compound optics and tapered
+            // antennae give the siege chassis an engineered insect silhouette.
+            titanLayer(out, &n, orb, at, .{ 0, 4.18, 0.12 }, .{ 0.56, 0.62, 0.56 }, orientation, palette.joint);
+            titanLayer(out, &n, orb, at, .{ 0, 3.30, 1.34 }, .{ 1.48, 1.32, 0.62 }, orientation, palette.accent);
+            titanLayer(out, &n, orb, at, .{ -0.63, 3.43, 1.17 }, .{ 0.54, 0.87, 0.46 }, orientation, palette.trim);
+            titanLayer(out, &n, orb, at, .{ 0.63, 3.43, 1.17 }, .{ 0.54, 0.87, 0.46 }, orientation, palette.trim);
+            for (0..3) |segment| {
+                const y = 2.28 - @as(f32, @floatFromInt(segment)) * 0.32;
+                const segment_color = if (segment == 1) palette.trim else palette.accent;
+                titanLayer(out, &n, orb, at, .{ 0, y, 0.94 }, .{ 1.20 - @as(f32, @floatFromInt(segment)) * 0.12, 0.31, 0.40 }, orientation, segment_color);
+            }
+            for ([_]f32{ -1, 1 }) |side| {
+                titanLayer(out, &n, orb, at, .{ side * 1.15, 3.84, 0.84 }, .{ 0.92, 1.02, 0.68 }, orientation, palette.accent);
+                titanLayer(out, &n, orb, at, .{ side * 1.47, 2.53, 0.64 }, .{ 0.68, 0.82, 0.54 }, orientation, palette.accent);
+                titanLayer(out, &n, orb, at, .{ side * 0.53, 3.35, -1.26 }, .{ 0.68, 1.28, 0.38 }, orientation, palette.armor);
+                titanLayer(out, &n, spike, at, .{ side * 0.30, 5.20, 0.02 }, .{ 0.20, 0.64, 0.20 }, orientation, palette.trim);
+                titanLayer(out, &n, spike, at, .{ side * 1.62, 1.82, 0.58 }, .{ 0.20, 0.48, 0.18 }, orientation, palette.trim);
+            }
+            for ([_]f32{ -0.24, 0, 0.24 }) |eye_x| titanLayer(out, &n, orb, at, .{ eye_x, 4.78, 0.53 }, .{ 0.16, 0.14, 0.11 }, orientation, palette.glow);
+        },
+    }
     return n;
+}
+
+fn titanLayer(out: []World.Prop, count: *usize, mesh: @import("../asset/Catalog.zig").MeshHandle, origin: V, offset: V, size: V, rotation: [4]f32, tint: [4]f32) void {
+    if (count.* >= out.len) return;
+    out[count.*] = .{ .mesh = mesh, .transform = .{ .position = R.add(origin, offset) }, .tint = tint, .size = size, .rotation = rotation };
+    count.* += 1;
+}
+
+/// Isolated art-review frame used by the metal and carapace showcases.
+pub fn publishTitanPreview(sb: *const Sandbox, out: []World.Prop, at: V, yaw: f32) usize {
+    return scalariTitan(out, sb.catalog.content.block, sb.catalog.content.orb, sb.catalog.content.spike, sb.catalog.content.gem, at, yaw, @as(f32, @floatFromInt(sb.tick)) / 60, 0, sb.creator.enemy_design);
 }
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {

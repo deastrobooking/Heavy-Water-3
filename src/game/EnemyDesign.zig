@@ -4,7 +4,9 @@ const Seed = @import("../procedural/Seed.zig");
 const enum_compat = @import("enum_compat");
 
 pub const Part = enum { frame, head, shoulders, arms, legs, back_unit, weapon };
-pub const Palette = enum { obsidian, amethyst, rose, war_red, silver };
+pub const Palette = enum { obsidian, amethyst, rose, war_red, silver, moss_steel, amber_carapace };
+/// Surface construction controls the robot's material layering and silhouette detail.
+pub const LayerStyle = enum { brushed_metal, insectoid_carapace };
 pub const part_count = enum_compat.fields(Part).len;
 
 pub const Design = struct {
@@ -16,6 +18,7 @@ pub const Design = struct {
     back_unit: u8 = 0,
     weapon: u8 = 0,
     palette: Palette = .obsidian,
+    layer_style: LayerStyle = .brushed_metal,
 
     pub fn value(self: Design, part: Part) u8 {
         return switch (part) {
@@ -45,16 +48,23 @@ pub const Design = struct {
     pub fn cyclePalette(self: *Design, direction: i32) void {
         self.palette = @enumFromInt(cycleIndex(@intFromEnum(self.palette), enum_compat.fields(Palette).len, direction));
     }
+
+    pub fn cycleLayerStyle(self: *Design, direction: i32) void {
+        self.layer_style = @enumFromInt(cycleIndex(@intFromEnum(self.layer_style), enum_compat.fields(LayerStyle).len, direction));
+    }
 };
 
 pub const ModuleInfo = struct { name: []const u8, scale: f32, description: []const u8 };
-pub const palette_names = [_][]const u8{ "OBSIDIAN", "AMETHYST", "ROSE", "WAR RED", "SILVER" };
-pub const colors = [_]struct { armor: [4]f32, accent: [4]f32, glow: [4]f32 }{
-    .{ .armor = .{ 0.10, 0.085, 0.14, 1 }, .accent = .{ 0.34, 0.13, 0.52, 1 }, .glow = .{ 1.0, 0.08, 0.54, 1 } },
-    .{ .armor = .{ 0.17, 0.12, 0.24, 1 }, .accent = .{ 0.50, 0.24, 0.78, 1 }, .glow = .{ 0.90, 0.10, 0.70, 1 } },
-    .{ .armor = .{ 0.24, 0.10, 0.18, 1 }, .accent = .{ 0.76, 0.22, 0.49, 1 }, .glow = .{ 1.0, 0.31, 0.71, 1 } },
-    .{ .armor = .{ 0.22, 0.045, 0.075, 1 }, .accent = .{ 0.62, 0.12, 0.18, 1 }, .glow = .{ 1.0, 0.16, 0.12, 1 } },
-    .{ .armor = .{ 0.34, 0.36, 0.41, 1 }, .accent = .{ 0.64, 0.68, 0.74, 1 }, .glow = .{ 1.0, 0.12, 0.56, 1 } },
+pub const palette_names = [_][]const u8{ "OBSIDIAN", "AMETHYST", "ROSE", "WAR RED", "SILVER", "MOSS STEEL", "AMBER CARAPACE" };
+pub const layer_style_names = [_][]const u8{ "BRUSHED METAL", "INSECTOID CARAPACE" };
+pub const colors = [_]struct { armor: [4]f32, accent: [4]f32, glow: [4]f32, joint: [4]f32, trim: [4]f32 }{
+    .{ .armor = .{ 0.10, 0.085, 0.14, 1 }, .accent = .{ 0.34, 0.13, 0.52, 1 }, .glow = .{ 1.0, 0.08, 0.54, 1 }, .joint = .{ 0.025, 0.021, 0.038, 1 }, .trim = .{ 0.49, 0.43, 0.58, 1 } },
+    .{ .armor = .{ 0.17, 0.12, 0.24, 1 }, .accent = .{ 0.50, 0.24, 0.78, 1 }, .glow = .{ 0.90, 0.10, 0.70, 1 }, .joint = .{ 0.038, 0.027, 0.052, 1 }, .trim = .{ 0.70, 0.52, 0.88, 1 } },
+    .{ .armor = .{ 0.24, 0.10, 0.18, 1 }, .accent = .{ 0.76, 0.22, 0.49, 1 }, .glow = .{ 1.0, 0.31, 0.71, 1 }, .joint = .{ 0.05, 0.022, 0.04, 1 }, .trim = .{ 0.91, 0.61, 0.73, 1 } },
+    .{ .armor = .{ 0.22, 0.045, 0.075, 1 }, .accent = .{ 0.62, 0.12, 0.18, 1 }, .glow = .{ 1.0, 0.16, 0.12, 1 }, .joint = .{ 0.038, 0.014, 0.023, 1 }, .trim = .{ 0.77, 0.43, 0.25, 1 } },
+    .{ .armor = .{ 0.52, 0.58, 0.68, 1 }, .accent = .{ 0.78, 0.83, 0.90, 1 }, .glow = .{ 0.18, 0.86, 1.0, 1 }, .joint = .{ 0.055, 0.063, 0.075, 1 }, .trim = .{ 0.95, 0.82, 0.52, 1 } },
+    .{ .armor = .{ 0.12, 0.27, 0.25, 1 }, .accent = .{ 0.28, 0.62, 0.52, 1 }, .glow = .{ 0.26, 1.0, 0.77, 1 }, .joint = .{ 0.026, 0.068, 0.06, 1 }, .trim = .{ 0.68, 0.83, 0.61, 1 } },
+    .{ .armor = .{ 0.42, 0.23, 0.08, 1 }, .accent = .{ 0.90, 0.48, 0.13, 1 }, .glow = .{ 1.0, 0.82, 0.16, 1 }, .joint = .{ 0.06, 0.036, 0.018, 1 }, .trim = .{ 1.0, 0.80, 0.38, 1 } },
 };
 
 const frames = [_]ModuleInfo{

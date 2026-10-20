@@ -40,6 +40,9 @@ fn ripples(p: vec2<f32>, t: f32) -> f32 {
     // The sun's glint, as a hard toon highlight.
     let sun = dot(mirror, frame.light_direction.xyz);
     color = color + frame.light_color.rgb * smoothstep(0.965, 0.975, sun) * 0.9 * (1.0 - fall);
+    // Broad, slow caustic flecks keep the moving water legible without high-frequency shimmer.
+    let caustic = smoothstep(0.72, 0.94, vnoise(w.xz * 0.12 + vec2<f32>(-t * 0.16, t * 0.11)) + 0.35 * vnoise(w.xz * 0.31 + vec2<f32>(t * 0.2, -t * 0.13)));
+    color = color + vec3<f32>(0.18, 0.56, 0.62) * caustic * (1.0 - fall) * (1.0 - fresnel * 0.55);
 
     // Foam: along the banks, broken up and drifting with the current.
     let edge = min(in.uv.y, 1.0 - in.uv.y);

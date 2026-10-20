@@ -327,7 +327,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         self.climb_energy = @min(100, self.climb_energy + 13 * dt);
     }
     const sprinting = input.fast and strength > 0.82 and self.stamina > 0;
-    self.stamina = std.math.clamp(self.stamina + (if (sprinting and self.grounded) @as(f32, -15) else self.suit.stamina_regen) * dt, 0, 100);
+    if (self.motion != .swim) self.stamina = std.math.clamp(self.stamina + (if (sprinting and self.grounded) @as(f32, -15) else self.suit.stamina_regen) * dt, 0, 100);
     self.ground = env.ground;
     self.wading = 0;
     // Authored water volumes and rivers use the same collision controller as dry traversal.
@@ -354,9 +354,19 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         self.grounded = false;
         const submerged = self.feet[1] + 1.35 < top;
         self.breath = std.math.clamp(self.breath + (if (submerged) @as(f32, -1) else 4) * dt, 0, 12);
-        h = approach(h, R.scale(wish, if (input.fast) 5 else 3.5), 14 * dt);
-        const vy = if (input.jump or self.breath < 2) @as(f32, 4) else if (input.dodge_held) @as(f32, -3) else std.math.clamp((top - 0.72 - self.feet[1]) * 3, -2.5, 3);
-        self.velocity = approach(self.velocity, .{ h[0], vy, h[2] }, 18 * dt);
+        const swim_boost = input.fast and self.stamina > 0 and self.breath >= 2;
+        self.stamina = std.math.clamp(self.stamina + (if (swim_boost) @as(f32, -28) else 16) * dt, 0, 100);
+        const look = camera.forward();
+        const swim_forward: V = .{ look.x(), look.y(), look.z() };
+        const vertical = std.math.clamp(input.up + @as(f32, @floatFromInt(@intFromBool(input.jump))) - @as(f32, @floatFromInt(@intFromBool(input.dodge_held))), -1, 1);
+        const swim_horizontal = R.add(R.scale(swim_forward, input.forward), R.scale(right, input.right));
+        const swim_raw = if (self.breath < 2) R.add(horizontal(swim_horizontal), .{ 0, 1, 0 }) else R.add(swim_horizontal, .{ 0, vertical, 0 });
+        const swim_length = R.length(swim_raw);
+        const swim_direction = if (swim_length > 0.05) R.scale(swim_raw, 1 / @max(1, swim_length)) else @as(V, @splat(0));
+        const swim_speed: f32 = if (swim_boost) 18 else 5.2;
+        const target = R.scale(swim_direction, swim_speed);
+        const buoyancy = if (swim_length > 0.05) 0 else std.math.clamp((top - 0.72 - self.feet[1]) * 3, -2.5, 3);
+        self.velocity = approach(self.velocity, .{ target[0], target[1] + buoyancy, target[2] }, (if (swim_boost) @as(f32, 24) else 16) * dt);
         self.move(physics, dt);
         camera.position = self.eye();
         return;

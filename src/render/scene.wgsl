@@ -140,12 +140,23 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
 }
 
 @fragment fn frag_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(surface_texture, surface_sampler, in.uv).rgb;
     // Negative UV sentinels reserve procedural materials without changing the vertex layout.
     let tag = select(0.0, floor(-in.uv.x + 0.5), in.uv.x < -9.5);
     let canopy = step(10.0, tag) * (1.0 - step(20.0, tag));
     let bark = step(20.0, tag);
-    var base = in.tint.rgb * mix(vec3<f32>(1.0, 1.0, 1.0), texel, 0.35);
+    // Antarctica props opt into a world-space triplanar glacier material through tint alpha
+    // -2. Sampling in world coordinates keeps long ice walls from stretching a single tile.
+    let ice_tag = in.tint.a < -1.5 && in.tint.a > -2.5;
+    var base = in.tint.rgb;
+    if (ice_tag) {
+        let normal_weights_raw = abs(normalize(in.normal));
+        let normal_weights = normal_weights_raw / max(normal_weights_raw.x + normal_weights_raw.y + normal_weights_raw.z, 0.001);
+        let ice_x = textureSample(surface_texture, surface_sampler, wrap(in.world.zy / 256.0)).rgb;
+        let ice_y = textureSample(surface_texture, surface_sampler, wrap(in.world.xz / 256.0)).rgb;
+        let ice_z = textureSample(surface_texture, surface_sampler, wrap(in.world.xy / 256.0)).rgb;
+        let glacier = ice_x * normal_weights.x + ice_y * normal_weights.y + ice_z * normal_weights.z;
+        base = in.tint.rgb * mix(vec3<f32>(0.54, 0.74, 0.92), glacier, 0.9);
+    }
     let d = distance(in.world, frame.eye.xyz);
     let detail = 1.0 - smoothstep(150.0, 720.0, d);
 
@@ -175,8 +186,15 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
     var emissive = 0.0;
     // Negative tint alpha selects unlit shading without expanding the 64-byte instance record.
     // Keep this branch in the shared pipeline so material choice adds no draw or pipeline switch.
-    if (in.tint.a >= 0.0) {
+    if (in.tint.a >= 0.0 || ice_tag) {
         color = lit(base, normalize(in.normal), in.world);
+        if (ice_tag) {
+            let view = normalize(frame.eye.xyz - in.world);
+            let mirror = reflected(view * -1.0, normalize(in.normal));
+            let sheen = smoothstep(0.89, 0.99, dot(mirror, frame.light_direction.xyz));
+            let facing = 1.0 - max(dot(normalize(in.normal), view), 0.0);
+            color = color + frame.light_color.rgb * sheen * sheen * 0.58 + vec3<f32>(0.10, 0.34, 0.62) * facing * facing * 0.16;
+        }
         // Lumen: tint alpha above 1 glows, more so at night.
         emissive = clamp(in.tint.a - 1.0, 0.0, 1.0);
         let glow = base * (0.9 + 0.8 * frame.horizon.a);

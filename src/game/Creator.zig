@@ -102,7 +102,11 @@ fn handleEnemyKey(self: *Creator, k: Key) Result {
         .down => self.enemy_part = @enumFromInt((@intFromEnum(self.enemy_part) + 1) % EnemyDesign.part_count),
         .left => self.enemy_design.cycle(self.enemy_part, -1),
         .right => self.enemy_design.cycle(self.enemy_part, 1),
-        .char => |c| if (std.ascii.toLower(c) == 'p') self.enemy_design.cyclePalette(1),
+        .char => |c| switch (std.ascii.toLower(c)) {
+            'p' => self.enemy_design.cyclePalette(1),
+            'l' => self.enemy_design.cycleLayerStyle(1),
+            else => {},
+        },
         .escape, .enter => self.enemy_design_open = false,
         else => {},
     }
@@ -123,7 +127,8 @@ fn handleImportedKey(self: *Creator, k: Key) Result {
             'h' => self.toggleImportedPart(),
             else => {},
         },
-        .escape, .enter => self.imported_open = false,
+        // Escape (pad B) leaves; Enter (pad A, Start) must not throw the panel away mid-edit.
+        .escape => self.imported_open = false,
         else => {},
     }
     return .editing;
@@ -176,6 +181,25 @@ pub fn moveImported(self: *Creator, delta: isize) void {
         self.imported_selected = if (wrapped_step > selected) count - (wrapped_step - selected) else selected - wrapped_step;
     }
     self.alignImportedPalette();
+}
+
+/// Part lists can be longer than a hit row's byte: a clicked row is the part index modulo 256,
+/// and the visible list is centred on the selection, so the matching part nearest the selection
+/// (in list order, among those the filter shows) is the one that was clicked.
+pub fn importedPartForRow(self: *const Creator, row: u8) usize {
+    const doc = self.imported_doc orelse return row;
+    var best: usize = row;
+    var best_distance: usize = std.math.maxInt(usize);
+    var candidate: usize = row;
+    while (candidate < doc.parts.len) : (candidate += 256) {
+        if (!self.matchesFilter(doc.parts[candidate].surface)) continue;
+        const distance = if (candidate > self.imported_selected) candidate - self.imported_selected else self.imported_selected - candidate;
+        if (distance < best_distance) {
+            best = candidate;
+            best_distance = distance;
+        }
+    }
+    return best;
 }
 
 pub fn selectImported(self: *Creator, index: usize) void {

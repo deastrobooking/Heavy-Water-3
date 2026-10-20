@@ -69,6 +69,7 @@ test {
     _ = @import("asset/Modifiers.zig");
     _ = @import("asset/MeshEdit.zig");
     _ = @import("game/MeshTools.zig");
+    _ = @import("character/Retarget.zig");
     _ = @import("asset/Catalog.zig");
     _ = @import("world/Modifications.zig");
     _ = @import("world/World.zig");

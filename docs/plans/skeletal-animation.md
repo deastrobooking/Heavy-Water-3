@@ -8,7 +8,9 @@
 - **Procedural poses:** traversal uses walk phase and motion state; combat maps aim, saber swing, guard, cast and throw actions onto joints. Troopers now add tactical cover, timed melee strike and grenade-throw poses on the same rig.
 - **Importer:** source tracing reports skin joints and parent links. A CPU-only preview path evaluates bind pose or compatible ranger-run rotations from glTF `JOINTS_0`, `WEIGHTS_0`, and inverse binds, but the normal runtime importer still rejects skinned nodes and does not import animation channels. `HWMS` contains no joints, weights, or skeleton.
 - **Renderer:** characters are skinned on the GPU. `render/skin.wgsl` is a vertex stage that blends per-joint dual quaternions from a palette uniform; `render/Characters.zig` uploads each character's bind-pose mesh once and writes its palette every frame. `-Dcpu-skinning` keeps the old CPU path.
-- **Still needed:** runtime glTF skin import (`HWSK`), animation channel import (`HWAN`), compatible-rig retargeting, named attachments, and per-bone combat hitboxes.
+- **Imported humanoids (2026-10-20):** an imported GLB keeps its skin (HWMS v3/v4), its bones map by name onto all 21 game joints, and `character/Retarget.zig` retargets the live game pose with a bind-pose correction and source-proportion forward kinematics. Not covered: fingers (they follow the hand), source animation clips, and non-humanoid rigs.
+- **Transitions (2026-10-20):** `Ranger.solvePose` crossfades from the displayed pose whenever the motion or action changes (about 0.15 s, attacks about 0.06 s), so take-offs, landings, attacks and interrupted clip fades no longer snap. A landing dip reads `Player.landing`; idle adds a breath, weight shift and head turn; the gait phase now advances by a speed-dependent step length (0.7–1.6 m) so feet plant instead of sliding.
+- **Still needed:** animation channel import (`HWAN`), named attachments, per-bone combat hitboxes, distinct poses for swim, stomp, board and hang, turn lean and strafing gaits, foot IK, spring bones in game, and Wildkin quadruped and wing motion.
 
 ## Progress
 

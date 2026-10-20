@@ -3,6 +3,7 @@ const mach = @import("mach");
 const gpu = mach.gpu;
 const Streamer = @import("../world/Streamer.zig");
 const Key = @import("../world/ChunkKey.zig");
+const Region = @import("../world/Region.zig");
 const Chunk = @import("../procedural/Chunk.zig");
 const Scatter = @import("../procedural/Scatter.zig");
 const Camera = @import("../world/Camera.zig");
@@ -16,6 +17,7 @@ const Modifications = @import("../world/Modifications.zig");
 const Vegetation = @import("../procedural/Vegetation.zig");
 const Noise = @import("../procedural/Noise.zig");
 const Scene = @This();
+const world_prop_distance: f32 = 6000;
 /// Per-axis `stretch` (applied first) and a unit-quaternion `rotation`; the shader corrects
 /// normals for the stretch and rotates them.
 pub const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32, stretch: [4]f32 = .{ 1, 1, 1, 0 }, rotation: [4]f32 = .{ 0, 0, 0, 1 } };
@@ -259,13 +261,22 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         }
     }
     self.peak_resident_count = @max(self.peak_resident_count, self.resident_count);
-    self.relic_count = self.gather(.relic, vp, culling, removed, null);
-    self.plant_count = 0;
-    for (&self.flora_counts, 0..) |*count, variant| {
-        count.* = self.gather(.vegetation, vp, culling, removed, @intCast(variant));
-        self.plant_count += count.*;
+    if (Region.antarctica.contains(center.x, center.z)) {
+        // The first ice sheet approach is intentionally bare: keep procedural forest, stones,
+        // and salvage out of the visual-only perimeter until Antarctic encounter dressing exists.
+        self.relic_count = 0;
+        self.flora_counts = @splat(0);
+        self.plant_count = 0;
+        self.boulder_counts = @splat(0);
+    } else {
+        self.relic_count = self.gather(.relic, vp, culling, removed, null);
+        self.plant_count = 0;
+        for (&self.flora_counts, 0..) |*count, variant| {
+            count.* = self.gather(.vegetation, vp, culling, removed, @intCast(variant));
+            self.plant_count += count.*;
+        }
+        for (&self.boulder_counts, 0..) |*count, variant| count.* = self.gather(.boulder, vp, culling, removed, @intCast(variant));
     }
-    for (&self.boulder_counts, 0..) |*count, variant| count.* = self.gather(.boulder, vp, culling, removed, @intCast(variant));
     self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
 
@@ -334,6 +345,15 @@ fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
 fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32, hide_owner: u8) void {
     self.draw_count = 0;
     self.prop_count = 0;
+    std.debug.assert(props.len <= World.max_props);
+    var nearby: [World.max_props]bool = @splat(false);
+    for (props, 0..) |prop, i| {
+        const p = prop.transform.position;
+        const dx = p[0] - camera_position[0];
+        const dy = p[1] - camera_position[1];
+        const dz = p[2] - camera_position[2];
+        nearby[i] = dx * dx + dy * dy + dz * dz <= world_prop_distance * world_prop_distance;
+    }
     var live = self.catalog.meshes.live.iterator(.{});
     while (live.next()) |slot| {
         const handle = self.catalog.meshes.idAt(slot);
@@ -342,7 +362,8 @@ fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32,
         for (entry.model.submeshes, 0..) |submesh, s| {
             const first = self.instance_count;
             const color = (self.catalog.material(entry.materials[s]) orelse continue).base_color;
-            for (props) |prop| {
+            for (props, 0..) |prop, prop_index| {
+                if (!nearby[prop_index]) continue;
                 if (hide_owner != 0 and prop.owner == hide_owner) continue;
                 if (!prop.effectiveMesh(camera_position).eql(handle)) continue;
                 self.instances[self.instance_count] = .{ .translation_scale = prop.transform.toInstance(), .tint = multiply(prop.tint, color), .stretch = .{ prop.size[0], prop.size[1], prop.size[2], 0 }, .rotation = prop.rotation };

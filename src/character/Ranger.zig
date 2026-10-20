@@ -41,6 +41,8 @@ pub const Pose = struct {
     action_t: f32 = 0,
     arc: Arc = .forehand,
     aim_pitch: f32 = 0,
+    /// Seconds of landing recovery left (`Player.landing`, 0.25 at touchdown): a knee-bend dip.
+    landing: f32 = 0,
 };
 pub const Draw = struct {
     profile: Profile,
@@ -61,6 +63,14 @@ profile: Profile,
 controller: Animation.Controller = .{},
 last_pose: ?Pose = null,
 last_blend: ?Animation.Blend = null,
+/// The pose on screen when the motion or action last changed, and how much of it still shows.
+/// Every discrete change (take-off, landing, an attack starting or ending, a clip fade cut short)
+/// crossfades from what was displayed instead of snapping. Allocated once at init.
+fade_from: []m.Transform = &.{},
+fade: f32 = 0,
+fade_rate: f32 = 0,
+fade_clock: ?f32 = null,
+last_fade: f32 = 0,
 /// How many entries the content registry held when this was built; the owner rebuilds when a
 /// mod installs later, so a saved choice appears as soon as its mod does.
 content_count: usize = 0,
@@ -210,7 +220,10 @@ pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const Char
     const vertices = try a.alloc(Mesh.Vertex, ch.mesh.vertices.items.len);
     errdefer a.free(vertices);
     const indices = try a.dupe(u32, ch.mesh.indices.items);
+    errdefer a.free(indices);
     var self: Ranger = .{ .character = ch, .instance = inst, .mesh = .{ .vertices = vertices, .indices = indices }, .profile = profile, .content_count = if (content) |registry| registry.count else 0 };
+    self.fade_from = try a.alloc(m.Transform, inst.pose.local.len);
+    errdefer a.free(self.fade_from);
     for (self.mesh.vertices, self.character.mesh.vertices.items, self.character.color_index.items) |*v, source, color| {
         var c = self.character.palette.items[color];
         if (source.region == .face and source.uv.x >= 0 and source.uv.y >= 0) {
@@ -244,6 +257,7 @@ pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const Char
     return self;
 }
 pub fn deinit(self: *Ranger, a: std.mem.Allocator) void {
+    a.free(self.fade_from);
     self.mesh.deinit(a);
     self.instance.deinit(a);
     self.character.deinit(a);
@@ -348,10 +362,37 @@ fn solvePose(self: *Ranger, state: Pose) bool {
     } else if (!timed_pose) {
         key.time = 0;
     }
-    if (self.last_pose) |previous| if (self.last_blend) |old_blend| {
+    // The fade runs on the game clock, but a stopped clock (pause, menus, a frozen showcase) must
+    // not hold a stale pose forever: a call without time passing counts as one frame.
+    const elapsed = if (self.fade_clock) |before| state.time - before else 0;
+    const dt = if (elapsed > 0) @min(elapsed, 0.1) else 1.0 / 60.0;
+    self.fade_clock = state.time;
+    if (self.last_pose) |previous| {
+        const changed = previous.motion != state.motion or previous.action != state.action or (state.action == .swing and previous.arc != state.arc);
+        if (changed and self.fade_from.len == p.local.len) {
+            @memcpy(self.fade_from, p.local);
+            self.fade = 1;
+            // Attacks start almost at once; everything else (landing, take-off, an action
+            // ending) settles over about a sixth of a second.
+            self.fade_rate = if (state.action != .none and previous.action != state.action) 16 else 6.5;
+        } else self.fade = @max(0, self.fade - dt * self.fade_rate);
+    }
+    // The cache is only good once the last solve was not mid-fade, or the final fade step would
+    // be skipped and leave a sliver of the old pose on screen.
+    const settled = self.fade == 0 and self.last_fade == 0;
+    self.last_fade = self.fade;
+    if (settled) if (self.last_pose) |previous| if (self.last_blend) |old_blend| {
         if (std.meta.eql(previous, key) and std.meta.eql(old_blend, blend)) return false;
     };
     poseSkeletonBlended(p, &self.character.skeleton, key, blend);
+    if (self.fade > 0) {
+        const w = self.fade * self.fade * (3 - 2 * self.fade);
+        for (p.local, self.fade_from) |*now, then| {
+            now.rotation = Q.slerp(now.rotation, then.rotation, w);
+            now.translation = now.translation.add(then.translation.sub(now.translation).scale(w));
+        }
+        p.updateGlobal(&self.character.skeleton);
+    }
     self.last_pose = key;
     self.last_blend = blend;
     return true;
@@ -461,7 +502,23 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
             p.rotateLocal(knee.idx(), Q.fromAxisAngle(V.unit_x, 0.5));
         }
     }
+    // Idle: a slow breath through the chest and a slight weight shift, fading out with speed.
     p.local[sk.Joint.hips.idx()].translation.y += @sin(state.time * 2) * 0.003 * (1 - amount);
+    const still = if (state.motion == .idle) 1 - amount else 0;
+    p.local[sk.Joint.hips.idx()].translation.x += @sin(state.time * 0.45) * 0.012 * still;
+    p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -@sin(state.time * 2) * 0.02 * still));
+    p.rotateLocal(sk.Joint.head.idx(), Q.fromAxisAngle(V.unit_y, @sin(state.time * 0.31) * 0.08 * still));
+    // Landing recovery: knees give and the hips drop, easing out over `Player.landing`.
+    if (state.landing > 0 and !airborne) {
+        const k = std.math.clamp(state.landing / 0.25, 0, 1);
+        const dip = k * k * (3 - 2 * k);
+        p.local[sk.Joint.hips.idx()].translation.y -= 0.09 * dip;
+        p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.14 * dip));
+        inline for ([_]sk.Joint{ .thigh_l, .thigh_r }, [_]sk.Joint{ .shin_l, .shin_r }) |thigh, shin| {
+            p.rotateLocal(thigh.idx(), Q.fromAxisAngle(V.unit_x, 0.32 * dip));
+            p.rotateLocal(shin.idx(), Q.fromAxisAngle(V.unit_x, 0.62 * dip));
+        }
+    }
     if (state.motion == .roll or state.motion == .dash or state.motion == .board or state.motion == .skate) p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.35));
     if (state.motion == .sprint) p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -0.16));
     if (state.motion == .dash) {
@@ -1129,12 +1186,104 @@ test "trooper strike and cover actions drive the skinned skeleton" {
     const strike_hand = ranger.instance.pose.global[sk.Joint.hand_r.idx()].translation;
     try std.testing.expect(strike_hand.sub(rest_hand).length() > 0.2);
     const strike_hips = ranger.instance.pose.global[sk.Joint.hips.idx()].translation;
+    // Changing action crossfades from the strike; half a second later the cover pose has settled.
     _ = ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 0.4, .walk_phase = 1, .action = .cover });
+    _ = ranger.update(.{ .feet = .{ 0, 0, 0 }, .yaw = 0, .walk_amount = 0.4, .walk_phase = 1, .action = .cover, .time = 0.5 });
     const cover_hips = ranger.instance.pose.global[sk.Joint.hips.idx()].translation;
     const cover_hand = ranger.instance.pose.global[sk.Joint.hand_r.idx()].translation;
     try std.testing.expect(cover_hips.y < strike_hips.y - 0.1);
     try std.testing.expect(cover_hand.sub(rest_hand).length() > 0.1);
     for (ranger.mesh.vertices) |v| for (v.position ++ v.normal) |value| try std.testing.expect(std.math.isFinite(value));
+}
+
+test "motion and action changes crossfade from the displayed pose, then settle on the target" {
+    const a = std.testing.allocator;
+    var ranger = try init(a, .{});
+    defer ranger.deinit(a);
+    const hand = sk.Joint.hand_r.idx();
+    const run: Pose = .{ .feet = .{ 0, 0, 0 }, .yaw = 0, .motion = .run, .walk_amount = 1, .walk_phase = 1.2, .time = 1 };
+    _ = ranger.update(run);
+    const before = ranger.instance.pose.global[hand].translation;
+    // Take-off: the first frame of the jump still shows the running pose (no pop)...
+    var jump = run;
+    jump.motion = .jump;
+    jump.walk_amount = 0.3;
+    jump.time = 1 + 1.0 / 60.0;
+    _ = ranger.update(jump);
+    try std.testing.expect(ranger.instance.pose.global[hand].translation.sub(before).length() < 1e-4);
+    // ...it moves part of the way within a few frames...
+    jump.time = 1 + 4.0 / 60.0;
+    _ = ranger.update(jump);
+    const blending = ranger.instance.pose.global[hand].translation;
+    // ...and a third of a second later (stepped per frame, as the game does) matches the
+    // stateless target pose exactly.
+    for (5..25) |frame| {
+        jump.time = 1 + @as(f32, @floatFromInt(frame)) / 60.0;
+        _ = ranger.update(jump);
+    }
+    const settled = ranger.instance.pose.global[hand].translation;
+    var target = try sk.Pose.init(a, &ranger.character.skeleton);
+    defer target.deinit(a);
+    // `solvePose` keys untimed motions at time 0 (it skips re-skinning for clock-only changes).
+    var jump_key = jump;
+    jump_key.time = 0;
+    poseSkeleton(&target, &ranger.character.skeleton, jump_key);
+    try std.testing.expect(settled.sub(target.global[hand].translation).length() < 1e-3);
+    try std.testing.expect(blending.sub(before).length() > 1e-3 and blending.sub(settled).length() > 1e-3);
+    // An attack fades in quickly but not instantly, and the swing reaches its target pose.
+    var swing = jump;
+    swing.motion = .idle;
+    swing.walk_amount = 0;
+    swing.action = .swing;
+    swing.action_t = 0.5;
+    swing.time = 2;
+    _ = ranger.update(swing);
+    for (1..13) |frame| {
+        swing.time = 2 + @as(f32, @floatFromInt(frame)) / 60.0;
+        _ = ranger.update(swing);
+    }
+    var swing_key = swing;
+    swing_key.time = 0;
+    poseSkeleton(&target, &ranger.character.skeleton, swing_key);
+    try std.testing.expect(ranger.instance.pose.global[hand].translation.sub(target.global[hand].translation).length() < 1e-3);
+}
+
+test "a crossfade still settles when the clock stands still (menus, frozen showcases)" {
+    const a = std.testing.allocator;
+    var ranger = try init(a, .{});
+    defer ranger.deinit(a);
+    const hand = sk.Joint.hand_r.idx();
+    const idle: Pose = .{ .feet = .{ 0, 0, 0 }, .yaw = 0, .time = 3 };
+    _ = ranger.update(idle);
+    var swing = idle;
+    swing.action = .swing;
+    swing.arc = .overhead;
+    swing.action_t = 0.35;
+    for (0..15) |_| _ = ranger.update(swing);
+    var target = try sk.Pose.init(a, &ranger.character.skeleton);
+    defer target.deinit(a);
+    var key = swing;
+    key.time = 0;
+    poseSkeleton(&target, &ranger.character.skeleton, key);
+    try std.testing.expect(ranger.instance.pose.global[hand].translation.sub(target.global[hand].translation).length() < 1e-3);
+}
+
+test "landing recovery dips the hips and bends the knees, then recovers" {
+    const a = std.testing.allocator;
+    var ranger = try init(a, .{});
+    defer ranger.deinit(a);
+    var p = try sk.Pose.init(a, &ranger.character.skeleton);
+    defer p.deinit(a);
+    const standing: Pose = .{ .feet = .{ 0, 0, 0 }, .yaw = 0 };
+    poseSkeleton(&p, &ranger.character.skeleton, standing);
+    const hips = p.global[sk.Joint.hips.idx()].translation.y;
+    var landed = standing;
+    landed.landing = 0.25;
+    poseSkeleton(&p, &ranger.character.skeleton, landed);
+    try std.testing.expect(p.global[sk.Joint.hips.idx()].translation.y < hips - 0.05);
+    landed.landing = 0;
+    poseSkeleton(&p, &ranger.character.skeleton, landed);
+    try std.testing.expectApproxEqAbs(hips, p.global[sk.Joint.hips.idx()].translation.y, 1e-5);
 }
 
 test "locomotion controller maps run sprint climb and airborne states" {

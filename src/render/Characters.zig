@@ -8,6 +8,7 @@ const mach = @import("mach");
 const gpu = @import("mach").gpu;
 const Ranger = @import("../character/Ranger.zig");
 const CelStyle = @import("../character/CelStyle.zig");
+const Retarget = @import("../character/Retarget.zig");
 const CharacterContent = @import("../game/CharacterContent.zig");
 const World = @import("../world/World.zig");
 const GpuMesh = @import("GpuMesh.zig");
@@ -40,6 +41,8 @@ const Slot = struct {
     imported_model: ?*const Model = null,
     imported_generation: u16 = 0,
     imported_revision: u64 = 0,
+    /// Built on the first imported pose; the slot is rebuilt whenever the imported model changes.
+    retarget: ?Retarget.Plan = null,
     gpu_mesh: ?GpuMesh = null,
     skinned: ?SkinnedMesh = null,
     /// The player's own cel style from a mod, validated when the character was built.
@@ -134,13 +137,12 @@ pub fn prepare(self: *Characters, a: std.mem.Allocator, io: std.Io, device: *gpu
                             palette[bone_index * 2 + 1] = posed.dual;
                         }
                     } else {
-                        for (skin.bones, 0..) |bone, bone_index| {
-                            const source = @as(usize, bone.ranger_joint) * 2;
-                            const r = rest[bone.ranger_joint];
-                            const posed = Model.retargetBone(bone, .{ r.x, r.y, r.z }, ranger_palette[source], ranger_palette[source + 1], unit);
-                            palette[bone_index * 2] = posed.real;
-                            palette[bone_index * 2 + 1] = posed.dual;
-                        }
+                        // Forward kinematics over the source's own bones, with its bind pose
+                        // corrected onto the game's rest pose (see `character/Retarget.zig`).
+                        var rest_points: [Retarget.joint_count][3]f32 = undefined;
+                        for (&rest_points, rest[0..Retarget.joint_count]) |*out, r| out.* = .{ r.x, r.y, r.z };
+                        if (slot.retarget == null) slot.retarget = Retarget.Plan.init(skin.bones, slot.ranger.character.skeleton.parents.items[0..Retarget.joint_count], &rest_points);
+                        slot.retarget.?.pose(ranger_palette[0 .. Retarget.joint_count * 2], &rest_points, unit, skin.bones, palette[0 .. skin.bones.len * 2]);
                     }
                     if (descriptor.imported_bind_pose) for (0..skin.bones.len) |bone_index| {
                         palette[bone_index * 2] = .{ 0, 0, 0, 1 };

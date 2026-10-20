@@ -1484,6 +1484,31 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** default `python3 tools/zig.py build check`; `MTL_DEBUG_LAYER=1` ReleaseSafe showcase 81 captured frame 120 and exited cleanly with Metal API Validation enabled. The capture shows the globe and Chicago travel row. `git diff --check` passed.
 - **Not checked:** hands-on globe dragging or Chicago travel/save behavior; headless tests were not run. Chicago has heightmapped terrain and an arrival but no dedicated city skyline, missions, or liberation content. LA is still not a travel destination.
 
+## Antarctica terrain landing and globe marker — 2026-10-20
+
+- **Added:** imported the 2048×2048 16-bit grayscale Antarctica raster as `src/assets/antarctica_terrain.hwmh` (160 km square, −200 m base, 1,200 m relief). Added a separated playable region at z −420 km, a terrain sampler binding, fast-travel row, and selectable Antarctica marker on the rotating Earth globe. Added the Subglacial Hive premise and named rescue roster to the creative bible. The raster is not georeferenced; this region samples the raster as a local gameplay landscape.
+- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` pass.
+- **Not checked:** terrain collision at the Antarctic landing, travel in a live session, or mission/rescue gameplay. Two Metal-validated globe capture attempts (`-Dcapture-frame=120`, then `-Dcapture-frame=1`) launched and enabled Metal API Validation, but remained alive without producing a fresh capture after 108 and 60 seconds; both were stopped. The older `zig-out/capture.bmp` predates this change and is not evidence for Antarctica. The robots and AMP are campaign canon and planned content; they are not currently playable heroes or in-world rescue encounters.
+
+## Antarctic glacier surface and sentry perimeter — 2026-10-20
+
+- **Added:** generated and checked in `assets/antarctica_blue_ice_albedo.png`, with a 512×512 RGBA runtime copy in `src/assets/antarctica_blue_ice.rgba`. The terrain shader blends the atlas over Antarctica with world-space ice strata, cold cel-shadows, and sharpened sun glints. World props tagged as ice use triplanar texture coordinates and a blue Fresnel sheen. The Antarctic approach now suppresses biome plants, salvage and boulders, draws four 46 m ice ramparts with lit seams, and animates two large six-legged scorpion sentries around the perimeter. A 6 km prop visibility bound prevents scenery at the far-separated Detroit coordinates leaking into the Antarctic view. Review scenes: `-Dshowcase=85` overview and `-Dshowcase=86` sentry close-up.
+- **Checked:** default `python3 tools/zig.py build check`, default `python3 tools/zig.py build` (installed executable), and `git diff --check` passed. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=85 -Dcapture-frame=120` completed with Metal API Validation enabled; the capture was inspected and shows the glacier atlas, icy wall ring, and animated sentries. The terrain is locally visible, though the current streamer/haze can make farther ground fade toward the sky colour.
+- **Not checked:** gameplay collision, combat or damage for the visual sentries; the walls are non-colliding scenery. No tests were added or run. The Antarctic robots and AMP rescue arc remain campaign plans.
+
+## Scalari metal and insectoid layer styles — 2026-10-20
+
+- **Added:** the Hive Forge now switches between a brushed-metal layer with visible dark bearings and metallic struts, and an insectoid-carapace layer with overlapping oval plates, glowing compound optics, paired antennae, dorsal shells and tapered claws. Added silver, moss-steel and amber-carapace palettes with distinct understructure and trim colors. Showcases 82–84 review the panel and each finish.
+- **Checked:** default `python3 tools/zig.py build check` passed with the new renderer code before the later importer-side `Gltf.zig` edit; showcase 83 completed under Metal API Validation at frame 1. The capture shows paired antennae, three optics, layered chest/shoulder shells, and a segmented abdomen in the amber-carapace palette.
+- **Blocked on current tree:** the brushed-metal showcase build now stops compiling at `src/asset/Gltf.zig:325:10` (`expected statement, found ';'`), in an unrelated in-progress importer edit. The current whole-graph build check therefore needs that syntax error resolved before it can pass again.
+- **Not checked:** final brushed-metal capture, hands-on style switching, or raid play; no tests were added or run. Forge designs remain session-only.
+
+## Water flow and high-speed swimming — 2026-10-20
+
+- **Added:** river shader caustic highlights use broad, slow world-space patterns to add moving surface detail without tight shimmer. Swimming now follows camera pitch and yaw in 3D, accepts the existing ascend/descend controls (jump rises, roll dives), and uses the sprint control for an 18 m/s burst. Swim bursts drain stamina; normal swimming recovers it. Low breath forces a steady surface ascent, and buoyancy holds the swimmer up when there is no directional input.
+- **Checked:** default `python3 tools/zig.py build check` passed (exit 0); `git diff --check` passed.
+- **Not checked:** headless tests were not run. The Metal-validated showcase 36 capture initialized the Apple M3 Pro backend and completed deferred-mesh preparation, but produced no fresh capture after about a minute and was stopped. The existing capture file was stale, so water appearance is not visually verified. Underwater controls and burst tuning still need hands-on play.
+
 ## Per-vertex cel pens (E1b) — 2026-10-19
 
 - **Added:** HWMS v4 adds one cel pen per vertex (`Model.pens`), written only when present; imported characters now shade and ink each vertex with its pen's cel material instead of always pen 0. `MeshEdit` adds the pen brush, pen fill, selection-masked dabs and select-by-pen/colour. Checked in a scratch worktree of HEAD with the pre-`2c361e4` `build.zig` restored there only, because HEAD's `build.zig` does not compile (it uses `captain_mesh` after the step that defines it was removed): default and 0.17 `build check` pass; the suite runs 476/482, with the same six failures already present after the terrain-heightmap commit (Field LOD, Chunk seed, cave mouth, Hive meshes, Skies, Pets) and every MeshEdit, Model, flight and New York test passing; the Metal smoke with `MTL_DEBUG_LAYER=1` completed 300 frames. Not checked: a capture of a painted imported character (no in-game way to paint yet), and painted colour surviving a part recolour (it does not; see the mesh editor plan).
@@ -1500,3 +1525,39 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Bugs found while capturing, fixed:** installing the imported mesh closed the tools (they now just rebind); the character-showcase review camera overrode the tools' orbit view; 909 selection dots used the whole 640-command GUI canvas so the panel did not draw (the panel now draws first and the dots share what is left, sampled).
 - **Checked:** the `-Dcharacter-showcase=48 -Dcapture-frame=60` capture under `MTL_DEBUG_LAYER=1`, inspected: the panel, the gold selection dots on the head, the upper body in the armour cel pen (hard specular) painted blue, and the orange accent band at the waist all render on the GPU-skinned imported character. MeshTools tests cover world/model placement round trips, a move drag on a turned and scaled model, pen painting, tear-off and its undo, and panel control clamping. Default and 0.17 `build check` pass; the suite runs 481/487 with every new test passing and the same six failures present since the terrain-heightmap commit (Field LOD, Chunk seed, cave mouth, Hive meshes, Skies, Pets); the Metal smoke completes 300 frames; the ReleaseFast build is installed.
 - **Not checked:** clicking and dragging by hand in a window (the capture is scripted, not driven by the mouse); whether the bundled GLB's bind pose differs visibly from its retargeted idle (the capture shows arms down either way); performance on large meshes (every brush dab scans all vertices); touch and pen tablets.
+
+## Character animation, imported rigging and GUI pass — 2026-10-20
+
+- **Rigging:**
+  - `Gltf.humanoidJoint` maps bone names onto all 21 humanoid joints, where it used to recognise 7 run tracks. It covers Mixamo, VRoid `J_Bip_L_*`, Rigify `DEF-*.L`, Unreal `*_l`/`spine_03` and Biped `Bip01 L *` names. Fingers, twist and end bones inherit their parent.
+  - Fixed: `forearm.L` and `lowerarm_l` were matched to the upper arm, and hips and spine fell back to root, which tore the waist.
+  - New `character/Retarget.zig`: a per-joint bind correction (a T-pose's arms come down to the game's A-pose) and forward kinematics over the source's own bone offsets, so proportions are the source's and the joints stay connected.
+  - Also fixed, older than this pass: `Sandbox.avatar` never applied the combat stance to imported skinned characters, so they never showed swings, aiming or guarding.
+  - The status line now reads "LIVE RETARGET n/21 JOINTS".
+- **Animation:**
+  - `Ranger.solvePose` crossfades from the displayed pose on every motion or action change: about 0.15 s, and about 0.06 s for an attack starting.
+  - The fade keeps going while the game clock is stopped (one frame per call) and always re-solves after a fading frame, so it never sticks or leaves a sliver of the old pose. Both bugs were found during this work, and each has a regression test that failed first.
+  - A landing dip reads `Player.landing`.
+  - Idle adds a breath, a weight shift and a head turn (idle motion only).
+  - The stride step length now follows speed (0.7–1.6 m) instead of a flat 1.4 rad/m.
+- **GUI:**
+  - Part hit rows are masked and resolved to the part nearest the selection, so parts at 256 and above no longer trigger another control.
+  - Enter (pad A or Start) no longer closes the imported library.
+  - With the vertex tools open, the pad cycles tools, sizes the brush and backs out, and no longer edits the library hidden behind them.
+  - Saving the library now says vertex edits are not saved yet.
+  - The vertex panel's status lines follow the content.
+- **Checked:**
+  - New tests pass: rig names (about 40 cases), retarget identity, T-pose correction with joint continuity, and knee bend with hips travel in centimetre units; crossfade continuity and settling, a crossfade with a stopped clock, and the landing dip.
+  - Default and 0.17 `build check` pass.
+  - Captures of `-Dcharacter-showcase=47` under `MTL_DEBUG_LAYER=1`:
+    - At the last commit (old retarget), the bundled rigged GLB stands with splayed, stretched legs and a tilted, torn body.
+    - With this change it stands in a clean A-pose.
+    - With `-Dcharacter-pose=2` it performs the overhead swing with the arm, forearm and shoulder pad connected.
+  - Suite, smoke and install: see the next line.
+- **Not checked:**
+  - Hands-on play feel of the fades, landing and strides.
+  - Real Rigify, VRoid and Unreal files: only names are tested, and VRoid files usually fail earlier on morph targets.
+  - Fingers, which follow the hand.
+  - Turn lean and strafing gaits, foot IK, distinct swim/stomp/board/hang poses, and Wildkin quadruped and wing motion.
+  - Remaining GUI items: the library panel at UI scale above 1, a pad path into the library and creator tabs, and the Heroes narrow layout.
+

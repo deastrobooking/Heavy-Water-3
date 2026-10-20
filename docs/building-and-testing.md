@@ -215,6 +215,10 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 74 | Nature review: a close pine view |
 | 75 | Nature review: a close moon-cascade view |
 | 78 | Immediate 3D API review: box, sphere, catalog models, tint, scale, and LOD |
+| 82 | HIVE FORGE UI with the insectoid carapace layer selected |
+| 83, 84 | Insectoid amber-carapace and brushed-silver Scalari siege frames |
+| 85 | Antarctic blue glacier, towering perimeter ramparts, and patrol overview |
+| 86 | Close view of an animated scorpion sentry against the ice rampart |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |

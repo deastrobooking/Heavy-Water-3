@@ -166,6 +166,8 @@ tool_camera: ?@import("world/Camera.zig") = null,
 tool_aspect: f32 = 16.0 / 9.0,
 orbit_held: bool = false,
 tools_showcase_done: bool = false,
+/// Vertex edits made since the imported mesh was installed; they are not written to disk yet.
+vertex_edits_pending: bool = false,
 queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
@@ -565,6 +567,19 @@ fn uiNav(self: *App, k: Menu.Key) void {
         .confirm => .close,
         .back => .close,
     });
+    if (self.meshToolsActive()) {
+        // A pad cannot aim a brush, but it can pick tools, size the brush and leave; it must not
+        // reach the part library hidden behind the tool bar.
+        const count: i32 = @intCast(MeshTools.tool_labels.len);
+        const current: i32 = @intFromEnum(self.mesh_tools.tool);
+        return switch (k) {
+            .left, .right => self.meshToolControl(@enumFromInt(@as(u8, @intCast(@mod(current + @as(i32, if (k == .right) 1 else -1), count))))),
+            .up => self.meshToolControl(.radius_up),
+            .down => self.meshToolControl(.radius_down),
+            .back => self.meshToolControl(.close),
+            .confirm => {},
+        };
+    }
     if (sb.creator.open) return self.creatorInput(switch (k) {
         .up => .up,
         .down => .down,
@@ -901,10 +916,11 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.enemy_design.cycle(sb.creator.enemy_part, if (Screens.hitArea(hit) == .enemy_left) -1 else 1);
         },
         .enemy_palette_left, .enemy_palette_right => if (click and sb.creator.enemy_design_open) sb.creator.enemy_design.cyclePalette(if (Screens.hitArea(hit) == .enemy_palette_left) -1 else 1),
+        .enemy_style_left, .enemy_style_right => if (click and sb.creator.enemy_design_open) sb.creator.enemy_design.cycleLayerStyle(if (Screens.hitArea(hit) == .enemy_style_left) -1 else 1),
         .imported_import_glb => if (click and sb.creator.imported_open) self.chooseAndImportCharacter(),
         .imported_filter => if (click and sb.creator.imported_open) sb.creator.cycleImportedFilter(@as(i32, row) - @as(i32, sb.creator.imported_filter)),
         .imported_part => if (click and sb.creator.imported_doc != null) {
-            sb.creator.selectImported(row);
+            sb.creator.selectImported(sb.creator.importedPartForRow(row));
         },
         .imported_surface_left, .imported_surface_right => if (click) {
             sb.creator.cycleImportedSurface(if (Screens.hitArea(hit) == .imported_surface_left) -1 else 1);
@@ -1518,7 +1534,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1671,6 +1687,35 @@ fn showcase(self: *App) void {
     } else if (v == 78) {
         target = .{ 0, 1.3, 0 };
         eye = .{ 13, 10, 19 };
+    } else if (v == 85) {
+        const Region = @import("world/Region.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const arrival = Region.antarctica.arrival;
+        const ground = Terrain.surface(self.sandbox.seed, arrival[0], arrival[1]).height;
+        self.sandbox.player.mode = .fly;
+        self.sandbox.player.feet = .{ arrival[0], ground + 4, arrival[1] };
+        target = .{ arrival[0], ground + 17, arrival[1] };
+        eye = .{ arrival[0] + 175, ground + 115, arrival[1] + 235 };
+    } else if (v == 86) {
+        const Region = @import("world/Region.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const arrival = Region.antarctica.arrival;
+        const ground = Terrain.surface(self.sandbox.seed, arrival[0] + 116, arrival[1]).height;
+        self.sandbox.player.mode = .fly;
+        self.sandbox.player.feet = .{ arrival[0], ground + 4, arrival[1] };
+        target = .{ arrival[0] + 116, ground + 5, arrival[1] };
+        eye = .{ arrival[0] + 20, ground + 27, arrival[1] + 125 };
+    } else if (v == 83 or v == 84) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const origin = Sandbox.spawn;
+        const ground = Terrain.surface(self.sandbox.seed, origin[0], origin[2]).height;
+        self.sandbox.creator.enemy_design.layer_style = if (v == 83) .insectoid_carapace else .brushed_metal;
+        self.sandbox.creator.enemy_design.palette = if (v == 83) .amber_carapace else .silver;
+        self.sandbox.enemies.units[0] = .{ .kind = .scalari_titan, .nest = 0, .position = .{ origin[0], ground, origin[2] }, .health = 5000, .orbit = 0 };
+        self.sandbox.player.feet = .{ origin[0] + 1000, ground, origin[2] + 1000 };
+        self.sandbox.player.mode = .fly;
+        target = .{ origin[0], ground + 2.5, origin[2] };
+        eye = .{ origin[0] + 1.8, ground + 4.6, origin[2] + 14 };
     } else if (v == 70) {
         const origin = District.testOrigin(self.sandbox.seed);
         target = .{ origin[0], origin[1] + 185, origin[2] };
@@ -1701,7 +1746,7 @@ fn showcase(self: *App) void {
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
     const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65;
-    self.sandbox.tick = if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
+    self.sandbox.tick = if (v == 85 or v == 86) 0 else if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
     const dz = target[2] - eye[2];
@@ -1857,6 +1902,18 @@ fn guiShowcase(self: *App, v: u32) void {
             self.menu.map_zoom = 3;
             self.menu.row = 0;
             self.menu.map_destination = 0;
+        },
+        82 => {
+            sb.creator.begin(sb.profile);
+            sb.creator.enemy_design_open = true;
+            sb.creator.enemy_design.layer_style = .insectoid_carapace;
+            sb.player.mode = .fly;
+            const facing: [3]f32 = .{ @sin(self.engine.camera.yaw), 0, @cos(self.engine.camera.yaw) };
+            for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.kind == .scalari_titan) {
+                unit.position = .{ sb.player.feet[0] + facing[0] * 11, sb.player.feet[1], sb.player.feet[2] + facing[2] * 11 };
+                unit.yaw = self.engine.camera.yaw + std.math.pi;
+                break;
+            };
         },
         29 => {
             sb.progress.vehicles = 0b111;
@@ -2960,7 +3017,12 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.cel_debug = self.cel_debug;
     renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
-    if (options.showcase == 78) {
+    if (options.showcase == 83 or options.showcase == 84) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const origin = Sandbox.spawn;
+        const ground = Terrain.surface(self.sandbox.seed, origin[0], origin[2]).height;
+        renderer.prop_count = @import("game/Frontier.zig").publishTitanPreview(&self.sandbox, &renderer.props, .{ origin[0], ground, origin[2] }, 0);
+    } else if (options.showcase == 78) {
         const Scene3D = @import("engine/Scene3D.zig");
         var scene = Scene3D.Frame.init(self.sandbox.catalog, &renderer.props);
         scene.drawBox(.{ -5, 1, 0 }, .{ 2, 2, 2 }, .{ 0.22, 0.52, 0.82, 1 }) catch unreachable;
@@ -3192,13 +3254,18 @@ fn saveMeshLibrary(self: *App) void {
         self.report("LIBRARY SAVE FAILED {s}", .{@errorName(err)});
         return;
     };
+    if (self.vertex_edits_pending) {
+        // Part edits are on disk; sculpt, paint and pen edits live only in this session so far.
+        self.report("PARTS SAVED. VERTEX EDITS ARE NOT SAVED YET (TEAR OFF SAVES PARTS)", .{});
+        return;
+    }
     self.sandbox.creator.imported_status = .saved;
     self.report("IMPORTED CHARACTER LIBRARY SAVED", .{});
 }
 
-/// Import a binary GLB into the Character Designer. The current runtime format is static, so the
-/// importer evaluates the gameplay run controller on matching named joints and keeps the source
-/// GLB plus editable component sidecar for repeat edits and future live-skin support.
+/// Import a binary GLB into the Character Designer. Its skin is kept and retargeted live onto the
+/// game's humanoid skeleton by bone name (`Gltf.humanoidJoint`, `character/Retarget.zig`); the
+/// source GLB and the editable component sidecar are saved for repeat edits.
 fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     var scratch: std.heap.ArenaAllocator = .init(self.allocator);
     defer scratch.deinit();
@@ -3226,9 +3293,9 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     self.sandbox.creator.draft.body_style = .imported_glb;
     self.sandbox.creator.imported_selected = 0;
     self.sandbox.creator.imported_status = .ready;
-    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "LIVE RETARGET {d}/7 JOINTS", .{mapped_count}) catch unreachable;
+    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "LIVE RETARGET {d}/21 JOINTS", .{mapped_count}) catch unreachable;
     self.imported_rig_status_len = app_status.len;
-    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "LIVE RETARGET {d}/7 JOINTS", .{mapped_count}) catch unreachable;
+    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "LIVE RETARGET {d}/21 JOINTS", .{mapped_count}) catch unreachable;
     self.sandbox.creator.imported_rig_status_len = creator_status.len;
     if (persist) self.sandbox.creator.imported_open = true;
 }
@@ -3267,6 +3334,7 @@ fn chooseAndImportCharacter(self: *App) void {
 fn installImportedCharacter(self: *App) void {
     const model = self.queued_character_model orelse return;
     self.mesh_tools.unbind();
+    self.vertex_edits_pending = false;
     self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
         model.deinit(self.allocator);
         self.queued_character_model = null;
@@ -3372,6 +3440,7 @@ fn updateMeshTools(self: *App, renderer: *Renderer) void {
         renderer.queueMeshPatch(.{ .handle = handle.*, .model = &entry.model, .all_vertices = true, .all_indices = editor.indices_dirty });
         editor.indices_dirty = false;
         creator.imported_status = .unsaved;
+        self.vertex_edits_pending = true;
     }
     const width: f32 = @floatFromInt(if (renderer.width == 0) 1280 else renderer.width);
     const height: f32 = @floatFromInt(if (renderer.height == 0) 800 else renderer.height);

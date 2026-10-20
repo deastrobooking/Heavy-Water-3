@@ -1063,7 +1063,11 @@ pub fn respawnGuest(self: *Sandbox, index: usize) void {
 
 fn stride(player: Player, phase: *f32, amount: *f32, dt: f32) void {
     const ground_speed = @sqrt(player.velocity[0] * player.velocity[0] + player.velocity[2] * player.velocity[2]);
-    phase.* = @mod(phase.* + ground_speed * dt * 1.4, 2 * std.math.pi);
+    // Half a gait cycle (pi) is one step; the step lengthens with speed the way the walk, run
+    // and sprint clips' leg swing does (about 0.85 m at a walk, 1.35 m at a run, 1.6 m flat
+    // out), so the feet plant instead of sliding.
+    const step_length = std.math.clamp(0.7 + 0.11 * ground_speed, 0.7, 1.6);
+    phase.* = @mod(phase.* + ground_speed * dt * std.math.pi / step_length, 2 * std.math.pi);
     amount.* = if (player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
 }
 
@@ -2109,7 +2113,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and (self.player.mode == .walk or self.player.mode == .fly) and n < out.len) {
-        var preview_pose: Avatar.Pose = .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 };
+        var preview_pose: Avatar.Pose = .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60, .landing = self.player.landing };
         preview_pose.feet = self.importedPreviewFeet();
         const first = n;
         n = avatar(if (self.creator.open) self.creator.draft else self.profile, preview_pose, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog, out, n);
@@ -2242,7 +2246,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60 }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60, .landing = g.player.landing }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog, out, n);
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);
@@ -2278,7 +2282,7 @@ fn avatar(profile: Profile, pose: Avatar.Pose, stance: Combat.Stance, owner: u8,
                     .transform = .{ .position = pose.feet },
                     .tint = .{ 1, 1, 1, 1 },
                     .owner = owner,
-                    .character = .{ .profile = profile, .pose = pose, .id = owner - 1, .imported_model = &entry.model, .imported_generation = catalog.content.captain_test.generation, .imported_revision = entry.model.revision, .imported_scale = scale },
+                    .character = .{ .profile = profile, .pose = stance.apply(pose), .id = owner - 1, .imported_model = &entry.model, .imported_generation = catalog.content.captain_test.generation, .imported_revision = entry.model.revision, .imported_scale = scale },
                 };
                 return start + 1;
             }

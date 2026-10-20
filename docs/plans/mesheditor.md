@@ -36,6 +36,24 @@
 
 **Not in the MVP:** remeshing or adding vertices (sculpting moves existing vertices only, so detail is limited by the source density), symmetry, textures, morph targets, GLB export (M8).
 
+### 0.1 Stylization toolkit roadmap (owner brief, 2026-10-20)
+
+**Direction.** The editor should feel like an art tool, not a geometry utility: the surface read matters more than clean topology, painting is decoupled from UV space (vertex attributes first, bake to a texture only on export), and paint, gradients and skin weights are one interaction, a brush writing values into a per-vertex buffer, so one brush engine (`MeshEdit.dab`) serves colour, cel pens, weights and gradients.
+
+**Project constraints applied to the brief.** Native Zig only: the brief's ImGui, zozz/ozz-animation and raylib suggestions are C/C++ bindings and are out; the existing Canvas GUI (`ui/MeshToolsPanel.zig`), GPU dual-quaternion skinning (`render/skin.wgsl`) and `character/Retarget.zig` cover those roles. The mesh stays an indexed triangle list with derived topology (`MeshEdit.Topology`), not a half-edge structure; topology edits rebuild the derived tables. Picking stays a brute-force ray test until a measured mesh size needs a BVH.
+
+**What already exists:** vertex picking and selection (sphere, grow, linked, invert, same pen/colour), soft-selection move, draw/inflate/smooth/grab sculpting, vertex-colour paint and fill, per-vertex cel pens (the game's own stylization channel: which cel ramp, rim, specular and ink each vertex uses), paint inside selection, stroke-level command undo/redo (each stroke is a reversible command of vertex and triangle changes), tear-off parts, a tool bar and orbit view.
+
+**Phases, in order:**
+- **S1 Painting core (next).** Symmetry (mirror X) for every brush; backface masking (paint only vertices facing the camera); blend modes for paint (replace, multiply, screen, smudge from neighbours); an HSV colour picker beyond the swatches; brush presets as data (airbrush, hard round, watercolour-soft).
+- **S2 Gradients and filters.** Linear, radial and height gradient fills over the selection with an editable colour ramp; per-vertex curvature (normal versus neighbour average) driving an edge/cavity gradient; posterize/quantize to N bands (the cel look); a gradient brush (colour along stroke distance).
+- **S3 Selection modes and gizmo.** Face and edge selection (pick the hit triangle, or its nearest edge), a move/rotate/scale gizmo on the selection centre with numeric entry (mesh editor M6), selection info (counts, bounds).
+- **S4 Topology operations.** Delete faces, extrude faces, split and collapse edges, as reversible commands that resize vertex, index, pen and skin arrays together and rebuild topology; they invalidate the part sidecar's component ids, so they are applied to a saved edited mesh (E2) rather than the source-linked part library.
+- **S5 Weights and rigging.** A weight brush for the imported skin's influences per game joint (heatmap view, add/subtract/replace/smooth, auto-normalize to four influences, mirror), auto-weights by distance to bone segments for meshes without a skin, and a lattice deformer for proportions. Pose bake to a static mesh.
+- **S6 Texture paint and bake.** Only after the game renders character textures: UV texture buffer, projection painting, layers, seam dilation, and bake vertex colour to texture.
+
+Face-corner colour (sharp facet boundaries) needs vertices split per face, which S4's topology commands make possible; until then colour and pens are per vertex, already split along the import's own seams.
+
 ## 1. Summary
 
 What exists:
@@ -90,7 +108,7 @@ Source: [Gltf.zig](../../src/asset/Gltf.zig). The file header states the contrac
 | `compile(allocator, source, resolver) !Model` | Static model with node transforms baked |
 | `compileBindPosePreview`, `compilePosePreview(.., .bind or .run)` | CPU-skinned static preview: bind pose, or the gameplay run controller's pose evaluated on matching joint names |
 | `compileModule(.., ModuleAddress)` | One `(node, primitive)` as its own model (the `split` command) |
-| `mappedGameplayJointCount(trace)` | How many of the 7 gameplay run tracks matched joint names (the "RUN RETARGET n/7" status) |
+| `mappedGameplayJointCount(trace)` | How many of the 21 humanoid joints (root excluded) the skin's bone names map to (the "LIVE RETARGET n/21 JOINTS" status; it was "n/7" run tracks before 2026-10-20) |
 | `externalBuffers`, `traceJson` | Buffer URIs to resolve; trace as JSON with provenance |
 
 Observations (by reading):

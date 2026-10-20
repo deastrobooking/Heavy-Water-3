@@ -239,7 +239,7 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     }
     const pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{layout} }));
     defer pipeline_layout.release();
-    self.texture = device.createTexture(&.{ .label = "surface checker", .size = .{ .width = 2, .height = 2 }, .format = .rgba8_unorm, .usage = .{ .texture_binding = true, .copy_dst = true } });
+    self.texture = device.createTexture(&.{ .label = "Antarctic glacier albedo", .size = .{ .width = 512, .height = 512 }, .format = .rgba8_unorm, .usage = .{ .texture_binding = true, .copy_dst = true } });
     errdefer {
         self.texture.?.release();
         self.texture = null;
@@ -249,13 +249,13 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         self.texture_view.?.release();
         self.texture_view = null;
     }
-    self.sampler = device.createSampler(&.{ .address_mode_u = .repeat, .address_mode_v = .repeat, .mag_filter = .nearest, .min_filter = .nearest });
+    self.sampler = device.createSampler(&.{ .address_mode_u = .repeat, .address_mode_v = .repeat, .mag_filter = .linear, .min_filter = .linear });
     errdefer {
         self.sampler.?.release();
         self.sampler = null;
     }
-    const pixels = [_]u8{ 240, 240, 240, 255, 190, 200, 205, 255, 190, 200, 205, 255, 240, 240, 240, 255 };
-    window.queue.writeTexture(&.{ .texture = self.texture.? }, &.{ .bytes_per_row = 8, .rows_per_image = 2 }, &.{ .width = 2, .height = 2 }, &pixels);
+    const ice_albedo = @embedFile("../assets/antarctica_blue_ice.rgba");
+    window.queue.writeTexture(&.{ .texture = self.texture.? }, &.{ .bytes_per_row = 512 * 4, .rows_per_image = 512 }, &.{ .width = 512, .height = 512 }, ice_albedo);
     self.createViewResources(device, 0);
     errdefer self.releaseViewResources(0);
     if (self.field) |f| self.field_buffer = device.createBuffer(&.{ .label = "scale field", .size = @max(f.gpuBytes(), 64), .usage = .{ .vertex = true, .copy_dst = true } });

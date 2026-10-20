@@ -190,7 +190,7 @@ fn traceInArena(arena: std.mem.Allocator, source: []const u8) !Trace {
     for (doc.nodes) |node| if (node.skin != null) {
         node_has_skin = true;
     };
-    if (doc.skins.len != 0 or node_has_skin) try notes.append(arena, "Skeletal skins are not supported by the static model importer.");
+    if (doc.skins.len != 0 or node_has_skin) try notes.append(arena, "Skeletal skins are retargeted onto the game's humanoid skeleton by bone name.");
     if (doc.animations.len != 0) try notes.append(arena, "Animations are traced but not imported into runtime clips yet.");
     if (doc.textures.len != 0 or doc.images.len != 0) try notes.append(arena, "Image textures are traced but the current HWMS material path imports base-color factors only.");
 
@@ -315,14 +315,11 @@ fn sourcePoseDelta(name: ?[]const u8) ?[4]f32 {
     return null;
 }
 
-/// Count distinct locomotion tracks that the imported skin can drive. This is shared by the
-/// Character Designer's compatibility report and the CPU retargeted preview.
+/// Count distinct humanoid joints (root excluded) that the imported skin's bone names drive.
 pub fn mappedGameplayJointCount(trace: Trace) usize {
     var mapped: [GameSkeleton.humanoid_joint_count]bool = @splat(false);
     for (trace.skins) |skin| for (skin.joints) |joint| {
-        for (GameAnimation.run_tracks) |track| if (matchesControllerJoint(joint.name, @enumFromInt(track.joint))) {
-            mapped[track.joint] = true;
-        };
+        if (humanoidJoint(joint.name)) |j| mapped[@intFromEnum(j)] = true;
     };
     var count: usize = 0;
     for (mapped) |yes| count += @intFromBool(yes);
@@ -330,29 +327,92 @@ pub fn mappedGameplayJointCount(trace: Trace) usize {
 }
 
 fn matchesControllerJoint(source: []const u8, joint: GameSkeleton.Joint) bool {
-    var normalized: [96]u8 = undefined;
-    var length: usize = 0;
-    for (source) |ch| {
-        if (!std.ascii.isAlphanumeric(ch)) continue;
-        if (length == normalized.len) return false;
-        normalized[length] = std.ascii.toLower(ch);
-        length += 1;
-    }
-    const name = normalized[0..length];
-    // Common Blender, Mixamo and Unity humanoid names after removing separators/prefix text.
-    const suffixes: []const []const u8 = switch (joint) {
-        .chest => &.{ "spine2", "upperchest", "chest", "spine03" },
-        .upper_arm_l => &.{ "leftarm", "leftupperarm", "upperarml", "arml" },
-        .upper_arm_r => &.{ "rightarm", "rightupperarm", "upperarmr", "armr" },
-        .thigh_l => &.{ "leftupleg", "leftthigh", "thighl", "uplegl" },
-        .thigh_r => &.{ "rightupleg", "rightthigh", "thighr", "uplegr" },
-        .shin_l => &.{ "leftleg", "leftlowerleg", "leftcalf", "shinl", "calfl" },
-        .shin_r => &.{ "rightleg", "rightlowerleg", "rightcalf", "shinr", "calfr" },
-        else => return false,
-    };
-    for (suffixes) |suffix| if (std.mem.endsWith(u8, name, suffix)) return true;
-    return false;
+    return humanoidJoint(source) == joint;
 }
+
+const Side = enum { center, left, right };
+
+/// Maps a source bone name to the game's humanoid joint, across the common rig conventions:
+/// Mixamo (`mixamorig:LeftForeArm`), VRoid (`J_Bip_L_UpperArm`), Blender/Rigify
+/// (`DEF-forearm.L`), Unreal (`lowerarm_l`, `spine_03`), 3ds Max Biped (`Bip01 L Thigh`) and
+/// Unity humanoid names. Side comes from a separate `L`/`R`/`Left`/`Right` token, or a token that
+/// starts or ends with `left`/`right`; the part is the rest of the name with separators removed.
+/// Fingers, twist and end bones return null and inherit their nearest mapped ancestor.
+pub fn humanoidJoint(source: []const u8) ?GameSkeleton.Joint {
+    var part_buf: [96]u8 = undefined;
+    var part_len: usize = 0;
+    var side: Side = .center;
+    var tokens = std.mem.tokenizeAny(u8, source, " _.:-|/\\");
+    while (tokens.next()) |raw| {
+        var token_buf: [96]u8 = undefined;
+        if (raw.len > token_buf.len) return null;
+        const token = std.ascii.lowerString(&token_buf, raw);
+        var rest = token;
+        if (std.mem.eql(u8, token, "l") or std.mem.eql(u8, token, "left")) {
+            side = .left;
+            continue;
+        }
+        if (std.mem.eql(u8, token, "r") or std.mem.eql(u8, token, "right")) {
+            side = .right;
+            continue;
+        }
+        if (std.mem.startsWith(u8, rest, "left")) {
+            side = .left;
+            rest = rest[4..];
+        } else if (std.mem.startsWith(u8, rest, "right")) {
+            side = .right;
+            rest = rest[5..];
+        } else if (std.mem.endsWith(u8, rest, "left") and rest.len > 4) {
+            side = .left;
+            rest = rest[0 .. rest.len - 4];
+        } else if (std.mem.endsWith(u8, rest, "right") and rest.len > 5) {
+            side = .right;
+            rest = rest[0 .. rest.len - 5];
+        }
+        for (rest) |ch| if (std.ascii.isAlphanumeric(ch)) {
+            if (part_len == part_buf.len) return null;
+            part_buf[part_len] = ch;
+            part_len += 1;
+        };
+    }
+    const part = part_buf[0..part_len];
+    const has = struct {
+        fn any(name: []const u8, comptime needles: []const []const u8) bool {
+            inline for (needles) |n| if (std.mem.indexOf(u8, name, n) != null) return true;
+            return false;
+        }
+        fn end(name: []const u8, comptime needles: []const []const u8) bool {
+            inline for (needles) |n| if (std.mem.endsWith(u8, name, n)) return true;
+            return false;
+        }
+    };
+    // Fingers, twist/roll helpers and end markers follow their parent instead of driving a joint.
+    if (has.any(part, &.{ "thumb", "index", "middle", "ring", "pinky", "little", "finger", "twist", "roll", "end", "ik", "pole", "target" })) return null;
+    if (side != .center) {
+        const l = side == .left;
+        const pick = struct {
+            fn of(left: bool, a: GameSkeleton.Joint, b: GameSkeleton.Joint) GameSkeleton.Joint {
+                return if (left) a else b;
+            }
+        }.of;
+        if (has.any(part, &.{ "toe", "ball" })) return pick(l, .toe_l, .toe_r);
+        if (has.any(part, &.{ "foot", "ankle" })) return pick(l, .foot_l, .foot_r);
+        if (has.any(part, &.{ "upleg", "upperleg", "thigh" })) return pick(l, .thigh_l, .thigh_r);
+        if (has.any(part, &.{ "lowerleg", "calf", "shin", "knee" }) or has.end(part, &.{"leg"})) return pick(l, .shin_l, .shin_r);
+        if (has.any(part, &.{ "hand", "wrist", "palm" })) return pick(l, .hand_l, .hand_r);
+        if (has.any(part, &.{ "forearm", "lowerarm", "elbow" })) return pick(l, .lower_arm_l, .lower_arm_r);
+        if (has.any(part, &.{ "upperarm", "uparm" }) or has.end(part, &.{"arm"})) return pick(l, .upper_arm_l, .upper_arm_r);
+        if (has.any(part, &.{ "shoulder", "clavicle", "collar" })) return pick(l, .shoulder_l, .shoulder_r);
+        return null;
+    }
+    if (has.any(part, &.{"head"})) return .head;
+    if (has.any(part, &.{"neck"})) return .neck;
+    if (has.any(part, &.{ "upperchest", "chest", "thorax" }) or has.end(part, &.{ "spine2", "spine3", "spine03", "spine003", "spine04", "spine004", "spine05" })) return .chest;
+    if (has.end(part, &.{ "spine", "spine1", "spine01", "spine001", "spine02", "spine002", "abdomen", "waist" })) return .spine;
+    if (has.end(part, &.{ "hips", "hip", "pelvis" })) return .hips;
+    return null;
+}
+
 
 fn markActiveRun(doc: Doc, active: []bool, world: []Mat, index: u32, parent_world: Mat, parent_bind_q: [4]f32, parent_pose_q: [4]f32, depth: u32) anyerror!void {
     if (index >= doc.nodes.len) return error.InvalidNode;
@@ -885,11 +945,7 @@ fn splitGlb(bytes: []const u8) !struct { json: []const u8, bin: ?[]const u8 } {
 }
 
 fn mappedJoint(name: []const u8) ?GameSkeleton.Joint {
-    for (GameAnimation.run_tracks) |track| {
-        const joint: GameSkeleton.Joint = @enumFromInt(track.joint);
-        if (matchesControllerJoint(name, joint)) return joint;
-    }
-    return null;
+    return humanoidJoint(name);
 }
 
 const MappedNode = struct { joint: GameSkeleton.Joint, node: u32 };
@@ -1149,4 +1205,31 @@ test "node transforms are baked and hostile inputs are rejected" {
 
 fn failLoad(_: ?*anyopaque, _: std.mem.Allocator, _: []const u8) anyerror![]u8 {
     return error.Unexpected;
+}
+
+test "humanoid joint names map across Mixamo, VRoid, Rigify, Unreal and Biped rigs" {
+    const J = GameSkeleton.Joint;
+    const cases = [_]struct { []const u8, ?J }{
+        .{ "mixamorig:Hips", .hips },          .{ "mixamorig1:Spine", .spine },           .{ "mixamorig:Spine1", .spine },
+        .{ "mixamorig:Spine2", .chest },       .{ "mixamorig:Neck", .neck },              .{ "mixamorig:Head", .head },
+        .{ "mixamorig:LeftShoulder", .shoulder_l }, .{ "mixamorig:LeftArm", .upper_arm_l }, .{ "mixamorig:LeftForeArm", .lower_arm_l },
+        .{ "mixamorig:LeftHand", .hand_l },    .{ "mixamorig:LeftHandIndex1", null },     .{ "mixamorig:RightUpLeg", .thigh_r },
+        .{ "mixamorig:RightLeg", .shin_r },    .{ "mixamorig:RightFoot", .foot_r },       .{ "mixamorig:RightToeBase", .toe_r },
+        .{ "J_Bip_C_Hips", .hips },            .{ "J_Bip_C_UpperChest", .chest },         .{ "J_Bip_L_UpperArm", .upper_arm_l },
+        .{ "J_Bip_L_LowerArm", .lower_arm_l }, .{ "J_Bip_R_UpperLeg", .thigh_r },         .{ "J_Bip_R_LowerLeg", .shin_r },
+        .{ "DEF-upper_arm.L", .upper_arm_l },  .{ "DEF-forearm.L", .lower_arm_l },        .{ "DEF-thigh.R", .thigh_r },
+        .{ "DEF-shin.R", .shin_r },            .{ "DEF-spine.003", .chest },              .{ "DEF-spine.001", .spine },
+        .{ "pelvis", .hips },                  .{ "spine_01", .spine },                   .{ "spine_03", .chest },
+        .{ "clavicle_l", .shoulder_l },        .{ "upperarm_l", .upper_arm_l },           .{ "lowerarm_l", .lower_arm_l },
+        .{ "upperarm_twist_01_l", null },      .{ "calf_r", .shin_r },                    .{ "ball_r", .toe_r },
+        .{ "Bip01 L Thigh", .thigh_l },        .{ "Bip01 R Forearm", .lower_arm_r },      .{ "HeadTop_End", null },
+        .{ "Armature", null },
+    };
+    for (cases) |case| {
+        const got = humanoidJoint(case[0]);
+        if (got != case[1]) {
+            std.debug.print("{s}: expected {any}, got {any}\n", .{ case[0], case[1], got });
+            return error.TestUnexpectedResult;
+        }
+    }
 }

@@ -18,6 +18,12 @@
     let snowy = smoothstep(0.6, 0.78, lum) * (1.0 - smoothstep(0.1, 0.22, chroma));
     let steep = 1.0 - smoothstep(0.6, 0.84, n.y);
 
+    // Antarctica is a dedicated 160 km region centered on (0, -420 km). Its broad blend
+    // feather hides the regional terrain boundary while giving the whole landing a glacial read.
+    let antarctic_x = 1.0 - smoothstep(76000.0, 80000.0, abs(w.x));
+    let antarctic_z = 1.0 - smoothstep(76000.0, 80000.0, abs(w.z + 420000.0));
+    let antarctic = antarctic_x * antarctic_z;
+
     // Grass and earth: broad colour drift and close-up tufts.
     let broad = vnoise(w.xz * 0.035);
     let blotch = vnoise(w.xz * 0.21 + vec2<f32>(17.0, 3.0));
@@ -45,10 +51,19 @@
     let snow = snowy * smoothstep(0.52, 0.74, n.y);
     color = mix(color, vec3<f32>(0.9, 0.94, 0.98) * (0.95 + 0.08 * broad), snow);
 
+    // World-space albedo repeats every 256 m (an exact divisor of wrap's 1024 m period),
+    // with lower frequency ice strata and snow veils to keep the macro terrain readable.
+    let glacier = textureSample(surface_texture, surface_sampler, wrap(w.xz / 256.0)).rgb;
+    let ice_strata = vnoise(w.xz * 0.018 + vec2<f32>(w.y * 0.006, -w.y * 0.004));
+    let snow_veil = smoothstep(0.37, 0.68, vnoise(w.xz * 0.09 + vec2<f32>(4.0, 29.0)));
+    let glacial_ground = glacier * (0.82 + ice_strata * 0.24) * mix(vec3<f32>(0.68, 0.85, 1.0), vec3<f32>(1.0), snow_veil * 0.42);
+    color = mix(color, glacial_ground, antarctic);
+
     var shaded = lit(color, n, w);
     let light = band(n);
     // Snow shadows go blue rather than grey.
     shaded = shaded + vec3<f32>(-0.03, 0.01, 0.07) * snow * (1.0 - light);
+    shaded = shaded + vec3<f32>(-0.015, 0.025, 0.11) * antarctic * (1.0 - light);
     // Glints: a few hashed cells catch the sun toward the eye.
     let cell = floor(wrap(w.xz) * 3.0);
     let view = normalize(frame.eye.xyz - w);
@@ -56,6 +71,9 @@
     let toward = smoothstep(0.55, 0.9, dot(mirror, frame.light_direction.xyz));
     let glint = step(0.975, hash2(cell)) * toward * snow * near * light;
     shaded = shaded + frame.light_color.rgb * glint * 0.9;
+    let ice_reflection = smoothstep(0.78, 0.98, dot(mirror, frame.light_direction.xyz));
+    let ice_glint = ice_reflection * ice_reflection * antarctic * (0.28 + 0.72 * near) * light;
+    shaded = shaded + vec3<f32>(0.46, 0.78, 1.0) * ice_glint * 0.42;
 
     // Sparse ground spores appear as small mint pools around grassy, level ground. The 0.5
     // cells-per-metre grid tiles exactly across wrap()'s 1024 m period, preventing seams.

@@ -44,7 +44,9 @@ fn stepper(c: *Canvas, x: f32, y: f32, w: f32, label: []const u8, value: []const
 pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     const tools = cr.mesh_tools orelse return;
     const w: f32 = @min(320, v.w * 0.42);
-    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = v.h - 20 };
+    // Content is about 600 units tall; the status lines follow it rather than being pinned to the
+    // bottom, so a short window scrolls instead of drawing text over the buttons.
+    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 610) };
     // The panel first: the canvas has a fixed command budget, and the selection dots take only
     // what the panel leaves.
     defer overlay(c, tools, v, r);
@@ -119,8 +121,10 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     y += 32;
     button(c, .{ .x = x, .y = y, .w = inner, .h = 26 }, "BACK TO PART LIBRARY", control(.close), false);
 
-    c.text(x, r.y + r.h - 40, tools.status(), 0.62, gold);
-    c.text(x, r.y + r.h - 22, "1-9 TOOLS  [ ] SIZE  Z UNDO  RIGHT-DRAG ORBIT  WHEEL ZOOM", 0.6, dim);
+    y += 38;
+    c.text(x, y, tools.status(), 0.62, gold);
+    c.text(x, y + 16, "1-9 TOOLS  [ ] SIZE  Z / SHIFT+Z", 0.6, dim);
+    c.text(x, y + 30, "RIGHT-DRAG ORBIT  WHEEL ZOOM  ESC BACK", 0.6, dim);
 }
 
 /// Selected vertices as dots and the brush as a ring, over the 3D view.
