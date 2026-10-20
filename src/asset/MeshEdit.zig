@@ -217,6 +217,53 @@ pub const Blend = enum {
 
 pub const Similar = enum { pen, color };
 
+/// A colour ramp of up to four stops, sorted by position (0..1).
+pub const Ramp = struct {
+    stops: [4]Stop = undefined,
+    len: u8 = 0,
+    pub const Stop = struct { at: f32, color: V };
+
+    pub fn two(a: V, b: V) Ramp {
+        var r: Ramp = .{};
+        r.stops[0] = .{ .at = 0, .color = a };
+        r.stops[1] = .{ .at = 1, .color = b };
+        r.len = 2;
+        return r;
+    }
+
+    pub fn three(a: V, mid: V, b: V) Ramp {
+        var r = two(a, b);
+        r.stops[2] = r.stops[1];
+        r.stops[1] = .{ .at = 0.5, .color = mid };
+        r.len = 3;
+        return r;
+    }
+
+    pub fn sample(self: Ramp, t: f32) V {
+        const x = std.math.clamp(t, 0, 1);
+        if (self.len == 0) return .{ 1, 1, 1 };
+        if (x <= self.stops[0].at) return self.stops[0].color;
+        for (1..self.len) |i| {
+            const a = self.stops[i - 1];
+            const b = self.stops[i];
+            if (x <= b.at) return lerp(a.color, b.color, if (b.at > a.at) (x - a.at) / (b.at - a.at) else 1);
+        }
+        return self.stops[self.len - 1].color;
+    }
+};
+
+/// What a gradient fill measures to place each vertex on the ramp.
+pub const Gradient = union(enum) {
+    /// Along the line from `from` (ramp 0) to `to` (ramp 1).
+    linear: struct { from: V, to: V },
+    /// Outward from `center` (ramp 0) to `radius` (ramp 1).
+    radial: struct { center: V, radius: f32 },
+    /// Bottom (ramp 0) to top (ramp 1) of the affected vertices.
+    height,
+    /// Cavities (ramp 0) through flat (0.5) to edges and ridges (ramp 1), scaled by `contrast`.
+    curvature: struct { contrast: f32 = 4 },
+};
+
 const Snapshot = struct { vertex: Mesh.Vertex, pen: u8, painted: bool };
 const VertexChange = struct { index: u32, before: Snapshot, after: Snapshot };
 const TriangleChange = struct { triangle: u32, before: [3]u32, after: [3]u32 };
@@ -618,6 +665,87 @@ pub const Editor = struct {
             self.vertices()[m].position = self.vertices()[i].position;
         };
         try self.refreshNormals(hits.items);
+    }
+
+    /// The vertices a fill or filter changes: the selection, or every vertex when none is selected.
+    fn affected(self: *const Editor, i: usize) bool {
+        return self.selection.count() == 0 or self.selection.isSet(i);
+    }
+
+    /// Discrete convexity per vertex in about -1 (cavity) .. 1 (ridge or edge): how far the
+    /// neighbours fall below the tangent plane of the welded group's mean normal.
+    pub fn curvature(self: *const Editor, out: []f32) void {
+        const verts = self.model.mesh.vertices;
+        for (verts, out, 0..) |v, *c, i| {
+            const ns = self.topology.neighborsOf(@intCast(i));
+            if (ns.len == 0) {
+                c.* = 0;
+                continue;
+            }
+            // Hard edges split the normal per face; the welded group's mean normal is the surface
+            // direction a corner actually bulges along.
+            var normal: V = .{ 0, 0, 0 };
+            for (self.topology.group(@intCast(i))) |m| normal = add(normal, verts[m].normal);
+            normal = normalize(normal);
+            var sum: f32 = 0;
+            for (ns) |n| {
+                const d = sub(verts[n].position, v.position);
+                const l = @sqrt(dot(d, d));
+                if (l > 1e-9) sum -= dot(normal, d) / l;
+            }
+            c.* = std.math.clamp(sum / @as(f32, @floatFromInt(ns.len)), -1, 1);
+        }
+    }
+
+    /// Fills the selection (or the whole mesh) with `ramp` placed by `gradient`, blended in by
+    /// `amount` (0..1). One undo step when called inside a stroke.
+    pub fn gradientFill(self: *Editor, gradient: Gradient, ramp: Ramp, amount: f32) Error!void {
+        const verts = self.vertices();
+        var lo: f32 = std.math.inf(f32);
+        var hi: f32 = -std.math.inf(f32);
+        var bend: []f32 = &.{};
+        defer self.allocator.free(bend);
+        switch (gradient) {
+            .height => for (verts, 0..) |v, i| if (self.affected(i)) {
+                lo = @min(lo, v.position[1]);
+                hi = @max(hi, v.position[1]);
+            },
+            .curvature => {
+                bend = try self.allocator.alloc(f32, verts.len);
+                self.curvature(bend);
+            },
+            else => {},
+        }
+        for (verts, 0..) |v, i| {
+            if (!self.affected(i)) continue;
+            const t: f32 = switch (gradient) {
+                .linear => |g| blk: {
+                    const axis = sub(g.to, g.from);
+                    const l2 = dot(axis, axis);
+                    break :blk if (l2 > 1e-12) dot(sub(v.position, g.from), axis) / l2 else 0;
+                },
+                .radial => |g| if (g.radius > 0) @sqrt(dist2(v.position, g.center)) / g.radius else 0,
+                .height => if (hi > lo) (v.position[1] - lo) / (hi - lo) else 0,
+                .curvature => |g| 0.5 + 0.5 * std.math.clamp(bend[i] * g.contrast, -1, 1),
+            };
+            // Edge/cavity colouring leaves flat areas alone: its strength follows the curvature.
+            const weight = if (gradient == .curvature) @abs(2 * t - 1) else 1;
+            try self.touch(@intCast(i));
+            verts[i].color = lerp(v.color, ramp.sample(t), std.math.clamp(amount * weight, 0, 1));
+            self.painted.set(i);
+        }
+    }
+
+    /// Quantizes colour to `levels` bands per channel (the flat, banded cel look).
+    pub fn posterize(self: *Editor, levels: u8) Error!void {
+        if (levels < 2) return error.InvalidMesh;
+        const n: f32 = @floatFromInt(levels - 1);
+        for (self.vertices(), 0..) |*v, i| {
+            if (!self.affected(i)) continue;
+            try self.touch(@intCast(i));
+            for (&v.color) |*ch| ch.* = @round(std.math.clamp(ch.*, 0, 1) * n) / n;
+            self.painted.set(i);
+        }
     }
 
     /// Paints every selected vertex one colour (a fill, not a brush).
@@ -1189,4 +1317,76 @@ test "the eyedropper reads colour and pen" {
     const got = ed.sample(3);
     try std.testing.expectEqual([3]f32{ 0.2, 0.3, 0.4 }, got.color);
     try std.testing.expectEqual(@as(u8, 9), got.pen);
+}
+
+test "ramps, gradient fills (linear, radial, height) and posterize" {
+    const red: V = .{ 1, 0, 0 };
+    const blue: V = .{ 0, 0, 1 };
+    const ramp = Ramp.two(red, blue);
+    try std.testing.expectEqual(red, ramp.sample(-1));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), ramp.sample(0.5)[0], 1e-6);
+    const tri = Ramp.three(red, .{ 0, 1, 0 }, blue);
+    try std.testing.expectEqual([3]f32{ 0, 1, 0 }, tri.sample(0.5));
+
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // Linear along +x across the grid only (select the grid island).
+    _ = ed.pick(.{ 2, 5, 2 }, .{ 0, -1, 0 }, false);
+    try ed.selectLinked();
+    ed.begin();
+    try ed.gradientFill(.{ .linear = .{ .from = .{ 0, 0, 0 }, .to = .{ 4, 0, 0 } } }, ramp, 1);
+    try ed.end();
+    try std.testing.expectEqual(red, model.mesh.vertices[0].color);
+    try std.testing.expectEqual(blue, model.mesh.vertices[4].color);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), model.mesh.vertices[2].color[0], 1e-6);
+    // The cube was not selected, so it kept its colour.
+    try std.testing.expectEqual([3]f32{ 1, 1, 1 }, model.mesh.vertices[25].color);
+    // Radial from the grid centre.
+    ed.begin();
+    try ed.gradientFill(.{ .radial = .{ .center = .{ 2, 0, 2 }, .radius = 2 } }, ramp, 1);
+    try ed.end();
+    try std.testing.expectEqual(red, model.mesh.vertices[12].color);
+    try std.testing.expectEqual(blue, model.mesh.vertices[14].color);
+    // Height over the cube (y 0..2), nothing selected means the whole mesh.
+    ed.clearSelection();
+    ed.begin();
+    try ed.gradientFill(.height, ramp, 1);
+    try ed.end();
+    for (model.mesh.vertices[25..]) |v| try std.testing.expectApproxEqAbs(v.position[1] / 2, v.color[2], 1e-5);
+    // Posterize to 2 bands: every channel becomes 0 or 1.
+    ed.begin();
+    try ed.posterize(2);
+    try ed.end();
+    for (model.mesh.vertices) |v| for (v.color) |ch| try std.testing.expect(ch == 0 or ch == 1);
+    try std.testing.expectError(error.InvalidMesh, ed.posterize(1));
+    // One undo step per fill.
+    for (0..4) |_| _ = try ed.undo();
+    try std.testing.expectEqual([3]f32{ 1, 1, 1 }, model.mesh.vertices[0].color);
+}
+
+test "curvature marks ridges positive and cavities negative" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // Raise the grid centre into a peak and sink a neighbour of the corner into a pit.
+    model.mesh.vertices[12].position[1] = 1;
+    model.mesh.vertices[6].position[1] = -1;
+    const bend = try a.alloc(f32, model.mesh.vertices.len);
+    defer a.free(bend);
+    ed.curvature(bend);
+    try std.testing.expect(bend[12] > 0.3);
+    try std.testing.expect(bend[6] < -0.3);
+    // A cube corner is convex.
+    try std.testing.expect(bend[25] > 0.3);
+    // Edge/cavity fill puts the peak toward the "edge" end of the ramp.
+    ed.begin();
+    try ed.gradientFill(.{ .curvature = .{} }, Ramp.two(.{ 0, 0, 0 }, .{ 1, 1, 1 }), 1);
+    try ed.end();
+    try std.testing.expect(model.mesh.vertices[12].color[0] > 0.8);
+    try std.testing.expect(model.mesh.vertices[6].color[0] < 0.2);
 }

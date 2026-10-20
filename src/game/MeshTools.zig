@@ -14,8 +14,8 @@ const MeshTools = @This();
 pub const V = MeshEdit.V;
 pub const Ray = struct { origin: V, direction: V };
 
-pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick };
-pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK" };
+pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick, gradient };
+pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK", "GRAD" };
 pub const tool_hints = [_][]const u8{
     "CLICK A VERTEX, SHIFT+CLICK TO ADD, DRAG TO BRUSH-SELECT",
     "DRAG TO MOVE THE SELECTION; SOFT RADIUS FADES THE PULL",
@@ -27,6 +27,7 @@ pub const tool_hints = [_][]const u8{
     "DRAG TO DRAW A CEL MATERIAL (SHADING AND INK)",
     "CLICK A PIECE TO SELECT IT, THEN TEAR OFF THE SELECTION",
     "CLICK THE MESH TO PICK UP ITS COLOUR AND CEL PEN",
+    "DRAG ACROSS THE MODEL: SECOND COLOUR TO FIRST (SELECTION OR ALL)",
 };
 
 /// Paint brush presets as data: size, strength, edge hardness and blend in one choice.
@@ -79,8 +80,15 @@ pub const Control = enum(u8) {
     blend_cycle,
     hardness_down,
     hardness_up,
-    swatch_first = 60,
-    open = 90,
+    swap_colors,
+    gradient_mode,
+    height_fill,
+    edge_fill,
+    posterize,
+    bands_down,
+    bands_up,
+    swatch_first = 100,
+    open = 120,
     _,
 };
 
@@ -99,6 +107,11 @@ color: [3]f32 = swatches[2],
 /// Hue (0..1), saturation and value of `color`, kept separately so hue survives grey.
 hsv: [3]f32 = rgbToHsv(swatches[2]),
 hardness: f32 = 0,
+/// The other end of gradient fills (SWAP exchanges it with `color`).
+color2: [3]f32 = swatches[1],
+radial: bool = false,
+/// Posterize band count.
+bands: u8 = 4,
 blend: MeshEdit.Blend = .mix,
 preset: u8 = 0,
 /// Mirror every brush across the model's centre plane.
@@ -119,6 +132,8 @@ orbit_distance: f32 = 1.5,
 dragging: bool = false,
 stroke_open: bool = false,
 anchor: V = .{ 0, 0, 0 },
+/// Where a gradient drag currently ends (model space).
+gradient_end: V = .{ 0, 0, 0 },
 plane_normal: V = .{ 0, 0, 1 },
 /// Model-space point under the pointer, for the brush ring.
 hover: ?V = null,
@@ -303,6 +318,14 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
             if (hit) |h| e.selectVertex(h.vertex, true);
             self.dragging = hit != null;
         },
+        .gradient => {
+            const h = hit orelse {
+                self.dragging = false;
+                return;
+            };
+            self.anchor = h.point;
+            self.gradient_end = h.point;
+        },
         .pick => {
             if (hit) |h| {
                 const got = e.sample(h.vertex);
@@ -370,12 +393,30 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
             try self.dab(h.point);
         },
         .split, .pick => {},
+        .gradient => {
+            const denom = dot(ray.direction, self.plane_normal);
+            if (@abs(denom) < 1e-6) return;
+            const t = dot(sub(self.anchor, ray.origin), self.plane_normal) / denom;
+            self.gradient_end = add(ray.origin, scale(ray.direction, t));
+        },
     }
 }
 
 pub fn release(self: *MeshTools) void {
+    if (self.dragging and self.tool == .gradient) self.applyGradient() catch self.setStatus("GRADIENT FAILED", .{});
     self.dragging = false;
     self.endStroke();
+}
+
+fn applyGradient(self: *MeshTools) MeshEdit.Error!void {
+    const e = &(self.editor orelse return);
+    const span = @sqrt(dot(sub(self.gradient_end, self.anchor), sub(self.gradient_end, self.anchor)));
+    if (span < 1e-4 * self.height()) return;
+    const ramp = MeshEdit.Ramp.two(self.color2, self.color);
+    const g: MeshEdit.Gradient = if (self.radial) .{ .radial = .{ .center = self.anchor, .radius = span } } else .{ .linear = .{ .from = self.anchor, .to = self.gradient_end } };
+    e.begin();
+    defer e.end() catch {};
+    try e.gradientFill(g, ramp, self.strength);
 }
 
 fn beginStroke(self: *MeshTools) void {
@@ -533,6 +574,27 @@ pub fn control(self: *MeshTools, c: Control) MeshEdit.Error!Action {
         .preset_down, .preset_up => {
             const n: i32 = @intCast(presets.len);
             self.applyPreset(@intCast(@mod(@as(i32, self.preset) + (if (c == .preset_up) @as(i32, 1) else -1), n)));
+        },
+        .swap_colors => {
+            const keep = self.color;
+            self.setColor(self.color2);
+            self.color2 = keep;
+        },
+        .gradient_mode => self.radial = !self.radial,
+        .bands_down, .bands_up => self.bands = std.math.clamp(if (c == .bands_up) self.bands + 1 else self.bands - 1, 2, 8),
+        .height_fill, .edge_fill, .posterize => {
+            e.begin();
+            defer e.end() catch {};
+            switch (c) {
+                .height_fill => try e.gradientFill(.height, MeshEdit.Ramp.two(self.color2, self.color), self.strength),
+                .edge_fill => try e.gradientFill(.{ .curvature = .{} }, MeshEdit.Ramp.two(self.color2, self.color), 1),
+                else => try e.posterize(self.bands),
+            }
+            self.setStatus("{s} ({s})", .{ switch (c) {
+                .height_fill => "HEIGHT RAMP",
+                .edge_fill => "EDGES AND CAVITIES",
+                else => "POSTERIZED",
+            }, if (e.selectedCount() == 0) "WHOLE MESH" else "SELECTION" });
         },
         .blend_cycle => self.blend = @enumFromInt(@as(u2, @intFromEnum(self.blend)) +% 1),
         .hardness_down, .hardness_up => self.hardness = std.math.clamp(self.hardness + (if (c == .hardness_up) @as(f32, 0.1) else -0.1), 0, 0.95),
@@ -706,4 +768,37 @@ test "HSV round-trips, presets set the brush, and the pick tool reads the mesh" 
     tools.setTool(.pick);
     try tools.press(down, false);
     try std.testing.expect(tools.color[1] > tools.color[0]);
+}
+
+test "the gradient tool drags a ramp, and height, edge and posterize fills are single undo steps" {
+    const a = std.testing.allocator;
+    var model = try Model.fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    var tools = try testTools(&model);
+    defer tools.deinit();
+    tools.setTool(.gradient);
+    tools.setColor(.{ 1, 0, 0 });
+    tools.color2 = .{ 0, 0, 1 };
+    tools.strength = 1;
+    // Drag across the top face from one edge to the other (model x -0.5 to 0.5).
+    const from = tools.toWorldPoint(.{ -0.5, 2, 0 });
+    const to = tools.toWorldPoint(.{ 0.5, 2, 0 });
+    try tools.press(.{ .origin = .{ from[0], 20, from[2] }, .direction = .{ 0, -1, 0 } }, false);
+    try tools.drag(.{ .origin = .{ to[0], 20, to[2] }, .direction = .{ 0, -1, 0 } });
+    tools.release();
+    var reds: usize = 0;
+    var blues: usize = 0;
+    for (model.mesh.vertices) |v| {
+        if (v.position[0] > 0.4 and v.color[0] > 0.9) reds += 1;
+        if (v.position[0] < -0.4 and v.color[2] > 0.9) blues += 1;
+    }
+    try std.testing.expect(reds >= 4 and blues >= 4);
+    _ = try tools.control(.height_fill);
+    _ = try tools.control(.edge_fill);
+    _ = try tools.control(.posterize);
+    try std.testing.expectEqual(@as(usize, 4), tools.editor.?.undo_stack.items.len);
+    _ = try tools.control(.swap_colors);
+    try std.testing.expectEqual([3]f32{ 0, 0, 1 }, tools.color);
+    for (0..10) |_| _ = try tools.control(.bands_up);
+    try std.testing.expectEqual(@as(u8, 8), tools.bands);
 }

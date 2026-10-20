@@ -52,9 +52,9 @@ fn small(c: *Canvas, x: f32, y: f32, w: f32, label: []const u8, value: []const u
 pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     const tools = cr.mesh_tools orelse return;
     const w: f32 = @min(340, v.w * 0.44);
-    // About 500 units of content; status lines follow it, so a short window scrolls instead of
+    // About 560 units of content; status lines follow it, so a short window scrolls instead of
     // drawing text over the buttons.
-    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 520) };
+    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 580) };
     // The panel first: the canvas has a fixed command budget, and the selection dots take only
     // what the panel leaves.
     defer overlay(c, tools, v, r);
@@ -68,11 +68,11 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     var y = r.y + 32;
     var buf: [24]u8 = undefined;
 
-    // Tools, five per row (keys 1-9, 0).
-    const cell = (inner - 16) / 5;
+    // Tools, six per row (keys 1-9, 0 for the first ten).
+    const cell = (inner - 20) / 6;
     for (MeshTools.tool_labels, 0..) |label, i| {
-        const col: f32 = @floatFromInt(i % 5);
-        const row: f32 = @floatFromInt(i / 5);
+        const col: f32 = @floatFromInt(i % 6);
+        const row: f32 = @floatFromInt(i / 6);
         button(c, .{ .x = x + col * (cell + 4), .y = y + row * 28, .w = cell, .h = 24 }, label, id(i), tools.tool == @as(MeshTools.Tool, @enumFromInt(i)));
     }
     y += 60;
@@ -118,7 +118,20 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     var pen_buf: [24]u8 = undefined;
     small(c, x, y, half, "VALUE", std.fmt.bufPrint(&buf, "{d:.0}%", .{tools.hsv[2] * 100}) catch "", .val_down, .val_up);
     small(c, x2, y, half, "PEN", upper(&pen_buf, MeshTools.penName(tools.pen)), .pen_down, .pen_up);
-    y += 32;
+    y += 30;
+
+    // Gradients and filters: second colour to first, over the selection (or the whole mesh).
+    const second: Rect = .{ .x = x, .y = y, .w = 22, .h = 22 };
+    c.rect(second, .{ tools.color2[0], tools.color2[1], tools.color2[2], 1 });
+    c.frame(second, 1, ink);
+    button(c, .{ .x = x + 26, .y = y, .w = quarter - 26, .h = 22 }, "SWAP", control(.swap_colors), false);
+    button(c, .{ .x = x + (quarter + 4), .y = y, .w = quarter, .h = 22 }, if (tools.radial) "RADIAL" else "LINEAR", control(.gradient_mode), false);
+    button(c, .{ .x = x + 2 * (quarter + 4), .y = y, .w = quarter, .h = 22 }, "HEIGHT", control(.height_fill), false);
+    button(c, .{ .x = x + 3 * (quarter + 4), .y = y, .w = quarter, .h = 22 }, "EDGES", control(.edge_fill), false);
+    y += 26;
+    small(c, x, y, half, "BANDS", std.fmt.bufPrint(&buf, "{d}", .{tools.bands}) catch "", .bands_down, .bands_up);
+    button(c, .{ .x = x2, .y = y, .w = half, .h = 22 }, "POSTERIZE", control(.posterize), false);
+    y += 30;
 
     // Selection.
     const e = tools.editor;

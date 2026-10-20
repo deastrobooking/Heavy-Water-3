@@ -3490,6 +3490,11 @@ fn scriptToolsShowcase(self: *App) void {
                     break;
                 }
             }
+            // Edges and cavities over the whole mesh: dark crevices, light ridges (S2).
+            ed.clearSelection();
+            ed.begin();
+            try ed.gradientFill(.{ .curvature = .{ .contrast = 6 } }, @import("asset/MeshEdit.zig").Ramp.two(.{ 0.02, 0.03, 0.06 }, .{ 0.9, 0.95, 1 }), 0.85);
+            try ed.end();
             script.band(ed, l[1] + 0.86 * height, l[1] + 2 * height);
             t.setTool(.pen);
         }
