@@ -3,12 +3,15 @@ const std = @import("std");
 const Enemies = @import("Enemies.zig");
 const Progress = @import("Progress.zig");
 const Skies = @import("Skies.zig");
+const CityContent = @import("CityContent.zig");
 
 pub const Objective = struct {
     title: []const u8,
     detail: []const u8,
     nests_left: u8 = 0,
     carriers_left: u8 = 0,
+    /// The objective belongs to placeholder content that the owner has not signed off.
+    draft: bool = false,
 };
 
 pub fn remainingNests(enemies: *const Enemies) u8 {
@@ -44,7 +47,40 @@ pub fn current(progress: *const Progress, enemies: *const Enemies, skies: *const
     if (!progress.fighter) return .{ .title = "FABRICATE THE KESTREL", .detail = "Use the frontier fabricator to build Maro's fighter design." };
     if (nests > 0) return .{ .title = "CLEAR THE HIVE NESTS", .detail = "Destroy the remaining surface and cave spires.", .nests_left = nests, .carriers_left = carriers };
     if (carriers > 0) return .{ .title = "DESTROY THE BROOD CARRIERS", .detail = "Break both carriers' defenses, bays and exposed cores.", .carriers_left = carriers };
+    // The wilds are broken: the city half. Detroit is the first city to free.
+    return city(progress, &CityContent.detroit);
+}
+
+/// The liberation objective for a city once the Hive is broken around it: expose the three
+/// allies (the sub-missions), then the boss, then the city is free.
+pub fn city(progress: *const Progress, content: *const CityContent.CityContent) Objective {
+    if (CityContent.liberated(content, progress)) return .{ .title = "DETROIT IS FREE", .detail = "The Hive's allies are exposed and its occupation is broken. The canopy is yours.", .draft = content.draft };
+    if (CityContent.nextMission(content, progress)) |i| {
+        const m = content.missions[i];
+        return .{ .title = m.title, .detail = m.detail, .draft = content.draft };
+    }
+    if (!CityContent.bossDefeated(content, progress)) return .{ .title = content.boss.name, .detail = content.boss.detail, .draft = content.draft };
     return .{ .title = "THE FRONTIER IS SECURE", .detail = "The Hive nests and Brood carriers have all fallen." };
+}
+
+test "once the wilds are broken the quest log moves to Detroit: three exposures, the Titan, freedom" {
+    var progress: Progress = .{ .fighter = true };
+    for ([_][]const u8{ "met_tavi", "tavi_scouted", "first_spire_broken", "ines_sap_warned", "carrier_seen" }) |f| progress.setFlag(f);
+    var enemies: Enemies = .{};
+    var skies: Skies = undefined;
+    skies.carriers = @splat(.{ .center = .{ 0, 0, 0 }, .radius = 0, .altitude = 0, .angle = 0, .alive = false });
+    try std.testing.expectEqualStrings("THE FOUNDRY LEDGER", current(&progress, &enemies, &skies).title);
+    progress.setFlag("windsor_started");
+    try std.testing.expectEqualStrings("THE WINDSOR GATE", current(&progress, &enemies, &skies).title);
+    progress.setFlag("windsor_exposed");
+    progress.setFlag("foundry_exposed");
+    try std.testing.expectEqualStrings("THE BILE ARCHIVE", current(&progress, &enemies, &skies).title);
+    progress.setFlag("bile_exposed");
+    try std.testing.expectEqualStrings("THE COLLABORATORS' TITAN", current(&progress, &enemies, &skies).title);
+    progress.setFlag("titan_defeated");
+    try std.testing.expectEqualStrings("THE FRONTIER IS SECURE", current(&progress, &enemies, &skies).title);
+    try std.testing.expect(CityContent.updateLiberation(&CityContent.detroit, &progress, true));
+    try std.testing.expectEqualStrings("DETROIT IS FREE", current(&progress, &enemies, &skies).title);
 }
 
 test "Hive quest follows story flags, a surface spire, the Kestrel, and war state" {
@@ -70,7 +106,8 @@ test "Hive quest follows story flags, a surface spire, the Kestrel, and war stat
     enemies.nests[0].alive = false;
     skies.carriers[0].alive = false;
     skies.carriers[1].alive = false;
-    try std.testing.expectEqualStrings("THE FRONTIER IS SECURE", current(&progress, &enemies, &skies).title);
+    // With the wilds broken the log turns to the city (the first Detroit mission).
+    try std.testing.expectEqualStrings("THE FOUNDRY LEDGER", current(&progress, &enemies, &skies).title);
 }
 
 test "existing Kestrel saves do not get stuck on the new blueprint objective" {

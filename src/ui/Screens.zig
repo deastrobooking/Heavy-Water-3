@@ -18,6 +18,7 @@ const Fabricator = @import("../game/Fabricator.zig");
 const Build = @import("../game/Build.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
+const CityContent = @import("../game/CityContent.zig");
 const Heroes = @import("../game/Heroes.zig");
 const Specials = @import("../game/Specials.zig");
 const Pets = @import("../game/Pets.zig");
@@ -413,7 +414,7 @@ fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
 }
 
 fn drawQuestLog(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
-    const r = menuRect(c, 620, 370);
+    const r = menuRect(c, 620, 500);
     panel(c, r, "THE HIVE CAMPAIGN");
     const objective = QuestLog.current(&sb.progress, &sb.enemies, &sb.skies);
     c.text(r.x + 24, r.y + 54, "NEXT OBJECTIVE", 1, dim);
@@ -436,6 +437,22 @@ fn drawQuestLog(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         y += 21;
     }
     c.print(r.x + 24, y + 3, 1, dim, "NESTS {d}   CARRIERS {d}", .{ objective.nests_left, objective.carriers_left });
+    // The city half: the three allies to expose, the boss, and the city's freedom.
+    const detroit = &CityContent.detroit;
+    y += 32;
+    c.text(r.x + 24, y, if (detroit.draft) "LIBERATE DETROIT  (DRAFT CONTENT)" else "LIBERATE DETROIT", 1, alpha(accent, 0.85));
+    y += 24;
+    for (detroit.missions, 0..) |m, i| {
+        const done = CityContent.exposed(detroit, &sb.progress, i);
+        const begun = CityContent.started(detroit, &sb.progress, i);
+        c.text(r.x + 24, y, if (done) "[x]" else "[ ]", 1, if (done) good else dim);
+        c.text(r.x + 58, y, m.title, 1, if (done) dim else ink);
+        if (!done and begun) c.text(r.x + r.w - 130, y, "IN PROGRESS", 0.8, gold);
+        y += 21;
+    }
+    const boss_done = CityContent.bossDefeated(detroit, &sb.progress);
+    c.text(r.x + 24, y, if (boss_done) "[x]" else "[ ]", 1, if (boss_done) good else dim);
+    c.text(r.x + 58, y, detroit.boss.name, 1, if (boss_done) dim else ink);
     const back: Rect = .{ .x = r.x + r.w - 136, .y = r.y + r.h - 48, .w = 112, .h = 30 };
     button(c, back, "BACK", hitId(.menu, 0), menu.row == 0);
 }

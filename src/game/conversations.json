@@ -95,6 +95,19 @@
               "next": "salvage"
             },
             {
+              "text": "Rotor cores keep vanishing. Know anything?",
+              "requires": "met_maro",
+              "unless": "foundry_started",
+              "sets": "foundry_started",
+              "next": "foundry_brief"
+            },
+            {
+              "text": "Remind me about the foundry ledger.",
+              "requires": "foundry_started",
+              "unless": "foundry_exposed",
+              "next": "foundry_reminder"
+            },
+            {
               "text": "Any spare scrap for a beginner?",
               "unless": "maro_gift",
               "sets": "maro_gift",
@@ -177,6 +190,16 @@
           "id": "rotors",
           "text": "Up high. Tower roofs, shrine steps. And the Hive hoards them by its spires. Bring a weapon if you go looking there.",
           "next": "hello"
+        },
+        {
+          "id": "foundry_brief",
+          "text": "Rotor cores are walking out of the yards, and somebody is signing for them. Trace the shipments through three checkpoints in the machine works and rail yards, and find the steward who sells sap and alloy to the brood.",
+          "next": "hello"
+        },
+        {
+          "id": "foundry_reminder",
+          "text": "Three checkpoints in the machine works and the rail yards. The steward keeps a ledger for the Hive; find it and bring it into the open.",
+          "next": "hello"
         }
       ]
     },
@@ -252,6 +275,19 @@
               "next": "car"
             },
             {
+              "text": "Anything strange at the bridges after dark?",
+              "requires": "met_ines",
+              "unless": "windsor_started",
+              "sets": "windsor_started",
+              "next": "windsor_brief"
+            },
+            {
+              "text": "Remind me about the Windsor gate.",
+              "requires": "windsor_started",
+              "unless": "windsor_exposed",
+              "next": "windsor_reminder"
+            },
+            {
               "text": "Goodbye."
             }
           ]
@@ -280,6 +316,16 @@
         {
           "id": "car",
           "text": "Four ducts and a wedge of paint. Keep it off the bridge decks at rush hour, and keep it out of the Arbors' branches.",
+          "next": "hello"
+        },
+        {
+          "id": "windsor_brief",
+          "text": "The Windsor toll gates open after dark with nobody on the log. Watch the two bridges at night. Someone in the civic hall is letting the Brood carriers cross.",
+          "next": "hello"
+        },
+        {
+          "id": "windsor_reminder",
+          "text": "Night watch on the Windsor bridges first, then the Gothic civic hall. The gate logs will name the councillor.",
           "next": "hello"
         }
       ]
@@ -363,6 +409,19 @@
               "next": "reward"
             },
             {
+              "text": "Those Rootdeep tracks. Where do they lead?",
+              "requires": "met_tavi",
+              "unless": "bile_started",
+              "sets": "bile_started",
+              "next": "bile_brief"
+            },
+            {
+              "text": "Remind me about Belle Isle.",
+              "requires": "bile_started",
+              "unless": "bile_exposed",
+              "next": "bile_reminder"
+            },
+            {
               "text": "Goodbye."
             }
           ]
@@ -413,6 +472,16 @@
           "id": "scout_mark",
           "sets": "tavi_scouted",
           "text": "I'll mark the nearest surface spire on your map. Break it and the local swarm loses its anchor. Don't linger: the stain's edge is moving.",
+          "next": "hello"
+        },
+        {
+          "id": "bile_brief",
+          "text": "Belle Isle. Glide across or take a boat. An institute out there trades Dr. Bile's notes with the Hive, and there is a vault under it. Somebody has to get inside.",
+          "next": "hello"
+        },
+        {
+          "id": "bile_reminder",
+          "text": "Belle Isle: find a way into the vault under the institute, and bring out the notes they trade.",
           "next": "hello"
         }
       ]

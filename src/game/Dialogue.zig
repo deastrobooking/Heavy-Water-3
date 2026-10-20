@@ -10,7 +10,7 @@ const Market = @import("../city/Market.zig");
 const Dialogue = @This();
 
 pub const Action = enum { none, trade, upgrades, wardrobe };
-pub const max_choices = 8;
+pub const max_choices = 10;
 pub const max_text = 280;
 pub const Choice = struct {
     text: []const u8,
@@ -271,6 +271,57 @@ test "conversations branch on flags, reveal text, give scrap once, and end in pa
     try std.testing.expectEqualStrings("hello", d.node(s).id);
     try std.testing.expectEqual(before, d.visibleChoices(s, &progress, &visible));
     try std.testing.expect(d.key(&s, .back, &progress, &wallet) == .ended);
+}
+
+test "each keeper hands over their Detroit mission once, then reminds, and the greeting stays within the choice limit" {
+    var d = try load(std.testing.allocator, builtin);
+    defer d.deinit();
+    var wallet: Market.Wallet = .{};
+    const City = @import("CityContent.zig");
+    for (0..3) |i| {
+        const m = City.detroit.missions[i];
+        var progress: Progress = .{};
+        progress.setFlag(switch (i) {
+            0 => "met_maro",
+            1 => "met_ines",
+            else => "met_tavi",
+        });
+        const index = d.find(switch (i) {
+            0 => "keeper_0",
+            1 => "keeper_1",
+            else => "keeper_2",
+        }).?;
+        try std.testing.expectEqualStrings(m.giver, d.speaker(d.begin(index, .{ .keeper = @intCast(i) }, &progress).?).id);
+        var session = d.begin(index, .{ .keeper = @intCast(i) }, &progress).?;
+        try std.testing.expect(!progress.hasFlag(m.started_flag));
+        const ask = switch (i) {
+            0 => "foundry_brief",
+            1 => "windsor_brief",
+            else => "bile_brief",
+        };
+        try chooseNext(&d, &session, &progress, &wallet, ask);
+        try std.testing.expect(progress.hasFlag(m.started_flag));
+        // Back at the greeting the offer is gone and the reminder is there instead.
+        session.reveal = 999;
+        _ = d.key(&session, .confirm, &progress, &wallet);
+        try std.testing.expectEqualStrings("hello", d.node(session).id);
+        var visible: [max_choices]u8 = undefined;
+        const count = d.visibleChoices(session, &progress, &visible);
+        try std.testing.expect(count <= max_choices);
+        const reminder = switch (i) {
+            0 => "foundry_reminder",
+            1 => "windsor_reminder",
+            else => "bile_reminder",
+        };
+        try chooseNext(&d, &session, &progress, &wallet, reminder);
+        // Once exposed, the reminder goes away too.
+        progress.setFlag(m.exposed_flag);
+        session = d.begin(index, .{ .keeper = @intCast(i) }, &progress).?;
+        for (visible[0..d.visibleChoices(session, &progress, &visible)]) |choice_index| {
+            const next = d.node(session).choices[choice_index].next;
+            try std.testing.expect(!std.mem.endsWith(u8, next, "_reminder") and !std.mem.endsWith(u8, next, "_brief"));
+        }
+    }
 }
 
 test "Hive story beats gate Tavi, Ines and Maro in campaign order" {
