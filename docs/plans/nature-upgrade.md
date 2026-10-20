@@ -4,6 +4,8 @@
 
 **Audience:** engineers and coding agents working in this repository. Every step names the files it touches, the tests that must exist, and the capture or measurement that proves it.
 
+The reusable flora generator also supplies a trailing vine for Detroit's roof gardens and selected stone facades. It is placed from the seeded skyline layout rather than ground scatter, so these city assets do not change scatter candidate identities or saved removals. `-Dshowcase=89` is the close review view.
+
 ## 1. Goal and what "best in class" means here
 
 Best in class for this game is not photorealism. [Visual direction](visual-direction.md) and [world](../world.md) set the target: fantasy anime sci-fi realism, cel-lit, painterly, no texture stack, no bloom. The nature bar is therefore:

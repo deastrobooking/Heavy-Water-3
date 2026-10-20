@@ -1,6 +1,6 @@
 //! Content recipes joining imported terrain to biome, faction, encounter and base plans.
-//! These catalogs are authoring data; terrain streaming and combat do not yet activate
-//! every listed site. The existing Detroit/NYC/Chicago landings remain the live slice.
+//! These catalogs are authoring data; only named destinations with runtime bindings are playable.
+//! K2, Antarctica, Detroit, NYC and Chicago are active; the rest are planning markers and recipes.
 const Seed = @import("Seed.zig");
 const Interiors = @import("Interiors.zig");
 
@@ -134,6 +134,7 @@ pub fn cityBase(seed: u64, index: usize) ?Interiors.Layout {
 }
 
 comptime {
+    @setEvalBranchQuota(20_000);
     if (mountains.len != 10 or strongholds.len != 6 or us_cities.len != 24) @compileError("terrain site catalog is incomplete");
     for (mountains, 0..) |site, i| {
         const base = Interiors.generate(@intCast(i), site.base);

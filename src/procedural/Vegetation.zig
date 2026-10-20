@@ -172,6 +172,58 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     out.deinit(a);
     return mesh;
 }
+
+/// A reusable trailing vine for roof gardens, bridge planters and stone facades. Its anchor is
+/// at local y=0 and the foliage hangs below it, so callers can attach it to ledges without
+/// reversing the instance transform.
+pub fn hangingVine(a: std.mem.Allocator, seed: u64) !Mesh {
+    var out: GenMesh = .{};
+    errdefer out.deinit(a);
+    try out.vertices.ensureTotalCapacity(a, 512);
+    try out.indices.ensureTotalCapacity(a, 840);
+
+    for (0..5) |strand| {
+        const strand_f: f32 = @floatFromInt(strand);
+        const key = Seed.mix(seed +% @as(u64, @intCast(strand)));
+        const angle = strand_f * (2 * std.math.pi / @as(f32, 5)) + Seed.unit(key) * 0.32;
+        const root_radius = 0.035 + Seed.unit(Seed.mix(key +% 1)) * 0.09;
+        const length = 0.62 + Seed.unit(Seed.mix(key +% 2)) * 0.38;
+        var previous: [3]f32 = .{ @cos(angle) * root_radius, 0, @sin(angle) * root_radius };
+        for (1..7) |segment| {
+            const t = @as(f32, @floatFromInt(segment)) / 6;
+            const sway = 0.055 * @sin(t * 4 + angle);
+            const next: [3]f32 = .{ @cos(angle) * (root_radius + sway), -length * t, @sin(angle) * (root_radius + sway) };
+            try twig(a, &out, previous, next, 0.009 * (1 - t * 0.48), 0.0035, segment == 6);
+            if (segment > 1) {
+                try leafCards(
+                    a,
+                    &out,
+                    next,
+                    .{ next[0] - previous[0], next[1] - previous[1], next[2] - previous[2] },
+                    0.055,
+                    12,
+                    key +% @as(u64, @intCast(segment)),
+                    .cascade,
+                );
+                for (0..4) |leaf| {
+                    const leaf_angle = angle + @as(f32, @floatFromInt(leaf)) * (2 * std.math.pi / @as(f32, 4));
+                    const leaf_center: [3]f32 = .{
+                        next[0] + @cos(leaf_angle) * 0.035,
+                        next[1] - 0.015,
+                        next[2] + @sin(leaf_angle) * 0.035,
+                    };
+                    try ellipsoid(a, &out, leaf_center, .{ 0.028, 0.012, 0.02 }, 4, 6);
+                }
+            }
+            previous = next;
+        }
+    }
+
+    const mesh = try finish(a, &out);
+    out.deinit(a);
+    return mesh;
+}
+
 /// Scattered leaf cards around `center`, each facing outward, so a crown has a ragged edge and
 /// light and wood show between the leaves. Counter-clockwise corners match the outward normal.
 fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, direction: [3]f32, radius: f32, count: usize, seed: u64, form: LSystem.LeafForm) !void {

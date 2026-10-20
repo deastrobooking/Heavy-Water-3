@@ -1753,6 +1753,15 @@ fn showcase(self: *App) void {
         const origin = District.testOrigin(self.sandbox.seed);
         target = .{ origin[0], origin[1] + 185, origin[2] };
         eye = .{ origin[0] + 290, origin[1] + 250, origin[2] + 310 };
+    } else if (v == 89) {
+        // Close city-art review frames a planted tower roof from above the bridge approach.
+        var building = layout.buildings[0];
+        for (layout.buildings[0..layout.building_count]) |candidate| if (candidate.palette >= 6 and candidate.architecture != .industrial) {
+            building = candidate;
+            break;
+        };
+        target = .{ building.base[0], building.roof + 4, building.base[2] };
+        eye = .{ building.base[0] + 46, building.roof + 26, building.base[2] + 56 };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -3129,7 +3138,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
     renderer.views[0].hide_owner = if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.

@@ -355,11 +355,26 @@ fn roofGarden(b: Building, out: anytype) !void {
         const x = b.base[0] + sx * (b.half[0] + 5.5);
         const z = b.base[2] + sz * (b.half[1] + 5.5);
         try out.add(.{ .center = .{ x, b.roof + 2, z }, .size = .{ 9, 1.2, 9 }, .color = .{ 0.22, 0.48, 0.28 } });
-        try out.add(.{ .center = .{ x, b.roof + 5.2, z }, .size = .{ 4.5, 5.2, 4.5 }, .color = palettes[b.palette].glass, .solid = false });
+        try out.add(.{ .center = .{ x, b.roof + 2.68, z }, .size = .{ 7.8, 0.16, 7.8 }, .color = .{ 0.25, 0.31, 0.22 }, .solid = false });
     };
     // A sheltered kiosk gives each roof terrace a reason to be a place, not just a landing.
     try out.add(.{ .center = .{ b.base[0], b.roof + 3.8, b.base[2] }, .size = .{ 9, 6.2, 7 }, .color = palettes[b.palette].body });
     try out.add(.{ .center = .{ b.base[0], b.roof + 4, b.base[2] + 3.6 }, .size = .{ 6.5, 3.4, 0.2 }, .color = palettes[b.palette].glass, .solid = false });
+
+    // The kiosk sits inside a light pergola, with open benches around the planted edge so the
+    // roof reads as a small public square instead of a decorated rooftop landing.
+    for ([_]f32{ -5, 5 }) |x| for ([_]f32{ -4, 4 }) |z| {
+        try out.add(.{ .center = .{ b.base[0] + x, b.roof + 7.9, b.base[2] + z }, .size = .{ 0.55, 2, 0.55 }, .color = palettes[b.palette].fin, .solid = false });
+    };
+    try out.add(.{ .center = .{ b.base[0], b.roof + 9.15, b.base[2] }, .size = .{ 12, 0.5, 10 }, .color = palettes[b.palette].band, .solid = false });
+    for ([_]f32{ -3, -1, 1, 3 }) |z| {
+        try out.add(.{ .center = .{ b.base[0], b.roof + 9.52, b.base[2] + z }, .size = .{ 12, 0.18, 0.32 }, .color = palettes[b.palette].fin, .solid = false });
+    }
+    for ([_]f32{ -1, 1 }) |side| {
+        const x = b.base[0] + side * (b.half[0] + 2.5);
+        try out.add(.{ .center = .{ x, b.roof + 1.65, b.base[2] }, .size = .{ 5.5, 0.5, 1.6 }, .color = palettes[b.palette].band, .solid = false });
+        try out.add(.{ .center = .{ x, b.roof + 2.35, b.base[2] - side * 0.55 }, .size = .{ 5.5, 0.9, 0.25 }, .color = palettes[b.palette].fin, .solid = false });
+    }
 }
 
 fn skyways(layout: *const District.Layout, out: anytype) !void {
@@ -430,6 +445,12 @@ fn skywaySpan(a: Building, b: Building, out: anytype) !void {
                 const planter = R.add(center, R.rotate(q, .{ side, 1.7, 0 }));
                 try out.add(.{ .center = planter, .size = .{ 8, 1.8, 24 }, .rotation = q, .color = .{ 0.24, 0.52, 0.30 } });
             }
+            if (i != 1) for ([_]f32{ -8, 8 }) |side| {
+                const seat = R.add(center, R.rotate(q, .{ side, 1.45, 0 }));
+                const back = R.add(center, R.rotate(q, .{ side + (if (side < 0) @as(f32, 0.7) else -0.7), 2.05, 0 }));
+                try out.add(.{ .center = seat, .size = .{ 5.5, 0.5, 1.4 }, .rotation = q, .color = .{ 0.64, 0.59, 0.46 }, .solid = false });
+                try out.add(.{ .center = back, .size = .{ 5.5, 0.9, 0.25 }, .rotation = q, .color = .{ 0.42, 0.46, 0.39 }, .solid = false });
+            };
             if (i == 1) {
                 const kiosk = R.add(center, R.rotate(q, .{ 0, 4.5, 0 }));
                 try out.add(.{ .center = kiosk, .size = .{ 12, 7.2, 10 }, .rotation = q, .color = palettes[2].body });

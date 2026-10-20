@@ -49,6 +49,8 @@ pub const Content = struct {
     spike: MeshHandle,
     /// Faceted field stones scattered over rough ground.
     boulders: [Vegetation.boulder_count]MeshHandle,
+    /// Trailing foliage used by the city's roof gardens and stone facades.
+    hanging_vine: MeshHandle,
     crate: MeshHandle,
     /// Centered unit cube; machine parts and device bodies scale it per axis.
     block: MeshHandle,
@@ -259,6 +261,7 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.content.orb = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.orb(allocator), .named("orb", .{ 1, 1, 1, 1 })));
     self.content.spike = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.spike(allocator), .named("spike", .{ 1, 1, 1, 1 })));
     for (&self.content.boulders, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.boulder(allocator, @intCast(i)), .named(Vegetation.boulder_names[i], Vegetation.stone ++ [_]f32{1})));
+    self.content.hanging_vine = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.hangingVine(allocator, seed), .named("hanging vine", .{ 0.20, 0.48, 0.24, 1 })));
     self.content.crate = try self.register(allocator, try Model.decode(allocator, @embedFile("crate.hwmesh")));
     self.content.block = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.block(allocator), .named("block", .{ 1, 1, 1, 1 })));
     const CombatGeometry = @import("../procedural/CombatGeometry.zig");
@@ -376,6 +379,7 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "copper_fan", .handle = self.content.flora[11] },                                    .{ .name = "moon_cascade", .handle = self.content.flora[12] },
         .{ .name = "star_blossom", .handle = self.content.flora[13] },                                  .{ .name = "boulder_round", .handle = self.content.boulders[0] },
         .{ .name = "boulder_tall", .handle = self.content.boulders[1] },                                .{ .name = "boulder_slab", .handle = self.content.boulders[2] },
+        .{ .name = "hanging_vine", .handle = self.content.hanging_vine },
         .{ .name = "orb", .handle = self.content.orb },                                                 .{ .name = "spike", .handle = self.content.spike },
         .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
         .{ .name = "saber_blade", .handle = self.content.saber_blade },                                 .{ .name = "saber_core", .handle = self.content.saber_core },

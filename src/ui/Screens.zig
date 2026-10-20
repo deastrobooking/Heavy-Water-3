@@ -26,6 +26,7 @@ const Arena = @import("../game/Arena.zig");
 const Market = @import("../city/Market.zig");
 const District = @import("../procedural/District.zig");
 const CityGeography = @import("../procedural/CityGeography.zig");
+const TerrainSites = @import("../procedural/TerrainSites.zig");
 const Enemies = @import("../game/Enemies.zig");
 const EnemyDesign = @import("../game/EnemyDesign.zig");
 pub const Rect = Canvas.Rect;
@@ -1706,16 +1707,6 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     c.text(r.x + 22, r.y + r.h - 24, "ENTER CYCLE TARGET / LEFT FRAME / RIGHT ZOOM OUT / ESC BACK", 1, dim);
 }
 
-const EarthCity = struct { name: []const u8, latitude: f32, longitude: f32, travel_label: ?[]const u8 };
-const earth_cities = [_]EarthCity{
-    .{ .name = "DETROIT", .latitude = CityGeography.detroit.latitude, .longitude = CityGeography.detroit.longitude, .travel_label = "BASE CAMP" },
-    .{ .name = "CHICAGO", .latitude = CityGeography.chicago.latitude, .longitude = CityGeography.chicago.longitude, .travel_label = "CHICAGO" },
-    .{ .name = "NEW YORK", .latitude = CityGeography.new_york.latitude, .longitude = CityGeography.new_york.longitude, .travel_label = "NEW YORK CITY" },
-    .{ .name = "LOS ANGELES", .latitude = CityGeography.los_angeles.latitude, .longitude = CityGeography.los_angeles.longitude, .travel_label = null },
-    .{ .name = "ANTARCTICA", .latitude = CityGeography.antarctica.latitude, .longitude = CityGeography.antarctica.longitude, .travel_label = "ANTARCTICA" },
-    .{ .name = "K2", .latitude = CityGeography.k2.latitude, .longitude = CityGeography.k2.longitude, .travel_label = "K2 EXPEDITION" },
-};
-
 fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: Rect, map: Rect, destination: usize) void {
     c.rect(map, .{ 0.012, 0.035, 0.075, 1 });
     c.hit(map, hitId(.planet_globe, 0));
@@ -1746,21 +1737,50 @@ fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: 
             c.rect(.{ .x = px - cell_w / 2, .y = py - cell_h / 2, .w = cell_w + 1, .h = cell_h + 1 }, color);
         }
     }
-    for (earth_cities) |city| {
+    for (TerrainSites.us_cities) |city| {
         const lat = city.latitude * pi / 180;
         const lon = city.longitude * pi / 180;
         const point = globePoint(lat, lon, menu.globe_yaw, menu.globe_pitch);
         if (point[2] <= 0) continue;
         const px = center_x + point[0] * radius;
         const py = center_y - point[1] * radius;
-        const selected = if (city.travel_label) |label| destinationNamed(destination, label) else false;
-        const color = if (city.travel_label == null) alpha(dim, 0.8) else if (selected) accent else gold;
-        const size: f32 = if (selected) 9 else 5;
+        const travel_label = cityTravelLabel(city.name);
+        const selected = if (travel_label) |label| destinationNamed(destination, label) else false;
+        const color = if (travel_label != null) (if (selected) accent else gold) else if (city.asset != null) cityBiomeColor(city.biome) else alpha(dim, 0.75);
+        const size: f32 = if (selected) 9 else if (travel_label != null) 5 else 3.5;
         c.rect(.{ .x = px - size / 2, .y = py - size / 2, .w = size, .h = size }, color);
         if (selected) c.frame(.{ .x = px - size / 2 - 3, .y = py - size / 2 - 3, .w = size + 6, .h = size + 6 }, 1, accent);
     }
+    for (TerrainSites.mountains) |site| {
+        const point = globePoint(site.latitude * pi / 180, site.longitude * pi / 180, menu.globe_yaw, menu.globe_pitch);
+        if (point[2] <= 0) continue;
+        const px = center_x + point[0] * radius;
+        const py = center_y - point[1] * radius;
+        const selected = std.mem.eql(u8, site.name, "K2") and destinationNamed(destination, "K2 EXPEDITION");
+        const color: Color = if (std.mem.eql(u8, site.name, "K2")) gold else .{ 0.38, 0.78, 1, 1 };
+        const size: f32 = if (selected) 9 else 4;
+        c.rect(.{ .x = px - size / 2, .y = py - size / 2, .w = size, .h = size }, if (selected) accent else color);
+        if (selected) c.frame(.{ .x = px - size / 2 - 3, .y = py - size / 2 - 3, .w = size + 6, .h = size + 6 }, 1, accent);
+    }
+    for (TerrainSites.strongholds) |site| {
+        const point = globePoint(site.latitude * pi / 180, site.longitude * pi / 180, menu.globe_yaw, menu.globe_pitch);
+        if (point[2] <= 0) continue;
+        const px = center_x + point[0] * radius;
+        const py = center_y - point[1] * radius;
+        const size: f32 = 4;
+        c.frame(.{ .x = px - size / 2, .y = py - size / 2, .w = size, .h = size }, 1, .{ 0.86, 0.54, 1, 1 });
+    }
+    const antarctica_point = globePoint(CityGeography.antarctica.latitude * pi / 180, CityGeography.antarctica.longitude * pi / 180, menu.globe_yaw, menu.globe_pitch);
+    if (antarctica_point[2] > 0) {
+        const px = center_x + antarctica_point[0] * radius;
+        const py = center_y - antarctica_point[1] * radius;
+        const selected = destinationNamed(destination, "ANTARCTICA");
+        const size: f32 = if (selected) 9 else 5;
+        c.rect(.{ .x = px - size / 2, .y = py - size / 2, .w = size, .h = size }, if (selected) accent else gold);
+        if (selected) c.frame(.{ .x = px - size / 2 - 3, .y = py - size / 2 - 3, .w = size + 6, .h = size + 6 }, 1, accent);
+    }
     c.print(map.x + 8, map.y + 8, 0.9, ink, "EARTH  /  DRAG TO ROTATE  /  LEFT-RIGHT TO ZOOM", .{});
-    c.centered(center_x, map.y + map.h - 16, "DETROIT / CHICAGO / NYC / K2 / ANTARCTICA / LA (LATER)", 0.78, dim);
+    c.centered(center_x, map.y + map.h - 16, "24 CITIES: BIOME COLOR  /  10 MOUNTAINS: BLUE  /  6 STRONGHOLDS: VIOLET  /  GOLD: PLAYABLE", 0.72, dim);
 
     for (Menu.map_items, 0..) |item, i| {
         const row: Rect = .{ .x = panel_rect.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = panel_rect.w - 24, .h = 26 };
@@ -1779,6 +1799,22 @@ fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: 
         }
     }
     c.text(panel_rect.x + 22, panel_rect.y + panel_rect.h - 24, "SELECT A DESTINATION BELOW  /  ENTER TRAVEL  /  ESC BACK", 1, dim);
+}
+
+fn cityTravelLabel(name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, name, "Detroit")) return "BASE CAMP";
+    if (std.mem.eql(u8, name, "Chicago")) return "CHICAGO";
+    if (std.mem.eql(u8, name, "New York City")) return "NEW YORK CITY";
+    return null;
+}
+
+fn cityBiomeColor(biome: TerrainSites.Biome) Color {
+    return switch (biome) {
+        .desert_basin, .desert_ring, .volcanic_salt_rift, .high_basalt => .{ 1, 0.65, 0.3, 1 },
+        .coastal_mountain, .alpine_front_range, .alpine_glacier, .alpine_icefall => .{ 0.42, 0.78, 1, 1 },
+        .subtropical_wetland, .humid_river_canopy, .jungle_mesa => .{ 0.35, 0.9, 0.75, 1 },
+        else => .{ 0.58, 0.88, 0.5, 1 },
+    };
 }
 
 fn destinationNamed(destination: usize, label: []const u8) bool {

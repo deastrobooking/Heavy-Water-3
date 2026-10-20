@@ -1650,3 +1650,15 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** pinned `python3 tools/zig.py build check` passes. ReleaseSafe showcases 87 (K2 landing) and 88 (mechworks heart) each captured frame 120 at 2560×1600 under `MTL_DEBUG_LAYER=1` with Metal API Validation enabled on Apple M3 Pro. Both captures were inspected; the glacier renders at its real elevation without vegetation, and the cave chamber, metal frames, and Titan render. The globe destination caption includes K2. `git diff --check` passes.
 - **Not checked:** headless tests, hands-on traversal from the surface to the heart, combat completion and reward confirmation in a normal play session, save/load of the defeat flag, performance/memory across the full raster, or cross-platform builds. The surface screenshot also retains the game's unrelated garage tutorial toast; it does not affect the K2 terrain.
 
+## Earth globe site plotting — 2026-10-20
+
+- **Changed:** the globe now plots all 24 catalogued U.S. city sites, all 10 Himalayan mountain sites, six alien strongholds, and Antarctica. Marker styles/colors distinguish active travel destinations, city biomes, mountains, and strongholds. Cities without a local raster are shown dimly. Catalog-only markers remain non-travelable until they have a playable region and safe arrival. Fixed a `shop` role typo in the sky-city room recipe and set a larger compile-time quota for validating the full site catalog when the globe imports it.
+- **Checked:** the pinned `build check` passes. The ReleaseSafe showcase 81 capture completed at frame 120 under Metal API Validation on Apple M3 Pro and was visually reviewed. `git diff --check` passes.
+- **Not checked:** marker selection/tooltips (the points are informational and globe drag still rotates the map), current-world labels at every zoom, or activation of any catalog-only region.
+
+## Canopy city garden asset pass — 2026-10-20
+
+- **Changed:** expanded the seeded Detroit roof-garden kit with open soil planting beds, native shrubs and flowers, a kiosk pergola, and benches. Added benches to the public skyway terraces. `Vegetation.hangingVine` generates reusable trailing stems and foliage; the catalog registers one mesh, and `Frontier.publish` places it on selected stone towers without changing ground-scatter IDs. Added `-Dshowcase=89` for a close skyline garden view.
+- **Checked:** pinned `python3 tools/zig.py build check` passes; `git diff --check` passes. ReleaseSafe showcase 89 captured frame 120 at 2560×1600 under `MTL_DEBUG_LAYER=1` with Metal API Validation enabled on Apple M3 Pro. The capture was inspected after tuning the vine leaf spacing and planter layout; no Metal validation messages appeared.
+- **Not checked:** headless tests, performance benchmarking for the added city props, hands-on rooftop traversal, or equivalent planting on NYC/Chicago. This is visual dressing on the existing Detroit skyline, not a player-facing city construction tool.
+
