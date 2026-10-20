@@ -93,12 +93,14 @@ pub const Control = enum(u8) {
     delete_faces,
     split_edge,
     collapse_edge,
+    save,
+    discard,
     swatch_first = 100,
     open = 120,
     _,
 };
 
-pub const Action = enum { none, tear_off, close };
+pub const Action = enum { none, tear_off, close, save, discard };
 pub const SelectMode = enum { vertex, face, edge };
 pub const Gizmo = enum { move, rotate, scale };
 /// Gizmo handle length and pick radius, as fractions of the model's height.
@@ -724,6 +726,8 @@ pub fn control(self: *MeshTools, c: Control) MeshEdit.Error!Action {
         .undo => _ = try e.undo(),
         .redo => _ = try e.redo(),
         .tear_off => return .tear_off,
+        .save => return .save,
+        .discard => return .discard,
         .close => return .close,
         .open => {},
         .mirror => self.mirror = !self.mirror,

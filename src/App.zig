@@ -30,6 +30,7 @@ const Profile = @import("game/Profile.zig");
 const MeshModifiers = @import("asset/Modifiers.zig");
 const MeshModel = @import("asset/Model.zig");
 const MeshTools = @import("game/MeshTools.zig");
+const EditedMesh = @import("game/EditedMesh.zig");
 const ToolEvent = union(enum) { press: struct { ray: MeshTools.Ray, extend: bool }, drag: MeshTools.Ray, release, control: MeshTools.Control };
 const Life = @import("city/Life.zig");
 const Market = @import("city/Market.zig");
@@ -171,6 +172,8 @@ vertex_edits_pending: bool = false,
 /// Set after a topology edit: the part library no longer matches the mesh, so its preview
 /// bake is not rebuilt until a mesh is imported or installed again.
 mesh_library_detached: bool = false,
+/// Look for saved vertex edits once the mesh they apply to is installed.
+edited_mesh_check: bool = true,
 queued_character_model: ?MeshModel = null,
 imported_rig_status: [96]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
@@ -2940,6 +2943,7 @@ fn installDeferred(self: *App) void {
 pub fn publish(self: *App, renderer: *Renderer) void {
     self.installDeferred();
     self.installImportedCharacter();
+    self.loadEditedMesh();
     self.sandbox.creator.imported_doc = &self.mesh_library;
     self.applyMeshLibraryPreview(renderer);
     self.updateMeshTools(renderer);
@@ -3258,12 +3262,67 @@ fn saveMeshLibrary(self: *App) void {
         return;
     };
     if (self.vertex_edits_pending) {
-        // Part edits are on disk; sculpt, paint and pen edits live only in this session so far.
-        self.report("PARTS SAVED. VERTEX EDITS ARE NOT SAVED YET (TEAR OFF SAVES PARTS)", .{});
+        if (!self.saveEditedMesh()) return;
+        self.sandbox.creator.imported_status = .saved;
+        self.report("LIBRARY AND EDITED MESH SAVED", .{});
         return;
     }
     self.sandbox.creator.imported_status = .saved;
     self.report("IMPORTED CHARACTER LIBRARY SAVED", .{});
+}
+
+fn editedMeshPath(self: *const App) []const u8 {
+    return if (self.sandbox.profile.body_style == .imported_glb and self.imported_rig_status_len != 0) EditedMesh.imported_path else EditedMesh.captain_path;
+}
+
+/// Writes the edited mesh (sculpt, paint, pens, topology, skin) beside the part sidecar.
+fn saveEditedMesh(self: *App) bool {
+    const entry = self.catalog.mesh(self.catalog.content.captain_test) orelse return false;
+    const bytes = EditedMesh.encode(self.allocator, entry.model) catch |err| {
+        self.report("MESH SAVE FAILED {s}", .{@errorName(err)});
+        return false;
+    };
+    defer self.allocator.free(bytes);
+    Save.writeFile(self.io, self.editedMeshPath(), bytes) catch |err| {
+        self.report("MESH SAVE FAILED {s}", .{@errorName(err)});
+        return false;
+    };
+    self.vertex_edits_pending = false;
+    return true;
+}
+
+/// Once the imported (or built-in) mesh is installed, replaces it with saved vertex edits when
+/// they still fit its rig. The part library stays detached: the saved colours are final.
+fn loadEditedMesh(self: *App) void {
+    if (!self.edited_mesh_check or self.queued_character_model != null) return;
+    const handle = &self.catalog.content.captain_test;
+    const entry = self.catalog.meshMut(handle.*) orelse return;
+    if (!entry.ready) return;
+    self.edited_mesh_check = false;
+    const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.editedMeshPath(), self.allocator, .limited(256 << 20)) catch return;
+    defer self.allocator.free(bytes);
+    const edited = EditedMesh.adopt(self.allocator, bytes, entry.model) catch |err| {
+        std.log.warn("saved mesh edits ignored ({s}); the file was preserved", .{@errorName(err)});
+        return;
+    };
+    self.mesh_tools.unbind();
+    self.destroyMeshLibraryBake();
+    self.catalog.replaceHandle(self.allocator, handle, edited) catch |err| {
+        std.log.err("saved mesh edits failed to install: {s}", .{@errorName(err)});
+        return;
+    };
+    self.mesh_library_detached = true;
+    std.log.info("Loaded saved mesh edits from {s}", .{self.editedMeshPath()});
+}
+
+/// Deletes the saved edits and reloads the source mesh.
+fn discardEditedMesh(self: *App) void {
+    std.Io.Dir.cwd().deleteFile(self.io, self.editedMeshPath()) catch {};
+    self.vertex_edits_pending = false;
+    if (self.imported_rig_status_len != 0) {
+        self.loadSavedCharacterImport();
+        self.report("EDITS DISCARDED; SOURCE MESH RELOADED", .{});
+    } else self.report("EDITS DISCARDED; RESTART TO RELOAD THE ORIGINAL MESH", .{});
 }
 
 /// Import a binary GLB into the Character Designer. Its skin is kept and retargeted live onto the
@@ -3339,6 +3398,8 @@ fn installImportedCharacter(self: *App) void {
     self.mesh_tools.unbind();
     self.vertex_edits_pending = false;
     self.mesh_library_detached = false;
+    // Saved edits of this source (if any) go on top once it is installed.
+    self.edited_mesh_check = true;
     self.catalog.replaceHandle(self.allocator, &self.catalog.content.captain_test, model) catch |err| {
         model.deinit(self.allocator);
         self.queued_character_model = null;
@@ -3540,6 +3601,13 @@ fn applyToolAction(self: *App, action: MeshTools.Action) void {
             self.sandbox.creator.vertex_tools = false;
         },
         .tear_off => self.tearOffPart(),
+        .save => {
+            if (self.saveEditedMesh()) {
+                self.sandbox.creator.imported_status = .saved;
+                self.report("EDITED MESH SAVED", .{});
+            }
+        },
+        .discard => self.discardEditedMesh(),
     }
 }
 

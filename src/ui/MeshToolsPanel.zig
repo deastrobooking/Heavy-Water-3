@@ -173,10 +173,10 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     // History and exit.
     const can_undo = if (e) |ed| ed.canUndo() else false;
     const can_redo = if (e) |ed| ed.canRedo() else false;
-    const third = (inner - 8) / 3;
-    button(c, .{ .x = x, .y = y, .w = third, .h = 24 }, "UNDO", control(.undo), can_undo);
-    button(c, .{ .x = x + third + 4, .y = y, .w = third, .h = 24 }, "REDO", control(.redo), can_redo);
-    button(c, .{ .x = x + 2 * (third + 4), .y = y, .w = third, .h = 24 }, "BACK", control(.close), false);
+    const fifth = (inner - 16) / 5;
+    for ([_]MeshTools.Control{ .undo, .redo, .save, .discard, .close }, [_][]const u8{ "UNDO", "REDO", "SAVE", "DISCARD", "BACK" }, [_]bool{ can_undo, can_redo, false, false, false }, 0..) |ctl, label, on, i| {
+        button(c, .{ .x = x + @as(f32, @floatFromInt(i)) * (fifth + 4), .y = y, .w = fifth, .h = 24 }, label, control(ctl), on);
+    }
     y += 32;
     c.text(x, y, tools.status(), 0.62, gold);
     c.text(x, y + 16, "1-9 0 TOOLS  [ ] SIZE  Z / SHIFT+Z  ESC BACK", 0.58, dim);

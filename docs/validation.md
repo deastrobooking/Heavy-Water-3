@@ -1594,3 +1594,14 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
   - Topology edits on a mesh whose welded seams split a selected region (walls follow welded edges; seam copies inside the region move together).
   - Memory on very large meshes: every topology edit keeps two whole-mesh copies in the undo history (up to 64 steps).
 
+## Saving vertex edits (mesh editor E2) — 2026-10-20
+
+- **Added:** SAVE and DISCARD on the vertex tool bar. SAVE LIBRARY also saves the edited mesh when there are vertex edits. `game/EditedMesh.zig` writes the edited model (HWMS with pens and skin) and adopts it on load only when the rig matches. `App.loadEditedMesh` applies it once the mesh is installed and detaches the part library. The old "vertex edits are not saved yet" message is gone.
+- **Checked:**
+  - A new test covers the encode/adopt round trip (positions, colours, pens) and refusal of a different joint mapping, an unskinned source and junk bytes. The suite runs 501/509 with the same 8 failures. Default and 0.17 `build check` pass.
+  - An isolated round trip in a scratch worktree (its own `saves/`), with a worktree-only line making showcase 48 save at the end:
+    - Showcase 48 wrote a 493 KB `saves/imported-character.edited.hwmesh` after the scripted edits, including the extrude.
+    - A second launch (showcase 47) logged "Loaded saved mesh edits", and its capture shows the edges, the armour pen and the chest plate on the live, retargeted character.
+  - The Metal smoke completes 300 frames, and the ReleaseFast build is installed. The user's real `saves/` holds no edited-mesh file afterwards.
+- **Not checked:** DISCARD by hand; a saved edit after the source GLB is replaced by a different rig (refused by the test, not tried in the app); edited saves of the built-in Captain (same code path, not run).
+
