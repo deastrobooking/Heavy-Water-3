@@ -1,18 +1,19 @@
-//! Seeded indoor plans composed from reusable room modules. Building floors, enemy facilities and
-//! dungeons share the same graph/door format while receiving different room roles and dimensions.
-//! This is the layout and mapping layer; rendering, streamed interior instances, doors and combat
-//! population attach to these stable room/link ids in the next content integration pass.
+//! Seeded indoor plans composed from reusable room modules. City districts, mountain vaults,
+//! Scalari mechworks, Hive broodworks, drake roosts and dungeons share the same connected graph.
+//! TerrainSites selects a facility grammar per location; rendering and live combat population
+//! still need to consume these stable room/link ids.
 const std = @import("std");
 const Seed = @import("Seed.zig");
 
-pub const Archetype = enum { residence, commerce, industry, enemy_base, dungeon };
-pub const Role = enum { entry, corridor, common, living, sleeping, utility, atrium, shop, storage, office, security, command, barracks, armory, reactor, hangar, assembly, control, trial, cache, heart };
+pub const Archetype = enum { residence, commerce, industry, enemy_base, dungeon, scalari_mechworks, hive_broodworks, mountain_vault, drake_roost, sky_city };
+pub const Role = enum { entry, corridor, common, living, sleeping, utility, atrium, shop, storage, office, security, command, barracks, armory, reactor, hangar, assembly, control, trial, cache, heart, lift, relay, mech_bay, resin_vat, brood, roost, sky_lobby, garden, shelter, escape };
 /// Reusable room content modules. The room graph stays procedural data; gameplay systems attach
 /// the matching fixture and interaction behavior without branching on every building archetype.
-pub const Module = enum { plain, entry, home, market, evidence, power, security, command, armory, hangar, trial, cache, heart };
-pub const Interaction = enum { exit, trade, evidence, power, alarm, loot, unlock, nest_heart };
+pub const Module = enum { plain, entry, home, market, evidence, power, security, command, armory, hangar, trial, cache, heart, lift, relay, mech_bay, resin_vat, brood, roost, sky_lobby, garden, shelter, escape };
+pub const Interaction = enum { exit, trade, evidence, power, alarm, loot, unlock, nest_heart, lift, disable_relay, service_mech, purge_resin, brood_heart, dragon_roost, open_skyway, restore_garden, rescue_civilians };
 pub const Side = enum { north, east, south, west };
-pub const max_rooms = 8;
+pub const Connector = enum { corridor, ramp, lift, vertical_shaft, resin_tube, flight_tunnel, sky_lift };
+pub const max_rooms = 10;
 pub const max_doors = max_rooms - 1;
 pub const module_pitch: f32 = 12;
 pub const wall_height: f32 = 4;
@@ -27,7 +28,7 @@ pub const Room = struct {
 };
 /// A local fixture anchor for the room's module. Coordinates are centered on the room, in meters.
 pub const Fixture = struct { interaction: Interaction, position: [3]f32 };
-pub const Door = struct { a: u8, b: u8, side_a: Side, side_b: Side, width: f32 = 2.4, height: f32 = 2.8 };
+pub const Door = struct { a: u8, b: u8, side_a: Side, side_b: Side, connector: Connector = .corridor, width: f32 = 2.4, height: f32 = 2.8 };
 pub const Layout = struct {
     seed: u64,
     archetype: Archetype,
@@ -68,7 +69,7 @@ pub const Layout = struct {
     }
 };
 
-const Template = struct { roles: []const Role, grid: []const [2]i8, parents: []const u8 };
+const Template = struct { roles: []const Role, grid: []const [2]i8, levels: []const i8, parents: []const u8 };
 const residence_roles = [_]Role{ .entry, .corridor, .common, .living, .sleeping, .utility };
 const residence_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ 0, 3 } };
 const residence_parents = [_]u8{ 0, 0, 1, 2, 2, 2 };
@@ -84,19 +85,45 @@ const base_parents = [_]u8{ 0, 0, 1, 2, 2, 2, 5, 3 };
 const dungeon_roles = [_]Role{ .entry, .corridor, .common, .trial, .cache, .heart };
 const dungeon_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ 0, 3 } };
 const dungeon_parents = [_]u8{ 0, 0, 1, 2, 2, 2 };
+const mechworks_roles = [_]Role{ .entry, .security, .assembly, .mech_bay, .reactor, .armory, .command, .lift, .hangar };
+const mechworks_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ -1, 3 }, .{ 0, 3 }, .{ 1, 3 }, .{ 1, 3 } };
+const mechworks_levels = [_]i8{ 0, 0, -1, -2, -2, -3, -4, -2, -6 };
+const mechworks_parents = [_]u8{ 0, 0, 1, 2, 2, 3, 2, 1, 7 };
+const broodworks_roles = [_]Role{ .entry, .security, .barracks, .resin_vat, .brood, .roost, .heart, .escape, .lift };
+const broodworks_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ 1, 3 }, .{ 0, 3 }, .{ -1, 3 }, .{ 0, 1 } };
+const broodworks_levels = [_]i8{ 0, 0, -1, -2, -3, -5, -8, -5, -2 };
+const broodworks_parents = [_]u8{ 0, 0, 1, 2, 2, 4, 4, 1, 1 };
+const vault_roles = [_]Role{ .entry, .corridor, .trial, .cache, .cache, .relay, .mech_bay, .heart, .lift };
+const vault_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ 0, 3 }, .{ -1, 3 }, .{ 0, 4 }, .{ 0, 1 } };
+const vault_levels = [_]i8{ 0, -1, -2, -2, -2, -3, -5, -8, -3 };
+const vault_parents = [_]u8{ 0, 0, 1, 2, 2, 1, 5, 5, 1 };
+const roost_roles = [_]Role{ .entry, .corridor, .trial, .brood, .roost, .cache, .heart, .lift };
+const roost_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ -1, 3 }, .{ 1, 3 }, .{ 0, 1 } };
+const roost_levels = [_]i8{ 0, -1, -2, -3, -5, -4, -8, -3 };
+const roost_parents = [_]u8{ 0, 0, 1, 2, 2, 3, 4, 1 };
+const sky_roles = [_]Role{ .entry, .sky_lobby, .market, .garden, .shelter, .lift, .command, .hangar };
+const sky_grid = [_][2]i8{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ -1, 2 }, .{ 1, 2 }, .{ 0, 1 }, .{ 0, 2 }, .{ 1, 2 } };
+const sky_levels = [_]i8{ 0, 0, 0, 0, 0, 1, 1, 2 };
+const sky_parents = [_]u8{ 0, 0, 1, 2, 2, 1, 5, 4 };
 
 pub fn generate(seed: u64, archetype: Archetype) Layout {
     const template: Template = switch (archetype) {
-        .residence => .{ .roles = &residence_roles, .grid = &residence_grid, .parents = &residence_parents },
-        .commerce => .{ .roles = &commerce_roles, .grid = &commerce_grid, .parents = &commerce_parents },
-        .industry => .{ .roles = &industry_roles, .grid = &industry_grid, .parents = &industry_parents },
-        .enemy_base => .{ .roles = &base_roles, .grid = &base_grid, .parents = &base_parents },
-        .dungeon => .{ .roles = &dungeon_roles, .grid = &dungeon_grid, .parents = &dungeon_parents },
+        .residence => .{ .roles = &residence_roles, .grid = &residence_grid, .levels = &.{ 0, 0, 0, 0, 0, 0 }, .parents = &residence_parents },
+        .commerce => .{ .roles = &commerce_roles, .grid = &commerce_grid, .levels = &.{ 0, 0, 0, 0, 0, 0, 0 }, .parents = &commerce_parents },
+        .industry => .{ .roles = &industry_roles, .grid = &industry_grid, .levels = &.{ 0, 0, 0, 0, 0, 0, 0 }, .parents = &industry_parents },
+        .enemy_base => .{ .roles = &base_roles, .grid = &base_grid, .levels = &.{ 0, 0, 0, 0, 0, 0, 0, 0 }, .parents = &base_parents },
+        .dungeon => .{ .roles = &dungeon_roles, .grid = &dungeon_grid, .levels = &.{ 0, 0, 0, 0, 0, 0 }, .parents = &dungeon_parents },
+        .scalari_mechworks => .{ .roles = &mechworks_roles, .grid = &mechworks_grid, .levels = &mechworks_levels, .parents = &mechworks_parents },
+        .hive_broodworks => .{ .roles = &broodworks_roles, .grid = &broodworks_grid, .levels = &broodworks_levels, .parents = &broodworks_parents },
+        .mountain_vault => .{ .roles = &vault_roles, .grid = &vault_grid, .levels = &vault_levels, .parents = &vault_parents },
+        .drake_roost => .{ .roles = &roost_roles, .grid = &roost_grid, .levels = &roost_levels, .parents = &roost_parents },
+        .sky_city => .{ .roles = &sky_roles, .grid = &sky_grid, .levels = &sky_levels, .parents = &sky_parents },
     };
     const rotation: u2 = @truncate(Seed.mix(seed ^ (@as(u64, @intFromEnum(archetype)) *% 0x9e3779b97f4a7c15)));
     var result: Layout = .{ .seed = seed, .archetype = archetype, .rotation = rotation, .room_count = @intCast(template.roles.len), .objective = @intCast(template.roles.len - 1) };
-    for (template.roles, template.grid, 0..) |role, cell, index| {
-        result.rooms[index] = .{ .role = role, .grid = cell, .half_extent = extents(role), .ceiling = if (role == .reactor or role == .atrium or role == .hangar) 7 else wall_height, .module = moduleFor(role) };
+    const floor_spacing: f32 = if (archetype == .sky_city) 45 else 24;
+    for (template.roles, template.grid, template.levels, 0..) |role, cell, level, index| {
+        result.rooms[index] = .{ .role = role, .grid = cell, .half_extent = extents(role), .floor_y = @as(f32, @floatFromInt(level)) * floor_spacing, .ceiling = if (role == .reactor or role == .atrium or role == .hangar or role == .brood or role == .roost) 7 else wall_height, .module = moduleFor(role) };
     }
     for (1..template.roles.len) |index| {
         const parent: usize = template.parents[index];
@@ -105,7 +132,15 @@ pub fn generate(seed: u64, archetype: Archetype) Layout {
         const dx: i16 = @as(i16, to[0]) - from[0];
         const dz: i16 = @as(i16, to[1]) - from[1];
         const side: Side = if (dx > 0) .east else if (dx < 0) .west else if (dz > 0) .north else .south;
-        result.doors[result.door_count] = .{ .a = @intCast(parent), .b = @intCast(index), .side_a = rotateSide(side, rotation), .side_b = rotateSide(opposite(side), rotation) };
+        const connector = if (result.rooms[parent].floor_y == result.rooms[index].floor_y) .corridor else switch (archetype) {
+            .scalari_mechworks => .lift,
+            .hive_broodworks => .resin_tube,
+            .mountain_vault => .vertical_shaft,
+            .drake_roost => .flight_tunnel,
+            .sky_city => .sky_lift,
+            else => .ramp,
+        };
+        result.doors[result.door_count] = .{ .a = @intCast(parent), .b = @intCast(index), .side_a = rotateSide(side, rotation), .side_b = rotateSide(opposite(side), rotation), .connector = connector };
         result.door_count += 1;
     }
     return result;
@@ -130,6 +165,16 @@ pub fn fixture(room: Room) ?Fixture {
         .trial => .{ .interaction = .unlock, .position = .{ 0, 0, z } },
         .cache => .{ .interaction = .loot, .position = .{ x, 0, 0 } },
         .heart => .{ .interaction = .nest_heart, .position = .{ 0, 0, z } },
+        .lift => .{ .interaction = .lift, .position = .{ 0, 0, z } },
+        .relay => .{ .interaction = .disable_relay, .position = .{ 0, 0, z } },
+        .mech_bay => .{ .interaction = .service_mech, .position = .{ -x, 0, 0 } },
+        .resin_vat => .{ .interaction = .purge_resin, .position = .{ x, 0, 0 } },
+        .brood => .{ .interaction = .brood_heart, .position = .{ 0, 0, z } },
+        .roost => .{ .interaction = .dragon_roost, .position = .{ 0, 0, z } },
+        .sky_lobby => .{ .interaction = .open_skyway, .position = .{ 0, 0, -z } },
+        .garden => .{ .interaction = .restore_garden, .position = .{ x, 0, 0 } },
+        .shelter => .{ .interaction = .rescue_civilians, .position = .{ 0, 0, z } },
+        .escape => .{ .interaction = .exit, .position = .{ 0, 0, -z } },
     };
 }
 
@@ -147,15 +192,25 @@ fn moduleFor(role: Role) Module {
         .trial => .trial,
         .cache, .storage => .cache,
         .heart => .heart,
+        .lift => .lift,
+        .relay => .relay,
+        .mech_bay => .mech_bay,
+        .resin_vat => .resin_vat,
+        .brood => .brood,
+        .roost => .roost,
+        .sky_lobby => .sky_lobby,
+        .garden => .garden,
+        .shelter => .shelter,
+        .escape => .escape,
         .corridor, .common, .atrium, .barracks, .assembly => .plain,
     };
 }
 
 fn extents(role: Role) [2]f32 {
     return switch (role) {
-        .common, .atrium, .assembly, .command, .heart => .{ 6, 6 },
+        .common, .atrium, .assembly, .command, .heart, .brood, .roost, .garden, .shelter => .{ 6, 6 },
         .reactor, .hangar => .{ 6, 6 },
-        .corridor, .entry, .security => .{ 4.5, 4.5 },
+        .corridor, .entry, .security, .lift, .escape => .{ 4.5, 4.5 },
         else => .{ 5, 5 },
     };
 }

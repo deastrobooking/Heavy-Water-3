@@ -52,3 +52,7 @@ pub const los_angeles: Coordinate = .{
 
 // The Antarctic continent raster has no georeferencing or city arrival coordinate.
 pub const antarctica: Coordinate = .{ .latitude = -82.0, .longitude = 0.0 };
+
+pub const k2: Coordinate = .{ .latitude = 35.8800, .longitude = 76.5151 };
+/// The low-gradient snowfield at source pixel (328, 1784) gives the expedition a safe landing.
+pub const k2_raster_anchor: RasterAnchor = .{ .anchor_u = 0.16023449, .anchor_v = 0.87151930 };

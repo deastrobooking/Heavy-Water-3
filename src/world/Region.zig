@@ -44,6 +44,7 @@ pub const detroit = cityRegion(.arboris_reach);
 pub const new_york = cityRegion(.hudson_reach);
 pub const chicago = cityRegion(.chicago_reach);
 pub const antarctica = cityRegion(.antarctic_hive);
+pub const k2 = cityRegion(.k2_expedition);
 pub const all = blk: {
     var count: usize = 0;
     for (Worlds.cities) |city| if (city.region != null) {

@@ -9,15 +9,18 @@ const detroit_bytes = @embedFile("../assets/detroit_terrain.hwmh");
 const nyc_bytes = @embedFile("../assets/nyc_terrain.hwmh");
 const chicago_bytes = @embedFile("../assets/chicago_terrain.hwmh");
 const antarctica_bytes = @embedFile("../assets/antarctica_terrain.hwmh");
+const k2_bytes = @embedFile("../assets/k2_terrain.hwmh");
 const detroit_map = Heightmap.view(detroit_bytes) catch unreachable;
 const nyc_map = Heightmap.view(nyc_bytes) catch unreachable;
 const chicago_map = Heightmap.view(chicago_bytes) catch unreachable;
 const antarctica_map = Heightmap.view(antarctica_bytes) catch unreachable;
+const k2_map = Heightmap.view(k2_bytes) catch unreachable;
 
 const detroit_center = Region.detroit.arrival;
 const nyc_center = Region.new_york.arrival;
 const chicago_center = Region.chicago.arrival;
 const antarctica_center = Region.antarctica.arrival;
+const k2_center = Region.k2.arrival;
 // Source row zero is north, mapping to negative Z in Heightmap.sample.
 const detroit_anchor_x = (CityGeography.detroit_raster_anchor.anchor_u - 0.5) * detroit_map.settings.world_width;
 const detroit_anchor_z = (CityGeography.detroit_raster_anchor.anchor_v - 0.5) * detroit_map.settings.world_depth;
@@ -28,6 +31,8 @@ const chicago_anchor_z = (CityGeography.chicago_raster_anchor.anchor_v - 0.5) * 
 // This continent raster has no georeferencing; use its center as the subglacial Hive landing.
 const antarctica_anchor_x: f32 = 0;
 const antarctica_anchor_z: f32 = 0;
+const k2_anchor_x = (CityGeography.k2_raster_anchor.anchor_u - 0.5) * k2_map.settings.world_width;
+const k2_anchor_z = (CityGeography.k2_raster_anchor.anchor_v - 0.5) * k2_map.settings.world_depth;
 const blend_width: f32 = 9000;
 
 pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
@@ -46,6 +51,11 @@ pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
         if (sampleMap(antarctica_map, x - antarctica_center[0] + antarctica_anchor_x, z - antarctica_center[1] + antarctica_anchor_z)) |height| {
             return blendToFallback(antarctica_map, x - antarctica_center[0] + antarctica_anchor_x, z - antarctica_center[1] + antarctica_anchor_z, height, seed, x, z);
         }
+    }
+    if (Region.k2.contains(key.x, key.z)) {
+        const mx = x - k2_center[0] + k2_anchor_x;
+        const mz = z - k2_center[1] + k2_anchor_z;
+        if (sampleMap(k2_map, mx, mz)) |height| return blendToFallback(k2_map, mx, mz, height, seed, x, z);
     }
     const dx = x - detroit_center[0] + detroit_anchor_x;
     const dz = z - detroit_center[1] + detroit_anchor_z;

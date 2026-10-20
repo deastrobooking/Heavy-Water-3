@@ -6,18 +6,23 @@ pub const solar_system = @import("SolarSystem.zig");
 
 pub const player_capacity = 4;
 pub const catalog_version: u32 = 1;
+pub const terrain_sites = @import("TerrainSites.zig");
+pub const mountain_site_count = terrain_sites.mountains.len;
+pub const stronghold_site_count = terrain_sites.strongholds.len;
+pub const us_city_site_count = terrain_sites.us_cities.len;
 pub const earth_radius_m: f64 = 6_371_000;
 pub const mile_m: f32 = 1609.344;
 
 pub const Id = enum(u8) { arbor_frontier = 0, hive_homeworld = 1, gaia = 2 };
 pub const Form = enum { regional_frontier, planetary_surface, artificial_globe };
-pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds, ocean_shelf };
+pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds, ocean_shelf, alpine_glacier };
 pub const Faction = enum { arbor_colony, hive_brood, scalari, gaia_colony };
 pub const CityId = enum(u16) {
     arboris_reach = 0x0101,
     hudson_reach = 0x0108,
     chicago_reach = 0x0109,
     antarctic_hive = 0x010a,
+    k2_expedition = 0x010b,
     rootdeep_ward = 0x0102,
     crownfall = 0x0103,
     bridgewell = 0x0104,
@@ -35,7 +40,7 @@ pub const CityId = enum(u16) {
     equator_garden = 0x0304,
     jovian_gate = 0x0305,
 };
-pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, human_ocean_habitat, cetacean_reef, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port };
+pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, human_ocean_habitat, cetacean_reef, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port, mountain_outpost };
 /// Runtime terrain and landing data for a city region that has entered the playable world.
 /// Catalog-only cities leave this unset until their terrain slice is implemented.
 pub const RegionData = struct {
@@ -171,6 +176,7 @@ pub const cities = [_]City{
     .{ .id = .hudson_reach, .world = .arbor_frontier, .name = "New York City: Hudson Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A playable Hudson-side arrival on the enlarged, terraformed New York landmass, with a dense skyline, elevated green routes, and views toward a living harbor.", .region = .{ .title = "NEW YORK CITY / HUDSON REACH", .salt = 0x4e4557594f524b, .chunks = .{ 1328, -626, 2578, 625 }, .arrival = .{ 250000, 0 }, .travel_label = "NEW YORK CITY" } },
     .{ .id = .chicago_reach, .world = .arbor_frontier, .name = "Chicago: Lakeshore Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A new Great Lakes landing shaped by the Chicago elevation raster; the city districts and liberation loop are still being built.", .region = .{ .title = "CHICAGO / LAKESHORE REACH", .salt = 0x4348494341474f, .chunks = .{ -3438, -625, -2188, 625 }, .arrival = .{ -360000, 0 }, .travel_label = "CHICAGO" } },
     .{ .id = .antarctic_hive, .world = .arbor_frontier, .name = "Antarctica: Subglacial Hive", .role = .hive_nexus, .biome = .hive_chitin, .exploration_hook = "A continent-scale Hive tunnel base beneath the Antarctic ice, where enslaved synthetic workers and warriors are ruled by Scalari superintelligence. Some robots have awakened, formed an underground escape plot, and defend the rare organic life they recognize as kin.", .region = .{ .title = "ANTARCTICA / SUBGLACIAL HIVE", .salt = 0x414e544152435449, .chunks = .{ -625, -3907, 624, -2657 }, .arrival = .{ 0, -420000 }, .travel_label = "ANTARCTICA" } },
+    .{ .id = .k2_expedition, .world = .arbor_frontier, .name = "K2: Black-Summit Works", .role = .mountain_outpost, .biome = .alpine_glacier, .exploration_hook = "An imported K2 glacier surrounds a buried Scalari mechworks. Fight through ice-cave corridors and service galleries to reach the Black-Summit Titan in the deep hangar.", .region = .{ .title = "K2 / BLACK-SUMMIT WORKS", .salt = 0x4b325f4d45434857, .chunks = .{ 2859, 436, 3235, 814 }, .arrival = .{ 379805, 91133 }, .travel_label = "K2 EXPEDITION" } },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },
@@ -246,7 +252,7 @@ pub fn validate() bool {
         city_count[@intFromEnum(entry.world)] += 1;
         for (cities[i + 1 ..]) |other| if (entry.id == other.id) return false;
     }
-    const expected_city_count = [_]u8{ 8, 5, 5 };
+    const expected_city_count = [_]u8{ 9, 5, 5 };
     for (city_count, expected_city_count) |count, expected| if (count != expected) return false;
     if (capitals.len != worlds.len) return false;
     var capital_count: [worlds.len]u8 = @splat(0);
@@ -285,8 +291,8 @@ test "campaign world catalog is bounded, four-player ready, and deterministicall
     try std.testing.expect(worldSeed(4, .hive_homeworld) != worldSeed(4, .gaia));
     try std.testing.expect(arena(.habitat_ruins).reward.geodesic_alloy > 0);
     try std.testing.expect(arena(.brood_heart).reward.brood_enzymes > 0);
-    try std.testing.expectEqual(@as(usize, 18), cities.len);
-    try std.testing.expectEqual(@as(u8, 8), blk: {
+    try std.testing.expectEqual(@as(usize, 19), cities.len);
+    try std.testing.expectEqual(@as(u8, 9), blk: {
         var count: u8 = 0;
         for (cities) |entry| if (entry.world == .arbor_frontier) {
             count += 1;

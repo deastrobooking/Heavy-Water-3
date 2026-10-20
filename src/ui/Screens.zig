@@ -1713,6 +1713,7 @@ const earth_cities = [_]EarthCity{
     .{ .name = "NEW YORK", .latitude = CityGeography.new_york.latitude, .longitude = CityGeography.new_york.longitude, .travel_label = "NEW YORK CITY" },
     .{ .name = "LOS ANGELES", .latitude = CityGeography.los_angeles.latitude, .longitude = CityGeography.los_angeles.longitude, .travel_label = null },
     .{ .name = "ANTARCTICA", .latitude = CityGeography.antarctica.latitude, .longitude = CityGeography.antarctica.longitude, .travel_label = "ANTARCTICA" },
+    .{ .name = "K2", .latitude = CityGeography.k2.latitude, .longitude = CityGeography.k2.longitude, .travel_label = "K2 EXPEDITION" },
 };
 
 fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: Rect, map: Rect, destination: usize) void {
