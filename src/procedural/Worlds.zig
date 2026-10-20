@@ -34,6 +34,15 @@ pub const CityId = enum(u16) {
     jovian_gate = 0x0305,
 };
 pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, human_ocean_habitat, cetacean_reef, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port };
+/// Runtime terrain and landing data for a city region that has entered the playable world.
+/// Catalog-only cities leave this unset until their terrain slice is implemented.
+pub const RegionData = struct {
+    title: []const u8,
+    salt: u64,
+    chunks: [4]i32,
+    arrival: [2]f32,
+    travel_label: ?[]const u8 = null,
+};
 pub const City = struct {
     id: CityId,
     world: Id,
@@ -41,6 +50,7 @@ pub const City = struct {
     role: CityRole,
     biome: Biome,
     exploration_hook: []const u8,
+    region: ?RegionData = null,
 };
 pub const Capital = struct {
     world: Id,
@@ -156,8 +166,8 @@ pub fn featurePack(world: Id) *const FeaturePack {
 /// Stable city-region content descriptors. NYC/Hudson Reach has a playable fast-travel landing
 /// and procedural landmark skyline; its full mission arc remains future content.
 pub const cities = [_]City{
-    .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Detroit Arbor Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Detroit, Michigan reimagined as a canopy city: historic civic towers, riverfront industry, transit bridges, and the first shipyard route." },
-    .{ .id = .hudson_reach, .world = .arbor_frontier, .name = "New York City: Hudson Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A playable Hudson-side arrival district with a dense skyscraper skyline, elevated green routes, and views toward a living harbor." },
+    .{ .id = .arboris_reach, .world = .arbor_frontier, .name = "Detroit Arbor Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "Detroit, Michigan reimagined as a canopy city: historic civic towers, riverfront industry, transit bridges, and the first shipyard route.", .region = .{ .title = "DETROIT / ARBOR REACH", .salt = 0, .chunks = .{ std.math.minInt(i32), std.math.minInt(i32), std.math.maxInt(i32), std.math.maxInt(i32) }, .arrival = .{ 0, -58 } } },
+    .{ .id = .hudson_reach, .world = .arbor_frontier, .name = "New York City: Hudson Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A playable Hudson-side arrival district with a dense skyscraper skyline, elevated green routes, and views toward a living harbor.", .region = .{ .title = "NEW YORK CITY / HUDSON REACH", .salt = 0x4e4557594f524b, .chunks = .{ 9, -3, 12, 0 }, .arrival = .{ 1320, -180 }, .travel_label = "NEW YORK CITY" } },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },

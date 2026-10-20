@@ -4044,13 +4044,42 @@ test "a guest fires their own blaster with the trigger and downs a drone" {
 
 /// Stable regional destinations shared by the map and fast travel.
 pub const detroit_travel_count = 3 + Metro.stop_nodes.len;
-pub const travel_count = detroit_travel_count + 1;
-pub const travel_labels = [_][]const u8{ "BASE CAMP", "ROOTDEEP 1", "ROOTDEEP 2", "SOUTH LINE", "NORTH LINE", "WEST LINE", "NEW YORK CITY" };
-/// The world-map row for each destination, in the same order as `travel_labels`.
-pub const travel_menu_labels = [_][]const u8{ "TRAVEL: BASE CAMP", "TRAVEL: ROOTDEEP SHRINE 1", "TRAVEL: ROOTDEEP SHRINE 2", "METRO: SOUTH LINE", "METRO: NORTH LINE", "METRO: WEST LINE", "TRAVEL: NEW YORK CITY" };
-comptime {
-    std.debug.assert(travel_labels.len == travel_count and travel_menu_labels.len == travel_count);
-}
+pub const TravelDestination = struct {
+    label: []const u8,
+    menu_label: []const u8,
+    map_title: []const u8,
+    kind: enum { base_camp, shrine, metro, region },
+    index: usize = 0,
+};
+pub const region_destination_count = blk: {
+    var count: usize = 0;
+    for (Region.all) |region| if (region.travel_label != null) {
+        count += 1;
+    };
+    break :blk count;
+};
+/// One ordered destination table drives world-map rows, titles, and fast-travel dispatch.
+pub const travel_destinations = blk: {
+    var list: [detroit_travel_count + region_destination_count]TravelDestination = undefined;
+    list[0] = .{ .label = "BASE CAMP", .menu_label = "TRAVEL: BASE CAMP", .map_title = Region.default_title, .kind = .base_camp };
+    list[1] = .{ .label = "ROOTDEEP 1", .menu_label = "TRAVEL: ROOTDEEP SHRINE 1", .map_title = Region.default_title, .kind = .shrine, .index = 0 };
+    list[2] = .{ .label = "ROOTDEEP 2", .menu_label = "TRAVEL: ROOTDEEP SHRINE 2", .map_title = Region.default_title, .kind = .shrine, .index = 1 };
+    for (Metro.stop_names, 0..) |name, i| list[3 + i] = .{ .label = name, .menu_label = std.fmt.comptimePrint("METRO: {s}", .{name}), .map_title = Region.default_title, .kind = .metro, .index = i };
+    var destination_index = detroit_travel_count;
+    for (Region.all, 0..) |region, region_index| {
+        const label = region.travel_label orelse continue;
+        list[destination_index] = .{ .label = label, .menu_label = std.fmt.comptimePrint("TRAVEL: {s}", .{label}), .map_title = region.title, .kind = .region, .index = region_index };
+        destination_index += 1;
+    }
+    std.debug.assert(destination_index == list.len);
+    break :blk list;
+};
+pub const travel_count = travel_destinations.len;
+pub const travel_labels = blk: {
+    var labels: [travel_count][]const u8 = undefined;
+    for (travel_destinations, 0..) |destination, i| labels[i] = destination.label;
+    break :blk labels;
+};
 const NewYorkLandmark = struct { x: f32, z: f32, height: f32, width: f32, depth: f32, tint: [4]f32 };
 const new_york_landmarks = [_]NewYorkLandmark{
     .{ .x = 1320, .z = -180, .height = 190, .width = 42, .depth = 42, .tint = .{ 0.24, 0.34, 0.40, 1 } },
@@ -4061,16 +4090,22 @@ const new_york_landmarks = [_]NewYorkLandmark{
 };
 
 pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
-    if (destination == detroit_travel_count) return newYorkArrival(self.seed);
-    if (destination >= 3 and destination < detroit_travel_count) {
-        const node_id = Metro.destinationNode(destination - 3).?;
-        const node = self.catalog.district.nodes[node_id];
-        // Station platform top, plus a small clearance for the ranger's feet.
-        return R.add(node.position, .{ 0, 0.78, 0 });
+    if (destination >= travel_count) return spawn;
+    const entry = travel_destinations[destination];
+    switch (entry.kind) {
+        .region => return regionArrival(self.seed, Region.all[entry.index]),
+        .metro => {
+            const node_id = Metro.destinationNode(entry.index).?;
+            const node = self.catalog.district.nodes[node_id];
+            // Station platform top, plus a small clearance for the ranger's feet.
+            return R.add(node.position, .{ 0, 0.78, 0 });
+        },
+        .base_camp, .shrine => {
+            var point = if (entry.kind == .base_camp or entry.index >= self.shrines.len) spawn else R.add(self.shrines[entry.index].origin, .{ 0, 0, -12 });
+            point[1] = Terrain.surface(self.seed, point[0], point[2]).height + 0.1;
+            return point;
+        },
     }
-    var point = if (destination == 0 or destination > self.shrines.len) spawn else R.add(self.shrines[destination - 1].origin, .{ 0, 0, -12 });
-    point[1] = Terrain.surface(self.seed, point[0], point[2]).height + 0.1;
-    return point;
 }
 
 /// Compact hand-authored procedural skyline gives the playable NYC arrival a clear identity.
@@ -4081,11 +4116,10 @@ pub fn newYorkLandmark(seed: u64, index: usize) ?struct { position: Physics.Vec3
     return .{ .position = .{ landmark.x, ground + landmark.height / 2, landmark.z }, .size = .{ landmark.width, landmark.height, landmark.depth }, .tint = landmark.tint };
 }
 
-/// New York's first arrival district is independently seeded and kept in the same local
-/// coordinate frame so streaming, terrain collision, and four-player movement remain shared.
-fn newYorkArrival(seed: u64) Physics.Vec3 {
-    const x = Region.new_york.arrival[0];
-    const z = Region.new_york.arrival[1];
+/// Region arrival uses the same terrain query as its streamed chunks and collision.
+fn regionArrival(seed: u64, region: Region.Region) Physics.Vec3 {
+    const x = region.arrival[0];
+    const z = region.arrival[1];
     return .{ x, Terrain.surface(seed, x, z).height + 0.1, z };
 }
 
@@ -4102,7 +4136,7 @@ pub fn travelBlocked(self: *const Sandbox, p: usize) ?[]const u8 {
 fn travelArrival(self: *const Sandbox, destination: usize) ?Physics.Vec3 {
     const origin = self.travelPoint(destination);
     const shape: Physics.Character = .{};
-    if (destination >= 3 and destination < detroit_travel_count) {
+    if (destination < travel_count and travel_destinations[destination].kind == .metro) {
         var ring: i32 = 0;
         while (ring <= 6) : (ring += 1) {
             var z = -ring;

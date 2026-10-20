@@ -1573,7 +1573,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         c.rect(.{ .x = map.x + map.w * f, .y = map.y, .w = 1, .h = map.h }, alpha(dim, 0.2));
         c.rect(.{ .x = map.x, .y = map.y + map.h * f, .w = map.w, .h = 1 }, alpha(dim, 0.2));
     }
-    const title = if (destination == Sandbox.detroit_travel_count) @import("../world/Region.zig").new_york.title else @import("../world/Region.zig").default_title;
+    const title = if (destination < Sandbox.travel_count) Sandbox.travel_destinations[destination].map_title else @import("../world/Region.zig").default_title;
     c.print(map.x + 8, map.y + 8, 1, ink, "{s}", .{title});
     c.print(map.x + 8, map.y + 23, 0.8, dim, "N ^  {d:.0}M WIDE / LEFT-RIGHT ZOOM", .{span});
     const legend_y = map.y + 39;

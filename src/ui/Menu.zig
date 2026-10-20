@@ -56,7 +56,7 @@ pub const player_items = [_]Item{
 pub const frame_row = Sandbox.travel_count;
 pub const map_items = blk: {
     var list: [Sandbox.travel_count + 2]Item = undefined;
-    for (Sandbox.travel_menu_labels, 0..) |label, i| list[i] = .{ .label = label, .command = .travel };
+    for (Sandbox.travel_destinations, 0..) |destination, i| list[i] = .{ .label = destination.menu_label, .command = .travel };
     list[frame_row] = .{ .label = "FRAME DESTINATION / PLAYER" };
     list[frame_row + 1] = .{ .label = "RESUME", .command = .@"resume" };
     break :blk list;

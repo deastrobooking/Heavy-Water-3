@@ -2195,7 +2195,7 @@ fn exerciseSmoke(self: *App) void {
                 const feet = self.sandbox.player.feet;
                 // Metro platforms are decks above the ground; only the open-terrain arrival is checked.
                 const ground = @import("procedural/Terrain.zig").surface(self.sandbox.seed, feet[0], feet[2]).height;
-                if (destination == Sandbox.detroit_travel_count and @abs(feet[1] - ground) > 2) return self.report("SMOKE TRAVEL {s} OFF GROUND", .{Sandbox.travel_labels[destination]});
+                if (Sandbox.travel_destinations[destination].kind == .region and @abs(feet[1] - ground) > 2) return self.report("SMOKE TRAVEL {s} OFF GROUND", .{Sandbox.travel_labels[destination]});
                 std.log.info("Smoke travel {s}: {d:.0} {d:.0} {d:.0}", .{ Sandbox.travel_labels[destination], feet[0], feet[1], feet[2] });
             }
         },

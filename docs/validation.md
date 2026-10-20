@@ -19,6 +19,12 @@
 
 Host: Apple M3 Pro, macOS 26.5.1, Metal. Compiler and Mach revision are pinned in `build.zig.zon`.
 
+## Shared travel destination table — 2026-10-19
+
+- Consolidated the duplicated travel labels and destination-index checks into `Sandbox.travel_destinations`. The world map builds its rows from this table; map titles and travel dispatch use the same destination record. Metro row labels are derived from `Metro.stop_names`; playable regional rows, labels, titles and arrivals are generated from `Worlds.cities` region records. Detroit preserves the existing world seed while NYC uses its regional salt. The gameplay smoke retains readable labels through a derived `travel_labels` view.
+- **Checked:** default and Zig 0.17 `python3 tools/zig.py build check` passed; `git diff --check` passed.
+- **Not checked:** headless tests, smoke stage, and hands-on travel. Regional entries now come from playable city records; each regional destination in smoke also gets an arrival-to-ground check. Detroit shrine and Metro destination definitions remain in the shared Sandbox travel table, so G1 is not complete.
+
 
 
 
