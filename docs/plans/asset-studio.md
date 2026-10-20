@@ -82,8 +82,8 @@ Builds on `CarSpec` and the planned ship design bay.
 
 ### 4.3 Nature studio
 
-Builds on the tree genome, the L-system species and the nature plan ([nature upgrade](nature-upgrade.md)).
-- **Operations:** species and genome sliders, a growth-direction brush (paint where the crown should reach; this is the existing "graft a growth target" idea made visible), a leaf-density brush, trunk flare and lean, rocks as a noise-displaced cage, flowers and shrubs as small recipes.
+Builds on the tree genome, the L-system species and the nature plan ([nature upgrade](nature-upgrade.md)). Texture reuse and natural material breakup are staged in the [texture authoring feature map](texture-authoring.md).
+- **Operations:** species and genome sliders, a growth-direction brush (paint where the crown should reach; this is the existing "graft a growth target" idea made visible), a leaf-density brush, trunk flare and lean, rocks as a noise-displaced cage, flowers and shrubs as small recipes. Nature material cards expose source images, mirrored/repeat or triplanar projection, seeded fractal breakup and biome masks before the advanced graph view.
 - **Previews:** the recipe in the real forest at three distances, with a triangle count and the level-of-detail ladder, so artists see the cost ([nature upgrade](nature-upgrade.md) records 12.2M triangles on the benchmark route).
 - **Automation:** the recipe regenerates the skeleton on the CPU in milliseconds and re-uploads kilobytes ([mesheditor](mesheditor.md) section 4.14); far-distance meshes and impostor sources are baked automatically.
 - **Output:** new species become data entries the scatterer can pick by niche.

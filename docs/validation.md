@@ -1605,6 +1605,12 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
   - The Metal smoke completes 300 frames, and the ReleaseFast build is installed. The user's real `saves/` holds no edited-mesh file afterwards.
 - **Not checked:** DISCARD by hand; a saved edit after the source GLB is replaced by a different rig (refused by the test, not tried in the app); edited saves of the built-in Captain (same code path, not run).
 
+## Antarctic spawn depression heightmap correction — 2026-10-20
+
+- **Changed:** replaced the zero-valued center of `assets/antarctica_continent_heightmap_16bit.png` with the newly supplied corrected raster. Recompiled `src/assets/antarctica_terrain.hwmh` with the existing 160 km square, −200 m base, and 1,200 m relief settings. The center sample now maps to about 596 m, avoiding the previous deep spawn hole.
+- **Checked:** the heightmap compile completed and reported a 2048×2048 source with the expected settings; `python3 tools/zig.py build check` passed. The supplied PNG was inspected and the center depression is gone.
+- **Not checked:** hands-on arrival. A ReleaseSafe showcase 85 build launched on Apple M3 Pro with Metal API Validation enabled and completed deferred-mesh preparation, but did not write a fresh capture after about a minute and was stopped. Runtime camera angles still need a fresh showcase review.
+
 ## Weight painting (mesh editor S5) — 2026-10-20
 
 - **Added:** the WEIGHT tool with a joint picker, add/subtract/replace/smooth, mirror to the partner joint, and a heatmap view. Weights are per game joint (summed over every skin bone mapped to it). Skin influences are part of stroke snapshots and of saved edits. `-Dcharacter-showcase=49` ends in the heatmap.

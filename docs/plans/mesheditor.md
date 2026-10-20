@@ -1354,7 +1354,7 @@ No baseline is measured yet (M0 creates it). Targets to adopt once it exists:
 
 Decisions that need the project owner:
 1. **Editor home:** in-game panel (recommended) or standalone window again.
-2. **Textures and vertex colour:** keep dropping them (current), bake textures to vertex colour at import, or add a small texture path. This changes what artists can bring in.
+2. **Textures and vertex colour:** owner direction (2026-10-20) is to add a small texture path, starting with reusable nature surfaces and texture transforms; see the [texture authoring feature map](texture-authoring.md). Preserve vertex colours and add UV painting only after the runtime material path and bake format are established.
 3. **Library scope:** how many imported characters, and whether imports are per player (`Kit`) or shared.
 4. **Rotation:** add per-part rotation to the sidecar (a format bump) or keep scale and offset only.
 5. **Exporter priority:** whether the Blender round trip is needed before skin data.
