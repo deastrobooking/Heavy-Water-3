@@ -1,6 +1,6 @@
 const std = @import("std");
-const Noise = @import("Noise.zig");
 const Chunk = @import("Chunk.zig");
+const CityHeightmaps = @import("CityHeightmaps.zig");
 
 /// Distance between terrain vertices. Chunk grids align to even world coordinates.
 pub const spacing: f32 = Chunk.extent / Chunk.cells;
@@ -18,18 +18,17 @@ pub fn surface(world_seed: u64, x: f32, z: f32) Surface {
     const v = z / spacing - gz;
     const x0 = gx * spacing;
     const z0 = gz * spacing;
-    // A cell lies wholly inside one chunk, so its centre picks the same regional seed as the mesh.
-    const seed = Chunk.regionalSeedAt(world_seed, x0 + spacing / 2, z0 + spacing / 2);
-    const h00 = Noise.height(seed, x0, z0);
-    const h10 = Noise.height(seed, x0 + spacing, z0);
-    const h01 = Noise.height(seed, x0, z0 + spacing);
+    // Use the same world-space height source as chunk vertices, including city map blends.
+    const h00 = CityHeightmaps.heightAt(world_seed, x0, z0);
+    const h10 = CityHeightmaps.heightAt(world_seed, x0 + spacing, z0);
+    const h01 = CityHeightmaps.heightAt(world_seed, x0, z0 + spacing);
     // Each cell splits along the (x+1, z) → (x, z+1) diagonal.
     if (u + v <= 1) {
         const dx = h10 - h00;
         const dz = h01 - h00;
         return .{ .height = h00 + dx * u + dz * v, .normal = normal(dx, dz) };
     }
-    const h11 = Noise.height(seed, x0 + spacing, z0 + spacing);
+    const h11 = CityHeightmaps.heightAt(world_seed, x0 + spacing, z0 + spacing);
     const dx = h11 - h01;
     const dz = h11 - h10;
     return .{ .height = h11 - dx * (1 - u) - dz * (1 - v), .normal = normal(dx, dz) };

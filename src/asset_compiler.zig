@@ -319,7 +319,7 @@ fn compileHeightmap(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8,
     }
     const source = try readFile(gpa, io, source_path);
     defer gpa.free(source);
-    const heightmap = try Heightmap.importPgm(gpa, source, settings);
+    const heightmap = try importHeightmap(gpa, source, source_path, settings);
     defer heightmap.deinit(gpa);
     const output = try heightmap.encode(gpa);
     defer gpa.free(output);
@@ -333,6 +333,13 @@ fn compileHeightmap(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8,
         settings.base_height + settings.elevation,
         output_path,
     });
+}
+
+fn importHeightmap(gpa: std.mem.Allocator, source: []const u8, source_path: []const u8, settings: Heightmap.Settings) !Heightmap {
+    return if (std.mem.endsWith(u8, source_path, ".pgm"))
+        Heightmap.importPgm(gpa, source, settings)
+    else
+        Heightmap.importPng(gpa, source, settings);
 }
 
 fn compile(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_path: []const u8, output: []const u8) !void {
@@ -374,7 +381,7 @@ fn compile(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, meta_pat
             try cwd.writeFile(io, .{ .sub_path = output, .data = bytes });
         },
         .heightmap => {
-            const heightmap = try Heightmap.importPgm(gpa, source, meta.heightmap);
+            const heightmap = try importHeightmap(gpa, source, source_path, meta.heightmap);
             defer heightmap.deinit(gpa);
             const bytes = try heightmap.encode(gpa);
             defer gpa.free(bytes);

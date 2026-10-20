@@ -8,6 +8,7 @@ const Physics = @import("../physics/Physics.zig");
 const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Terrain = @import("../procedural/Terrain.zig");
+const Region = @import("../world/Region.zig");
 const District = @import("../procedural/District.zig");
 const Market = @import("../city/Market.zig");
 const Material = @import("../render/Material.zig");
@@ -1347,6 +1348,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishArena(sb, out, n, t);
     n = publishShrines(sb, out, n, t);
     n = publishObjectiveBeacon(sb, out, n, t);
+    n = publishCityHiveBases(sb, out, n, t);
     // Fabricator kiosk: a pedestal, a slanted console and a glowing screen.
     const kiosk = kioskPosition(sb);
     if (room(out, n, 3)) {
@@ -1401,22 +1403,12 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         // Cave nests grow smaller, under the chamber's roof.
         const size: [3]f32 = if (nest.cave) @splat(0.45) else @splat(1);
         if (nest.alive) {
-            out[n] = .{ .mesh = c.spire, .transform = .{ .position = nest.position }, .tint = .{ 1, 1, 1, 1 }, .size = size };
-            out[n + 1] = .{ .mesh = c.spire_glow, .transform = .{ .position = nest.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = size };
+            const shell = if (nest.cave) c.spire else c.hive_base;
+            const glow = if (nest.cave) c.spire_glow else c.hive_base_glow;
+            const base_size: [3]f32 = if (nest.cave) size else @splat(0.78);
+            out[n] = .{ .mesh = shell, .transform = .{ .position = nest.position }, .tint = .{ 1, 1, 1, 1 }, .size = base_size };
+            out[n + 1] = .{ .mesh = glow, .transform = .{ .position = nest.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = base_size };
             n += 2;
-            // A surface spire is the command mast of a field base: low armored workshops,
-            // relay pylons, and a lit assembly apron make the raid objective readable at range.
-            if (!nest.cave and room(out, n, 7)) {
-                const palette = EnemyDesign.colors[@intFromEnum(EnemyDesign.encounter(sb.seed, n, null).palette)];
-                out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 0.18, 0 }) }, .tint = palette.armor, .size = .{ 17, 0.34, 17 } };
-                out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 8, 1.35, 0 }) }, .tint = palette.accent, .size = .{ 2.8, 2.7, 4.8 } };
-                out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ -8, 1.35, 0 }) }, .tint = palette.accent, .size = .{ 2.8, 2.7, 4.8 } };
-                out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 1.25, 8 }) }, .tint = palette.armor, .size = .{ 4.8, 2.5, 2.8 } };
-                out[n + 4] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 1.25, -8 }) }, .tint = palette.armor, .size = .{ 4.8, 2.5, 2.8 } };
-                out[n + 5] = .{ .mesh = c.gem, .transform = .{ .position = R.add(nest.position, .{ 0, 2, 5.2 }) }, .tint = Material.emissive(palette.glow, pulse), .size = .{ 0.65, 1.2, 0.65 } };
-                out[n + 6] = .{ .mesh = c.block, .transform = .{ .position = R.add(nest.position, .{ 0, 0.8, 0 }) }, .tint = Material.emissive(palette.accent, pulse * 0.35), .size = .{ 9, 0.12, 9 } };
-                n += 7;
-            }
         } else {
             // A broken stump.
             out[n] = .{ .mesh = c.spire, .transform = .{ .position = R.sub(nest.position, .{ 0, 1, 0 }) }, .tint = .{ 0.45, 0.4, 0.4, 1 }, .size = .{ size[0], 0.22 * size[1], size[2] } };
@@ -1669,6 +1661,39 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         };
         n += 1;
     };
+    return n;
+}
+
+/// The two occupied cities have Hive strongholds around their outer approaches. These
+/// installations are environmental siege landmarks; surface nests remain the combat objectives.
+fn publishCityHiveBases(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const c = &sb.catalog.content;
+    const room = struct {
+        fn ok(o: []World.Prop, k: usize, need: usize) bool {
+            return k + need <= o.len;
+        }
+    }.ok;
+    var n = start;
+    const pulse = 0.62 + 0.3 * @sin(t * 1.45);
+    const detroit_sites = [_][2]f32{ .{ 350, 95 }, .{ -350, 185 }, .{ 0, 445 } };
+    for (detroit_sites) |site| {
+        if (!room(out, n, 2)) return n;
+        const ground = Terrain.surface(sb.seed, site[0], site[1]).height;
+        const at: V = .{ site[0], ground, site[1] };
+        out[n] = .{ .mesh = c.hive_base, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .size = @splat(0.78) };
+        out[n + 1] = .{ .mesh = c.hive_base_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = @splat(0.78) };
+        n += 2;
+    }
+    const ny_seed = Region.new_york.seed(sb.seed);
+    const ny_sites = [_][2]f32{ .{ 249845, 0 }, .{ 250170, 0 }, .{ 250000, 160 }, .{ 250000, -170 } };
+    for (ny_sites) |site| {
+        if (!room(out, n, 2)) return n;
+        const ground = Terrain.surface(ny_seed, site[0], site[1]).height;
+        const at: V = .{ site[0], ground, site[1] };
+        out[n] = .{ .mesh = c.hive_base, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .size = @splat(0.78) };
+        out[n + 1] = .{ .mesh = c.hive_base_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = @splat(0.78) };
+        n += 2;
+    }
     return n;
 }
 

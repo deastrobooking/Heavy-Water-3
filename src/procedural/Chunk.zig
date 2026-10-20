@@ -1,5 +1,5 @@
 const std = @import("std");
-const Noise = @import("Noise.zig");
+const CityHeightmaps = @import("CityHeightmaps.zig");
 const Biome = @import("Biome.zig");
 const Hydrology = @import("Hydrology.zig");
 const Mesh = @import("../render/Mesh.zig");
@@ -48,9 +48,9 @@ pub fn fill(seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32
         for (0..cells + 1) |x| {
             const wx = ox + @as(f32, @floatFromInt(x)) * 2;
             const wz = oz + @as(f32, @floatFromInt(z)) * 2;
-            const height = Noise.height(regional_seed, wx, wz);
-            const nx = Noise.height(regional_seed, wx - 0.5, wz) - Noise.height(regional_seed, wx + 0.5, wz);
-            const nz = Noise.height(regional_seed, wx, wz - 0.5) - Noise.height(regional_seed, wx, wz + 0.5);
+            const height = CityHeightmaps.heightAt(seed, wx, wz);
+            const nx = CityHeightmaps.heightAt(seed, wx - 0.5, wz) - CityHeightmaps.heightAt(seed, wx + 0.5, wz);
+            const nz = CityHeightmaps.heightAt(seed, wx, wz - 0.5) - CityHeightmaps.heightAt(seed, wx, wz + 0.5);
             const inv = 1 / @sqrt(nx * nx + 1 + nz * nz);
             const slope = @sqrt(nx * nx + nz * nz);
             vertices[z * (cells + 1) + x] = .{ .position = .{ wx, height, wz }, .normal = .{ nx * inv, inv, nz * inv }, .uv = .{ wx / 4, wz / 4 }, .color = Biome.terrainColor(regional_seed, wx, wz, height, slope) };

@@ -12,7 +12,7 @@ pub const Settings = struct {
     base_height: f32 = 0,
     elevation: f32 = 128,
 };
-pub const Error = error{ InvalidPgm, UnsupportedPgm, InvalidDimensions, InvalidSettings, InvalidHeightmap, OutOfMemory };
+pub const Error = error{ InvalidPgm, UnsupportedPgm, InvalidPng, UnsupportedPng, InvalidDimensions, InvalidSettings, InvalidHeightmap, OutOfMemory };
 
 width: u32,
 height: u32,
@@ -60,6 +60,109 @@ pub fn importPgm(allocator: std.mem.Allocator, bytes: []const u8, settings: Sett
     return .{ .width = width, .height = height, .settings = settings, .samples = samples };
 }
 
+/// Imports 16-bit grayscale, non-interlaced PNG elevation data. Filter types 0–4 and
+/// multiple IDAT chunks are supported; color and alpha PNGs are rejected explicitly.
+pub fn importPng(allocator: std.mem.Allocator, bytes: []const u8, settings: Settings) (Error || error{OutOfMemory})!Heightmap {
+    if (!validSettings(settings)) return error.InvalidSettings;
+    const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
+    if (bytes.len < signature.len or !std.mem.eql(u8, bytes[0..8], &signature)) return error.InvalidPng;
+    var width: u32 = 0;
+    var height: u32 = 0;
+    var saw_header = false;
+    var saw_end = false;
+    var compressed: std.ArrayList(u8) = .empty;
+    defer compressed.deinit(allocator);
+    var at: usize = 8;
+    while (at + 12 <= bytes.len) {
+        const length = std.mem.readInt(u32, bytes[at..][0..4], .big);
+        at += 4;
+        const kind = bytes[at..][0..4];
+        at += 4;
+        if (length > bytes.len - at -| 4) return error.InvalidPng;
+        const data = bytes[at..][0..length];
+        at += length;
+        // Chunk CRC is checked before consuming its data.
+        const expected_crc = std.mem.readInt(u32, bytes[at..][0..4], .big);
+        if (pngCrc(kind, data) != expected_crc) return error.InvalidPng;
+        at += 4;
+        if (std.mem.eql(u8, kind, "IHDR")) {
+            if (saw_header or length != 13) return error.InvalidPng;
+            width = std.mem.readInt(u32, data[0..4], .big);
+            height = std.mem.readInt(u32, data[4..8], .big);
+            if (width < 2 or height < 2 or width > max_dimension or height > max_dimension or @as(u64, width) * height > max_samples) return error.InvalidDimensions;
+            if (data[8] != 16 or data[9] != 0 or data[10] != 0 or data[11] != 0 or data[12] != 0) return error.UnsupportedPng;
+            saw_header = true;
+        } else if (std.mem.eql(u8, kind, "IDAT")) {
+            if (!saw_header or saw_end) return error.InvalidPng;
+            try compressed.appendSlice(allocator, data);
+        } else if (std.mem.eql(u8, kind, "IEND")) {
+            if (length != 0 or !saw_header) return error.InvalidPng;
+            saw_end = true;
+            break;
+        } else if (kind[0] & 0x20 == 0 and !std.mem.eql(u8, kind, "IHDR")) {
+            // Unknown critical chunks can change pixel interpretation.
+            return error.UnsupportedPng;
+        }
+    }
+    if (!saw_header or !saw_end or compressed.items.len == 0) return error.InvalidPng;
+
+    const row_bytes = @as(usize, width) * 2;
+    const scanline_bytes = row_bytes + 1;
+    const raw_len = scanline_bytes * @as(usize, height);
+    const filtered = try allocator.alloc(u8, raw_len);
+    defer allocator.free(filtered);
+    var compressed_reader: std.Io.Reader = .fixed(compressed.items);
+    var inflate_window: [@import("std").compress.flate.max_window_len]u8 = undefined;
+    var inflater = std.compress.flate.Decompress.init(&compressed_reader, .zlib, &inflate_window);
+    inflater.reader.readSliceAll(filtered) catch return error.InvalidPng;
+    const rows = try allocator.alloc(u8, row_bytes * @as(usize, height));
+    defer allocator.free(rows);
+    for (0..height) |y| {
+        const filter = filtered[y * scanline_bytes];
+        if (filter > 4) return error.InvalidPng;
+        for (0..row_bytes) |x| {
+            const raw = filtered[y * scanline_bytes + 1 + x];
+            const left: u8 = if (x >= 2) rows[y * row_bytes + x - 2] else 0;
+            const up: u8 = if (y > 0) rows[(y - 1) * row_bytes + x] else 0;
+            const upper_left: u8 = if (y > 0 and x >= 2) rows[(y - 1) * row_bytes + x - 2] else 0;
+            const predictor: u8 = switch (filter) {
+                0 => 0,
+                1 => left,
+                2 => up,
+                3 => @intCast((@as(u16, left) + up) / 2),
+                4 => paeth(left, up, upper_left),
+                else => unreachable,
+            };
+            rows[y * row_bytes + x] = raw +% predictor;
+        }
+    }
+    const samples = try allocator.alloc(u16, @as(usize, width) * height);
+    errdefer allocator.free(samples);
+    for (samples, 0..) |*sample_value, i| sample_value.* = std.mem.readInt(u16, rows[i * 2 ..][0..2], .big);
+    return .{ .width = width, .height = height, .settings = settings, .samples = samples };
+}
+
+fn paeth(a: u8, b: u8, c: u8) u8 {
+    const p: i32 = @as(i32, a) + b - c;
+    const da = @abs(p - a);
+    const db = @abs(p - b);
+    const dc = @abs(p - c);
+    return if (da <= db and da <= dc) a else if (db <= dc) b else c;
+}
+
+fn pngCrc(kind: []const u8, data: []const u8) u32 {
+    var crc: u32 = 0xffff_ffff;
+    for (kind) |byte| crc = crcByte(crc, byte);
+    for (data) |byte| crc = crcByte(crc, byte);
+    return ~crc;
+}
+
+fn crcByte(initial: u32, byte: u8) u32 {
+    var crc = initial ^ byte;
+    for (0..8) |_| crc = if (crc & 1 != 0) (crc >> 1) ^ 0xedb8_8320 else crc >> 1;
+    return crc;
+}
+
 pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) (Error || error{OutOfMemory})!Heightmap {
     if (bytes.len < header_size or !std.mem.eql(u8, bytes[0..4], "HWMH")) return error.InvalidHeightmap;
     if (std.mem.readInt(u16, bytes[4..6], .little) != format_version or std.mem.readInt(u16, bytes[6..8], .little) != 0) return error.InvalidHeightmap;
@@ -79,6 +182,60 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) (Error || error{O
     errdefer allocator.free(samples);
     for (samples, 0..) |*sample_value, i| sample_value.* = std.mem.readInt(u16, bytes[header_size + i * 2 ..][0..2], .little);
     return .{ .width = width, .height = height, .settings = settings, .samples = samples };
+}
+
+/// A validated read-only view over an encoded map. Useful for large built-in maps that should
+/// remain in the executable's immutable asset pages instead of copying samples onto the heap.
+pub const View = struct {
+    width: u32,
+    height: u32,
+    settings: Settings,
+    encoded_samples: []const u8,
+
+    pub fn sample(self: View, x: f32, z: f32) ?f32 {
+        const u = x / self.settings.world_width + 0.5;
+        const v = z / self.settings.world_depth + 0.5;
+        if (u < 0 or u > 1 or v < 0 or v > 1) return null;
+        const px = u * @as(f32, @floatFromInt(self.width - 1));
+        const pz = v * @as(f32, @floatFromInt(self.height - 1));
+        const x0: usize = @intFromFloat(@floor(px));
+        const z0: usize = @intFromFloat(@floor(pz));
+        const x1 = @min(x0 + 1, self.width - 1);
+        const z1 = @min(z0 + 1, self.height - 1);
+        const fx = px - @floor(px);
+        const fz = pz - @floor(pz);
+        const h00 = self.heightAt(x0, z0);
+        const h10 = self.heightAt(x1, z0);
+        const h01 = self.heightAt(x0, z1);
+        const h11 = self.heightAt(x1, z1);
+        const top = h00 + (h10 - h00) * fx;
+        const bottom = h01 + (h11 - h01) * fx;
+        return top + (bottom - top) * fz;
+    }
+
+    fn heightAt(self: View, x: usize, z: usize) f32 {
+        const i = (z * @as(usize, self.width) + x) * 2;
+        const value = std.mem.readInt(u16, self.encoded_samples[i..][0..2], .little);
+        return self.settings.base_height + (@as(f32, @floatFromInt(value)) / 65535) * self.settings.elevation;
+    }
+};
+
+pub fn view(bytes: []const u8) Error!View {
+    if (bytes.len < header_size or !std.mem.eql(u8, bytes[0..4], "HWMH")) return error.InvalidHeightmap;
+    if (std.mem.readInt(u16, bytes[4..6], .little) != format_version or std.mem.readInt(u16, bytes[6..8], .little) != 0) return error.InvalidHeightmap;
+    const width = std.mem.readInt(u32, bytes[8..12], .little);
+    const height = std.mem.readInt(u32, bytes[12..16], .little);
+    if (width < 2 or height < 2 or width > max_dimension or height > max_dimension or @as(u64, width) * height > max_samples) return error.InvalidDimensions;
+    const sample_count: usize = @as(usize, width) * height;
+    if (bytes.len != header_size + sample_count * 2) return error.InvalidHeightmap;
+    const settings: Settings = .{
+        .world_width = @bitCast(std.mem.readInt(u32, bytes[16..20], .little)),
+        .world_depth = @bitCast(std.mem.readInt(u32, bytes[20..24], .little)),
+        .base_height = @bitCast(std.mem.readInt(u32, bytes[24..28], .little)),
+        .elevation = @bitCast(std.mem.readInt(u32, bytes[28..32], .little)),
+    };
+    if (!validSettings(settings)) return error.InvalidSettings;
+    return .{ .width = width, .height = height, .settings = settings, .encoded_samples = bytes[header_size..] };
 }
 
 pub fn encode(self: Heightmap, allocator: std.mem.Allocator) ![]u8 {

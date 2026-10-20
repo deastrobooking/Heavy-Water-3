@@ -13,7 +13,7 @@ pub const Kind = enum { model, blueprint, heightmap, scene, animation, texture }
 pub const importers = struct {
     pub const gltf: u32 = 2;
     pub const blueprint: u32 = 1;
-    pub const heightmap: u32 = 1;
+    pub const heightmap: u32 = 2;
 };
 pub const ModelSettings = struct {
     /// Uniform scale applied to positions at import.
@@ -49,15 +49,15 @@ pub fn hashSource(source: []const u8) [71]u8 {
 pub fn kindOf(path: []const u8) Error!Kind {
     if (std.mem.endsWith(u8, path, ".gltf") or std.mem.endsWith(u8, path, ".glb")) return .model;
     if (std.mem.endsWith(u8, path, ".json")) return .blueprint;
-    if (std.mem.endsWith(u8, path, ".pgm")) return .heightmap;
+    if (std.mem.endsWith(u8, path, ".pgm") or std.mem.endsWith(u8, path, "_heightmap_16bit.png")) return .heightmap;
     return error.UnknownSourceType;
 }
 
-fn importerFor(kind: Kind) Importer {
+fn importerFor(kind: Kind, path: []const u8) Importer {
     return switch (kind) {
         .model => .{ .name = "gltf", .version = importers.gltf },
         .blueprint => .{ .name = "blueprint", .version = importers.blueprint },
-        .heightmap => .{ .name = "pgm", .version = importers.heightmap },
+        .heightmap => .{ .name = if (std.mem.endsWith(u8, path, ".pgm")) "pgm" else "png16", .version = importers.heightmap },
         else => .{ .name = "none", .version = 0 },
     };
 }
@@ -79,7 +79,7 @@ fn checkSource(allocator: std.mem.Allocator, meta_bytes: []const u8, source_path
     if (doc.format != format_version) return error.UnsupportedMetaFormat;
     const kind = try kindOf(source_path);
     if (doc.kind != kind) return error.WrongKind;
-    const importer = importerFor(kind);
+    const importer = importerFor(kind, source_path);
     if (!std.mem.eql(u8, doc.importer.name, importer.name)) return error.WrongKind;
     if (doc.importer.version != importer.version) return error.OldImporter;
     if (require_hash and !std.mem.eql(u8, doc.source_hash, &hashSource(source))) return error.StaleMeta;
@@ -143,7 +143,7 @@ pub fn refresh(allocator: std.mem.Allocator, existing: ?[]const u8, source_path:
         .heightmap => .{ .world_width = heightmap.world_width, .world_depth = heightmap.world_depth, .base_height = heightmap.base_height, .elevation = heightmap.elevation },
         else => null,
     };
-    return std.json.Stringify.valueAlloc(allocator, Out{ .format = format_version, .guid = guid, .kind = kind, .source_hash = &hash, .importer = importerFor(kind), .settings = settings }, .{ .whitespace = .indent_2, .emit_null_optional_fields = false });
+    return std.json.Stringify.valueAlloc(allocator, Out{ .format = format_version, .guid = guid, .kind = kind, .source_hash = &hash, .importer = importerFor(kind, source_path), .settings = settings }, .{ .whitespace = .indent_2, .emit_null_optional_fields = false });
 }
 
 test "sidecars keep identity and settings, detect stale sources, and reject bad settings" {
@@ -172,7 +172,7 @@ test "sidecars keep identity and settings, detect stale sources, and reject bad 
     }
     // Kind follows the source type, and old importers are stale.
     try std.testing.expectError(error.WrongKind, check(a, first, "door.json", "v1"));
-    const current_version = try std.fmt.allocPrint(a, "\"version\": {d}", .{importerFor(.model).version});
+    const current_version = try std.fmt.allocPrint(a, "\"version\": {d}", .{importerFor(.model, "crate.gltf").version});
     defer a.free(current_version);
     const old_version = try std.fmt.allocPrint(a, "\"version\": {d}", .{0});
     defer a.free(old_version);

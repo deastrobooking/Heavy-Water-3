@@ -1,7 +1,7 @@
 const std = @import("std");
 const Seed = @import("Seed.zig");
 const Chunk = @import("Chunk.zig");
-const Noise = @import("Noise.zig");
+const CityHeightmaps = @import("CityHeightmaps.zig");
 const Biome = @import("Biome.zig");
 const Key = @import("../world/ChunkKey.zig");
 const Transform = @import("../world/Transform.zig");
@@ -49,13 +49,14 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const kind: Kind = if (i % 7 == 0) .relic else .vegetation;
         if (kind == .relic and nearSpawn(x, z, spawn_relic_clearing)) continue;
         const biome = Biome.sample(regional_seed, x, z);
-        const nx = Noise.height(regional_seed, x - 0.5, z) - Noise.height(regional_seed, x + 0.5, z);
-        const nz = Noise.height(regional_seed, x, z - 0.5) - Noise.height(regional_seed, x, z + 0.5);
+        const nx = CityHeightmaps.heightAt(seed, x - 0.5, z) - CityHeightmaps.heightAt(seed, x + 0.5, z);
+        const nz = CityHeightmaps.heightAt(seed, x, z - 0.5) - CityHeightmaps.heightAt(seed, x, z + 0.5);
         if (!allowed(1 / @sqrt(nx * nx + 1 + nz * nz), kind)) continue;
         const chance = Seed.unit(Seed.mix(h +% 2));
         if (kind == .vegetation and chance > 0.85 - biome.arid * 0.65) continue;
         // Snow thins the flora to the hardy trees, and frosts what grows.
-        const frost = if (kind == .vegetation) Biome.cover(regional_seed, x, z, Noise.height(regional_seed, x, z), @sqrt(nx * nx + nz * nz)).snow else 0;
+        const ground = CityHeightmaps.heightAt(seed, x, z);
+        const frost = if (kind == .vegetation) Biome.cover(regional_seed, x, z, ground, @sqrt(nx * nx + nz * nz)).snow else 0;
         const choice = Seed.unit(Seed.mix(h +% 3));
         if (frost > 0.25 and choice <= 0.82 and Seed.unit(Seed.mix(h +% 5)) < frost) continue;
         // Long grass and fern fronds are sparse floor accents; rounded shrubs and flowering
@@ -69,7 +70,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
             .local_id = @intCast(i),
             .kind = kind,
             .variant = variant,
-            .transform = .{ .position = .{ x, Noise.height(regional_seed, x, z) - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 14) 6 + Seed.unit(Seed.mix(h +% 1)) * 12 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else if (variant == 0) 0.55 + Seed.unit(Seed.mix(h +% 1)) * 0.55 else if (variant == 1) 0.7 + Seed.unit(Seed.mix(h +% 1)) * 0.65 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .transform = .{ .position = .{ x, ground - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 14) 6 + Seed.unit(Seed.mix(h +% 1)) * 12 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else if (variant == 0) 0.55 + Seed.unit(Seed.mix(h +% 1)) * 0.55 else if (variant == 1) 0.7 + Seed.unit(Seed.mix(h +% 1)) * 0.65 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
             .tint = if (kind == .relic) .{ shade, shade, shade, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
         };
         count += 1;
@@ -79,10 +80,10 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const h = Seed.mix(chunk_seed ^ 0x524f434b +% i);
         const x = @as(f32, @floatFromInt(key.x)) * Key.extent + Seed.unit(h) * 124 - 62;
         const z = @as(f32, @floatFromInt(key.z)) * Key.extent + Seed.unit(Seed.mix(h)) * 124 - 62;
-        const nx = Noise.height(regional_seed, x - 0.5, z) - Noise.height(regional_seed, x + 0.5, z);
-        const nz = Noise.height(regional_seed, x, z - 0.5) - Noise.height(regional_seed, x, z + 0.5);
+        const nx = CityHeightmaps.heightAt(seed, x - 0.5, z) - CityHeightmaps.heightAt(seed, x + 0.5, z);
+        const nz = CityHeightmaps.heightAt(seed, x, z - 0.5) - CityHeightmaps.heightAt(seed, x, z + 0.5);
         if (!allowed(1 / @sqrt(nx * nx + 1 + nz * nz), .boulder)) continue;
-        const height = Noise.height(regional_seed, x, z);
+        const height = CityHeightmaps.heightAt(seed, x, z);
         const cover = Biome.cover(regional_seed, x, z, height, @sqrt(nx * nx + nz * nz));
         // Rocky, high and dry ground carries the most stone; lush meadow the least.
         const alpine = std.math.clamp((height - 8) / 30, 0, 1);

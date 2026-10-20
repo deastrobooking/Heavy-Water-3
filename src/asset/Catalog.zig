@@ -85,6 +85,8 @@ pub const Content = struct {
     sentinel_glow: MeshHandle,
     spire: MeshHandle,
     spire_glow: MeshHandle,
+    hive_base: MeshHandle,
+    hive_base_glow: MeshHandle,
     gem: MeshHandle,
     /// Ships: the Kestrel fighter, Hive wasps (and a wing drawn four times), the Brood carrier.
     kestrel: MeshHandle,
@@ -301,7 +303,7 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     {
         const H = @import("../vehicle/HiveMeshes.zig");
         const white: [4]f32 = .{ 1, 1, 1, 1 };
-        inline for (.{ .{ "drone", H.drone }, .{ "sentinel", H.sentinel }, .{ "spire", H.spire } }) |entry| {
+        inline for (.{ .{ "drone", H.drone }, .{ "sentinel", H.sentinel }, .{ "spire", H.spire }, .{ "hive_base", H.base } }) |entry| {
             const pair = try entry[1](allocator);
             // The glow mesh is ours until its model takes it.
             var glow_owned = true;

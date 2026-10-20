@@ -4082,11 +4082,11 @@ pub const travel_labels = blk: {
 };
 const NewYorkLandmark = struct { x: f32, z: f32, height: f32, width: f32, depth: f32, tint: [4]f32 };
 const new_york_landmarks = [_]NewYorkLandmark{
-    .{ .x = 1320, .z = -180, .height = 190, .width = 42, .depth = 42, .tint = .{ 0.24, 0.34, 0.40, 1 } },
-    .{ .x = 1375, .z = -205, .height = 138, .width = 34, .depth = 38, .tint = .{ 0.31, 0.37, 0.40, 1 } },
-    .{ .x = 1270, .z = -240, .height = 112, .width = 38, .depth = 32, .tint = .{ 0.37, 0.31, 0.26, 1 } },
-    .{ .x = 1412, .z = -145, .height = 164, .width = 32, .depth = 32, .tint = .{ 0.26, 0.39, 0.42, 1 } },
-    .{ .x = 1240, .z = -130, .height = 96, .width = 30, .depth = 34, .tint = .{ 0.35, 0.35, 0.31, 1 } },
+    .{ .x = 250000, .z = 0, .height = 190, .width = 42, .depth = 42, .tint = .{ 0.24, 0.34, 0.40, 1 } },
+    .{ .x = 250055, .z = -25, .height = 138, .width = 34, .depth = 38, .tint = .{ 0.31, 0.37, 0.40, 1 } },
+    .{ .x = 249950, .z = -60, .height = 112, .width = 38, .depth = 32, .tint = .{ 0.37, 0.31, 0.26, 1 } },
+    .{ .x = 250092, .z = 35, .height = 164, .width = 32, .depth = 32, .tint = .{ 0.26, 0.39, 0.42, 1 } },
+    .{ .x = 249920, .z = 50, .height = 96, .width = 30, .depth = 34, .tint = .{ 0.35, 0.35, 0.31, 1 } },
 };
 
 pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {

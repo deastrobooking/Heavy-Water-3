@@ -18,11 +18,15 @@ pub const Pair = struct { shell: RenderMesh, glow: RenderMesh };
 const hive: Designs.Palette = .{ .paint = .{ 0.13, 0.11, 0.13 }, .accent = .{ 0.32, 0.08, 0.1 }, .lights = .{ 1, 0.15, 0.12 } };
 
 fn finish(a: Allocator, shell: *cm.Mesh, glow: *cm.Mesh) !Pair {
+    return finishPalette(a, shell, glow, hive);
+}
+
+fn finishPalette(a: Allocator, shell: *cm.Mesh, glow: *cm.Mesh, palette: Designs.Palette) !Pair {
     shell.computeNormals();
     glow.computeNormals();
-    const s = try Designs.renderMesh(a, shell, hive);
+    const s = try Designs.renderMesh(a, shell, palette);
     errdefer s.deinit(a);
-    return .{ .shell = s, .glow = try Designs.renderMesh(a, glow, hive) };
+    return .{ .shell = s, .glow = try Designs.renderMesh(a, glow, palette) };
 }
 
 /// An ellipsoid-ish pod revolved about +Y: `r` radius, `h` half height, `points` profile points.
@@ -123,6 +127,72 @@ pub fn spire(a: Allocator) !Pair {
     return finish(a, &shell, &glow);
 }
 
+/// A fortified Hive installation grown around an elongated egg tower. Its walls are
+/// biomineral ribs over a metal frame; corner emplacements carry outward-facing lasers.
+pub fn base(a: Allocator) !Pair {
+    var shell: cm.Mesh = .{};
+    defer shell.deinit(a);
+    var glow: cm.Mesh = .{};
+    defer glow.deinit(a);
+
+    // Central egg, rooted into the courtyard and narrowing to a sealed crown.
+    var egg: [17]Vec2 = undefined;
+    for (&egg, 0..) |*p, i| {
+        const t = @as(f32, @floatFromInt(i)) / 16.0;
+        const round = @sqrt(@max(0, 1 - std.math.pow(f32, 2 * t - 1, 2)));
+        p.* = .{ .x = 13.5 * round * (0.68 + 0.42 * t), .y = 3 + 31 * t };
+    }
+    try prims.lathe(a, &shell, &egg, 24, .{}, .paint);
+    // Tall reinforcing ribs make the organic shell read as engineered architecture.
+    for (0..12) |i| {
+        const angle = @as(f32, @floatFromInt(i)) * m.tau / 12;
+        const x = @sin(angle);
+        const z = @cos(angle);
+        try prims.strut(a, &shell, Vec3.init(x * 7.5, 1, z * 7.5), Vec3.init(x * 12.5, 31, z * 12.5), Vec3.unit_y, 0.48, 0.62, .paint_accent);
+    }
+    // Four uneven growth bands bind the shell to the rib cage.
+    for ([_]f32{ 7, 14, 22, 29 }) |y| {
+        const t = (y - 3) / 31;
+        const r = 13.5 * @sqrt(@max(0, 1 - std.math.pow(f32, 2 * t - 1, 2))) * (0.68 + 0.42 * t) + 0.32;
+        var band: [8]Vec2 = undefined;
+        for (&band, 0..) |*p, i| {
+            const k = @as(f32, @floatFromInt(i)) / 8 * m.tau;
+            p.* = .{ .x = r + 0.18 * @cos(k), .y = y + 0.28 * @sin(k) };
+        }
+        try prims.lathe(a, &glow, &band, 32, .{}, .emissive);
+    }
+
+    // Heavy perimeter walls, with a broad gate on the near side.
+    const wall = [_][2]Vec3{
+        .{ Vec3.init(-36, 5, -36), Vec3.init(-12, 5, -36) },
+        .{ Vec3.init(12, 5, -36), Vec3.init(36, 5, -36) },
+        .{ Vec3.init(-36, 5, 36), Vec3.init(36, 5, 36) },
+        .{ Vec3.init(-36, 5, -12), Vec3.init(-36, 5, 36) },
+        .{ Vec3.init(36, 5, -36), Vec3.init(36, 5, 36) },
+    };
+    for (wall) |ends| try prims.strut(a, &shell, ends[0], ends[1], Vec3.unit_y, 2.2, 5.2, .metal);
+    // Tower-like bastions at the corners and fixed laser cannons trained outward.
+    for ([_]f32{ -1, 1 }) |xside| for ([_]f32{ -1, 1 }) |zside| {
+        const x = xside * 36;
+        const z = zside * 36;
+        try pod(a, &shell, Vec3.init(x, 7.2, z), 4.8, 3.2, .paint_accent);
+        const outward = Vec3.init(xside, 0.05, zside).normalize();
+        try prims.strut(a, &shell, Vec3.init(x, 8.5, z).add(outward.scale(2)), Vec3.init(x, 8.5, z).add(outward.scale(9)), Vec3.unit_y, 0.8, 0.8, .metal);
+        try pod(a, &glow, Vec3.init(x, 8.5, z).add(outward.scale(9.1)), 0.95, 0.85, .emissive);
+        // Emitter slit on each wall-facing bastion.
+        try pod(a, &glow, Vec3.init(x, 9.7, z), 1.45, 0.22, .emissive);
+    };
+    // Lit seams along the walls and a broken-open gate threshold.
+    for ([_][2]Vec3{
+        .{ Vec3.init(-36, 10.5, -36), Vec3.init(-12, 10.5, -36) },
+        .{ Vec3.init(12, 10.5, -36), Vec3.init(36, 10.5, -36) },
+        .{ Vec3.init(-36, 10.5, 36), Vec3.init(36, 10.5, 36) },
+        .{ Vec3.init(-36, 10.5, -36), Vec3.init(-36, 10.5, 36) },
+        .{ Vec3.init(36, 10.5, -36), Vec3.init(36, 10.5, 36) },
+    }) |ends| try prims.strut(a, &glow, ends[0], ends[1], Vec3.unit_y, 0.18, 0.18, .emissive);
+    return finishPalette(a, &shell, &glow, .{ .paint = .{ 0.12, 0.115, 0.13 }, .accent = .{ 0.34, 0.22, 0.29 }, .lights = .{ 1, 0.16, 0.34 } });
+}
+
 /// A faceted gem (two pyramids) for pickups: 0.5 m tall, centred at the origin.
 pub fn gem(a: Allocator) !RenderMesh {
     var mesh: cm.Mesh = .{};
@@ -136,9 +206,9 @@ pub fn gem(a: Allocator) !RenderMesh {
         const p0 = Vec3.init(@cos(a0) * 0.2, 0, @sin(a0) * 0.2);
         const p1 = Vec3.init(@cos(a1) * 0.2, 0, @sin(a1) * 0.2);
         for ([_][3]Vec3{ .{ top, p1, p0 }, .{ bottom, p0, p1 } }) |tri| {
-            const base = mesh.vertexCount();
+            const vertex_base = mesh.vertexCount();
             for (tri) |p| _ = try mesh.addVertex(a, .{ .pos = p, .material = .emissive });
-            try mesh.addTri(a, base, base + 1, base + 2);
+            try mesh.addTri(a, vertex_base, vertex_base + 1, vertex_base + 2);
         }
     }
     mesh.computeNormals();
@@ -148,7 +218,7 @@ pub fn gem(a: Allocator) !RenderMesh {
 
 test "hive meshes and the gem build with sensible sizes" {
     const a = std.testing.allocator;
-    inline for (.{ drone, sentinel, spire }) |build| {
+    inline for (.{ drone, sentinel, spire, base }) |build| {
         const pair = try build(a);
         defer pair.shell.deinit(a);
         defer pair.glow.deinit(a);
