@@ -1,0 +1,26 @@
+{
+  "projection": "EPSG:4326 (Equirectangular Plate Carree)",
+  "resolution": [
+    4096,
+    2048
+  ],
+  "earth_equatorial_circumference_m": 40075017.0,
+  "earth_mean_radius_m": 6371000.0,
+  "topobathy": {
+    "file": "earth_topobathy_16bit.png",
+    "min_elevation_m": -10297.89,
+    "max_elevation_m": 6325.56,
+    "total_relief_m": 16623.45,
+    "sea_level_uint16_value": 40597,
+    "sea_level_normalized_float": 0.619471
+  },
+  "land_only": {
+    "file": "earth_land_only_16bit.png",
+    "min_elevation_m": 0.0,
+    "max_elevation_m": 6325.56,
+    "total_relief_m": 6325.56
+  },
+  "land_mask": {
+    "file": "earth_land_mask_8bit.png"
+  }
+}
