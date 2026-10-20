@@ -5,6 +5,7 @@ const Streamer = @import("../world/Streamer.zig");
 const Key = @import("../world/ChunkKey.zig");
 const Region = @import("../world/Region.zig");
 const Chunk = @import("../procedural/Chunk.zig");
+const CityHeightmaps = @import("../procedural/CityHeightmaps.zig");
 const Scatter = @import("../procedural/Scatter.zig");
 const Camera = @import("../world/Camera.zig");
 const Mesh = @import("Mesh.zig");
@@ -256,7 +257,19 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         if (resident.view) |view| {
             self.resident_count += 1;
             if (Key.distance(view.key, center) <= Streamer.active_radius) self.active_missing -= 1;
-            resident.visible = !culling or Visibility.sphereVisible(vp, .{ @as(f32, @floatFromInt(view.key.x)) * Key.extent, 0, @as(f32, @floatFromInt(view.key.z)) * Key.extent }, 96);
+            const x = @as(f32, @floatFromInt(view.key.x)) * Key.extent;
+            const z = @as(f32, @floatFromInt(view.key.z)) * Key.extent;
+            var low = CityHeightmaps.heightAt(self.stream.seed, x, z);
+            var high = low;
+            const half = Key.extent * 0.5;
+            for ([_][2]f32{ .{ -half, -half }, .{ half, -half }, .{ -half, half }, .{ half, half } }) |corner| {
+                const height = CityHeightmaps.heightAt(self.stream.seed, x + corner[0], z + corner[1]);
+                low = @min(low, height);
+                high = @max(high, height);
+            }
+            const vertical = (high - low) * 0.5 + 8;
+            const radius = @sqrt(half * half * 2 + vertical * vertical);
+            resident.visible = !culling or Visibility.sphereVisible(vp, .{ x, (low + high) * 0.5, z }, radius);
             if (resident.visible) self.terrain_draws += 1;
         }
     }
@@ -291,6 +304,9 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
     for (self.residents) |resident| {
         if (!resident.visible) continue;
         const view = resident.view.?;
+        // The glacier is intentionally bare; keep stale or future scatter payloads from adding
+        // trees back onto K2 even if its scatter recipe changes independently.
+        if (kind == .vegetation and Region.k2.contains(view.key.x, view.key.z)) continue;
         const data = self.stream.payload(view).?;
         for (data.objects[0..data.object_count]) |object| {
             if (object.kind != kind) continue;
@@ -352,7 +368,9 @@ fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32,
         const dx = p[0] - camera_position[0];
         const dy = p[1] - camera_position[1];
         const dz = p[2] - camera_position[2];
-        nearby[i] = dx * dx + dy * dy + dz * dz <= world_prop_distance * world_prop_distance;
+        // Cave shells are already authored in absolute world coordinates; their instance origin
+        // stays at zero so adding the player position would shift the mesh to the wrong place.
+        nearby[i] = self.isCaveMesh(prop.mesh) or dx * dx + dy * dy + dz * dz <= world_prop_distance * world_prop_distance;
     }
     var live = self.catalog.meshes.live.iterator(.{});
     while (live.next()) |slot| {
@@ -380,6 +398,10 @@ fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32,
 /// Generated landscape (the ranges' far panorama, cave shells): coloured like the terrain.
 fn isGround(self: *const Scene, handle: Catalog.MeshHandle) bool {
     if (handle.eql(self.catalog.ranges)) return true;
+    return self.isCaveMesh(handle);
+}
+
+fn isCaveMesh(self: *const Scene, handle: Catalog.MeshHandle) bool {
     for (self.catalog.cave_meshes) |cave| if (handle.eql(cave)) return true;
     return false;
 }

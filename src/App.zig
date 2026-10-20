@@ -1711,6 +1711,33 @@ fn showcase(self: *App) void {
         self.sandbox.player.feet = .{ arrival[0], ground + 4, arrival[1] };
         target = .{ arrival[0] + 116, ground + 5, arrival[1] };
         eye = .{ arrival[0] + 20, ground + 27, arrival[1] + 125 };
+    } else if (v == 87 or v == 88) {
+        const Region = @import("world/Region.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const Mountains = @import("procedural/Mountains.zig");
+        const arrival = Region.k2.arrival;
+        var k2_index: ?usize = null;
+        for (self.sandbox.caves.systems[0..self.sandbox.caves.count], 0..) |cave, i| if (cave.range == Mountains.count) {
+            k2_index = i;
+            break;
+        };
+        self.sandbox.player.mode = .fly;
+        if (v == 87) {
+            const ground = Terrain.surface(self.sandbox.seed, arrival[0], arrival[1]).height;
+            const inward: [2]f32 = .{ 0.675, -0.738 };
+            self.sandbox.player.feet = .{ arrival[0] - inward[0] * 45, ground + 2, arrival[1] - inward[1] * 45 };
+            target = .{ arrival[0] + inward[0] * 85, ground + 18, arrival[1] + inward[1] * 85 };
+            eye = .{ arrival[0] - inward[0] * 145, ground + 78, arrival[1] - inward[1] * 145 };
+        } else if (k2_index) |index| {
+            const heart = self.sandbox.caves.systems[index].heart();
+            // Keep the ranger and held weapon out of the close camera's sightline.
+            self.sandbox.player.feet = .{ heart.center[0] + 12, heart.floor + 0.1, heart.center[2] + 12 };
+            target = .{ heart.center[0] - 8, heart.floor + 4.6, heart.center[2] - 6 };
+            eye = .{ heart.center[0] + 6, heart.floor + 7.1, heart.center[2] + 14 };
+        } else {
+            target = .{ arrival[0], 0, arrival[1] };
+            eye = .{ arrival[0] + 40, 35, arrival[1] + 70 };
+        }
     } else if (v == 83 or v == 84) {
         const Terrain = @import("procedural/Terrain.zig");
         const origin = Sandbox.spawn;
@@ -1752,7 +1779,7 @@ fn showcase(self: *App) void {
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
     const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65;
-    self.sandbox.tick = if (v == 85 or v == 86) 0 else if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
+    self.sandbox.tick = if (v == 85 or v == 86 or v == 87 or v == 88) 0 else if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
     const dz = target[2] - eye[2];

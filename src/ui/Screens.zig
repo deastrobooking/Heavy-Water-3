@@ -1760,7 +1760,7 @@ fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: 
         if (selected) c.frame(.{ .x = px - size / 2 - 3, .y = py - size / 2 - 3, .w = size + 6, .h = size + 6 }, 1, accent);
     }
     c.print(map.x + 8, map.y + 8, 0.9, ink, "EARTH  /  DRAG TO ROTATE  /  LEFT-RIGHT TO ZOOM", .{});
-    c.centered(center_x, map.y + map.h - 16, "DETROIT / CHICAGO / NEW YORK / ANTARCTICA / LOS ANGELES (LATER)", 0.78, dim);
+    c.centered(center_x, map.y + map.h - 16, "DETROIT / CHICAGO / NYC / K2 / ANTARCTICA / LA (LATER)", 0.78, dim);
 
     for (Menu.map_items, 0..) |item, i| {
         const row: Rect = .{ .x = panel_rect.x + 12, .y = map.y + map.h + 40 + @as(f32, @floatFromInt(i)) * 29, .w = panel_rect.w - 24, .h = 26 };

@@ -479,12 +479,12 @@ fn stepCaves(sb: *Sandbox) void {
     for (feet, 0..) |maybe, p| {
         const f = maybe orelse continue;
         const inside = Caves.systemAt(&sb.caves, R.add(f, .{ 0, 1, 0 }));
+        if (p == 0) if (inside) |cave_index| startK2Encounter(sb, cave_index);
         if (inside != null and inside != sb.cave_inside[p]) {
             var flag: [20]u8 = undefined;
             const first = !sb.progress.hasFlag(std.fmt.bufPrint(&flag, "cave_{d}_found", .{inside.?}) catch unreachable);
             sb.progress.setFlag(std.fmt.bufPrint(&flag, "cave_{d}_found", .{inside.?}) catch unreachable);
             if (p == 0) sb.say("{s}{s}", .{ Caves.systemName(&sb.caves, inside.?), if (first) ": a new cave" else "" });
-            if (p == 0) startK2Encounter(sb, inside.?);
             if (first) sb.cue(.vault, null);
         }
         sb.cave_inside[p] = inside;
