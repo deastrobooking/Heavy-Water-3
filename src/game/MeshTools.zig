@@ -15,8 +15,8 @@ const MeshTools = @This();
 pub const V = MeshEdit.V;
 pub const Ray = struct { origin: V, direction: V };
 
-pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick, gradient, weight };
-pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK", "GRAD", "WEIGHT" };
+pub const Tool = enum { select, move, draw, inflate, smooth, grab, paint, pen, split, pick, gradient, weight, lattice };
+pub const tool_labels = [_][]const u8{ "SELECT", "MOVE", "DRAW", "INFLATE", "SMOOTH", "GRAB", "PAINT", "CEL PEN", "SPLIT", "PICK", "GRAD", "WEIGHT", "LATTICE" };
 pub const tool_hints = [_][]const u8{
     "CLICK A VERTEX, SHIFT+CLICK TO ADD, DRAG TO BRUSH-SELECT",
     "DRAG: MOVE, ROTATE OR SCALE THE SELECTION; GRAB AN AXIS HANDLE TO LOCK IT",
@@ -30,6 +30,7 @@ pub const tool_hints = [_][]const u8{
     "CLICK THE MESH TO PICK UP ITS COLOUR AND CEL PEN",
     "DRAG ACROSS THE MODEL: SECOND COLOUR TO FIRST (SELECTION OR ALL)",
     "DRAG TO PAINT HOW MUCH THE CHOSEN BONE MOVES THE SURFACE",
+    "DRAG A CONTROL POINT TO BEND THE SELECTION (OR THE WHOLE MESH) SMOOTHLY",
 };
 
 /// Paint brush presets as data: size, strength, edge hardness and blend in one choice.
@@ -148,6 +149,12 @@ weight_op: MeshEdit.WeightOp = .add,
 /// `color_backup` and come back when the view closes; nothing here is recorded for undo.
 weight_view: bool = false,
 color_backup: []V = &.{},
+/// The lattice control point being dragged, and where the drag started (model space).
+lattice_point: ?u8 = null,
+lattice_start: V = .{ 0, 0, 0 },
+/// The 3x3x3 control points on screen while the LATTICE tool is active.
+lattice_screen: [27][2]f32 = undefined,
+lattice_shown: bool = false,
 /// Gizmo on screen: centre and the three axis tips (normalised), when the move tool has a selection.
 gizmo_screen: ?[4][2]f32 = null,
 blend: MeshEdit.Blend = .mix,
@@ -310,7 +317,18 @@ pub fn refreshOverlay(self: *MeshTools, camera: Camera, aspect: f32) void {
     self.overlay_len = 0;
     self.ring = null;
     self.gizmo_screen = null;
+    self.lattice_shown = false;
     const e = self.editor orelse return;
+    if (self.tool == .lattice) lattice: {
+        // The grid over the selection (or the whole mesh); during a drag, the live lattice.
+        var points: [27][2]f32 = undefined;
+        for (0..27) |i| {
+            const world = if (e.latticePoint(i)) |p| self.toWorldPoint(p) else self.toWorldPoint(e.latticeGrid(i));
+            points[i] = project(camera, aspect, world) orelse break :lattice;
+        }
+        self.lattice_screen = points;
+        self.lattice_shown = true;
+    }
     if (self.tool == .move) if (e.selectionBounds()) |b| gizmo: {
         // While dragging the pivot stays where the drag began.
         const centre = if (self.dragging) self.pivot else b.center;
@@ -373,6 +391,35 @@ pub fn press(self: *MeshTools, world_ray: Ray, extend: bool) MeshEdit.Error!void
             };
             self.anchor = h.point;
             self.gradient_end = h.point;
+        },
+        .lattice => {
+            self.beginStroke();
+            e.latticeBegin() catch |err| {
+                self.endStroke();
+                self.dragging = false;
+                if (err == error.EmptySelection) return;
+                return err;
+            };
+            // The control point whose screen-side ray distance is smallest, within reach.
+            var best: ?u8 = null;
+            var best_d = 0.08 * self.height();
+            for (0..27) |i| {
+                const p = e.latticePoint(i).?;
+                const d = pointRayDistance(ray, p);
+                if (d < best_d) {
+                    best_d = d;
+                    best = @intCast(i);
+                }
+            }
+            self.lattice_point = best;
+            if (best) |i| {
+                self.anchor = e.latticePoint(i).?;
+                self.lattice_start = self.anchor;
+            } else {
+                e.latticeEnd();
+                self.endStroke();
+                self.dragging = false;
+            }
         },
         .pick => {
             if (hit) |h| {
@@ -447,6 +494,10 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
             if (self.select_mode == .face) e.selectFacesInSphere(h.point, self.radius * self.height(), true) else e.selectSphere(h.point, self.radius * self.height(), true);
         },
         .move => try self.dragGizmo(e, ray),
+        .lattice => if (self.lattice_point) |i| {
+            const point = planeHit(ray, self.lattice_start, self.plane_normal) orelse return;
+            try e.latticeSet(i, sub(point, e.latticeGrid(i)));
+        },
         .grab => {
             const denom = dot(ray.direction, self.plane_normal);
             if (@abs(denom) < 1e-6) return;
@@ -471,6 +522,8 @@ pub fn drag(self: *MeshTools, world_ray: Ray) MeshEdit.Error!void {
 
 pub fn release(self: *MeshTools) void {
     if (self.dragging and self.tool == .gradient) self.applyGradient() catch self.setStatus("GRADIENT FAILED", .{});
+    if (self.editor) |*e| e.latticeEnd();
+    self.lattice_point = null;
     self.dragging = false;
     self.endStroke();
 }
@@ -588,6 +641,13 @@ fn closestOnLine(origin: V, dir: V, ray: Ray) f32 {
     const denom = 1 - b * b;
     if (@abs(denom) < 1e-6) return 0;
     return (b * e - d) / denom;
+}
+
+/// Distance from `p` to the ray (to its origin when `p` is behind it).
+fn pointRayDistance(ray: Ray, p: V) f32 {
+    const t = @max(0, dot(sub(p, ray.origin), ray.direction));
+    const q = add(ray.origin, scale(ray.direction, t));
+    return @sqrt(dot(sub(p, q), sub(p, q)));
 }
 
 fn raySegmentDistance(ray: Ray, a: V, b: V) f32 {
@@ -1241,4 +1301,30 @@ test "the weight tool paints the chosen game joint's bone, mirrors to its partne
     for (model.mesh.vertices) |v| try std.testing.expectEqual([3]f32{ 0.2, 0.4, 0.6 }, v.color);
     _ = try tools.control(.undo);
     for (0..model.mesh.vertices.len) |i| try std.testing.expectEqual(@as(f32, 0), tools.editor.?.weightOf(@intCast(i), @intFromEnum(Skeleton.Joint.upper_arm_l)));
+}
+
+test "the lattice tool bends the selected piece by dragging a control point, one undo step" {
+    const a = std.testing.allocator;
+    var model = try Model.fromMesh(a, try Mesh.cube(a), .{});
+    defer model.deinit(a);
+    var tools = MeshTools.init(a);
+    defer tools.deinit();
+    try tools.bind(&model, null);
+    tools.setTool(.lattice);
+    // Grab the top corner control point (index 6: x -0.5, y 2, z -0.5) with a ray along -z...
+    const grid = tools.editor.?.latticeGrid(6);
+    try tools.press(.{ .origin = .{ grid[0], grid[1], 10 }, .direction = .{ 0, 0, -1 } }, false);
+    try std.testing.expectEqual(@as(?u8, 6), tools.lattice_point);
+    // ...and pull it up half a metre.
+    try tools.drag(.{ .origin = .{ grid[0], grid[1] + 0.5, 10 }, .direction = .{ 0, 0, -1 } });
+    tools.release();
+    var top: f32 = 0;
+    for (model.mesh.vertices) |v| top = @max(top, v.position[1]);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), top, 1e-3);
+    try std.testing.expect(tools.editor.?.lattice == null);
+    _ = try tools.control(.undo);
+    for (model.mesh.vertices) |v| try std.testing.expect(v.position[1] <= 2 + 1e-5);
+    // A press nowhere near a control point starts nothing and leaves no stroke open.
+    try tools.press(.{ .origin = .{ 40, 40, 10 }, .direction = .{ 0, 0, -1 } }, false);
+    try std.testing.expect(!tools.dragging and !tools.stroke_open);
 }

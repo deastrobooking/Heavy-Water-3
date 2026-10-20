@@ -264,6 +264,15 @@ pub const Gradient = union(enum) {
     curvature: struct { contrast: f32 = 4 },
 };
 
+pub const Lattice = struct {
+    lo: V,
+    hi: V,
+    /// Affected vertex ids and their positions when the lattice began.
+    ids: []u32,
+    rest: []V,
+    offset: [27]V = @splat(.{ 0, 0, 0 }),
+};
+
 const Snapshot = struct { vertex: Mesh.Vertex, pen: u8, painted: bool, skin: ?Model.SkinVertex = null };
 
 /// How a weight dab changes the chosen bone's influence.
@@ -333,6 +342,7 @@ pub const Editor = struct {
     open_vertices: std.AutoArrayHashMapUnmanaged(u32, Snapshot) = .empty,
     open_triangles: std.AutoArrayHashMapUnmanaged(u32, [3]u32) = .empty,
     open: bool = false,
+    lattice: ?Lattice = null,
     /// Set when a topology edit (or its undo) changed vertex or index counts: the owner must
     /// re-register the model (new GPU buffers) and drop anything keyed to the old vertex ids.
     topology_changed: bool = false,
@@ -366,6 +376,7 @@ pub const Editor = struct {
         self.open_triangles.deinit(a);
         self.dirty.deinit(a);
         a.free(self.weights);
+        self.latticeEnd();
         self.painted.deinit(a);
         self.selection.deinit(a);
         self.topology.deinit(a);
@@ -898,6 +909,93 @@ pub const Editor = struct {
             for (&v.color) |*ch| ch.* = @round(std.math.clamp(ch.*, 0, 1) * n) / n;
             self.painted.set(i);
         }
+    }
+
+    // ---- Lattice deformer ------------------------------------------------------------------
+
+    /// Starts a lattice over the selection (or the whole mesh): a 3x3x3 grid of control points
+    /// across the affected vertices' bounds. Dragging a point bends the surface smoothly
+    /// (quadratic Bernstein blend); call within a stroke, and `latticeEnd` when it closes. Each
+    /// stroke builds a fresh lattice from the current shape, so undo needs nothing special.
+    pub fn latticeBegin(self: *Editor) Error!void {
+        std.debug.assert(self.open and self.lattice == null);
+        const a = self.allocator;
+        var ids: std.ArrayList(u32) = .empty;
+        defer ids.deinit(a);
+        var lo: V = @splat(std.math.inf(f32));
+        var hi: V = @splat(-std.math.inf(f32));
+        for (self.vertices(), 0..) |v, i| if (self.affected(i)) {
+            try ids.append(a, @intCast(i));
+            for (0..3) |k| {
+                lo[k] = @min(lo[k], v.position[k]);
+                hi[k] = @max(hi[k], v.position[k]);
+            }
+        };
+        if (ids.items.len == 0) return error.EmptySelection;
+        const owned = try ids.toOwnedSlice(a);
+        errdefer a.free(owned);
+        const rest = try a.alloc(V, owned.len);
+        for (owned, rest) |i, *r| r.* = self.vertices()[i].position;
+        self.lattice = .{ .lo = lo, .hi = hi, .ids = owned, .rest = rest };
+    }
+
+    /// Where control point `index` (0..26) currently sits, offset included (null when no
+    /// lattice is active).
+    pub fn latticePoint(self: *const Editor, index: usize) ?V {
+        const l = self.lattice orelse return null;
+        return add(self.latticeGrid(index), l.offset[index]);
+    }
+
+    /// Control point `index`'s undeformed grid position: over the active lattice, or over the
+    /// selection (or whole mesh) when none is active, so the tool can draw it before a drag.
+    pub fn latticeGrid(self: *const Editor, index: usize) V {
+        var lo: V = @splat(std.math.inf(f32));
+        var hi: V = @splat(-std.math.inf(f32));
+        if (self.lattice) |l| {
+            lo = l.lo;
+            hi = l.hi;
+        } else for (self.model.mesh.vertices, 0..) |v, i| if (self.affected(i)) {
+            for (0..3) |k| {
+                lo[k] = @min(lo[k], v.position[k]);
+                hi[k] = @max(hi[k], v.position[k]);
+            }
+        };
+        const t: V = .{ @as(f32, @floatFromInt(index % 3)) / 2, @as(f32, @floatFromInt((index / 3) % 3)) / 2, @as(f32, @floatFromInt(index / 9)) / 2 };
+        var p: V = undefined;
+        for (0..3) |axis| p[axis] = lo[axis] + (hi[axis] - lo[axis]) * t[axis];
+        return p;
+    }
+
+    /// Sets control point `index`'s offset from its grid position and bends the surface.
+    pub fn latticeSet(self: *Editor, index: usize, offset: V) Error!void {
+        const l = &(self.lattice orelse return error.InvalidMesh);
+        l.offset[index] = offset;
+        var moved: std.ArrayList(u32) = .empty;
+        defer moved.deinit(self.allocator);
+        for (l.ids, l.rest) |id, r| {
+            var delta: V = .{ 0, 0, 0 };
+            var bw: [3][3]f32 = undefined;
+            for (0..3) |axis| {
+                const span = l.hi[axis] - l.lo[axis];
+                const t = if (span > 1e-9) std.math.clamp((r[axis] - l.lo[axis]) / span, 0, 1) else 0.5;
+                bw[axis] = .{ (1 - t) * (1 - t), 2 * t * (1 - t), t * t };
+            }
+            for (0..27) |c| {
+                const w = bw[0][c % 3] * bw[1][(c / 3) % 3] * bw[2][c / 9];
+                if (w > 0) delta = add(delta, scale(l.offset[c], w));
+            }
+            try self.touch(id);
+            self.vertices()[id].position = add(r, delta);
+            try moved.append(self.allocator, id);
+        }
+        try self.refreshNormals(moved.items);
+    }
+
+    pub fn latticeEnd(self: *Editor) void {
+        const l = self.lattice orelse return;
+        self.allocator.free(l.ids);
+        self.allocator.free(l.rest);
+        self.lattice = null;
     }
 
     // ---- Skin weights ----------------------------------------------------------------------
@@ -2245,4 +2343,42 @@ test "weight brush adds, smooths and mirrors bone influence, and undoes with the
     ed2.begin();
     try std.testing.expectError(error.InvalidMesh, ed2.dabWeight(0, null, .add, 1, .{ .center = .{ 0, 0, 0 }, .radius = 1, .strength = 1 }));
     try ed2.end();
+}
+
+test "lattice: pulling the top control points stretches the top, leaves the base, undoes in one step" {
+    const a = std.testing.allocator;
+    var model = try testModel(a);
+    defer model.deinit(a);
+    var ed = try Editor.init(a, &model);
+    defer ed.deinit();
+    // Work on the cube (y 0..2).
+    ed.selectVertex(25, true);
+    try ed.selectLinked();
+    ed.begin();
+    try ed.latticeBegin();
+    // The four top corner points (j = 2, i and k in {0, 2}) are indices 6, 8, 24 and 26.
+    const before = ed.latticePoint(6).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 2), before[1], 1e-5);
+    for ([_]usize{ 6, 8, 24, 26 }) |corner| try ed.latticeSet(corner, .{ 0, 1, 0 });
+    ed.latticeEnd();
+    try ed.end();
+    var tallest: f32 = 0;
+    var base: f32 = 100;
+    for (model.mesh.vertices[25..]) |v| {
+        tallest = @max(tallest, v.position[1]);
+        base = @min(base, v.position[1]);
+    }
+    try std.testing.expect(tallest > 2.4 and tallest < 3.1);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), base, 1e-5);
+    // The grid was not selected, so it did not move.
+    try std.testing.expectEqual(@as(f32, 0), model.mesh.vertices[12].position[1]);
+    _ = try ed.undo();
+    for (model.mesh.vertices[25..]) |v| try std.testing.expect(v.position[1] <= 2 + 1e-5);
+    // No selection means the whole mesh, and an empty mesh selection of nothing never starts.
+    ed.clearSelection();
+    ed.begin();
+    try ed.latticeBegin();
+    try std.testing.expectEqual(@as(usize, 49), ed.lattice.?.ids.len);
+    ed.latticeEnd();
+    try ed.end();
 }

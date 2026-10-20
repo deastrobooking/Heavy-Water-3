@@ -1622,3 +1622,10 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
   - The 0.17 `build check` passes, the Metal smoke completes 300 frames, and the ReleaseFast build is installed.
 - **Not checked:** painting weights by hand and watching the limb deform in the game; auto-weights and the lattice (not built).
 
+## Lattice deformer (mesh editor S5b) — 2026-10-20
+
+- **Added:** the LATTICE tool: a 3x3x3 control grid over the selection (or the whole mesh), a smooth quadratic blend, no topology change, one undo step per drag, and the 27 points drawn in the view. `-Dcharacter-showcase=50` bends the head with it.
+- **Checked:** new tests pass: pulling the four top corner points stretches the top of a cube (to about 2.5 from 2) while its base stays put, the unselected grid does not move, undo restores the exact shape, no selection lattices the whole mesh, and the tool picks the nearest control point by ray, drags it in the view plane, and starts nothing when the press misses every point. The suite runs 507/515 with the same 8 failures; default `build check` passes. The showcase-50 capture under `MTL_DEBUG_LAYER=1` was inspected: the head is taller (selection height 0.14 to 0.16) and the lattice points are drawn over the selection's bounds, which include the horns and hair.
+- **Notes:** a mid-edge control point has no pull at the exact corners (quadratic Bernstein), so bending a box's corners needs the corner points; this is deliberate and the test uses the corners.
+- **Not checked:** dragging the lattice by hand; lattice on a skinned mesh while posing (it moves rest positions only); very dense meshes. The 0.17 `build check` passes, the Metal smoke completes 300 frames, and the ReleaseFast build is installed.
+

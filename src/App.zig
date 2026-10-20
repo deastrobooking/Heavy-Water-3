@@ -308,7 +308,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
         }
         if (options.character_showcase == 46) self.sandbox.profile.body_style = .captain_test;
-        if (options.character_showcase >= 47 and options.character_showcase <= 49) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
+        if (options.character_showcase >= 47 and options.character_showcase <= 50) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -333,7 +333,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.creator.begin(self.sandbox.profile);
         if (options.character_showcase == 46 and options.capture_frame > 0) self.sandbox.creator.openImported();
-        if (options.character_showcase == 48 or options.character_showcase == 49) {
+        if (options.character_showcase == 48 or options.character_showcase == 49 or options.character_showcase == 50) {
             self.sandbox.creator.openImported();
             self.sandbox.creator.vertex_tools = true;
         }
@@ -3479,7 +3479,7 @@ fn updateMeshTools(self: *App, renderer: *Renderer) void {
         };
     }
     if (self.mesh_library_bake) |bake| bake.painted = &self.mesh_tools.editor.?.painted;
-    if ((options.character_showcase == 48 or options.character_showcase == 49) and !self.tools_showcase_done) self.scriptToolsShowcase();
+    if ((options.character_showcase >= 48 and options.character_showcase <= 50) and !self.tools_showcase_done) self.scriptToolsShowcase();
     if (self.sandbox.importedPlacement()) |place| {
         self.mesh_tools.base = place.base;
         self.mesh_tools.yaw = place.yaw;
@@ -3592,6 +3592,17 @@ fn scriptToolsShowcase(self: *App) void {
             t.setTool(.move);
         }
     }).run(tools, e, lo, h, centre) catch |err| std.log.err("vertex tools showcase failed: {s}", .{@errorName(err)});
+    if (options.character_showcase == 50) {
+        // 50: the head (still selected) bent with the lattice: taller crown, narrower chin.
+        e.begin();
+        if (e.latticeBegin()) {
+            for ([_]usize{ 6, 8, 24, 26 }) |corner| e.latticeSet(corner, .{ 0, 0.06 * h, 0 }) catch {};
+            for ([_]usize{ 0, 2, 18, 20 }) |corner| e.latticeSet(corner, .{ 0.015 * h, 0, 0 }) catch {};
+            e.latticeEnd();
+        } else |_| {}
+        e.end() catch {};
+        tools.setTool(.lattice);
+    }
     if (options.character_showcase == 49) {
         // 49: the same session ending in the weight heatmap for the left upper arm.
         tools.weight_joint = @intFromEnum(@import("character/skeleton.zig").Joint.upper_arm_l);

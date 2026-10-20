@@ -54,7 +54,7 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
     const w: f32 = @min(340, v.w * 0.44);
     // About 560 units of content; status lines follow it, so a short window scrolls instead of
     // drawing text over the buttons.
-    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 668) };
+    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = @min(v.h - 20, 696) };
     // The panel first: the canvas has a fixed command budget, and the selection dots take only
     // what the panel leaves.
     defer overlay(c, tools, v, r);
@@ -75,7 +75,7 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
         const row: f32 = @floatFromInt(i / 6);
         button(c, .{ .x = x + col * (cell + 4), .y = y + row * 28, .w = cell, .h = 24 }, label, id(i), tools.tool == @as(MeshTools.Tool, @enumFromInt(i)));
     }
-    y += 60;
+    y += 88;
     c.text(x, y, MeshTools.tool_hints[@intFromEnum(tools.tool)], 0.58, dim);
     y += 18;
 
@@ -198,6 +198,12 @@ pub fn draw(c: *Canvas, cr: *const Creator, v: Rect) void {
 
 /// Selected vertices as dots and the brush as a ring, over the 3D view.
 fn overlay(c: *Canvas, tools: *const MeshTools, v: Rect, panel: Rect) void {
+    // The lattice grid: 27 points, with the one being dragged brighter.
+    if (tools.lattice_shown) for (tools.lattice_screen, 0..) |p, i| {
+        const lit = if (tools.lattice_point) |k| k == i else false;
+        const size: f32 = if (lit) 9 else 5;
+        c.rect(.{ .x = v.x + p[0] * v.w - size / 2, .y = v.y + p[1] * v.h - size / 2, .w = size, .h = size }, if (lit) gold else Color{ 0.4, 0.9, 1, 1 });
+    };
     // The gizmo first, so its handles are never thinned out by a large selection.
     if (tools.gizmo_screen) |g| {
         const colors = [_]Color{ .{ 0.95, 0.3, 0.3, 1 }, .{ 0.4, 0.9, 0.4, 1 }, .{ 0.35, 0.55, 1, 1 } };
