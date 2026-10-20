@@ -15,6 +15,7 @@ const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 const Fabricator = @import("../game/Fabricator.zig");
+const Build = @import("../game/Build.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
 const Heroes = @import("../game/Heroes.zig");
@@ -40,7 +41,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor };
 pub fn hitId(area: Area, row: usize) u16 {
     return @as(u16, @intFromEnum(area)) << 8 | @as(u16, @intCast(row));
 }
@@ -135,7 +136,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
             if (locked) c.centered(mark.x, mark.y + size / 2 + 6, "LOCK", 1, bad);
         },
     };
-    const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or menu.screen != .none;
+    const panels = sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or sb.tools.platform_editor_open or menu.screen != .none;
     if (!sb.creator.open) drawHud(c, menu, sb, hud, panels);
     // Panels and menus scroll as one when they are taller than the screen (larger interface
     // sizes); the HUD above never moves.
@@ -151,7 +152,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
         } else {
             drawCreator(c, sb, hud.view);
         }
-    } else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
+    } else if (sb.tools.platform_editor_open) drawPlatformEditor(c, sb) else if (sb.talk) |session| drawTalk(c, sb, session, hud) else if (sb.shop) |shop| switch (shop.kind) {
         .upgrades => drawUpgrades(c, sb, shop.row, hud.view),
         .wardrobe => drawWardrobe(c, sb, shop.row, hud.view),
         .fabricate => drawFabricator(c, sb, shop, hud.view),
@@ -1273,6 +1274,35 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
     const selected = Fabricator.recipes[rows[@min(shop.row, rows.len - 1)]];
     c.text(r.x + 18, r.y + r.h - 50, selected.about, 1, ink);
     c.text(r.x + 18, r.y + r.h - 28, if (@as(Fabricator.Tab, @enumFromInt(shop.tab)) == .aircraft) "LEFT RIGHT TAB  ENTER INSTALL / SELECT  ESC CLOSE" else "LEFT RIGHT TAB  ENTER FABRICATE  ESC CLOSE  FIND PICKUPS IN THE WORLD", 0.9, alpha(dim, 0.8));
+}
+
+fn drawPlatformEditor(c: *Canvas, sb: *const Sandbox) void {
+    const w: f32 = @min(520, c.width - 32);
+    const h: f32 = 304;
+    const x = (c.width - w) / 2;
+    const y = (c.height - h) / 2;
+    const frame: Rect = .{ .x = x, .y = y, .w = w, .h = h };
+    panel(c, frame, "FLOATING PLATFORM BUILDER");
+    c.text(x + 20, y + 52, "Aim at a surface, then set the deck height from that point.", 1, dim);
+
+    const button_y = y + 82;
+    const gap: f32 = 12;
+    const wide = (w - 40 - gap) / 2;
+    button(c, .{ .x = x + 20, .y = button_y, .w = wide, .h = 42 }, "HORIZONTAL 16m", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.horizontal)), !sb.tools.platform_vertical);
+    button(c, .{ .x = x + 20 + wide + gap, .y = button_y, .w = wide, .h = 42 }, "VERTICAL 16m", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.vertical)), sb.tools.platform_vertical);
+
+    var offset: [48]u8 = undefined;
+    const label = std.fmt.bufPrint(&offset, "HEIGHT OFFSET  {d:.0} m", .{sb.tools.platform_offset}) catch unreachable;
+    c.centered(x + w / 2, y + 152, label, 1.5, ink);
+    const step_y = y + 178;
+    const step_w = (w - 40 - 3 * gap) / 4;
+    button(c, .{ .x = x + 20, .y = step_y, .w = step_w, .h = 38 }, "-10 m", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.down_ten)), false);
+    button(c, .{ .x = x + 20 + (step_w + gap), .y = step_y, .w = step_w, .h = 38 }, "-1 m", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.down_one)), false);
+    button(c, .{ .x = x + 20 + 2 * (step_w + gap), .y = step_y, .w = step_w, .h = 38 }, "+1 m", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.up_one)), false);
+    button(c, .{ .x = x + 20 + 3 * (step_w + gap), .y = step_y, .w = step_w, .h = 38 }, "+10 m", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.up_ten)), false);
+
+    button(c, .{ .x = x + 20, .y = y + 238, .w = wide, .h = 38 }, "RESET HEIGHT", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.reset)), false);
+    button(c, .{ .x = x + 20 + wide + gap, .y = y + 238, .w = wide, .h = 38 }, "DONE  [ESC]", hitId(.platform_editor, @intFromEnum(Build.PlatformEditorAction.close)), true);
 }
 
 // ---------------------------------------------------------------- conversations

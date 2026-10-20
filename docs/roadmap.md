@@ -51,7 +51,7 @@ The rover was added only after the door and elevator worked, as planned. A headl
 
 ## 5. Creation — implemented
 
-1. Build tool: a palette of crates, prefab machines (powered door, elevator, rover), and loose devices (generator, button, latch, logic OR, lamp), with 0.5 m grid snapping, quarter-turn rotation, surface or terrain-footprint snapping, a green or red preview, overlap and player rejection, and removal.
+1. Build tool: a palette of crates, prefab machines (powered door, elevator, rover), loose devices (generator, button, latch, logic OR, lamp), and floating platforms, with 0.5 m grid snapping, quarter-turn rotation, surface or terrain-footprint snapping, a green or red preview, overlap and player rejection, and removal. Press O in the build tool to open the platform editor: choose a 16 m horizontal or vertical square and set its height from the aimed surface in 1 m or 10 m steps (−1,000 to +1,200 m). Placed decks use the ordinary machine save path.
 2. Wire tool: connect any output to a compatible input on the same machine, cycling valid port pairs; disconnect a device's inputs. Every edit goes through `Blueprint.connect` / `addDevice` / `removeDevice`, the same checks the file format uses. Live machines `reconfigure` and keep their state.
 3. Loose devices form one editable workshop machine, so they can be wired together.
 4. Save format v4 stores the whole world: each machine's full (possibly edited) blueprint document, origin, yaw, and state, plus every crate. Loading validates everything, including body capacity, with a dry run before rebuilding.

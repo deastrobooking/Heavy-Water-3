@@ -100,3 +100,4 @@ Additional system plans live in [`docs/plans/`](docs/plans/), including scenes, 
 - **Validation target:** Apple Silicon with Metal. Linux/Vulkan and Windows/D3D12 runtime testing remains future work.
 
 Frame intervals include presentation pacing and are not GPU execution timings. The pinned Mach revision also has a known macOS programmatic-resize deadlock; see [Validation](docs/validation.md) before changing window behavior.
+

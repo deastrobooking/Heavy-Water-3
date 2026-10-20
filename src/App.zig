@@ -522,7 +522,7 @@ fn saveExists(self: *App) bool {
 /// Any GUI that takes the keyboard and frees the mouse is open.
 fn uiActive(self: *const App) bool {
     const sb = &self.sandbox;
-    return self.menu.screen != .none or sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null;
+    return self.menu.screen != .none or sb.creator.open or sb.talk != null or sb.shop != null or sb.trading != null or sb.tools.platform_editor_open;
 }
 
 /// Arrow keys, WASD, Enter/Space/E and Escape navigate every GUI.
@@ -557,6 +557,14 @@ fn uiNav(self: *App, k: Menu.Key) void {
     });
     if (self.menu.screen != .none) return self.menuKey(k);
     const sb = &self.sandbox;
+    if (sb.tools.platform_editor_open) return Build.platformEditorAction(sb, switch (k) {
+        .left => .horizontal,
+        .right => .vertical,
+        .up => .up_one,
+        .down => .down_one,
+        .confirm => .close,
+        .back => .close,
+    });
     if (sb.creator.open) return self.creatorInput(switch (k) {
         .up => .up,
         .down => .down,
@@ -926,6 +934,7 @@ fn pointAt(self: *App, click: bool) void {
         },
         .imported_save => if (click) self.saveMeshLibrary(),
         .mesh_tool => if (click) self.meshToolControl(@enumFromInt(row)),
+        .platform_editor => if (click) Build.platformEditorAction(sb, @enumFromInt(row)),
         .fab_tab => if (sb.shop) |*shop| if (click) {
             shop.tab = row;
             shop.row = 0;
@@ -1140,6 +1149,8 @@ pub fn update(self: *App, core: *mach.Core) void {
                 }
             };
             if (self.navKey(key.key)) |k| self.uiNav(k);
+        } else if (key.key == .o and self.sandbox.tools.tool == .build) {
+            Build.openPlatformEditor(&self.sandbox);
         } else if (key.key == .escape) {
             self.menu.open(.pause);
             self.menu.hero_player = 0;
@@ -1501,7 +1512,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1821,6 +1832,18 @@ fn guiShowcase(self: *App, v: u32) void {
         68 => {
             self.menu.open(.pause);
             self.menu.open(.world_map);
+        },
+        80 => {
+            sb.player.mode = .fly;
+            sb.tools.tool = .build;
+            sb.tools.preview = null;
+            Build.openPlatformEditor(sb);
+            const view_stall = sb.stallPosition(0);
+            const eye: [3]f32 = .{ view_stall[0], view_stall[1] + 3, view_stall[2] - 3 };
+            self.showcase_pose = .{ .eye = eye, .yaw = 0, .pitch = -0.32 };
+            self.engine.camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
+            self.engine.camera.yaw = 0;
+            self.engine.camera.pitch = -0.32;
         },
         29 => {
             sb.progress.vehicles = 0b111;

@@ -1468,7 +1468,14 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Inspected:** the Detroit, NYC and LA rasters are 2048×2048, 16-bit grayscale PNGs. NYC is already sampled by `CityHeightmaps` for both chunks and physics/placement queries; the image contains a broad dark water channel and raised landforms, but no georeferencing metadata, so the current 160 km placement and 700 m relief are still approximate. No Chicago heightmap asset is present under `assets/`.
 - **Checked:** default `python3 tools/zig.py build check` passed. `MTL_DEBUG_LAYER=1` ReleaseSafe showcase 7 captured frame 120 and exited cleanly; Metal API Validation was enabled. The overview keeps the ground city and existing road bridges visible beneath the megatowers, but it does not clearly show the crown route at this camera distance.
 - **Capture recheck:** after excluding low factory roofs from the skyway graph, a repeat showcase run initialized Metal but did not reach frame 120 within about three minutes; I stopped it. The successful capture above predates that graph filter.
-- **Not checked / next:** hands-on walkability on the crown loop, moving lifts, the popup editor for user-placed horizontal/vertical platforms and height offsets, Hive patrols on the elevated routes, civilian panic/evacuation behavior, and headless tests. Chicago cannot be imported until its source raster is added.
+- **Not checked / next:** hands-on walkability on the crown loop, Hive patrols on the elevated routes, civilian panic/evacuation behavior, and headless tests. The existing prefab elevator already has a ride-to-landing smoke test, but the tower ascent route is not yet connected as a complete playable path. Chicago cannot be imported until its source raster is added.
+
+## Floating platform editor — 2026-10-20
+
+- **Added:** O in the build tool opens a popup with horizontal and vertical 16 m square decks and 1 m / 10 m height adjustments from the aimed surface, clamped to −1,000…+1,200 m. Platforms are saved as ordinary body-plate machines. Their placement preview now renders the body device and permits unsupported placement at the chosen offset; overlap and player collision checks still apply. P remains prefab capture.
+- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` passed. `MTL_DEBUG_LAYER=1` ReleaseSafe showcase 80 captured frame 120 and exited cleanly with Metal API Validation enabled; the popup is readable and the aimed platform preview is visible, red where it overlaps nearby geometry.
+- **Not checked:** hands-on input and placement, save/reload in the game, and headless tests. The existing elevator ride test remains the current evidence for elevator operation; it does not prove a continuous ascent route through the new skyline.
+- **Still open:** playable route walkability across the crown loop, Hive patrols on elevated skyways, civilian flight from threats, and adding a Chicago raster.
 
 ## Per-vertex cel pens (E1b) — 2026-10-19
 

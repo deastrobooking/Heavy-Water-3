@@ -1,4 +1,5 @@
-//! In-world creation: the build tool (place and remove crates, prefab machines, and loose
+//! In-world creation: the build tool (place and remove crates, prefab machines, floating
+//! platforms, and loose
 //! workshop devices with grid and surface snapping and quarter-turn rotation) and the wire
 //! tool (connect and disconnect device ports with the same validation blueprint files get).
 const std = @import("std");
@@ -15,7 +16,7 @@ const Vec3 = Physics.Vec3;
 
 pub const Tool = enum { hands, build, wire, bridge, weapon };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
-pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon, root_sender, root_listener };
+pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon, root_sender, root_listener, platform };
 pub const build_reach: f32 = 14;
 pub const grid: f32 = 0.5;
 pub const max_candidates = 16;
@@ -40,7 +41,46 @@ pub const State = struct {
     bridge_hover: ?u8 = null,
     /// Structure for the next player bridge (Tab cycles it with the bridge tool).
     bridge_style: @import("../procedural/District.zig").Style = .suspension,
+    platform_editor_open: bool = false,
+    platform_vertical: bool = false,
+    /// Height relative to the surface the placement ray hits, in metres.
+    platform_offset: f32 = 0,
 };
+
+fn makePlatformBlueprint(vertical: bool) Blueprint {
+    var bp: Blueprint = .{};
+    bp.setName("floating_platform") catch unreachable;
+    const size: Vec3 = if (vertical) .{ 1, 16, 16 } else .{ 16, 1, 16 };
+    _ = bp.addDevice(.{ .id = "deck", .kind = .plate, .size = size, .color = .{ 0.62, 0.75, 0.70, 1 }, .body = true }) catch unreachable;
+    return bp;
+}
+const horizontal_platform_blueprint = makePlatformBlueprint(false);
+const vertical_platform_blueprint = makePlatformBlueprint(true);
+
+pub const PlatformEditorAction = enum { horizontal, vertical, up_one, down_one, up_ten, down_ten, reset, close };
+
+pub fn openPlatformEditor(sb: *Sandbox) void {
+    sb.tools.slot = @intFromEnum(Item.platform);
+    sb.tools.platform_editor_open = true;
+}
+
+pub fn platformEditorAction(sb: *Sandbox, action: PlatformEditorAction) void {
+    const st = &sb.tools;
+    switch (action) {
+        .horizontal => {
+            st.platform_vertical = false;
+        },
+        .vertical => {
+            st.platform_vertical = true;
+        },
+        .up_one => st.platform_offset = @min(1200, st.platform_offset + 1),
+        .down_one => st.platform_offset = @max(-1000, st.platform_offset - 1),
+        .up_ten => st.platform_offset = @min(1200, st.platform_offset + 10),
+        .down_ten => st.platform_offset = @max(-1000, st.platform_offset - 10),
+        .reset => st.platform_offset = 0,
+        .close => st.platform_editor_open = false,
+    }
+}
 
 pub fn paletteLen(sb: *const Sandbox) usize {
     return builtin_count + Market.ware_count + sb.prefab_count;
@@ -64,7 +104,7 @@ pub fn entryName(sb: *const Sandbox, e: Entry) []const u8 {
 /// The blueprint an entry places as a whole machine, if it is one.
 fn blueprintOf(sb: *const Sandbox, e: Entry) ?*const Blueprint {
     return switch (e) {
-        .item => |item| prefab(sb, item),
+        .item => |item| if (item == .platform) (if (sb.tools.platform_vertical) &vertical_platform_blueprint else &horizontal_platform_blueprint) else prefab(sb, item),
         .kit => |ware| sb.catalog.content.wares[@intFromEnum(ware)],
         .prefab => |i| &sb.prefabs[i],
     };
@@ -79,6 +119,7 @@ pub fn itemName(item: Item) []const u8 {
         .root_sender => "root sender",
         .root_listener => "root listener",
         .sap_beacon => "sap beacon",
+        .platform => "floating platform",
         else => @tagName(item),
     };
 }
@@ -126,7 +167,7 @@ pub fn kitDevice(item: Item, id: []const u8) Blueprint.DocDevice {
         .receiver => .{ .id = id, .kind = .receiver, .size = .{ 0.5, 0.3, 0.5 }, .color = .{ 0.45, 0.55, 0.95, 1 }, .channel = 1, .body = true },
         .root_sender => .{ .id = id, .kind = .root_sender, .size = .{ 0.5, 0.9, 0.5 }, .color = .{ 0.55, 0.95, 0.45, 1 }, .channel = 1, .body = true },
         .root_listener => .{ .id = id, .kind = .root_listener, .size = .{ 0.7, 0.4, 0.7 }, .color = .{ 0.35, 0.8, 0.4, 1 }, .channel = 1, .body = true },
-        .crate, .powered_door, .elevator, .rover, .sap_beacon => unreachable,
+        .crate, .powered_door, .elevator, .rover, .sap_beacon, .platform => unreachable,
     };
 }
 
@@ -226,9 +267,14 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
     const e = current(sb);
     var result: Preview = .{ .entry = e, .origin = undefined, .center = undefined, .half = undefined, .yaw = st.yaw, .valid = true };
     if (blueprintOf(sb, e)) |bp| {
+        const floating_platform = e == .item and e.item == .platform;
         result.origin = sb.groundOrigin(bp, x, z, st.yaw);
         var bounds = footprint(bp, st.yaw);
-        if (hit.point[1] > Terrain.surface(sb.seed, x, z).height + 1) {
+        if (floating_platform) {
+            // A platform's lowest face is placed on the hit surface at offset zero; the
+            // popup adjusts it freely above or below that reference without requiring supports.
+            result.origin = .{ x, hit.point[1] - bounds.lo[1] + st.platform_offset, z };
+        } else if (hit.point[1] > Terrain.surface(sb.seed, x, z).height + 1) {
             // Elevated construction must be supported across its whole footprint. Start rays
             // just above the selected deck so upper floors cannot steal the placement.
             var top = -std.math.inf(f32);
@@ -247,8 +293,10 @@ pub fn preview(sb: *const Sandbox, camera: Camera) ?Preview {
             if (hit.normal[1] < 0.95) result.valid = false;
         }
         // Foundations may sink into the terrain; only the part above ground must be clear.
-        bounds.lo[1] = @max(bounds.lo[1], 0.05);
-        if (bounds.hi[1] <= bounds.lo[1]) bounds.hi[1] = bounds.lo[1] + 0.1;
+        if (!floating_platform) {
+            bounds.lo[1] = @max(bounds.lo[1], 0.05);
+            if (bounds.hi[1] <= bounds.lo[1]) bounds.hi[1] = bounds.lo[1] + 0.1;
+        }
         for (0..3) |k| {
             result.center[k] = result.origin[k] + (bounds.lo[k] + bounds.hi[k]) / 2;
             result.half[k] = (bounds.hi[k] - bounds.lo[k]) / 2;
@@ -292,7 +340,7 @@ pub fn place(sb: *Sandbox, p: Preview) !void {
     const item = p.entry.item;
     switch (item) {
         .crate => _ = sb.spawnCrate(p.center, .{ 0, 0, 0 }) catch |err| return sb.say("cannot place: {s}", .{@errorName(err)}),
-        .powered_door, .elevator, .rover, .sap_beacon => unreachable,
+        .powered_door, .elevator, .rover, .sap_beacon, .platform => unreachable,
         .generator, .sap_tap, .button, .latch, .logic_or, .lamp, .transmitter, .receiver, .root_sender, .root_listener => {
             sb.tools.kit_serial += 1;
             var id_buffer: [Blueprint.id_len]u8 = undefined;
@@ -571,7 +619,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
         .build => switch (current(sb)) {
             .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.kits[0].wallet.kits[@intFromEnum(ware)] }) catch buffer,
-            else => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE", .{entryName(sb, current(sb))}) catch buffer,
+            else => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE  O PLATFORM EDITOR", .{entryName(sb, current(sb))}) catch buffer,
         },
         .wire => if (pendingWire(sb)) |w| blk: {
             const bp = &sb.machines[st.wire_from.?.machine].blueprint;
@@ -604,6 +652,14 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             for (bp.parts[0..bp.part_count]) |part| {
                 if (n == out.len) return n;
                 out[n] = .{ .mesh = block, .transform = .{ .position = R.add(p.origin, R.rotate(q, part.offset)) }, .tint = tint, .size = part.size, .rotation = q };
+                n += 1;
+            }
+            // Device-only blueprints still need a visible preview. Floating platforms use a
+            // single body plate rather than a fabricated assembly part.
+            for (bp.devices[0..bp.device_count]) |device| {
+                if (!device.visible()) continue;
+                if (n == out.len) return n;
+                out[n] = .{ .mesh = block, .transform = .{ .position = R.add(p.origin, R.rotate(q, device.offset)) }, .tint = tint, .size = device.size, .rotation = q };
                 n += 1;
             }
             if (bp.vehicle) |v| if (n < out.len) {
