@@ -1,0 +1,80 @@
+{
+  "01_eye_of_the_sahara": {
+    "name": "Richat Structure (Eye of the Sahara, Mauritania)",
+    "biome": "Arid Concentric Megastructure Arena",
+    "file": "01_eye_of_the_sahara_16bit.png",
+    "center_lat": 21.124,
+    "center_lon": -11.402,
+    "dem_min_elevation_m": 334.04,
+    "dem_max_elevation_m": 617.76,
+    "vertical_relief_m": 283.71,
+    "footprint_width_m": 51999.76,
+    "footprint_height_m": 51999.95,
+    "z_to_x_ratio": 0.005456
+  },
+  "02_auyan_tepui_angel_falls": {
+    "name": "Auyan-tepui & Chur\u00fan Canyon (Angel Falls, Venezuela)",
+    "biome": "Jungle Tabletop Mesa & 979m Waterfall",
+    "file": "02_auyan_tepui_angel_falls_16bit.png",
+    "center_lat": 5.918,
+    "center_lon": -62.535,
+    "dem_min_elevation_m": 399.18,
+    "dem_max_elevation_m": 2377.54,
+    "vertical_relief_m": 1978.36,
+    "footprint_width_m": 37999.83,
+    "footprint_height_m": 37999.88,
+    "z_to_x_ratio": 0.052062
+  },
+  "03_putorana_plateau": {
+    "name": "Putorana Plateau & Lake Lama Fjords (Siberia)",
+    "biome": "Arctic Basalt Fortress & Waterfall Canyons",
+    "file": "03_putorana_plateau_16bit.png",
+    "center_lat": 69.38,
+    "center_lon": 90.65,
+    "dem_min_elevation_m": 0.0,
+    "dem_max_elevation_m": 1418.56,
+    "vertical_relief_m": 1418.56,
+    "footprint_width_m": 47999.78,
+    "footprint_height_m": 48001.49,
+    "z_to_x_ratio": 0.029553
+  },
+  "04_chongqing_tiankeng_karst": {
+    "name": "Xiaozhai Tiankeng & Three Gorges Karst (China)",
+    "biome": "Collapsed Megacavern Sinkholes & Deep Gorges",
+    "file": "04_chongqing_tiankeng_karst_16bit.png",
+    "center_lat": 30.7505,
+    "center_lon": 109.47,
+    "dem_min_elevation_m": 183.53,
+    "dem_max_elevation_m": 2076.86,
+    "vertical_relief_m": 1893.33,
+    "footprint_width_m": 29999.86,
+    "footprint_height_m": 29999.91,
+    "z_to_x_ratio": 0.063111
+  },
+  "05_danakil_erta_ale": {
+    "name": "Danakil Depression & Erta Ale Shield Volcano (Ethiopia)",
+    "biome": "Sub-Sea-Level Rift Valley & Acid/Lava Flats",
+    "file": "05_danakil_erta_ale_16bit.png",
+    "center_lat": 13.6,
+    "center_lon": 40.66,
+    "dem_min_elevation_m": -116.18,
+    "dem_max_elevation_m": 1000.64,
+    "vertical_relief_m": 1116.82,
+    "footprint_width_m": 44999.79,
+    "footprint_height_m": 44999.9,
+    "z_to_x_ratio": 0.024818
+  },
+  "06_mariana_trench_abyss": {
+    "name": "Mariana Trench \u2014 Challenger Deep (Western Pacific)",
+    "biome": "Abyssal Ocean Trench (-10,900m Sub-Surface)",
+    "file": "06_mariana_trench_abyss_16bit.png",
+    "center_lat": 11.35,
+    "center_lon": 142.2,
+    "dem_min_elevation_m": -11998.0,
+    "dem_max_elevation_m": 0.0,
+    "vertical_relief_m": 11998.0,
+    "footprint_width_m": 159999.27,
+    "footprint_height_m": 160003.8,
+    "z_to_x_ratio": 0.074988
+  }
+}
