@@ -72,18 +72,10 @@ pub fn build(b: *std.Build) void {
     compile_crate.addFileArg(b.path("assets/source/crate.gltf"));
     compile_crate.addFileArg(b.path("assets/source/crate.gltf.meta"));
     const crate = compile_crate.addOutputFileArg("crate.hwmesh");
-    const compile_captain = b.addRunArtifact(compiler);
-    compile_captain.addArg("compile-modified");
-    compile_captain.addFileArg(b.path("assets/Characters/Test+Chroma (1).glb"));
-    compile_captain.addFileArg(b.path("assets/Characters/Test+Chroma (1).glb.meta"));
-    compile_captain.addFileArg(b.path("tools/captain/Captain.modifiers.json"));
-    const captain_mesh = compile_captain.addOutputFileArg("captain.hwmesh");
-    compile_captain.addArg("bind");
     manifest.addFileArg(b.path("assets/source/crate.gltf.meta"));
     manifest.addArgs(&.{ "crate", "crate.hwmesh" });
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
-    assets.dependOn(&b.addInstallFileWithDir(captain_mesh, .{ .custom = "assets" }, "captain.hwmesh").step);
     // Blueprints are validated by the same tool; an invalid machine fails the build.
     const blueprint_names = [_][]const u8{ "powered_door", "elevator", "rover", "sap_beacon", "proximity_gate", "street_lamp", "signal_relay", "rootsong_hearth", "rootsong_call" };
     var blueprints: [blueprint_names.len]std.Build.LazyPath = undefined;
