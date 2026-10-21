@@ -2257,14 +2257,25 @@ fn publishCityHiveBases(sb: *const Sandbox, out: []World.Prop, start: usize, t: 
     var n = start;
     const pulse = 0.62 + 0.3 * @sin(t * 1.45);
     const detroit_sites = [_][2]f32{ .{ 350, 95 }, .{ -350, 185 }, .{ 0, 445 } };
-    if (!CityContent.liberated(&CityContent.detroit, &sb.progress)) for (detroit_sites) |site| {
-        if (!room(out, n, 2)) return n;
+    const detroit_liberated = CityContent.liberated(&CityContent.detroit, &sb.progress);
+    for (detroit_sites) |site| {
+        const need: usize = if (detroit_liberated) 4 else 2;
+        if (!room(out, n, need)) return n;
         const ground = Terrain.surface(sb.seed, site[0], site[1]).height;
         const at: V = .{ site[0], ground, site[1] };
-        out[n] = .{ .mesh = c.hive_base, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .size = @splat(0.78) };
-        out[n + 1] = .{ .mesh = c.hive_base_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = @splat(0.78) };
-        n += 2;
-    };
+        if (detroit_liberated) {
+            const light = Material.emissive(.{ 0.24, 0.94, 0.72, 1 }, pulse);
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ site[0], ground + 1.6, site[1] } }, .tint = .{ 0.64, 0.73, 0.69, 1 }, .size = .{ 1.2, 3.2, 1.2 } };
+            out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = .{ site[0], ground + 3.55, site[1] } }, .tint = light, .size = @splat(1.05) };
+            out[n + 2] = .{ .mesh = c.flora[7], .transform = .{ .position = .{ site[0] - 3.1, ground + 0.2, site[1] }, .scale = 2.4 }, .tint = .{ 1, 1, 1, 1 } };
+            out[n + 3] = .{ .mesh = c.flora[9], .transform = .{ .position = .{ site[0] + 3.1, ground + 0.2, site[1] + 0.6 }, .scale = 1.55 }, .tint = .{ 1, 1, 1, 1 } };
+            n += 4;
+        } else {
+            out[n] = .{ .mesh = c.hive_base, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .size = @splat(0.78) };
+            out[n + 1] = .{ .mesh = c.hive_base_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = @splat(0.78) };
+            n += 2;
+        }
+    }
     const ny_seed = Region.new_york.seed(sb.seed);
     const ny_sites = [_][2]f32{ .{ 249845, 0 }, .{ 250170, 0 }, .{ 250000, 160 }, .{ 250000, -170 } };
     for (ny_sites) |site| {
@@ -3343,10 +3354,20 @@ test "Detroit Titan opens after the frontier, runs three phases, rewards the par
     const p2_xp = sb.kits[1].combat_xp;
     const p1_parts = sb.kits[0].wallet.parts;
     const p2_parts = sb.kits[1].wallet.parts;
+    var siege_props: [32]World.Prop = undefined;
+    const siege_count = publishCityHiveBases(&sb, &siege_props, 0, 0);
+    try std.testing.expect(siege_props[0].mesh.eql(sb.catalog.content.hive_base));
     sb.enemies.units = @splat(null);
     hive(&sb, .{ .unit_down = .{ .kind = .scalari_titan, .nest = Enemies.foundry_nest, .position = arena } }, &camera);
     try std.testing.expect(CityContent.bossDefeated(&CityContent.detroit, &sb.progress));
     try std.testing.expect(CityContent.liberated(&CityContent.detroit, &sb.progress));
+    var liberated_props: [32]World.Prop = undefined;
+    const liberated_count = publishCityHiveBases(&sb, &liberated_props, 0, 0);
+    try std.testing.expect(liberated_count > siege_count);
+    try std.testing.expect(liberated_props[0].mesh.eql(sb.catalog.content.block));
+    try std.testing.expect(liberated_props[1].mesh.eql(sb.catalog.content.gem));
+    try std.testing.expect(liberated_props[2].mesh.eql(sb.catalog.content.flora[7]));
+    try std.testing.expect(liberated_props[3].mesh.eql(sb.catalog.content.flora[9]));
     try std.testing.expectEqual(p1_xp + 1200, sb.kits[0].combat_xp);
     try std.testing.expectEqual(p2_xp + 1200, sb.kits[1].combat_xp);
     try std.testing.expectEqual(p1_parts + 18, sb.kits[0].wallet.parts);

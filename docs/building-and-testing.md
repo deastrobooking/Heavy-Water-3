@@ -221,8 +221,9 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 83, 84 | Insectoid amber-carapace and brushed-silver Scalari siege frames |
 | 85 | Antarctic blue glacier, towering perimeter ramparts, and patrol overview |
 | 86 | Close view of an animated scorpion sentry against the ice rampart |
-| 97 | Collaborators' Titan with its three Detroit ally pylons and one reinforcement wave |
-| 98 | Detroit's sealed sap barrel discovery marker on a plaza loading deck |
+| 97 | Collaborators' Titan, framed from a low bridge approach with its three Detroit ally pylons |
+| 98 | Detroit's Undercroft Stash discovery marker in the plaza side aisle |
+| 99 | A former Detroit Hive site reclaimed as a relay garden |
 | 16, 17 | Armor lineup; hardsuit close-up (`-Dcharacter-showcase=30..33`: the four mecha armor sets over a hardsuit in the creator) |
 | 18 | Title screen |
 | 19 | Conversation with Maro |

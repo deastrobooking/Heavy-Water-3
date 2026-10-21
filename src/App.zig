@@ -1940,9 +1940,9 @@ fn showcase(self: *App) void {
         };
         self.sandbox.city_titan_phase = 2;
         self.sandbox.player.mode = .fly;
-        self.sandbox.player.feet = R3.add(arena, .{ 70, 30, 12 });
-        target = R3.add(arena, .{ 0, 4, 0 });
-        eye = R3.add(arena, .{ 110, 180, 0 });
+        self.sandbox.player.feet = R3.add(arena, .{ 18, 11, -37 });
+        target = R3.add(arena, .{ 0, 3, 0 });
+        eye = R3.add(arena, .{ 24, 17, -44 });
     } else if (v == 98) {
         const CityDiscoveries = @import("game/CityDiscoveries.zig");
         var points: [@import("game/CityContent.zig").discovery_count][3]f32 = undefined;
@@ -1956,6 +1956,28 @@ fn showcase(self: *App) void {
         target = point;
         const player_eye = self.sandbox.player.eye();
         eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
+    } else if (v == 99) {
+        const CityContent = @import("game/CityContent.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        for (self.sandbox.enemies.nests[0..self.sandbox.enemies.nest_count]) |*nest| {
+            nest.alive = false;
+            nest.health = 0;
+        }
+        for (&self.sandbox.skies.carriers) |*carrier| carrier.alive = false;
+        self.sandbox.enemies.units = @splat(null);
+        for (CityContent.detroit.missions) |mission| self.sandbox.progress.setFlag(mission.exposed_flag);
+        self.sandbox.progress.setFlag(CityContent.detroit.boss.defeated_flag);
+        self.sandbox.progress.setFlag(CityContent.detroit.liberated_flag);
+        self.sandbox.notice_len = 0;
+        self.sandbox.notice_until = 0;
+        const site: [2]f32 = .{ 350, 95 };
+        const ground = Terrain.surface(self.sandbox.seed, site[0], site[1]).height;
+        self.sandbox.player.mode = .fly;
+        self.sandbox.view = .first;
+        self.sandbox.player.feet = .{ site[0] + 10, ground + 6, site[1] - 18 };
+        self.sandbox.player.velocity = .{ 0, 0, 0 };
+        target = .{ site[0], ground + 2.5, site[1] };
+        eye = .{ site[0] + 18, ground + 13, site[1] - 31 };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
