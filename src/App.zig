@@ -1943,6 +1943,19 @@ fn showcase(self: *App) void {
         self.sandbox.player.feet = R3.add(arena, .{ 70, 30, 12 });
         target = R3.add(arena, .{ 0, 4, 0 });
         eye = R3.add(arena, .{ 110, 180, 0 });
+    } else if (v == 98) {
+        const CityDiscoveries = @import("game/CityDiscoveries.zig");
+        var points: [@import("game/CityContent.zig").discovery_count][3]f32 = undefined;
+        CityDiscoveries.positions(layout, self.sandbox.seed, &points);
+        const point = points[2];
+        self.sandbox.player.mode = .fly;
+        self.sandbox.view = .first;
+        self.sandbox.player.feet = .{ point[0] + 8, point[1] - 2, point[2] + 10 };
+        self.sandbox.player.velocity = .{ 0, 0, 0 };
+        self.sandbox.target = .{ .city_discovery = 2 };
+        target = point;
+        const player_eye = self.sandbox.player.eye();
+        eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -2593,6 +2606,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeWindsorCase();
             self.smokeBileCase();
             self.smokeCityTitan();
+            self.smokeCityDiscoveries();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -3007,6 +3021,83 @@ fn smokeCityTitan(self: *App) void {
     std.log.info("Smoke Collaborators' Titan: three ally flags and a cleared Frontier opened the bridge fight; the Titan called one Hive reinforcement wave and exposed its core; P1 defeated the group and both kits received the boss reward; Detroit was marked free", .{});
 }
 
+/// Recover a personal discovery through P1 and P2's separate aim/interact paths, then a shared
+/// find, and confirm the two kit claims survive a world save round-trip.
+fn smokeCityDiscoveries(self: *App) void {
+    const sb = &self.sandbox;
+    const camera = &self.engine.camera;
+    const baseline = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE DISCOVERIES BASELINE {s}", .{@errorName(err)});
+    defer self.allocator.free(baseline);
+    defer sb.restore(self.allocator, baseline, camera) catch |err| self.smokeFail("SMOKE DISCOVERIES RESTORE {s}", .{@errorName(err)});
+    defer sb.leaveGuest(0);
+
+    const CityContent = @import("game/CityContent.zig");
+    const CityDiscoveries = @import("game/CityDiscoveries.zig");
+    var points: [CityContent.discovery_count][3]f32 = undefined;
+    CityDiscoveries.positions(&sb.catalog.district, sb.seed, &points);
+    const personal: usize = 0;
+    const shared: usize = 3;
+    if (CityContent.detroit.discoveries[personal].reward != .personal or CityContent.detroit.discoveries[shared].reward != .shared) return self.smokeFail("SMOKE DISCOVERY REWARD MAP CHANGED", .{});
+
+    sb.joinGuest(0);
+    sb.tools.tool = .hands;
+    sb.view = .first;
+    sb.player.mode = .fly;
+    sb.kits[0].city_discoveries = 0;
+    sb.kits[1].city_discoveries = 0;
+    const p1_level = sb.kits[0].level(.fuel_tank);
+    const p2_level = sb.kits[1].level(.fuel_tank);
+
+    sb.player.feet = .{ points[personal][0], points[personal][1] - 2, points[personal][2] - 4 };
+    sb.player.velocity = .{ 0, 0, 0 };
+    var eye = sb.player.eye();
+    var dx = points[personal][0] - eye.x();
+    var dy = points[personal][1] - eye.y();
+    var dz = points[personal][2] - eye.z();
+    camera.position = eye;
+    camera.yaw = std.math.atan2(dx, dz);
+    camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+    sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P1 DISCOVERY {s}", .{@errorName(err)});
+    if (sb.target != .city_discovery or sb.target.city_discovery != personal or !sb.kits[0].hasCityDiscovery(personal) or sb.kits[0].level(.fuel_tank) != p1_level + 1) return self.smokeFail("SMOKE P1 PERSONAL DISCOVERY FAILED (target {s})", .{@tagName(sb.target)});
+
+    var guest = &sb.guests[0];
+    guest.view = .first;
+    guest.player.mode = .fly;
+    guest.player.feet = .{ points[personal][0], points[personal][1] - 2, points[personal][2] - 4 };
+    guest.player.velocity = .{ 0, 0, 0 };
+    eye = guest.player.eye();
+    dx = points[personal][0] - eye.x();
+    dy = points[personal][1] - eye.y();
+    dz = points[personal][2] - eye.z();
+    guest.camera.position = eye;
+    guest.camera.yaw = std.math.atan2(dx, dz);
+    guest.camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+    guest.interact = true;
+    sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P2 DISCOVERY {s}", .{@errorName(err)});
+    if (guest.target != .city_discovery or guest.target.city_discovery != personal or !sb.kits[1].hasCityDiscovery(personal) or sb.kits[1].level(.fuel_tank) != p2_level + 1) return self.smokeFail("SMOKE P2 PERSONAL DISCOVERY FAILED (target {s})", .{@tagName(guest.target)});
+
+    sb.player.feet = .{ points[shared][0], points[shared][1] - 2, points[shared][2] - 4 };
+    sb.player.velocity = .{ 0, 0, 0 };
+    eye = sb.player.eye();
+    dx = points[shared][0] - eye.x();
+    dy = points[shared][1] - eye.y();
+    dz = points[shared][2] - eye.z();
+    camera.position = eye;
+    camera.yaw = std.math.atan2(dx, dz);
+    camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+    sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE SHARED DISCOVERY {s}", .{@errorName(err)});
+    const shared_flag = CityContent.detroit.discoveries[shared].reward.shared;
+    if (sb.target != .city_discovery or sb.target.city_discovery != shared or !sb.progress.hasFlag(shared_flag)) return self.smokeFail("SMOKE SHARED DISCOVERY FAILED (target {s})", .{@tagName(sb.target)});
+
+    const bytes = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE DISCOVERY SAVE {s}", .{@errorName(err)});
+    defer self.allocator.free(bytes);
+    sb.kits[0].city_discoveries = 0;
+    sb.kits[1].city_discoveries = 0;
+    sb.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE DISCOVERY LOAD {s}", .{@errorName(err)});
+    if (!sb.kits[0].hasCityDiscovery(personal) or !sb.kits[1].hasCityDiscovery(personal) or !sb.progress.hasFlag(shared_flag)) return self.smokeFail("SMOKE DISCOVERY SAVE ROUND TRIP FAILED", .{});
+    std.log.info("Smoke Detroit discoveries: P1 and P2 independently recovered the Bell Tower Cache, Plaza 5's Rootmap became shared, and both kit claims plus the shared flag survived save/load", .{});
+}
+
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
     const session = self.sandbox.talk orelse return false;
     const node = self.sandbox.dialogue.node(session);
@@ -3217,7 +3308,7 @@ fn smokeHeroes(self: *App) void {
     var met: ?u8 = null;
     for (sb.encounters) |maybe| if (maybe) |spot| if (!sb.progress.hasHero(spot.hero) and met == null) {
         const eye: [3]f32 = .{ spot.position[0], spot.position[1] + 1.6, spot.position[2] - 3 };
-        const target = Frontier.pick(sb, eye, R3.normalize(.{ 0, -0.45, 3 }), 8, 8);
+        const target = Frontier.pick(sb, eye, R3.normalize(.{ 0, -0.45, 3 }), 8, 8, 0);
         if (target != null and target.? == .hero and target.?.hero == spot.hero) {
             Frontier.recruit(sb, spot.hero);
             met = spot.hero;
@@ -3284,7 +3375,7 @@ fn smokePets(self: *App) void {
         if (sb.kits[0].hasPet(sp)) continue;
         const lift: f32 = if (Pets.info(sp).flies) Pets.hover else 0.7;
         const eye: [3]f32 = .{ spot.position[0], spot.position[1] + lift, spot.position[2] - 3 };
-        const target = Frontier.pick(sb, eye, .{ 0, 0, 1 }, 8, 8);
+        const target = Frontier.pick(sb, eye, .{ 0, 0, 1 }, 8, 8, 0);
         if (target != null and target.? == .wild_pet and target.?.wild_pet == sp) {
             _ = sb.pets.netHitWild(sp, 38);
             _ = sb.pets.netHitWild(sp, 38);
@@ -3689,8 +3780,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and options.showcase != 97 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
-    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 94 or options.showcase == 97 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and options.showcase != 97 and options.showcase != 98 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 94 or options.showcase == 97 or options.showcase == 98 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
@@ -3758,6 +3849,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .bile_trace => |i| renderer.hud_lines[1].set("BILE ARCHIVE TRACE {d}/3  X / CLICK RECOVER", .{i + 1}),
         .bile_relay => |i| renderer.hud_lines[1].set("ARCHIVE RELAY {d}  X / CLICK PRESS", .{i + 1}),
         .bile_notes => renderer.hud_lines[1].set("DR. BILE'S NOTES  X / CLICK READ", .{}),
+        .city_discovery => |i| renderer.hud_lines[1].set("{s}  X / CLICK RECOVER", .{@import("game/CityContent.zig").detroit.discoveries[i].name}),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
             renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
         else

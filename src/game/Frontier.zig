@@ -699,7 +699,7 @@ fn seedNestAtMarketDay(sb: *Sandbox) ?u8 {
 }
 
 /// Hover car, fabricator or nothing, along the hands' aim.
-pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.Target {
+pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32, player_slot: usize) ?Sandbox.Target {
     var nearest = @min(best, reach);
     var result: ?Sandbox.Target = null;
     if (sb.garage.pick(eye, dir, nearest)) |hit| {
@@ -796,7 +796,94 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
             };
         }
     }
+    for (sb.city_discovery_positions, 0..) |point, index| {
+        if (!cityDiscoveryAvailable(sb, player_slot, index)) continue;
+        if (Physics.rayBox(eye, dir, point, .{ 1.0, 1.05, 1.0 })) |hit| if (hit.distance < nearest) {
+            nearest = hit.distance;
+            result = .{ .city_discovery = @intCast(index) };
+        };
+    }
     return result;
+}
+
+fn cityDiscoveryAvailable(sb: *const Sandbox, owner: usize, index: usize) bool {
+    if (owner >= Sandbox.max_players or index >= CityContent.discovery_count or !sb.present(owner)) return false;
+    return switch (CityContent.detroit.discoveries[index].reward) {
+        .shared => |flag| !sb.progress.hasFlag(flag),
+        .personal => !sb.kits[owner].hasCityDiscovery(index),
+    };
+}
+
+fn anyPlayerNeedsDiscovery(sb: *const Sandbox, index: usize) bool {
+    if (index >= CityContent.discovery_count) return false;
+    return switch (CityContent.detroit.discoveries[index].reward) {
+        .shared => |flag| !sb.progress.hasFlag(flag),
+        .personal => for (0..Sandbox.max_players) |owner| {
+            if (sb.present(owner) and !sb.kits[owner].hasCityDiscovery(index)) break true;
+        } else false,
+    };
+}
+
+fn awardDiscoveryUpgrade(sb: *Sandbox, owner: usize, upgrade: Sandbox.Kit.Upgrade) bool {
+    const kit = &sb.kits[owner];
+    const level = kit.level(upgrade);
+    if (level >= Sandbox.Kit.max_level) return false;
+    kit.levels[@intFromEnum(upgrade)] = level + 1;
+    return true;
+}
+
+/// A personal discovery is claimed and rewarded by the interacting ranger only.
+pub fn collectCityDiscovery(sb: *Sandbox, owner: usize, index: u8) void {
+    const i: usize = index;
+    if (owner >= Sandbox.max_players or !sb.present(owner) or i >= CityContent.discovery_count) return;
+    const discovery = CityContent.detroit.discoveries[i];
+    switch (discovery.reward) {
+        .shared => |flag| {
+            if (sb.progress.hasFlag(flag)) return;
+            sb.progress.setFlag(flag);
+            sb.say("{s} recovered; shared city record updated", .{discovery.name});
+        },
+        .personal => |reward| {
+            if (!sb.kits[owner].claimCityDiscovery(i)) return;
+            const kit = &sb.kits[owner];
+            const message: []const u8 = switch (reward) {
+                .flight_cell => if (awardDiscoveryUpgrade(sb, owner, .fuel_tank)) "flight cell installed: Fuel Tank +1" else blk: {
+                    kit.wallet.scrap +|= 60;
+                    break :blk "flight cell converted to 60 scrap; Fuel Tank is full";
+                },
+                .suit_upgrade => if (awardDiscoveryUpgrade(sb, owner, .sprint_servos)) "suit servo installed: Sprint Servos +1" else blk: {
+                    kit.wallet.scrap +|= 60;
+                    break :blk "servo converted to 60 scrap; Sprint Servos are full";
+                },
+                .energy_upgrade => if (awardDiscoveryUpgrade(sb, owner, .jet_efficiency)) "energy regulator installed: Jet Efficiency +1" else blk: {
+                    kit.wallet.scrap +|= 60;
+                    break :blk "regulator converted to 60 scrap; Jet Efficiency is full";
+                },
+                .grapple_upgrade => if (awardDiscoveryUpgrade(sb, owner, .grapple_reel)) "pylon reel installed: Grapple Reel +1" else blk: {
+                    kit.wallet.scrap +|= 60;
+                    break :blk "pylon reel converted to 60 scrap; Grapple Reel is full";
+                },
+                .travel_item => blk: {
+                    kit.wallet.scrap +|= 60;
+                    break :blk "transit voucher added: 60 scrap";
+                },
+                .armor_gem => if (!kit.ownsArmor(.gem_aegis)) blk: {
+                    kit.armors |= Sandbox.Kit.armorBit(.gem_aegis);
+                    break :blk "Rootway Gem unlocked: Gem Aegis armor";
+                } else blk: {
+                    kit.wallet.scrap +|= 80;
+                    break :blk "duplicate Rootway Gem converted to 80 scrap";
+                },
+                .pet_freed => if (kit.freePet(.moth)) "Lumi freed; the Lumen Moth is yours" else blk: {
+                    kit.wallet.scrap +|= 80;
+                    break :blk "duplicate pet collar converted to 80 scrap";
+                },
+                .growth_item => "growth sample recovered",
+            };
+            sb.say("P{d}: {s}", .{ owner + 1, message });
+        },
+    }
+    sb.cue(.pickup, sb.city_discovery_positions[i]);
 }
 
 /// Recover one manifest page from a generated industrial checkpoint. Story state is shared.
@@ -1727,6 +1814,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishWindsorEvidence(sb, out, n, t);
     n = publishWindsorGates(sb, out, n, t);
     n = publishBileArchive(sb, out, n, t);
+    n = publishCityDiscoveries(sb, out, n, t);
     n = publishCityTitanArena(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
     n = publishCityGardenFoliage(sb, out, n);
@@ -2482,6 +2570,37 @@ fn publishBileArchive(sb: *const Sandbox, out: []World.Prop, start: usize, t: f3
                 n += 3;
             }
         }
+    }
+    return n;
+}
+
+/// Glowing city keepsakes appear near the party until the shared find or every present ranger's
+/// personal claim is complete. Their anchors remain fixed to seeded Detroit landmarks.
+fn publishCityDiscoveries(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const colors = [CityContent.discovery_count][3]f32{
+        .{ 0.28, 0.86, 1.0 },
+        .{ 0.75, 0.84, 0.92 },
+        .{ 0.3, 1.0, 0.56 },
+        .{ 0.3, 0.92, 0.78 },
+        .{ 0.6, 1.0, 0.38 },
+        .{ 1.0, 0.69, 0.24 },
+        .{ 0.25, 0.72, 1.0 },
+        .{ 0.35, 0.92, 1.0 },
+        .{ 0.67, 0.55, 1.0 },
+        .{ 1.0, 0.77, 0.38 },
+    };
+    var n = start;
+    const c = &sb.catalog.content;
+    for (sb.city_discovery_positions, 0..) |point, index| {
+        if (!anyPlayerNeedsDiscovery(sb, index) or R.length(R.sub(point, sb.player.feet)) > 520 or n + 3 > out.len) continue;
+        const rgb = colors[index];
+        const selected = sb.target == .city_discovery and sb.target.city_discovery == @as(u8, @intCast(index));
+        const pulse = 0.72 + 0.28 * @sin(t * 2.3 + @as(f32, @floatFromInt(index)));
+        const glow = Material.emissive(if (selected) .{ 0.46, 1.0, 0.88, 1 } else .{ rgb[0], rgb[1], rgb[2], 1 }, pulse);
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], point[1] - 0.72, point[2] } }, .tint = .{ 0.23, 0.3, 0.31, 1 }, .size = .{ 1.6, 0.3, 1.6 } };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], point[1] + 2.55, point[2] } }, .tint = Material.emissive(.{ rgb[0], rgb[1], rgb[2], 1 }, 0.48 + pulse * 0.28), .size = .{ 0.28, 5.1, 0.28 } };
+        out[n + 2] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], point[1] + 0.3 + 0.12 * @sin(t * 2.5 + @as(f32, @floatFromInt(index))), point[2] } }, .tint = glow, .size = @splat(if (selected) 1.15 else 0.92), .rotation = yawQuat(t * 0.55) };
+        n += 3;
     }
     return n;
 }

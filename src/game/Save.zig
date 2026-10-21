@@ -30,10 +30,11 @@ const District = @import("../procedural/District.zig");
 /// pine scatter and Detroit's Gothic/industrial skyline; v23 widens Detroit River, adds Belle
 /// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities;
 /// v24 corrects Rootway gallery geometry while retaining district and bridge identities;
-/// v25 adds the selectable Captain test-mesh body style to saved player profiles.
+/// v25 adds the selectable Captain test-mesh body style to saved player profiles; v26 stores
+/// each ranger's Detroit discoveries independently in their kit.
 /// Format 13 is the oldest supported save; its four-player kits default combat XP to zero.
 /// Older saves are rejected deliberately. Bumping the current format does not move this floor.
-pub const format_version: u32 = 25;
+pub const format_version: u32 = 26;
 pub const min_supported_format: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;

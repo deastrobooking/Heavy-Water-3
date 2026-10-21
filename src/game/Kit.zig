@@ -17,6 +17,8 @@ const Kit = @This();
 pub const Upgrade = enum { fuel_tank, jet_efficiency, sprint_servos, stamina_weave, grapple_reel, salvage_kit };
 pub const upgrade_count = enum_compat.fields(Upgrade).len;
 pub const max_level = 3;
+pub const city_discovery_count = 10;
+const city_discovery_mask: u16 = (1 << city_discovery_count) - 1;
 pub const Cost = struct { scrap: u32, parts: u32 };
 pub const Error = error{ MaxLevel, NotEnoughScrap, NotEnoughParts, AlreadyOwned, NotOwned };
 
@@ -56,6 +58,8 @@ pet_active: ?Pets.Species = null,
 /// One independently built field droid and its per-ranger combat experience.
 robot_built: bool = false,
 robot_xp: u32 = 0,
+/// Detroit's personal discoveries already claimed by this ranger.
+city_discoveries: u16 = 0,
 
 pub fn bit(c: Profile.Clothing) u8 {
     return @as(u8, 1) << @intCast(@intFromEnum(c));
@@ -101,6 +105,17 @@ pub fn awardCombatXP(self: *Kit, amount: u32) bool {
 
 pub fn level(self: *const Kit, u: Upgrade) u8 {
     return self.levels[@intFromEnum(u)];
+}
+
+pub fn hasCityDiscovery(self: *const Kit, index: usize) bool {
+    return index < city_discovery_count and self.city_discoveries & (@as(u16, 1) << @intCast(index)) != 0;
+}
+
+/// Claims one personal Detroit discovery. Shared discoveries are recorded in `Progress`.
+pub fn claimCityDiscovery(self: *Kit, index: usize) bool {
+    if (index >= city_discovery_count or self.hasCityDiscovery(index)) return false;
+    self.city_discoveries |= @as(u16, 1) << @intCast(index);
+    return true;
 }
 
 /// Price of the next level of `u` (scrap rises 1×, 2×, 3.5×; later levels also take parts).
@@ -223,6 +238,7 @@ pub const Doc = struct {
     pet_active: ?[]const u8 = null,
     robot_built: bool = false,
     robot_xp: u32 = 0,
+    city_discoveries: u16 = 0,
 };
 
 pub const PetDoc = struct { name: []const u8, xp: u32 = 0 };
@@ -249,6 +265,7 @@ pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
         .pet_active = if (self.pet_active) |a| Pets.info(a).name else null,
         .robot_built = self.robot_built,
         .robot_xp = self.robot_xp,
+        .city_discoveries = self.city_discoveries,
     };
 }
 
@@ -260,7 +277,8 @@ fn petNamed(name: []const u8) ?Pets.Species {
 pub fn fromDoc(doc: Doc) error{InvalidKit}!Kit {
     if (doc.combat_xp > (max_combat_level - 1) * 250) return error.InvalidKit;
     if (doc.robot_xp > max_robot_xp or (doc.robot_xp > 0 and !doc.robot_built)) return error.InvalidKit;
-    var result: Kit = .{ .wallet = doc.wallet, .combat_xp = doc.combat_xp, .robot_built = doc.robot_built, .robot_xp = doc.robot_xp };
+    if (doc.city_discoveries & ~city_discovery_mask != 0) return error.InvalidKit;
+    var result: Kit = .{ .wallet = doc.wallet, .combat_xp = doc.combat_xp, .robot_built = doc.robot_built, .robot_xp = doc.robot_xp, .city_discoveries = doc.city_discoveries };
     if (doc.levels.len > upgrade_count) return error.InvalidKit;
     for (doc.levels) |l| if (l > max_level) return error.InvalidKit;
     @memcpy(result.levels[0..doc.levels.len], doc.levels);
@@ -321,6 +339,9 @@ test "suits are bought once, and a kit round-trips through its save shape" {
     k.weapons = 0b11;
     k.weapon_upgrades[@intFromEnum(WeaponKind.beam_saber)] = 2;
     k.armors |= armorBit(.skyguard) | armorBit(.battle_plate);
+    try std.testing.expect(k.claimCityDiscovery(0));
+    try std.testing.expect(!k.claimCityDiscovery(0));
+    try std.testing.expect(k.claimCityDiscovery(city_discovery_count - 1));
     _ = k.freePet(.falcon);
     k.pet_xp[@intFromEnum(Pets.Species.falcon)] = 200;
 
@@ -332,6 +353,8 @@ test "suits are bought once, and a kit round-trips through its save shape" {
     try std.testing.expect(back.owns(.exo_rig) and back.level(.grapple_reel) == 2);
     try std.testing.expectEqual(k.inventory, back.inventory);
     try std.testing.expectEqual(k.weapon_upgrades, back.weapon_upgrades);
+    try std.testing.expectEqual(k.city_discoveries, back.city_discoveries);
+    try std.testing.expect(back.hasCityDiscovery(0) and back.hasCityDiscovery(city_discovery_count - 1));
     try std.testing.expect(back.ownsArmor(.skyguard) and back.ownsArmor(.scout) and back.ownsArmor(.battle_plate) and !back.ownsArmor(.buster));
     try std.testing.expectEqual(@as(f32, 140), back.maxHealth());
     try std.testing.expectEqual(@as(u8, 3), back.petLevel(.falcon));
@@ -339,6 +362,7 @@ test "suits are bought once, and a kit round-trips through its save shape" {
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .levels = &.{ 0, 0, 9 } }));
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .levels = &@as([upgrade_count + 1]u8, @splat(0)) }));
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .weapon_upgrades = &.{3} }));
+    try std.testing.expectError(error.InvalidKit, fromDoc(.{ .city_discoveries = @as(u16, 1) << city_discovery_count }));
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .weapon_upgrades = &.{1} })).weaponLevel(.beam_saber));
     try std.testing.expectEqual(@as(u8, 2), (try fromDoc(.{ .levels = &.{ 0, 2 } })).level(.jet_efficiency));
     try std.testing.expectEqual(free_suits, (try fromDoc(.{})).suits);

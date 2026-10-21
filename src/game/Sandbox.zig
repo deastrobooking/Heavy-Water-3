@@ -36,6 +36,7 @@ const District = @import("../procedural/District.zig");
 const Metro = @import("../procedural/Metro.zig");
 const WindsorCase = @import("WindsorCase.zig");
 const BileCase = @import("BileCase.zig");
+const CityDiscoveries = @import("CityDiscoveries.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
@@ -143,6 +144,8 @@ pub const Target = union(enum) {
     bile_trace: u8,
     bile_relay: u8,
     bile_notes,
+    /// One of Detroit's ten city discoveries.
+    city_discovery: u8,
 };
 
 /// A live case clue stays targetable when a salvage object also crosses the ray; other
@@ -151,6 +154,7 @@ fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
     const found = candidate orelse return current;
     return switch (found) {
         .evidence, .foundry_terminal, .windsor_evidence, .bile_trace, .bile_relay, .bile_notes => found,
+        .city_discovery => if (current == .none) found else current,
         .hero, .wild_pet, .pet => if (current == .none) found else current,
         else => current,
     };
@@ -402,6 +406,8 @@ target: Target = .none,
 bile_relay_step: u8 = 0,
 /// Seeded once from the verified Shrine solver; the frame path only reads these three symbols.
 bile_sequence: [BileCase.relay_count]u8 = @splat(0),
+/// Seed-derived Detroit pickup anchors, computed once rather than during aiming or rendering.
+city_discovery_positions: [CityDiscoveries.count]Physics.Vec3 = undefined,
 /// Runtime-only Titan phase; an unfinished encounter restarts from phase one after loading.
 city_titan_phase: u8 = 0,
 modifications: Modifications = .{},
@@ -423,6 +429,7 @@ notice_until: u64 = 0,
 pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
     self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined, .scripts = .init(allocator) };
     self.bile_sequence = BileCase.sequence(seed);
+    CityDiscoveries.positions(&catalog.district, seed, &self.city_discovery_positions);
     self.caves = Caves.layout(seed);
     self.physics = .init(.{ .context = &self.caves, .sample = groundSample, .hollow = groundHollow });
     errdefer self.physics.deinit();
@@ -1142,7 +1149,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
     const eye = g.player.eye();
     g.target = self.pick(eye, g.camera.forward(), reach, false, true);
     const gf = g.camera.forward();
-    g.target = preferFrontierTarget(g.target, Frontier.pick(self, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, reach + 2, reach + 2));
+    g.target = preferFrontierTarget(g.target, Frontier.pick(self, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, reach + 2, reach + 2, slot));
     if (g.interact) switch (g.target) {
         .hero => |i| Frontier.recruit(self, i),
         .wild_pet => |sp| Frontier.freePet(self, slot, sp),
@@ -1153,6 +1160,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         .bile_trace => |i| Frontier.collectBileTrace(self, i),
         .bile_relay => |i| Frontier.pressBileRelay(self, i),
         .bile_notes => Frontier.readBileNotes(self),
+        .city_discovery => |i| Frontier.collectCityDiscovery(self, slot, i),
         else => {},
     };
     if (g.interact and g.target == .stall) {
@@ -1295,11 +1303,11 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     self.target = self.pick(aim.position, aim.forward(), if (hands) reach else Build.build_reach, hands, hands);
     if (hands) {
         const f = aim.forward();
-        self.target = preferFrontierTarget(self.target, Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2));
+        self.target = preferFrontierTarget(self.target, Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2, 0));
     }
     if (!hands) {
         const f = aim.forward();
-        if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |vehicle| switch (vehicle) {
+        if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2, 0)) |vehicle| switch (vehicle) {
             .car, .jet => switch (self.target) {
                 .none, .prop, .structure, .bridge => self.target = vehicle,
                 else => {},
@@ -1346,6 +1354,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .bile_trace => |i| Frontier.collectBileTrace(self, i),
                     .bile_relay => |i| Frontier.pressBileRelay(self, i),
                     .bile_notes => Frontier.readBileNotes(self),
+                    .city_discovery => |i| Frontier.collectCityDiscovery(self, 0, i),
                     .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
