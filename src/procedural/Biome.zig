@@ -4,6 +4,7 @@ const Seed = @import("Seed.zig");
 const Region = @import("../world/Region.zig");
 const ChunkKey = @import("../world/ChunkKey.zig");
 const Cloudwater = @import("Cloudwater.zig");
+const CityHeightmaps = @import("CityHeightmaps.zig");
 pub const Weights = struct {
     arid: f32,
     meadow: f32,
@@ -65,9 +66,9 @@ pub fn cover(seed: u64, x: f32, z: f32, height: f32, slope: f32) Cover {
 /// The cover of the generated terrain at (x, z), with height and slope measured exactly as the
 /// chunk mesh measures them.
 pub fn coverAt(seed: u64, x: f32, z: f32) Cover {
-    const nx = Noise.height(seed, x - 0.5, z) - Noise.height(seed, x + 0.5, z);
-    const nz = Noise.height(seed, x, z - 0.5) - Noise.height(seed, x, z + 0.5);
-    return cover(seed, x, z, Noise.height(seed, x, z), @sqrt(nx * nx + nz * nz));
+    const nx = CityHeightmaps.heightAt(seed, x - 0.5, z) - CityHeightmaps.heightAt(seed, x + 0.5, z);
+    const nz = CityHeightmaps.heightAt(seed, x, z - 0.5) - CityHeightmaps.heightAt(seed, x, z + 0.5);
+    return cover(seed, x, z, CityHeightmaps.heightAt(seed, x, z), @sqrt(nx * nx + nz * nz));
 }
 
 pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
@@ -122,4 +123,13 @@ test "footing follows the cover: snow above the snowline, the biome's ground bel
     try std.testing.expectEqual(Kind.sand, (Cover{ .weights = .{ .arid = 0.7, .meadow = 0.3, .wetland = 0 }, .exposed = 0, .snow = 0 }).kind());
     try std.testing.expectEqual(Kind.marsh, (Cover{ .weights = .{ .arid = 0, .meadow = 0.3, .wetland = 0.7 }, .exposed = 0, .snow = 0 }).kind());
     try std.testing.expect(cover(42, 10, 20, -3, 0.1).kind() != .snow);
+}
+
+test "cover is measured on the same height the chunk mesh uses" {
+    const h = CityHeightmaps.heightAt(7, 0, 0);
+    const a = coverAt(7, 0, 0);
+    const nx = CityHeightmaps.heightAt(7, -0.5, 0) - CityHeightmaps.heightAt(7, 0.5, 0);
+    const nz = CityHeightmaps.heightAt(7, 0, -0.5) - CityHeightmaps.heightAt(7, 0, 0.5);
+    const b = cover(7, 0, 0, h, @sqrt(nx * nx + nz * nz));
+    try std.testing.expectEqual(b.kind(), a.kind());
 }

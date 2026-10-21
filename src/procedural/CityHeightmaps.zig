@@ -89,3 +89,12 @@ fn blendToFallback(map: Heightmap.View, x: f32, z: f32, mapped: f32, seed: u64, 
 fn fallbackHeight(seed: u64, x: f32, z: f32) f32 {
     return Noise.height(Region.seedAtPosition(seed, x, z), x, z);
 }
+
+test "height is finite and repeatable in every region and between them" {
+    const std = @import("std");
+    for ([_][2]f32{ .{ 0, 0 }, .{ 1500, -900 }, .{ 40000, 3000 }, .{ -120000, 90000 } }) |p| {
+        const h = heightAt(7, p[0], p[1]);
+        try std.testing.expect(std.math.isFinite(h));
+        try std.testing.expectEqual(h, heightAt(7, p[0], p[1]));
+    }
+}

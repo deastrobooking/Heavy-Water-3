@@ -1,3 +1,8 @@
+## Block-building plan, BT0 terrain cleanup — 2026-10-21
+
+- Planned the block-building and terrain-sculpting track ([block building](plans/block-building.md)). Moved `Biome.coverAt` and the flora review position from `Noise.height` to `CityHeightmaps.heightAt`, so they agree with the raster terrain the chunk mesh uses; registered `CityHeightmaps.zig` in `src/tests.zig` and added two tests. Corrected stale facts in [settlement and building](plans/settlement-building.md).
+- **Checked:** `build check` and the three new tests passed. **Not checked:** the other-session edits in the tree, 0.17 channel, smoke, captures. No gameplay changed; nothing of the block grid or sculpting exists yet.
+
 ## Immediate 3D helpers on Mach — 2026-10-16
 
 - Added `engine/Scene3D.zig`, an allocation-free per-frame builder over caller-owned `World.Prop` storage. It validates catalog mesh and LOD handles/readiness, transform/tint values, and capacity before append; box and sphere helpers use the existing catalog primitives. `Sandbox.publishProps` routes the district, raceway, and NYC landmarks through it. Showcase 78 demonstrates box, sphere, crate, and hover-car model submission with LOD.

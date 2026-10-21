@@ -2,6 +2,8 @@
 
 **Status:** proposed, 2026-10-15. Planning only; nothing here is built. The [roadmap](../roadmap.md) stays the single plan. This is the design for the "Grow" pillar of [world](../world.md) ("guide the city and the trees themselves: graft new branches, plan bridge roads, raise districts"), extended with farming, terraforming and mining.
 
+**Update 2026-10-21:** structures are now a chunked block grid with styles, prefabs and platformer blocks, planned in [block building](block-building.md), which supersedes the structure and plot parts of this document. The claims, terraforming (section 8), economy, farming and weather parts below still stand and feed that plan. Facts that changed since this was written: terrain height is `CityHeightmaps.heightAt` (raster cities plus procedural fallback), not `Noise.height`; the save format is already 26 or later, so the bump targets here are stale; `Progress.max_flags` is 128; `settlement_examples.zig` is not in the repository.
+
 **Owner decisions (2026-10-15):**
 - **Hybrid sandbox with light simulation:** free placement of districts, buildings, roads and farms, plus a modest loop of power, water, food, materials and population that gives players reasons to build. Not a full city-builder.
 - **One shared settlement** with a shared stockpile. Each structure records who built it. Personal rewards (gear, upgrades) stay in each player's own `Kit`.
@@ -37,11 +39,11 @@
 | Bridges and plazas | 6 fixed plazas, 4 player bridges (`District.max_bridges`), grade at most 6 percent, persisted as plaza-id edges. | `procedural/District.zig`, `game/BridgeTool.zig` |
 | Economy | Per-player `Wallet` (scrap, parts, kits), `Kit` inventory of four collectible kinds, fabricator recipes with costs, 3 market stalls. **No production, storage, upkeep, population or zoning.** | `city/Market.zig`, `game/Kit.zig`, `game/Fabricator.zig` |
 | Sap | `Sap.allocate` shares a tree's vascular capacity among taps; trees have up to 512 nodes and 8 natural shelves each. | `machine/Sap.zig`, `procedural/Arbor.zig` |
-| Terrain | pure `Noise.height(seed, x, z)`, used by `Chunk.fill`, `Terrain.surface` (103 call sites), Scatter, Biome, Caves, Mountains; `Terrain.surface` and the chunk mesh must agree exactly. No edit layer; `Modifications` stores only removed object ids (cap 4,096). | `procedural/*.zig`, `world/Modifications.zig` |
+| Terrain | pure `CityHeightmaps.heightAt(seed, x, z)` (city rasters, with `Noise.height` as the fallback and beyond the feather), used by `Chunk.fill`, `Terrain.surface` (103 call sites), Scatter, Biome, Caves, Mountains; `Terrain.surface` and the chunk mesh must agree exactly. No edit layer; `Modifications` stores only removed object ids (cap 4,096). | `procedural/*.zig`, `world/Modifications.zig` |
 | Streaming | a worker generates chunks; there is no per-chunk invalidate. | `world/Streamer.zig` |
 | Mining | deterministic caves with static meshes and colliders; the only harvest is one-shot relic salvage; no ore, depletion or digging. | `procedural/Caves.zig`, `game/Sandbox.zig` |
 | Farming | four render-only farmsteads with crop-bed boxes; no plant state. | `game/Frontier.zig` |
-| Saves | JSON, format 25, `min_supported_format` 13, 4 MiB cap; per-player data in `Kit.Doc`, team data in `Progress` or `Document`; `Progress.max_flags` is 96. | `game/Save.zig`, `game/Progress.zig` |
+| Saves | JSON, format 26 at the time of writing (check `Save.format_version`), `min_supported_format` 13, 4 MiB cap; per-player data in `Kit.Doc`, team data in `Progress` or `Document`; `Progress.max_flags` is 128. | `game/Save.zig`, `game/Progress.zig` |
 
 The consequences: buildings cannot be machines (too few slots), plot state cannot live in story flags (too few), terrain edits need a real layer (there is none), and saves need compact encodings.
 

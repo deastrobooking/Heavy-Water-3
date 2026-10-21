@@ -60,6 +60,7 @@ test {
     _ = @import("engine/Handle.zig");
     _ = @import("engine/Sky.zig");
     _ = @import("procedural/Terrain.zig");
+    _ = @import("procedural/CityHeightmaps.zig");
     _ = @import("procedural/Heightmap.zig");
     _ = @import("procedural/Landscape.zig");
     _ = @import("procedural/TestArbor.zig");

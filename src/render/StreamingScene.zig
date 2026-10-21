@@ -353,7 +353,7 @@ fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
     const zoff: f32 = if (Vegetation.isTree(variant)) 0 else 215;
     const x = origin[0] + xoff;
     const z = origin[2] + zoff;
-    return .{ x, Noise.height(seed, x, z) - 0.03, z };
+    return .{ x, CityHeightmaps.heightAt(seed, x, z) - 0.03, z };
 }
 
 /// Groups props by catalog mesh, then emits one instanced draw per submesh with its material color.
