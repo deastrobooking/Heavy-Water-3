@@ -43,6 +43,7 @@ const Arena = @import("Arena.zig");
 const QuestLog = @import("QuestLog.zig");
 const FoundryCase = @import("FoundryCase.zig");
 const WindsorCase = @import("WindsorCase.zig");
+const BileCase = @import("BileCase.zig");
 const CityContent = @import("CityContent.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
@@ -760,6 +761,33 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
             };
         }
     }
+    if (sb.progress.hasFlag(BileCase.started_flag) and !sb.progress.hasFlag(BileCase.exposed_flag)) {
+        if (!sb.progress.hasFlag(BileCase.traces_complete_flag)) {
+            var points: [BileCase.trace_count]V = undefined;
+            const count = BileCase.tracePositions(sb.seed, &points);
+            for (points[0..count], 0..) |point, index| {
+                if (BileCase.collected(&sb.progress, index)) continue;
+                if (Physics.rayBox(eye, dir, point, .{ 0.8, 0.9, 0.8 })) |hit| if (hit.distance < nearest) {
+                    nearest = hit.distance;
+                    result = .{ .bile_trace = @intCast(index) };
+                };
+            }
+        } else if (!sb.progress.hasFlag(BileCase.vault_open_flag)) {
+            for (0..BileCase.relay_count) |index| {
+                const point = BileCase.relayPosition(sb.seed, index) orelse continue;
+                if (Physics.rayBox(eye, dir, point, .{ 0.8, 1.3, 0.8 })) |hit| if (hit.distance < nearest) {
+                    nearest = hit.distance;
+                    result = .{ .bile_relay = @intCast(index) };
+                };
+            }
+        } else if (!sb.progress.hasFlag(BileCase.notes_read_flag)) {
+            const point = BileCase.notesPosition(sb.seed);
+            if (Physics.rayBox(eye, dir, point, .{ 0.85, 0.9, 0.85 })) |hit| if (hit.distance < nearest) {
+                nearest = hit.distance;
+                result = .bile_notes;
+            };
+        }
+    }
     if (sb.progress.hasFlag(FoundryCase.reported_flag) and !sb.progress.hasFlag(FoundryCase.confrontation_flag)) {
         if (FoundryCase.consolePosition(&sb.catalog.district)) |console| {
             if (Physics.rayBox(eye, dir, console, .{ 0.8, 0.9, 0.75 })) |hit| if (hit.distance < nearest) {
@@ -788,6 +816,41 @@ pub fn collectWindsorEvidence(sb: *Sandbox, index: u8) void {
     var points: [WindsorCase.checkpoint_count]V = undefined;
     const count = WindsorCase.positions(&sb.catalog.district, &points);
     sb.cue(.pickup, if (index < count) points[index] else sb.player.feet);
+}
+
+/// Recover one institute trace; story state is shared across the party.
+pub fn collectBileTrace(sb: *Sandbox, index: u8) void {
+    if (!BileCase.collectTrace(&sb.progress, index)) return;
+    const relay = sb.bile_sequence[index] + 1;
+    sb.say("trace {d}/3: press archive relay {d} in slot {d}", .{ index + 1, relay, index + 1 });
+    var points: [BileCase.trace_count]V = undefined;
+    const n = BileCase.tracePositions(sb.seed, &points);
+    sb.cue(.pickup, if (index < n) points[index] else sb.player.feet);
+}
+
+/// Press one archive relay; a wrong input restarts the sequence from its first symbol.
+pub fn pressBileRelay(sb: *Sandbox, index: u8) void {
+    const result = BileCase.pressRelay(&sb.progress, sb.bile_sequence, &sb.bile_relay_step, index);
+    switch (result) {
+        .unavailable => {},
+        .wrong => {
+            const first = sb.bile_sequence[0] + 1;
+            sb.say("wrong relay; begin with relay {d}", .{first});
+            sb.cue(.hive_zap, BileCase.relayPosition(sb.seed, index));
+        },
+        .progress => sb.say("relay accepted: {d}/{d}", .{ sb.bile_relay_step, BileCase.relay_count }),
+        .opened => {
+            sb.say("archive vault opened; recover Dr. Bile's notes inside", .{});
+            sb.cue(.vault, BileCase.institutePosition(sb.seed));
+        },
+    }
+}
+
+/// Read the notes left in the opened archive. Reporting them to Tavi exposes the case.
+pub fn readBileNotes(sb: *Sandbox) void {
+    if (!BileCase.readNotes(&sb.progress)) return;
+    sb.say("Dr. Bile's notes copied; take the archive record to Tavi", .{});
+    sb.cue(.pickup, BileCase.notesPosition(sb.seed));
 }
 
 /// Publish the case at the loading dock terminal and draw the steward and brood scavengers out.
@@ -1579,6 +1642,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishFoundryDock(sb, out, n, t);
     n = publishWindsorEvidence(sb, out, n, t);
     n = publishWindsorGates(sb, out, n, t);
+    n = publishBileArchive(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
     n = publishCityGardenFoliage(sb, out, n);
     n = publishAntarcticPerimeter(sb, out, n, t);
@@ -2095,6 +2159,17 @@ fn objectiveTarget(sb: *const Sandbox) ?V {
                 if (WindsorCase.positions(&sb.catalog.district, &points) > index) return points[index];
             }
         }
+        if (mission == 2 and p.hasFlag(BileCase.started_flag)) {
+            if (p.hasFlag(BileCase.notes_read_flag)) return sb.keeperPosition(2);
+            if (p.hasFlag(BileCase.vault_open_flag)) return BileCase.notesPosition(sb.seed);
+            if (BileCase.nextTrace(p)) |index| {
+                var points: [BileCase.trace_count]V = undefined;
+                if (BileCase.tracePositions(sb.seed, &points) > index) return points[index];
+            }
+            const answer = sb.bile_sequence;
+            const relay_step = @min(sb.bile_relay_step, BileCase.relay_count - 1);
+            return BileCase.relayPosition(sb.seed, answer[relay_step]);
+        }
         return sb.keeperPosition(mission);
     }
     return null;
@@ -2221,6 +2296,83 @@ fn publishWindsorGates(sb: *const Sandbox, out: []World.Prop, start: usize, t: f
         out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ gate[0] + width * 0.46, gate[1] + 1.15, gate[2] } }, .tint = .{ 0.22, 0.27, 0.29, 1 }, .size = post };
         out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ gate[0], gate[1] + 1.25 + lift, gate[2] } }, .tint = tint, .size = .{ width, 0.5, 0.36 } };
         n += 3;
+    }
+    return n;
+}
+
+/// Belle Isle's former water institute opens into a compact relay archive for Tavi's case.
+/// Geometry remains presentation-only; the interact ray and saved case flags own access.
+fn publishBileArchive(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const c = &sb.catalog.content;
+    const center = BileCase.institutePosition(sb.seed);
+    if (R.length(R.sub(center, sb.player.feet)) > 540 or start + 10 > out.len) return start;
+    var n = start;
+    const stone: [4]f32 = .{ 0.78, 0.82, 0.77, 1 };
+    const trim: [4]f32 = .{ 0.3, 0.39, 0.4, 1 };
+    const ground = center[1];
+    const opened = sb.progress.hasFlag(BileCase.vault_open_flag);
+    const door = if (opened) Material.emissive(.{ 0.16, 0.84, 0.75, 1 }, 0.75 + 0.18 * @sin(t * 2)) else Material.emissive(.{ 0.88, 0.28, 0.16, 1 }, 0.8 + 0.2 * @sin(t * 2));
+    // Stone plinth, three outer walls and a split facade leave a broad front doorway.
+    const walls = [_]struct { at: V, size: V, tint: [4]f32 }{
+        .{ .at = .{ center[0], ground + 0.22, center[2] }, .size = .{ 27, 0.44, 23 }, .tint = trim },
+        .{ .at = .{ center[0], ground + 4.2, center[2] + 10.8 }, .size = .{ 23, 8, 0.7 }, .tint = stone },
+        .{ .at = .{ center[0] - 11.2, ground + 4.2, center[2] }, .size = .{ 0.7, 8, 21 }, .tint = stone },
+        .{ .at = .{ center[0] + 11.2, ground + 4.2, center[2] }, .size = .{ 0.7, 8, 21 }, .tint = stone },
+        .{ .at = .{ center[0] - 7.25, ground + 4.2, center[2] - 10.8 }, .size = .{ 8.9, 8, 0.7 }, .tint = stone },
+        .{ .at = .{ center[0] + 7.25, ground + 4.2, center[2] - 10.8 }, .size = .{ 8.9, 8, 0.7 }, .tint = stone },
+        .{ .at = .{ center[0], ground + 8.25, center[2] }, .size = .{ 23, 0.65, 21 }, .tint = trim },
+        .{ .at = .{ center[0], ground + 7.2, center[2] - 10.8 }, .size = .{ 5.4, 1.8, 0.8 }, .tint = trim },
+        .{ .at = .{ center[0] - 3.8, ground + 3.1, center[2] - 10.75 }, .size = .{ 0.75, 6.2, 0.8 }, .tint = trim },
+        .{ .at = .{ center[0] + 3.8, ground + 3.1, center[2] - 10.75 }, .size = .{ 0.75, 6.2, 0.8 }, .tint = trim },
+    };
+    for (walls) |wall| {
+        if (n == out.len) return n;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = wall.at }, .size = wall.size, .tint = wall.tint };
+        n += 1;
+    }
+    if (n < out.len) {
+        const lift: f32 = if (opened) 7 else 0;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ center[0], ground + 3.1 + lift, center[2] - 10.72 } }, .size = .{ 6.2, 5.8, 0.34 }, .tint = door };
+        n += 1;
+    }
+
+    if (sb.progress.hasFlag(BileCase.started_flag) and !sb.progress.hasFlag(BileCase.exposed_flag)) {
+        if (!sb.progress.hasFlag(BileCase.traces_complete_flag)) {
+            var points: [BileCase.trace_count]V = undefined;
+            const count = BileCase.tracePositions(sb.seed, &points);
+            for (points[0..count], 0..) |point, index| {
+                if (BileCase.collected(&sb.progress, index) or R.length(R.sub(point, sb.player.feet)) > 540 or n + 2 > out.len) continue;
+                const selected = sb.target == .bile_trace and sb.target.bile_trace == @as(u8, @intCast(index));
+                const glow = Material.emissive(if (selected) .{ 0.32, 1, 0.92, 1 } else .{ 0.9, 0.68, 0.3, 1 }, 0.72 + 0.28 * @sin(t * 2.4 + @as(f32, @floatFromInt(index))));
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], point[1] - 0.28, point[2] } }, .size = .{ 0.9, 0.36, 0.8 }, .tint = .{ 0.28, 0.33, 0.34, 1 } };
+                out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], point[1] + 0.15, point[2] } }, .size = @splat(0.17), .tint = glow };
+                n += 2;
+            }
+        } else if (!opened) {
+            for (0..BileCase.relay_count) |index| {
+                const point = BileCase.relayPosition(sb.seed, index) orelse continue;
+                if (R.length(R.sub(point, sb.player.feet)) > 540 or n + 2 > out.len) continue;
+                const selected = sb.target == .bile_relay and sb.target.bile_relay == @as(u8, @intCast(index));
+                const relay_color: [4]f32 = if (selected) .{ 0.24, 0.96, 0.82, 1 } else switch (index) {
+                    0 => .{ 0.96, 0.62, 0.18, 1 },
+                    1 => .{ 0.66, 0.38, 0.96, 1 },
+                    else => .{ 0.18, 0.67, 0.96, 1 },
+                };
+                const glow = Material.emissive(relay_color, 0.8 + 0.2 * @sin(t * 2.8 + @as(f32, @floatFromInt(index))));
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], point[1] - 0.48, point[2] } }, .size = .{ 1.05, 0.95, 0.9 }, .tint = trim };
+                out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], point[1] + 0.05, point[2] } }, .size = @splat(0.27), .tint = glow };
+                n += 2;
+            }
+        } else if (!sb.progress.hasFlag(BileCase.notes_read_flag)) {
+            const point = BileCase.notesPosition(sb.seed);
+            if (R.length(R.sub(point, sb.player.feet)) <= 540 and n + 3 <= out.len) {
+                const glow = Material.emissive(.{ 0.32, 0.92, 0.82, 1 }, 0.8 + 0.2 * @sin(t * 2.1));
+                out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], point[1] - 0.18, point[2] } }, .size = .{ 1.2, 0.32, 0.9 }, .tint = trim };
+                out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], point[1] + 0.04, point[2] } }, .size = .{ 0.8, 0.08, 0.58 }, .tint = glow };
+                out[n + 2] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], point[1] + 0.48 + 0.05 * @sin(t * 1.8), point[2] } }, .size = @splat(0.2), .tint = glow };
+                n += 3;
+            }
+        }
     }
     return n;
 }

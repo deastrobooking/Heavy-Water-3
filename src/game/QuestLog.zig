@@ -6,6 +6,7 @@ const Skies = @import("Skies.zig");
 const CityContent = @import("CityContent.zig");
 const FoundryCase = @import("FoundryCase.zig");
 const WindsorCase = @import("WindsorCase.zig");
+const BileCase = @import("BileCase.zig");
 
 pub const Objective = struct {
     title: []const u8,
@@ -82,6 +83,22 @@ pub fn city(progress: *const Progress, content: *const CityContent.CityContent) 
                 2 => "Recover the closed-session recording outside the Gothic civic hall (2/3).",
                 else => "Take both gate logs and the hall recording back to Ines to expose the councillor.",
             },
+            .draft = content.draft,
+        };
+        if (i == 2 and CityContent.started(content, progress, i)) return .{
+            .title = m.title,
+            .detail = if (BileCase.traceCount(progress) < BileCase.trace_count)
+                switch (BileCase.traceCount(progress)) {
+                    0 => "Recover three institute traces on Belle Isle (0/3).",
+                    1 => "Recover the remaining institute traces on Belle Isle (1/3).",
+                    else => "Recover the final institute trace on Belle Isle (2/3).",
+                }
+            else if (!progress.hasFlag(BileCase.vault_open_flag))
+                "Use the three traces to read the relay order, then open the archive vault."
+            else if (!progress.hasFlag(BileCase.notes_read_flag))
+                "Enter the open archive and recover Dr. Bile's notes."
+            else
+                "Take Dr. Bile's notes back to Tavi on Belle Isle.",
             .draft = content.draft,
         };
         return .{ .title = m.title, .detail = m.detail, .draft = content.draft };

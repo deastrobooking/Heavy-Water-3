@@ -410,7 +410,7 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
             if (!sb.closeBridge(i)) return sb.say("bridge closed: removed once traffic clears", .{});
             sb.say("removed bridge", .{});
         },
-        .relic, .stall, .walker, .car, .fabricator, .jet, .hero, .wild_pet, .pet, .evidence, .foundry_terminal, .windsor_evidence, .none => sb.say("nothing to remove", .{}),
+        .relic, .stall, .walker, .car, .fabricator, .jet, .hero, .wild_pet, .pet, .evidence, .foundry_terminal, .windsor_evidence, .bile_trace, .bile_relay, .bile_notes, .none => sb.say("nothing to remove", .{}),
     }
 }
 

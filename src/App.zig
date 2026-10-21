@@ -1906,6 +1906,17 @@ fn showcase(self: *App) void {
             target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
             eye = .{ target[0] + 4, target[1] + 3, target[2] + 5 };
         }
+    } else if (v == 96) {
+        const BileCase = @import("game/BileCase.zig");
+        self.sandbox.progress.setFlag(BileCase.started_flag);
+        const institute = BileCase.institutePosition(self.sandbox.seed);
+        self.sandbox.player.mode = .fly;
+        self.sandbox.view = .first;
+        self.sandbox.player.feet = .{ institute[0] + 32, institute[1] + 15, institute[2] - 40 };
+        self.sandbox.player.velocity = .{ 0, 0, 0 };
+        self.sandbox.target = .none;
+        target = institute;
+        eye = .{ institute[0] + 32, institute[1] + 18, institute[2] - 40 };
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -2554,6 +2565,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeFrontier();
             self.smokeFoundryCase();
             self.smokeWindsorCase();
+            self.smokeBileCase();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -2800,6 +2812,88 @@ fn smokeWindsorCase(self: *App) void {
     };
     if (crossing_stops != 2) return self.smokeFail("SMOKE WINDSOR UNLOCKED {d} CROSSING STOPS", .{crossing_stops});
     std.log.info("Smoke Windsor Gate: Ines started the case; two bridge logs and the hall recording were recovered through aim/interact; the report exposed the councillor and opened the crossings", .{});
+}
+
+/// Complete Tavi's Belle Isle case through normal aim, interact, puzzle and dialogue paths.
+/// The report grants pet XP separately to P1 and an active P2, then restores the starting save.
+fn smokeBileCase(self: *App) void {
+    const sb = &self.sandbox;
+    const camera = &self.engine.camera;
+    const baseline = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE BILE BASELINE {s}", .{@errorName(err)});
+    defer self.allocator.free(baseline);
+    defer sb.restore(self.allocator, baseline, camera) catch |err| self.smokeFail("SMOKE BILE RESTORE {s}", .{@errorName(err)});
+    defer sb.leaveGuest(0);
+
+    const BileCase = @import("game/BileCase.zig");
+    sb.progress.setFlag("met_tavi");
+    sb.joinGuest(0);
+    sb.kits[0].ensureStarterPet();
+    sb.kits[1].ensureStarterPet();
+    const p1_pet = sb.kits[0].pet_active.?;
+    const p2_pet = sb.kits[1].pet_active.?;
+    const p1_xp = sb.kits[0].pet_xp[@intFromEnum(p1_pet)];
+    const p2_xp = sb.kits[1].pet_xp[@intFromEnum(p2_pet)];
+    sb.startTalk(.{ .keeper = 2 });
+    if (!self.smokeDialogueChoose("Those Rootdeep tracks. Where do they lead?")) return self.smokeFail("SMOKE BILE CASE NOT OFFERED", .{});
+    if (!self.smokeDialogueContinue()) return self.smokeFail("SMOKE BILE BRIEF DID NOT RETURN TO TAVI", .{});
+    sb.talkKey(.back);
+    sb.tools.tool = .hands;
+    sb.player.mode = .fly;
+    sb.view = .first;
+    sb.held = null;
+
+    var traces: [BileCase.trace_count][3]f32 = undefined;
+    const count = BileCase.tracePositions(sb.seed, &traces);
+    if (count != BileCase.trace_count) return self.smokeFail("SMOKE BILE HAS {d} TRACES", .{count});
+    for (traces, 0..) |point, index| {
+        sb.player.feet = .{ point[0] + 2, point[1] - 1.1, point[2] + 3.5 };
+        sb.player.velocity = .{ 0, 0, 0 };
+        const eye = sb.player.eye();
+        const dx = point[0] - eye.x();
+        const dy = point[1] - eye.y();
+        const dz = point[2] - eye.z();
+        camera.position = eye;
+        camera.yaw = std.math.atan2(dx, dz);
+        camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE BILE TRACE {s}", .{@errorName(err)});
+        if (sb.target != .bile_trace or sb.target.bile_trace != @as(u8, @intCast(index)) or !BileCase.collected(&sb.progress, index)) return self.smokeFail("SMOKE BILE TRACE {d} NOT RECOVERED (target {s})", .{ index + 1, @tagName(sb.target) });
+    }
+    if (!sb.progress.hasFlag(BileCase.traces_complete_flag)) return self.smokeFail("SMOKE BILE TRACES NOT COMPLETE", .{});
+    const answer = sb.bile_sequence;
+    for (answer, 0..) |relay, index| {
+        const point = BileCase.relayPosition(sb.seed, relay).?;
+        sb.player.feet = .{ point[0] + 2, point[1] - 1.1, point[2] - 3.5 };
+        sb.player.velocity = .{ 0, 0, 0 };
+        const eye = sb.player.eye();
+        const dx = point[0] - eye.x();
+        const dy = point[1] - eye.y();
+        const dz = point[2] - eye.z();
+        camera.position = eye;
+        camera.yaw = std.math.atan2(dx, dz);
+        camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE BILE RELAY {s}", .{@errorName(err)});
+        if (sb.target != .bile_relay or sb.target.bile_relay != relay) return self.smokeFail("SMOKE BILE RELAY {d} NOT TARGETED (target {s})", .{ relay + 1, @tagName(sb.target) });
+        if (index + 1 == answer.len and !sb.progress.hasFlag(BileCase.vault_open_flag)) return self.smokeFail("SMOKE BILE VAULT DID NOT OPEN", .{});
+    }
+    const notes = BileCase.notesPosition(sb.seed);
+    sb.player.feet = .{ notes[0] + 2, notes[1] - 1.1, notes[2] - 3.5 };
+    sb.player.velocity = .{ 0, 0, 0 };
+    const notes_eye = sb.player.eye();
+    const nx = notes[0] - notes_eye.x();
+    const ny = notes[1] - notes_eye.y();
+    const nz = notes[2] - notes_eye.z();
+    camera.position = notes_eye;
+    camera.yaw = std.math.atan2(nx, nz);
+    camera.pitch = std.math.atan2(ny, @sqrt(nx * nx + nz * nz));
+    sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE BILE NOTES {s}", .{@errorName(err)});
+    if (sb.target != .bile_notes or !sb.progress.hasFlag(BileCase.notes_read_flag)) return self.smokeFail("SMOKE BILE NOTES NOT READ (target {s})", .{@tagName(sb.target)});
+
+    sb.startTalk(.{ .keeper = 2 });
+    if (!self.smokeDialogueChoose("Remind me about Belle Isle.")) return self.smokeFail("SMOKE BILE REMINDER NOT OFFERED", .{});
+    if (!self.smokeDialogueChoose("I recovered Dr. Bile's notes.")) return self.smokeFail("SMOKE BILE REPORT NOT OFFERED", .{});
+    if (!sb.progress.hasFlag(BileCase.exposed_flag)) return self.smokeFail("SMOKE BILE CASE NOT EXPOSED", .{});
+    if (sb.kits[0].pet_xp[@intFromEnum(p1_pet)] != p1_xp + 60 or sb.kits[1].pet_xp[@intFromEnum(p2_pet)] != p2_xp + 60) return self.smokeFail("SMOKE BILE PERSONAL PET REWARD FAILED", .{});
+    std.log.info("Smoke Bile Archive: Tavi started the case; all three traces revealed the relay order; the archive opened, notes were read and reported; P1 and P2 each received 60 pet XP in their own kit", .{});
 }
 
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
@@ -3550,6 +3644,9 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .evidence => |i| renderer.hud_lines[1].set("FOUNDRY LEDGER PAGE {d}/3  X / CLICK RECOVER", .{i + 1}),
         .foundry_terminal => renderer.hud_lines[1].set("LOADING DOCK CONSOLE  X / CLICK TO DRAW OUT STEWARD", .{}),
         .windsor_evidence => |i| renderer.hud_lines[1].set("WINDSOR CASE RECORD {d}/3  X / CLICK REVIEW", .{i + 1}),
+        .bile_trace => |i| renderer.hud_lines[1].set("BILE ARCHIVE TRACE {d}/3  X / CLICK RECOVER", .{i + 1}),
+        .bile_relay => |i| renderer.hud_lines[1].set("ARCHIVE RELAY {d}  X / CLICK PRESS", .{i + 1}),
+        .bile_notes => renderer.hud_lines[1].set("DR. BILE'S NOTES  X / CLICK READ", .{}),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
             renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
         else

@@ -35,6 +35,7 @@ const Sap = @import("../machine/Sap.zig");
 const District = @import("../procedural/District.zig");
 const Metro = @import("../procedural/Metro.zig");
 const WindsorCase = @import("WindsorCase.zig");
+const BileCase = @import("BileCase.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
@@ -138,6 +139,10 @@ pub const Target = union(enum) {
     foundry_terminal,
     /// A toll-gate log or civic-hall recording in the Windsor Gate investigation.
     windsor_evidence: u8,
+    /// An institute trace, relay control or the sealed notes in the Belle Isle archive.
+    bile_trace: u8,
+    bile_relay: u8,
+    bile_notes,
 };
 
 /// A live case clue stays targetable when a salvage object also crosses the ray; other
@@ -145,7 +150,7 @@ pub const Target = union(enum) {
 fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
     const found = candidate orelse return current;
     return switch (found) {
-        .evidence, .foundry_terminal, .windsor_evidence => found,
+        .evidence, .foundry_terminal, .windsor_evidence, .bile_trace, .bile_relay, .bile_notes => found,
         .hero, .wild_pet, .pet => if (current == .none) found else current,
         else => current,
     };
@@ -393,6 +398,10 @@ seated: ?u8 = null,
 driver_input: Machine.Controls = .{},
 held: ?u32 = null,
 target: Target = .none,
+/// Partial Bile Archive relay input; resets when the vault opens or a save is restored.
+bile_relay_step: u8 = 0,
+/// Seeded once from the verified Shrine solver; the frame path only reads these three symbols.
+bile_sequence: [BileCase.relay_count]u8 = @splat(0),
 modifications: Modifications = .{},
 nearby_center: ?Key = null,
 nearby: [9]NearbyChunk = undefined,
@@ -411,6 +420,7 @@ notice_until: u64 = 0,
 /// Initializes in place: physics keeps a pointer to `caves` (and its seed) for terrain queries.
 pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
     self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined, .scripts = .init(allocator) };
+    self.bile_sequence = BileCase.sequence(seed);
     self.caves = Caves.layout(seed);
     self.physics = .init(.{ .context = &self.caves, .sample = groundSample, .hollow = groundHollow });
     errdefer self.physics.deinit();
@@ -1138,6 +1148,9 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         .evidence => |i| Frontier.collectFoundryEvidence(self, i),
         .foundry_terminal => Frontier.startFoundryDockEncounter(self),
         .windsor_evidence => |i| Frontier.collectWindsorEvidence(self, i),
+        .bile_trace => |i| Frontier.collectBileTrace(self, i),
+        .bile_relay => |i| Frontier.pressBileRelay(self, i),
+        .bile_notes => Frontier.readBileNotes(self),
         else => {},
     };
     if (g.interact and g.target == .stall) {
@@ -1328,6 +1341,9 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .evidence => |i| Frontier.collectFoundryEvidence(self, i),
                     .foundry_terminal => Frontier.startFoundryDockEncounter(self),
                     .windsor_evidence => |i| Frontier.collectWindsorEvidence(self, i),
+                    .bile_trace => |i| Frontier.collectBileTrace(self, i),
+                    .bile_relay => |i| Frontier.pressBileRelay(self, i),
+                    .bile_notes => Frontier.readBileNotes(self),
                     .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
@@ -1702,7 +1718,17 @@ pub fn talkKey(self: *Sandbox, key: Dialogue.Key) void {
     const session = if (self.talk) |*t| t else return;
     const wallet = &self.kits[0].wallet;
     const scrap = wallet.scrap;
+    const bile_was_exposed = self.progress.hasFlag(BileCase.exposed_flag);
     const outcome = self.dialogue.key(session, key, &self.progress, wallet);
+    if (!bile_was_exposed and self.progress.hasFlag(BileCase.exposed_flag)) {
+        for (0..max_players) |owner| if (self.present(owner)) {
+            self.kits[owner].ensureStarterPet();
+            if (self.kits[owner].pet_active) |species| {
+                self.kits[owner].pet_xp[@intFromEnum(species)] +|= 60;
+                self.say("P{d}: {s} gained 60 pet XP", .{ owner + 1, Pets.info(species).name });
+            }
+        };
+    }
     if (wallet.scrap > scrap) self.say("received {d} scrap", .{wallet.scrap - scrap});
     switch (outcome) {
         .talking => {},
@@ -2565,6 +2591,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.shop = null;
     self.trading = null;
     self.target = .none;
+    self.bile_relay_step = 0;
     // Saves remember which mods they were made with; a missing or different mod is reported, not
     // fatal (its blueprints are in the save; its scripts output 0 until it is installed).
     self.mod_warnings = 0;

@@ -521,6 +521,23 @@
         {
           "id": "bile_reminder",
           "text": "Belle Isle: find a way into the vault under the institute, and bring out the notes they trade.",
+          "choices": [
+            {
+              "text": "I recovered Dr. Bile's notes.",
+              "requires": "bile_notes_read",
+              "unless": "bile_exposed",
+              "sets": "bile_exposed",
+              "next": "bile_report"
+            },
+            {
+              "text": "Not yet.",
+              "next": "hello"
+            }
+          ]
+        },
+        {
+          "id": "bile_report",
+          "text": "The institute notes map the trade with the Hive. I'll get this copy to the city stewards. Take this growth for your companion; we'll need every friend we can keep.",
           "next": "hello"
         }
       ]

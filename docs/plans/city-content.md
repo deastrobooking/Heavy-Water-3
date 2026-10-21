@@ -1,6 +1,6 @@
 # City content plan: three sub-missions, one boss battle and ten item discoveries per city
 
-**Status:** Detroit content draft proposed, 2026-10-15; campaign direction updated 2026-10-19. The Foundry Ledger investigation, steward encounter and personal upgrade are now playable; the other two missions, boss and discoveries remain drafts. The owner has set Detroit and New York City as captured and directed synthetic humanoid warriors to lead their liberation alongside humanity. New York's detailed missions and rewards are intentionally deferred until Detroit's loop is proven. The [roadmap](../roadmap.md) stays the single plan; this is the detail behind milestone B in [next steps](next-steps.md).
+**Status:** Detroit content draft proposed, 2026-10-15; campaign direction updated 2026-10-19. The Foundry Ledger investigation and steward encounter, Windsor Gate investigation, and Bile Archive investigation now have playable paths; the Collaborators' Titan, discoveries, and liberation outcome remain drafts. The owner has set Detroit and New York City as captured and directed synthetic humanoid warriors to lead their liberation alongside humanity. New York's detailed missions and rewards are intentionally deferred until Detroit's loop is proven. The [roadmap](../roadmap.md) stays the single plan; this is the detail behind milestone B in [next steps](next-steps.md).
 
 **Audience:** the project owner (content), and engineers who will build it. Part 1 to 3 are content; part 4 onward is the technical plan.
 
@@ -37,7 +37,9 @@ Detroit is "Detroit, Michigan reimagined as a canopy city" with six plazas (0 to
 
 **Playable slice, 2026-10-21:** Maro can start The Foundry Ledger; three deterministic manifest checkpoints appear beside generated industrial buildings, are recoverable through the normal hands target, and update the quest count. The collected flags persist in shared `Progress`. Once all three pages are recovered, Maro's report conversation sets `foundry_reported`; publishing at the targetable loading-dock console draws out a human steward and two Hive guards. Defeating the group sets `foundry_exposed`, awards Sprint Servos +1 to each active player's own `Kit`, and slides open a visible yard gate. The gate is presentation-only and does not block movement. An unfinished fight respawns after loading because enemy combat state is not saved.
 
-Ines can start The Windsor Gate after the party has met her. Three deterministic records appear: a log at each bridge control tower and a recording outside the nearest Gothic civic hall. They use normal aim-and-interact targeting, persist as shared flags, and update the quest log. Returning the complete set to Ines sets `windsor_exposed` and animates open the two visual crossing gates. The world map then enables a safe fast-travel stop at each Detroit-side crossing; both rows are visible but disabled beforehand. Dialogue describes a night watch, but this first playable slice has no time-of-day lock, so evidence can be recovered at any hour. The gates are visual and do not change collision. The Bile Archive, Titan, ten discoveries and final city liberation are not implemented yet; Detroit remains occupied.
+Ines can start The Windsor Gate after the party has met her. Three deterministic records appear: a log at each bridge control tower and a recording outside the nearest Gothic civic hall. They use normal aim-and-interact targeting, persist as shared flags, and update the quest log. Returning the complete set to Ines sets `windsor_exposed` and animates open the two visual crossing gates. The world map then enables a safe fast-travel stop at each Detroit-side crossing; both rows are visible but disabled beforehand. Dialogue describes a night watch, but this first playable slice has no time-of-day lock, so evidence can be recovered at any hour. The gates are visual and do not change collision.
+
+Tavi can start The Bile Archive after the party has met them. The institute, three deterministic traces, three color-coded relay controls, and Dr. Bile's notes appear on Belle Isle. Each trace reveals one relay symbol and its place in the sequence. The sequence is derived from the verified Rootdeep Shrine solver for the world seed. A wrong relay restarts the attempt; the partial input resets on save load, while collected traces and an opened vault remain in shared `Progress`. Reading the notes and reporting them to Tavi sets `bile_exposed`; each present player receives 60 pet XP for their active pet in their own `Kit`. The institute and its door are visual geometry, with access handled by the case interaction. The Collaborators' Titan, ten discoveries and final city liberation are not implemented yet; Detroit remains occupied.
 
 ### 3.1 Sub-missions (proposed)
 
@@ -47,7 +49,7 @@ Each mission has a giver among the existing keepers, so no new quest-giver syste
 | --- | --- | --- | --- | --- | --- |
 | 1 | **The Foundry Ledger** | Industry: the foundry syndicate's steward, who sells sap and alloy to the brood | Maro (plaza 1) | the industrial belt, machine works and rail yards | Maro notices rotor cores going missing. Trace the shipments through three checkpoints, recover manifest pages from the machine works (a short fight against brood scavengers), and confront the steward at the loading dock. |
 | 2 | **The Windsor Gate** | Government: a civic councillor who lets Hive carriers cross at night | Ines (plaza 3) | the two heavy Windsor bridges and the Gothic civic hall | Ines hears the toll gates open after dark. Watch the bridges at night, collect gate logs from the control towers, and record a closed session in the civic hall. |
-| 3 | **The Bile Archive** | Science: an institute on Belle Isle that keeps Dr. Bile's bioengineering notes and trades with the Hive | Tavi (plaza 5) | Belle Isle, reached by glide or boat, and a vault below | Tavi finds Rootdeep tracks leading to the island. Open the archive with a machine puzzle (the shrine solver already generates verified puzzles), read the notes, and expose the director. |
+| 3 | **The Bile Archive** | Science: an institute on Belle Isle that keeps Dr. Bile's bioengineering notes and trades with the Hive | Tavi (plaza 5) | Belle Isle, reached by glide or boat, and the institute vault | Tavi finds Rootdeep tracks leading to the island. Recover three trace fragments, use their ordered relay symbols to open the archive, read the notes, and expose the director. The relay order is seeded from a verified Shrine solver plan. |
 
 Each mission ends with an **exposure scene** (a short cinematic, see [engine features](engine-features.md) E4) and sets one shared flag. Missions can be done in any order. Ending beats and rewards:
 
@@ -55,7 +57,7 @@ Each mission ends with an **exposure scene** (a short cinematic, see [engine fea
 | --- | --- | --- |
 | The Foundry Ledger | the steward is exposed; the foundry yard opens | a suit upgrade from Maro |
 | The Windsor Gate | the councillor is exposed; the Windsor bridge gates open for the party | a travel upgrade (fast-travel stops at both crossings) |
-| The Bile Archive | the director is exposed; the Bile notes are read | a Wildkin or pet growth item |
+| The Bile Archive | the director is exposed; the Bile notes are read | 60 pet XP for each present player's active pet |
 
 ### 3.2 Boss battle (proposed)
 
