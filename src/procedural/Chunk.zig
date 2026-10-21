@@ -4,6 +4,7 @@ const Biome = @import("Biome.zig");
 const Hydrology = @import("Hydrology.zig");
 const Mesh = @import("../render/Mesh.zig");
 const Seed = @import("Seed.zig");
+const Cloudwater = @import("Cloudwater.zig");
 pub const cells = 64;
 const ChunkKey = @import("../world/ChunkKey.zig");
 const Region = @import("../world/Region.zig");
@@ -64,7 +65,7 @@ pub fn fill(seed: u64, cx: i32, cz: i32, vertices: []Mesh.Vertex, indices: []u32
         }
     }
     openCaves(seed, cx, cz, ox, oz, vertices, indices);
-    if (!fillRivers(regional_seed, ox, oz, vertices, indices)) return false;
+    if (!fillRivers(regional_seed, cx, cz, ox, oz, vertices, indices)) return false;
     return true;
 }
 
@@ -94,7 +95,8 @@ fn openCaves(seed: u64, cx: i32, cz: i32, ox: f32, oz: f32, vertices: []const Me
 
 /// Appends blue river ribbons and actual vertical curtains at seeded waterfall drops.
 /// Paths and waterfalls are evaluated in world space, so adjacent chunks meet exactly.
-fn fillRivers(seed: u64, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u32) bool {
+fn fillRivers(seed: u64, cx: i32, cz: i32, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u32) bool {
+    if (Region.k2.contains(cx, cz)) return fillCloudwater(seed, ox, oz, vertices, indices);
     var vertex_at: usize = terrain_vertex_count;
     var index_at: usize = terrain_index_count;
     const lane_center: i64 = @intFromFloat(@round((oz + extent * 0.5 - Hydrology.lane_offset) / Hydrology.lane_spacing));
@@ -168,6 +170,65 @@ fn fillRivers(seed: u64, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u
     return true;
 }
 
+/// K2's stream follows the imported glacier raster through a sheltered basin. The terrain cut,
+/// water plane and vertical icefall curtains all use the same world-space centerline.
+fn fillCloudwater(seed: u64, ox: f32, oz: f32, vertices: []Mesh.Vertex, indices: []u32) bool {
+    var vertex_at: usize = terrain_vertex_count;
+    var index_at: usize = terrain_index_count;
+    var intersects = false;
+    for (0..cells + 1) |step| {
+        const x = ox + @as(f32, @floatFromInt(step)) * (extent / cells);
+        if (!Cloudwater.streamActive(x)) continue;
+        const z = Cloudwater.streamCenterZ(seed, x);
+        const half = Cloudwater.streamHalfWidth(x);
+        if (z + half >= oz and z - half <= oz + extent) intersects = true;
+    }
+    if (!intersects) {
+        @memset(indices[index_at..], 0);
+        return true;
+    }
+    if (vertex_at + river_vertices_per_lane > vertices.len or index_at + river_indices_per_lane > indices.len) return false;
+
+    const first = vertex_at;
+    for (0..cells + 1) |step| {
+        const x = ox + @as(f32, @floatFromInt(step)) * (extent / cells);
+        const z = Cloudwater.streamCenterZ(seed, x);
+        const half = Cloudwater.streamHalfWidth(x);
+        const bed = CityHeightmaps.heightAt(seed, x, z);
+        const level = Cloudwater.waterLevel(bed);
+        vertices[vertex_at] = waterVertex(x, level, z - half, step, 0);
+        vertices[vertex_at + 1] = waterVertex(x, level, z + half, step, 1);
+        vertex_at += 2;
+        if (step == 0) continue;
+        const a: u32 = @intCast(first + (step - 1) * 2);
+        const base = index_at + (step - 1) * 6;
+        @memcpy(indices[base..][0..6], &[_]u32{ a, a + 1, a + 2, a + 1, a + 3, a + 2 });
+    }
+    index_at += cells * 6;
+
+    // Each authored drop occupies a separate chunk in X. Its translucent curtain spans the
+    // same bank edges as the stream above and below the short carved step.
+    for (Cloudwater.falls()) |fall_x| {
+        if (fall_x < ox or fall_x >= ox + extent) continue;
+        const center = Cloudwater.streamCenterZ(seed, fall_x);
+        const half = Cloudwater.streamHalfWidth(fall_x);
+        if (center + half < oz or center - half > oz + extent) continue;
+        const high = Cloudwater.waterLevel(CityHeightmaps.heightAt(seed, fall_x - 4, Cloudwater.streamCenterZ(seed, fall_x - 4)));
+        const low = Cloudwater.waterLevel(CityHeightmaps.heightAt(seed, fall_x + 4, Cloudwater.streamCenterZ(seed, fall_x + 4)));
+        const base_vertex = vertex_at;
+        for ([_]f32{ high, high, low, low }, [_]f32{ center - half, center + half, center - half, center + half }, 0..) |y, z, i| {
+            vertices[vertex_at + i] = waterVertex(fall_x, y, z, cells + 1, @intCast(i % 2));
+            vertices[vertex_at + i].normal = .{ 1, 0, 0 };
+        }
+        const a: u32 = @intCast(base_vertex);
+        @memcpy(indices[index_at..][0..6], &[_]u32{ a, a + 2, a + 1, a + 1, a + 2, a + 3 });
+        vertex_at += 4;
+        index_at += 6;
+    }
+    @memset(indices[index_at..], 0);
+    return true;
+}
+
 fn waterVertex(x: f32, y: f32, z: f32, step: usize, side: u32) Mesh.Vertex {
     return .{ .position = .{ x, y, z }, .normal = .{ 0, 1, 0 }, .uv = .{ @as(f32, @floatFromInt(step)) / 8, @floatFromInt(side) }, .color = Hydrology.color() };
 }
@@ -193,6 +254,27 @@ test "streamed chunk includes a real waterfall curtain and joined river surface"
     }
     try std.testing.expect(colored);
     try std.testing.expectApproxEqAbs(Hydrology.fall_drop, highest - lowest, 0.1);
+    for (mesh.indices) |index| try std.testing.expect(index < mesh.vertices.len);
+}
+
+test "K2 Cloudwater chunk streams its cyan river and vertical icefall curtain" {
+    const world_seed: u64 = 42;
+    const probe = @import("../world/ChunkKey.zig").fromPosition(Cloudwater.falls()[1], Cloudwater.arrival[1]);
+    const seed = regionalSeed(world_seed, probe.x, probe.z);
+    const fall_x = Cloudwater.falls()[1];
+    const fall_z = Cloudwater.streamCenterZ(seed, fall_x);
+    const key = @import("../world/ChunkKey.zig").fromPosition(fall_x, fall_z);
+    const mesh = try generate(std.testing.allocator, world_seed, key.x, key.z);
+    defer mesh.deinit(std.testing.allocator);
+
+    var curtain_vertices: usize = 0;
+    var water_colored = false;
+    for (mesh.vertices[terrain_vertex_count..]) |vertex| {
+        if (vertex.color[2] > 0.6 and vertex.color[1] > 0.5) water_colored = true;
+        if (vertex.normal[0] > 0.9 and @abs(vertex.position[0] - fall_x) < 0.01) curtain_vertices += 1;
+    }
+    try std.testing.expect(water_colored);
+    try std.testing.expectEqual(@as(usize, 4), curtain_vertices);
     for (mesh.indices) |index| try std.testing.expect(index < mesh.vertices.len);
 }
 

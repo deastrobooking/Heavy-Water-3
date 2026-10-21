@@ -3,6 +3,7 @@ const Noise = @import("Noise.zig");
 const Seed = @import("Seed.zig");
 const Region = @import("../world/Region.zig");
 const ChunkKey = @import("../world/ChunkKey.zig");
+const Cloudwater = @import("Cloudwater.zig");
 pub const Weights = struct {
     arid: f32,
     meadow: f32,
@@ -47,8 +48,17 @@ pub fn cover(seed: u64, x: f32, z: f32, height: f32, slope: f32) Cover {
     const exposed = std.math.clamp((slope - 0.72) / 0.9, 0, 1) * alpine;
     // The great ranges carry their snow higher, on their peaks rather than their flanks.
     const range = @import("Mountains.zig").sample(seed, x, z).influence;
-    const snowline = if (k2) @as(f32, 4160) + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 115 else 27 + range * 165 + (Noise.value(seed ^ 0x534e4f57, x / 260, z / 260) - 0.5) * 9;
-    const snow = if (k2) @max(0.72, std.math.clamp((height - snowline) / 90, 0, 1)) else std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
+    const local_snow = Noise.value(seed ^ 0x534e4f57, x / 260, z / 260);
+    const snowline = if (k2) @as(f32, 4160) + (local_snow - 0.5) * 115 else 27 + range * 165 + (local_snow - 0.5) * 9;
+    var snow = if (k2) @max(0.72, std.math.clamp((height - snowline) / 90, 0, 1)) else std.math.clamp((height - snowline) / 8, 0, 1) * (0.75 + exposed * 0.25);
+    if (k2) {
+        // The sheltered Cloudwater bowl keeps rock shelves and hardy tree pockets below its
+        // locally raised snowline; the surrounding K2 glacier retains its permanent ice cover.
+        const bowl_snowline = 4510 + (local_snow - 0.5) * 78;
+        const sheltered_snow = @max(0.24, std.math.clamp((height - bowl_snowline) / 125, 0, 1));
+        const mix = Cloudwater.basinWeight(x, z);
+        snow = snow * (1 - mix) + sheltered_snow * mix;
+    }
     return .{ .weights = sample(seed, x, z), .exposed = exposed, .snow = snow };
 }
 
@@ -74,7 +84,7 @@ pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
         const bare = if (k2) alpine_color * 0.28 + ice[i] * 0.72 else alpine_color;
         channel.* = bare * (1 - c.snow) + snow_color[i] * c.snow;
     }
-    return result;
+    return if (k2) Cloudwater.terrainColor(seed, x, z, result, c.snow, slope) else result;
 }
 
 /// Continuous world-space moisture mask. No chunk-local normalization or thresholds at seams.

@@ -1836,7 +1836,7 @@ fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: 
         if (point[2] <= 0) continue;
         const px = center_x + point[0] * radius;
         const py = center_y - point[1] * radius;
-        const selected = std.mem.eql(u8, site.name, "K2") and destinationNamed(destination, "K2 EXPEDITION");
+        const selected = std.mem.eql(u8, site.name, "K2") and (destinationNamed(destination, "K2 EXPEDITION") or destinationNamed(destination, "CLOUDWATER BASIN"));
         const color: Color = if (std.mem.eql(u8, site.name, "K2")) gold else .{ 0.38, 0.78, 1, 1 };
         const size: f32 = if (selected) 9 else 4;
         c.rect(.{ .x = px - size / 2, .y = py - size / 2, .w = size, .h = size }, if (selected) accent else color);

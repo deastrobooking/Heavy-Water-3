@@ -680,7 +680,8 @@ test "an ID3v2.3 tag yields its text frames" {
         try body.appendSlice(gpa, frame);
     }
     // Padding after the frames, which is where the walk must stop.
-    try body.appendSlice(gpa, &[_]u8{0} ** 32);
+    const padding: [32]u8 = @splat(0);
+    try body.appendSlice(gpa, &padding);
 
     const raw = try buildTag(gpa, 3, 0, body.items);
     defer gpa.free(raw);
@@ -779,10 +780,12 @@ test "an ID3v2.4 frame size written the wrong way is still read" {
     // Sizes above 127 are where a plain integer and a syncsafe one diverge,
     // and where taggers that got it wrong become visible.
     const gpa = testing.allocator;
-    const long = "x" ** 200;
+    var long: [201]u8 = undefined;
+    long[0] = 0;
+    @memset(long[1..], 'x');
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(gpa);
-    const first = try buildFrame(gpa, "TIT2", "\x00" ++ long, false); // plain size
+    const first = try buildFrame(gpa, "TIT2", &long, false); // plain size
     defer gpa.free(first);
     try body.appendSlice(gpa, first);
     const second = try latin1Frame(gpa, "TPE1", "Recovered");
@@ -872,7 +875,8 @@ test "an extended header is stepped over" {
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(gpa);
     try body.appendSlice(gpa, &[_]u8{ 0, 0, 0, 6 });
-    try body.appendSlice(gpa, &[_]u8{0} ** 6);
+    const padding: [6]u8 = @splat(0);
+    try body.appendSlice(gpa, &padding);
     try body.appendSlice(gpa, frame);
 
     const raw = try buildTag(gpa, 3, 0x40, body.items);
@@ -928,7 +932,7 @@ test "genres resolve whether written as a name, a number or both" {
 
 test "an ID3v1 block reads as a tag of the same shape" {
     const gpa = testing.allocator;
-    var raw = [_]u8{0} ** 128;
+    var raw: [128]u8 = @splat(0);
     @memcpy(raw[0..3], "TAG");
     @memcpy(raw[3..][0.."A Title".len], "A Title");
     @memcpy(raw[33..][0.."An Artist".len], "An Artist");
@@ -951,7 +955,7 @@ test "an ID3v1 block reads as a tag of the same shape" {
 
 test "ID3v1.1 takes the last of the comment for a track number" {
     const gpa = testing.allocator;
-    var raw = [_]u8{0} ** 128;
+    var raw: [128]u8 = @splat(0);
     @memcpy(raw[0..3], "TAG");
     @memcpy(raw[97..][0.."Short".len], "Short");
     raw[97 + 28] = 0;
@@ -965,9 +969,9 @@ test "ID3v1.1 takes the last of the comment for a track number" {
     try testing.expect(tag.genre() == null);
 
     // A comment filling the field is plain ID3v1 and keeps all thirty bytes.
-    var full = [_]u8{0} ** 128;
+    var full: [128]u8 = @splat(0);
     @memcpy(full[0..3], "TAG");
-    @memcpy(full[97..127], "x" ** 30);
+    @memset(full[97..127], 'x');
     full[127] = 255;
     var plain = (try parseV1(gpa, &full)).?;
     defer plain.deinit();
@@ -977,7 +981,7 @@ test "ID3v1.1 takes the last of the comment for a track number" {
 
 test "ID3v1 fields are trimmed of the padding they are written with" {
     const gpa = testing.allocator;
-    var raw = [_]u8{' '} ** 128;
+    var raw: [128]u8 = @splat(' ');
     @memcpy(raw[0..3], "TAG");
     @memcpy(raw[3..][0.."Padded".len], "Padded");
     raw[127] = 255;
@@ -995,7 +999,7 @@ test "parse prefers the tag at the front and falls back to the one at the end" {
     const v2 = try buildTag(gpa, 3, 0, frame);
     defer gpa.free(v2);
 
-    var v1 = [_]u8{0} ** 128;
+    var v1: [128]u8 = @splat(0);
     @memcpy(v1[0..3], "TAG");
     @memcpy(v1[3..][0.."From ID3v1".len], "From ID3v1");
     v1[127] = 255;
@@ -1019,14 +1023,19 @@ test "nothing that is not a tag is read as one" {
     const gpa = testing.allocator;
     try testing.expect(try parseV2(gpa, "") == null);
     try testing.expect(try parseV2(gpa, "ID3") == null);
-    try testing.expect(try parseV2(gpa, &[_]u8{ 0xff, 0xfb, 0x90, 0x00 } ** 4) == null);
+    try testing.expect(try parseV2(gpa, &[_]u8{
+        0xff, 0xfb, 0x90, 0x00,
+        0xff, 0xfb, 0x90, 0x00,
+        0xff, 0xfb, 0x90, 0x00,
+        0xff, 0xfb, 0x90, 0x00,
+    }) == null);
     // A major version this does not know.
-    var future = [_]u8{0} ** 32;
+    var future: [32]u8 = @splat(0);
     @memcpy(future[0..3], "ID3");
     future[3] = 9;
     try testing.expect(try parseV2(gpa, &future) == null);
     // A size that is not syncsafe means the ten bytes are not a tag header.
-    var bad = [_]u8{0} ** 32;
+    var bad: [32]u8 = @splat(0);
     @memcpy(bad[0..3], "ID3");
     bad[3] = 3;
     bad[8] = 0x80;
@@ -1061,7 +1070,8 @@ test "a tag truncated by the file it was read from is still read as far as it go
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(gpa);
     try body.appendSlice(gpa, frame);
-    try body.appendSlice(gpa, &[_]u8{0} ** 500); // padding the caller never got
+    const padding: [500]u8 = @splat(0);
+    try body.appendSlice(gpa, &padding); // padding the caller never got
 
     const raw = try buildTag(gpa, 3, 0, body.items);
     defer gpa.free(raw);

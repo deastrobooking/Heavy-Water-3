@@ -44,6 +44,8 @@ test {
     _ = @import("asset/HotReload.zig");
     _ = @import("procedural/Seed.zig");
     _ = @import("procedural/Chunk.zig");
+    _ = @import("procedural/Cloudwater.zig");
+    _ = @import("procedural/Hydrology.zig");
     _ = @import("render/Visibility.zig");
     _ = @import("machine/Graph.zig");
     _ = @import("world/ChunkKey.zig");

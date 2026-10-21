@@ -8,6 +8,8 @@ const Physics = @import("../physics/Physics.zig");
 const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Terrain = @import("../procedural/Terrain.zig");
+const Chunk = @import("../procedural/Chunk.zig");
+const Cloudwater = @import("../procedural/Cloudwater.zig");
 const Region = @import("../world/Region.zig");
 const District = @import("../procedural/District.zig");
 const Market = @import("../city/Market.zig");
@@ -398,6 +400,99 @@ fn publishPets(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usiz
         out[n + 7] = .{ .mesh = c.gem, .transform = .{ .position = R.add(at, .{ 0, 0.66, -0.34 }) }, .tint = Material.emissive(.{ 1, 0.48, 0.12, 1 }, if (droid.health > 0) @as(f32, 0.9) else 0.15), .size = .{ 0.19, 0.19, 0.12 } };
         n += 8;
     };
+    return n;
+}
+
+/// The art-led K2 stop: a small marble-and-ice hamlet, golden sheltered grove, natural arch,
+/// distant floating ice-rocks and a marked cascade route. These are visual props; the streamed
+/// K2 heightmap remains the walkable/collidable ground and the custom water mesh carries the falls.
+fn publishCloudwater(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const center = Cloudwater.arrival;
+    const eye = sb.player.feet;
+    const dx = center[0] - eye[0];
+    const dz = center[1] - eye[2];
+    if (dx * dx + dz * dz > 2400 * 2400) return start;
+
+    const c = &sb.catalog.content;
+    var n = start;
+    const town: [2]f32 = .{ center[0] - 72, center[1] + 52 };
+    if (n + 9 <= out.len) {
+        // Five staggered terraces make a readable arrival plaza, with two low shelters set into
+        // the hill and a blue-lit stone arch facing the waterfall path.
+        const decks = [_]struct { x: f32, z: f32, w: f32, d: f32, tint: [4]f32 }{
+            .{ .x = 0, .z = 0, .w = 30, .d = 22, .tint = .{ 0.72, 0.82, 0.83, 1 } },
+            .{ .x = -23, .z = 12, .w = 16, .d = 11, .tint = .{ 0.84, 0.86, 0.81, 1 } },
+            .{ .x = 22, .z = 11, .w = 15, .d = 10, .tint = .{ 0.59, 0.70, 0.73, 1 } },
+            .{ .x = -17, .z = -17, .w = 13, .d = 9, .tint = .{ 0.78, 0.80, 0.74, 1 } },
+            .{ .x = 18, .z = -18, .w = 12, .d = 10, .tint = .{ 0.73, 0.81, 0.82, 1 } },
+        };
+        for (decks) |deck| {
+            const x = town[0] + deck.x;
+            const z = town[1] + deck.z;
+            const ground = Terrain.surface(sb.seed, x, z).height;
+            out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ x, ground + 0.55, z } }, .size = .{ deck.w, 1.1, deck.d }, .tint = deck.tint };
+            n += 1;
+        }
+        const sanctuary_ground = Terrain.surface(sb.seed, town[0], town[1]).height;
+        out[n] = .{ .mesh = c.cave_temple, .transform = .{ .position = .{ town[0], sanctuary_ground + 0.8, town[1] } }, .size = .{ 0.74, 0.74, 0.74 }, .tint = .{ 0.94, 0.91, 0.78, 1 } };
+        n += 1;
+        const cabin_a: V = .{ town[0] - 35, Terrain.surface(sb.seed, town[0] - 35, town[1] + 22).height, town[1] + 22 };
+        const cabin_b: V = .{ town[0] + 32, Terrain.surface(sb.seed, town[0] + 32, town[1] - 24).height, town[1] - 24 };
+        out[n] = .{ .mesh = c.wilds_cabin, .transform = .{ .position = cabin_a }, .size = .{ 0.8, 0.8, 0.8 }, .tint = .{ 0.82, 0.90, 0.91, 1 } };
+        out[n + 1] = .{ .mesh = c.wilds_cabin, .transform = .{ .position = cabin_b }, .size = .{ 0.72, 0.72, 0.72 }, .rotation = yawQuat(0.8), .tint = .{ 0.77, 0.82, 0.77, 1 } };
+        n += 2;
+        const signal = Material.emissive(.{ 0.26, 0.79, 1, 1 }, 1.0 + 0.18 * @sin(t * 1.6));
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ town[0], sanctuary_ground + 1.35, town[1] - 15 } }, .size = .{ 18, 0.16, 0.26 }, .tint = signal };
+        n += 1;
+    }
+
+    // A tall arch of blue ice frames the first cascade. Its base follows the same carved terrain
+    // sample used by collision; the river itself is streamed through the water shader.
+    const arch_x = Region.k2.arrival[0] + 840;
+    const arch_z = Cloudwater.streamCenterZ(Chunk.regionalSeedAt(sb.seed, arch_x, center[1]), arch_x);
+    const arch_ground = Terrain.surface(sb.seed, arch_x, arch_z).height;
+    if (n < out.len) {
+        out[n] = .{ .mesh = c.cave_arch, .transform = .{ .position = .{ arch_x, arch_ground, arch_z } }, .size = .{ 1.8, 2.25, 1.5 }, .rotation = yawQuat(@as(f32, std.math.pi) * 0.5), .tint = .{ 0.41, 0.72, 0.87, 1 } };
+        n += 1;
+    }
+
+    // Six lightweight islands echo the floating landforms in the clay scene. They deliberately
+    // have no collision so they cannot become invisible platforms or block the mountain route.
+    const islands = [_]struct { x: f32, z: f32, up: f32, scale: f32, turn: f32 }{
+        .{ .x = -185, .z = -72, .up = 115, .scale = 24, .turn = 0.3 },
+        .{ .x = 45, .z = -115, .up = 172, .scale = 30, .turn = 1.2 },
+        .{ .x = 245, .z = 25, .up = 128, .scale = 21, .turn = 2.1 },
+        .{ .x = 410, .z = 105, .up = 205, .scale = 34, .turn = 0.8 },
+        .{ .x = 635, .z = -50, .up = 148, .scale = 25, .turn = 2.6 },
+        .{ .x = -470, .z = 145, .up = 188, .scale = 28, .turn = 1.8 },
+    };
+    for (islands, 0..) |island, i| {
+        if (n + 2 > out.len) return n;
+        const x = center[0] + island.x;
+        const z = center[1] + island.z;
+        const ground = Terrain.surface(sb.seed, x, z).height;
+        out[n] = .{ .mesh = c.boulders[i % c.boulders.len], .transform = .{ .position = .{ x, ground + island.up, z }, .scale = island.scale }, .rotation = yawQuat(island.turn), .tint = if (i % 2 == 0) .{ 0.63, 0.81, 0.92, 1 } else .{ 0.78, 0.86, 0.88, 1 } };
+        out[n + 1] = .{ .mesh = c.spike, .transform = .{ .position = .{ x + 1.8, ground + island.up - island.scale * 0.72, z - 2 }, .scale = island.scale * 0.17 }, .rotation = yawQuat(island.turn + 0.6), .tint = .{ 0.46, 0.68, 0.78, 1 } };
+        n += 2;
+    }
+
+    // The sheltered grove mixes dark alpine pines with amber copper-fan crowns.
+    for (0..9) |i| {
+        if (n == out.len) return n;
+        const angle = @as(f32, @floatFromInt(i)) * (@as(f32, 2) * std.math.pi / 9.0);
+        const radius = 26 + @as(f32, @floatFromInt(i % 3)) * 15;
+        const x = Cloudwater.grove_center[0] + @cos(angle) * radius;
+        const z = Cloudwater.grove_center[1] + @sin(angle) * radius;
+        const ground = Terrain.surface(sb.seed, x, z).height;
+        const golden = i % 3 == 0;
+        out[n] = .{
+            .mesh = c.flora[if (golden) 11 else 14],
+            .transform = .{ .position = .{ x, ground, z }, .scale = if (golden) 42 else 38 },
+            .rotation = yawQuat(angle),
+            .tint = if (golden) .{ 1.8, 1.1, 0.55, 1 } else .{ 0.84, 0.94, 1.04, 1 },
+        };
+        n += 1;
+    }
     return n;
 }
 
@@ -1718,6 +1813,8 @@ fn publishAntarcticPerimeter(sb: *const Sandbox, out: []World.Prop, start: usize
     const wall_top = Material.ice(.{ 0.82, 0.91, 1.0, 1 });
     for (0..4) |face| {
         for (0..8) |segment| {
+            // Leave a 153 m north gate through the visual-only landing ramparts.
+            if (face == 0 and segment >= 2 and segment <= 5) continue;
             if (n + 4 > out.len) return n;
             const along = (@as(f32, @floatFromInt(segment)) - 3.5) * 38;
             const along_axis: V = if (face < 2) .{ along, 0, 0 } else .{ 0, 0, along };
@@ -1740,6 +1837,26 @@ fn publishAntarcticPerimeter(sb: *const Sandbox, out: []World.Prop, start: usize
                 n += 1;
             }
         }
+    }
+
+    // Lit ice markers guide the player from the landing pad through the gate and out onto the
+    // open glacier instead of making the square look like a sealed spawn pen.
+    for (0..10) |tile| {
+        if (n == out.len) return n;
+        const distance = 20 + @as(f32, @floatFromInt(tile)) * 13;
+        const z = center[1] - distance;
+        const ground = Terrain.surface(sb.seed, center[0], z).height;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ center[0], ground + 0.18, z } }, .tint = Material.emissive(.{ 0.16, 0.76, 1.0, 1 }, 0.42), .size = .{ 9, 0.18, 7 } };
+        n += 1;
+    }
+    for (0..2) |side| {
+        if (n + 2 > out.len) return n;
+        const x = center[0] + (if (side == 0) @as(f32, -80) else 80);
+        const z = center[1] - 152;
+        const ground = Terrain.surface(sb.seed, x, z).height;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ x, ground + 8, z } }, .tint = wall_tint, .size = .{ 4, 16, 4 } };
+        out[n + 1] = .{ .mesh = c.spike, .transform = .{ .position = .{ x, ground + 18, z } }, .tint = wall_top, .size = .{ 5, 6, 5 } };
+        n += 2;
     }
 
     const local = struct {
@@ -2435,7 +2552,7 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
             }
         }
     }
-    return n;
+    return publishCloudwater(sb, out, n, t);
 }
 
 /// Hive troopers: dark red heavy plate, sealed helmets, magenta lumen.

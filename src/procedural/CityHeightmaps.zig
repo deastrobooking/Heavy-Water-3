@@ -5,6 +5,7 @@ const Mountains = @import("Mountains.zig");
 const CityGeography = @import("CityGeography.zig");
 const Region = @import("../world/Region.zig");
 const ChunkKey = @import("../world/ChunkKey.zig");
+const Cloudwater = @import("Cloudwater.zig");
 
 const detroit_bytes = @embedFile("../assets/detroit_terrain.hwmh");
 const nyc_bytes = @embedFile("../assets/nyc_terrain.hwmh");
@@ -56,7 +57,10 @@ pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
     if (Region.k2.contains(key.x, key.z)) {
         const mx = x - k2_center[0] + k2_anchor_x;
         const mz = z - k2_center[1] + k2_anchor_z;
-        if (sampleMap(k2_map, mx, mz)) |height| return blendToFallback(k2_map, mx, mz, height, seed, x, z);
+        if (sampleMap(k2_map, mx, mz)) |height| {
+            const mapped = blendToFallback(k2_map, mx, mz, height, seed, x, z);
+            return Cloudwater.carve(seed, x, z, mapped);
+        }
     }
     const dx = x - detroit_center[0] + detroit_anchor_x;
     const dz = z - detroit_center[1] + detroit_anchor_z;

@@ -8,6 +8,7 @@ const V = Physics.Vec3;
 const Camera = @import("../world/Camera.zig");
 const Input = @import("../engine/Input.zig");
 const Biome = @import("../procedural/Biome.zig");
+const enum_compat = @import("enum_compat");
 const Player = @This();
 pub const Mode = enum { walk, fly };
 /// Held boost in free-fly or suit flight doubles the speed every this many seconds.
@@ -151,6 +152,10 @@ pub fn boostTier(self: *const Player) u32 {
 fn boostScale(tier: u32) f32 {
     return @floatFromInt(@as(u32, 1) << @intCast(tier));
 }
+fn nextTraversal(current: Traversal) Traversal {
+    const next = (@as(usize, @intCast(@intFromEnum(current))) + 1) % enum_compat.fields(Traversal).len;
+    return @enumFromInt(next);
+}
 /// How fast velocity may change toward a flight target: never slower than `base`, and scaled to the
 /// speeds involved so a tier change (or letting go) settles in about a second at any tier.
 fn flightAccel(self: *const Player, base: f32, target_speed: f32) f32 {
@@ -257,7 +262,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
     self.grapple.heat = @max(0, self.grapple.heat - 24 * dt);
     if (self.grapple.mode == .cooldown and self.grapple.timer == 0) self.grapple.mode = .ready;
     if (input.cycle_mode) {
-        self.traversal = @enumFromInt(@intFromEnum(self.traversal) +% 1);
+        self.traversal = nextTraversal(self.traversal);
         self.flight_engaged = false;
         self.air_assist_engaged = false;
         self.flight_tap_count = 0;
@@ -687,8 +692,23 @@ fn move(self: *Player, physics: *Physics, dt: f32) void {
     // The cap bounds the cost at boost-tier speeds; the move is split by the capped count, so a long
     // step still covers its full distance (it used to fall short above the old 64-step cap).
     const count: usize = @intFromFloat(@min(max_move_substeps, @max(1, @ceil(R.length(movement) / 0.18))));
+    // At regional coordinates hundreds of kilometres from zero, a small f32 movement can round
+    // away. Track the collision-free endpoint using the same substeps as the physics backend so
+    // that quantization is not mistaken for a wall and does not erase velocity. Local play keeps
+    // the original collision path without this extra bookkeeping.
+    const precision_sensitive = @max(@abs(start[0]), @abs(start[2])) >= 16_384;
+    var unobstructed: V = start;
+    const substep = R.scale(movement, 1 / @as(f32, @floatFromInt(count)));
     for (0..count) |_| {
-        const result = physics.moveCharacter(self.shape, self.feet, R.scale(movement, 1 / @as(f32, @floatFromInt(count))), self.grounded and self.velocity[1] <= 0);
+        if (precision_sensitive) {
+            const horizontal_distance = @sqrt(substep[0] * substep[0] + substep[2] * substep[2]);
+            const collision_steps: usize = @max(1, @as(usize, @intFromFloat(@min(64, @ceil(horizontal_distance / (self.shape.radius * 0.5))))));
+            for (0..collision_steps) |_| {
+                unobstructed[0] += substep[0] / @as(f32, @floatFromInt(collision_steps));
+                unobstructed[2] += substep[2] / @as(f32, @floatFromInt(collision_steps));
+            }
+        }
+        const result = physics.moveCharacter(self.shape, self.feet, substep, self.grounded and self.velocity[1] <= 0);
         self.feet = result.feet;
         self.grounded = result.grounded;
         self.support = result.support;
@@ -699,7 +719,7 @@ fn move(self: *Player, physics: *Physics, dt: f32) void {
     }
     for ([_]usize{ 0, 2 }) |k| {
         const actual = (self.feet[k] - start[k]) / dt - carry[k];
-        if (@abs(actual) < @abs(self.velocity[k])) self.velocity[k] = actual;
+        if ((!precision_sensitive or self.feet[k] != unobstructed[k]) and @abs(actual) < @abs(self.velocity[k])) self.velocity[k] = actual;
     }
     if (self.grounded and self.velocity[1] < 0) self.velocity[1] = 0;
     self.knockback = R.scale(self.knockback, @exp(-9 * dt));
@@ -878,6 +898,18 @@ fn runIn(p: *Player, physics: *Physics, camera: *Camera, input: Input, env: Envi
 
 fn groundSpeed(p: Player) f32 {
     return @sqrt(p.velocity[0] * p.velocity[0] + p.velocity[2] * p.velocity[2]);
+}
+
+test "cycling every traversal wraps from the last mode to the first" {
+    var physics = Physics.init(.{ .sample = flatGround });
+    defer physics.deinit();
+    var camera: Camera = .{};
+    var player: Player = .{ .traversal = .energy_skate };
+    const expected = [_]Traversal{ .grapple, .hover_jet, .flight, .hoverboard, .energy_skate };
+    for (expected) |mode| {
+        player.step(&physics, &camera, .{ .cycle_mode = true }, test_dt);
+        try std.testing.expectEqual(mode, player.traversal);
+    }
 }
 
 test "snow, marsh and shallow water slow a runner; snow slides further to a stop" {

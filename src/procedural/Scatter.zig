@@ -3,6 +3,7 @@ const Seed = @import("Seed.zig");
 const Chunk = @import("Chunk.zig");
 const CityHeightmaps = @import("CityHeightmaps.zig");
 const Biome = @import("Biome.zig");
+const Cloudwater = @import("Cloudwater.zig");
 const Region = @import("../world/Region.zig");
 const Key = @import("../world/ChunkKey.zig");
 const Transform = @import("../world/Transform.zig");
@@ -51,7 +52,9 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const z = @as(f32, @floatFromInt(key.z)) * Key.extent + Seed.unit(Seed.mix(h)) * 124 - 62;
         const kind: Kind = if (i % 7 == 0) .relic else .vegetation;
         // The subglacial approach is a wind-carved ice sheet; preserve salvage, clear the forest.
-        if ((antarctic or alpine_glacier) and kind == .vegetation) continue;
+        if (antarctic and kind == .vegetation) continue;
+        const ground = CityHeightmaps.heightAt(seed, x, z);
+        if (alpine_glacier and kind == .vegetation and (!Cloudwater.isSheltered(x, z) or ground > 4660)) continue;
         if (kind == .relic and nearSpawn(x, z, spawn_relic_clearing)) continue;
         const biome = Biome.sample(regional_seed, x, z);
         const nx = CityHeightmaps.heightAt(seed, x - 0.5, z) - CityHeightmaps.heightAt(seed, x + 0.5, z);
@@ -60,13 +63,13 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const chance = Seed.unit(Seed.mix(h +% 2));
         if (kind == .vegetation and chance > 0.85 - biome.arid * 0.65) continue;
         // Snow thins the flora to the hardy trees, and frosts what grows.
-        const ground = CityHeightmaps.heightAt(seed, x, z);
         const frost = if (kind == .vegetation) Biome.cover(regional_seed, x, z, ground, @sqrt(nx * nx + nz * nz)).snow else 0;
         const choice = Seed.unit(Seed.mix(h +% 3));
         if (frost > 0.25 and choice <= 0.82 and Seed.unit(Seed.mix(h +% 5)) < frost) continue;
         // Long grass and fern fronds are sparse floor accents; rounded shrubs and flowering
         // natives carry most of the understory so their silhouettes do not read like tree leaves.
-        const variant: u8 = if (kind == .relic) 0 else if (choice < 0.07) 0 else if (choice < 0.15) 1 else if (choice > 0.985) Vegetation.tree_variants[@intCast(Seed.mix(h +% 4) % Vegetation.tree_count)] else if (choice > 0.96 and biome.arid < 0.58) 14 else if (choice > 0.88) 2 else if (choice > 0.66) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.25) 7 else 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3));
+        const sheltered = alpine_glacier and Cloudwater.isSheltered(x, z);
+        const variant: u8 = if (kind == .relic) 0 else if (choice < 0.07) 0 else if (choice < 0.15) 1 else if (sheltered and Cloudwater.groveWeight(x, z) > 0.2 and choice > 0.69) 11 else if (sheltered and choice > 0.90) 14 else if (choice > 0.985) Vegetation.tree_variants[@intCast(Seed.mix(h +% 4) % Vegetation.tree_count)] else if (choice > 0.96 and biome.arid < 0.58) 14 else if (choice > 0.88) 2 else if (choice > 0.66) 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3)) else if (choice > 0.25) 7 else 8 + @as(u8, @intCast(Seed.mix(h +% 6) % 3));
         if (Vegetation.isTree(variant) and (nearSpawn(x, z, spawn_clearing) or District.nearRoad(seed, x, z, road_clearance))) continue;
         const color = biome.color();
         const shade = 0.84 + 0.28 * Seed.unit(Seed.mix(h +% 5));
@@ -75,8 +78,8 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
             .local_id = @intCast(i),
             .kind = kind,
             .variant = variant,
-            .transform = .{ .position = .{ x, ground - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 14) 6 + Seed.unit(Seed.mix(h +% 1)) * 12 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else if (variant == 0) 0.55 + Seed.unit(Seed.mix(h +% 1)) * 0.55 else if (variant == 1) 0.7 + Seed.unit(Seed.mix(h +% 1)) * 0.65 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
-            .tint = if (kind == .relic) .{ shade, shade, shade, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
+            .transform = .{ .position = .{ x, ground - 0.03, z }, .scale = if (kind == .relic) 6.1 + Seed.unit(Seed.mix(h +% 1)) * 12.2 else if (alpine_glacier and Vegetation.isTree(variant)) 30 + Seed.unit(Seed.mix(h +% 1)) * 24 else if (Vegetation.isRedwood(variant)) 132 + Seed.unit(Seed.mix(h +% 1)) * 20.4 else if (Vegetation.isTree(variant)) 96 + Seed.unit(Seed.mix(h +% 1)) * 54 else if (variant == 14) 6 + Seed.unit(Seed.mix(h +% 1)) * 12 else if (variant == 7) 1.3 + Seed.unit(Seed.mix(h +% 1)) * 1.2 else if (variant == 0) 0.55 + Seed.unit(Seed.mix(h +% 1)) * 0.55 else if (variant == 1) 0.7 + Seed.unit(Seed.mix(h +% 1)) * 0.65 else 0.8 + Seed.unit(Seed.mix(h +% 1)) * 1.1 },
+            .tint = if (kind == .relic) .{ shade, shade, shade, 1 } else if (alpine_glacier and variant == 11 and Cloudwater.groveWeight(x, z) > 0.2) .{ 1.8 * shade, 1.1 * shade, 0.55 * shade, 1 } else if (variant == 2) .{ 1.15, 0.72, 1.12, 1 } else frosted(tint, frost, Vegetation.colors[variant]),
         };
         count += 1;
     }

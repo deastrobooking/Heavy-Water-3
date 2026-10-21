@@ -62,14 +62,16 @@ pub fn detect(data: []const u8) Detection {
 const testing = std.testing;
 
 test "an ID3v2 tag is ten bytes plus its syncsafe size" {
-    var data = [_]u8{ 'I', 'D', '3', 4, 0, 0, 0, 0, 2, 1 } ++ [_]u8{0} ** 300;
+    var data: [310]u8 = @splat(0);
+    @memcpy(data[0..10], &[_]u8{ 'I', 'D', '3', 4, 0, 0, 0, 0, 2, 1 });
     const tag = detect(&data).found;
     try testing.expectEqual(Kind.id3v2, tag.kind);
     try testing.expectEqual(@as(usize, 10 + (2 << 7) + 1), tag.size);
 }
 
 test "an ID3v2 footer adds another ten bytes" {
-    var data = [_]u8{ 'I', 'D', '3', 4, 0, 0x10, 0, 0, 0, 20 } ++ [_]u8{0} ** 40;
+    var data: [50]u8 = @splat(0);
+    @memcpy(data[0..10], &[_]u8{ 'I', 'D', '3', 4, 0, 0x10, 0, 0, 0, 20 });
     try testing.expectEqual(@as(usize, 40), detect(&data).found.size);
 }
 
@@ -79,7 +81,8 @@ test "a size byte with its high bit set is not a syncsafe size" {
 }
 
 test "ID3v1 is always 128 bytes" {
-    const data = [_]u8{ 'T', 'A', 'G' } ++ [_]u8{0} ** 125;
+    var data: [128]u8 = @splat(0);
+    @memcpy(data[0..3], "TAG");
     try testing.expectEqual(@as(usize, 128), detect(&data).found.size);
 }
 
@@ -90,7 +93,7 @@ test "a truncated tag header asks for more rather than guessing" {
 }
 
 test "an APE tag is its stated size plus a 32 byte header" {
-    var data = [_]u8{0} ** 64;
+    var data: [64]u8 = @splat(0);
     @memcpy(data[0..8], "APETAGEX");
     std.mem.writeInt(u32, data[12..16], 100, .little);
     const tag = detect(&data).found;

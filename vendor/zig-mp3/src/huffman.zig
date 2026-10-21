@@ -228,7 +228,7 @@ test "every code word decodes back to its own symbol" {
         for (entry.codes) |code| {
             // Put the code word at the top of a buffer, followed by ones so
             // that a decoder reading too far is caught rather than fed zeroes.
-            var buf = [_]u8{0xff} ** 8;
+            var buf: [8]u8 = @splat(0xff);
             for (0..code.len) |i| {
                 const bit: u8 = @truncate((code.code >> @intCast(code.len - 1 - i)) & 1);
                 const mask = @as(u8, 0x80) >> @intCast(i % 8);

@@ -3,6 +3,10 @@
 const std = @import("std");
 const Seed = @import("Seed.zig");
 const Noise = @import("Noise.zig");
+const Region = @import("../world/Region.zig");
+const ChunkKey = @import("../world/ChunkKey.zig");
+const Cloudwater = @import("Cloudwater.zig");
+const CityHeightmaps = @import("CityHeightmaps.zig");
 
 pub const lane_spacing: f32 = 1000;
 pub const lane_offset: f32 = 500;
@@ -83,6 +87,11 @@ pub fn carvedHeight(seed: u64, x: f32, z: f32, base: f32) f32 {
 
 /// The river surface over (x, z), or null on dry ground. Waterfall curtains are not included.
 pub fn waterAt(seed: u64, x: f32, z: f32) ?f32 {
+    const key = ChunkKey.fromPosition(x, z);
+    if (Region.k2.contains(key.x, key.z) and Cloudwater.streamContains(seed, x, z)) {
+        const center = Cloudwater.streamCenterZ(seed, x);
+        return Cloudwater.waterLevel(CityHeightmaps.heightAt(seed, x, center));
+    }
     const nearest: i64 = @intFromFloat(@round((z - lane_offset) / lane_spacing));
     const center = centerZ(seed, nearest, x);
     if (@abs(z - center) > surfaceHalfWidth(nearest, x)) return null;
@@ -112,6 +121,18 @@ test "the river surface lies over the carved channel and nowhere else" {
     const bed = carvedHeight(42, x, z, Noise.baseHeight(42, x, z));
     try std.testing.expect(surface > bed + 1);
     try std.testing.expect(waterAt(42, x, z + water_width) == null);
+}
+
+test "Cloudwater's stream surface sits above its carved K2 bed and ends at the bank" {
+    const world_seed: u64 = 42;
+    const x = Region.k2.arrival[0] + 600;
+    const probe_z = Region.k2.arrival[1] + 600;
+    const seed = Region.seedAtPosition(world_seed, x, probe_z);
+    const center = Cloudwater.streamCenterZ(seed, x);
+    const bed = CityHeightmaps.heightAt(world_seed, x, center);
+    const surface = waterAt(seed, x, center) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(surface > bed + 6);
+    try std.testing.expect(waterAt(seed, x, center + 40) == null);
 }
 
 test "Detroit has a wide river around a dry Belle Isle and a narrow channel beyond the city" {

@@ -38,6 +38,7 @@ const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
 const Mountains = @import("../procedural/Mountains.zig");
+const Cloudwater = @import("../procedural/Cloudwater.zig");
 const Chunk = @import("../procedural/Chunk.zig");
 const Region = @import("../world/Region.zig");
 const Host = @import("../script/Host.zig");
@@ -894,13 +895,13 @@ pub fn halve(size: [3]f32) Physics.Vec3 {
     return .{ size[0] / 2, size[1] / 2, size[2] / 2 };
 }
 
-/// P1's controller combat for the coming step: in Hands, trigger/bumper drive energy martial
-/// attacks and guard; in Weapon, they fire the gun and quick-draw the saber.
+/// P1's controller combat for the coming step. Firing or quick-drawing always selects the Weapon
+/// tool, including from the default Hands tool, so a controller can reach both direct weapons.
 pub fn padWeapons(self: *Sandbox, fire: bool, saber: bool) void {
     self.trigger.fire = self.trigger.fire or fire;
     self.trigger.saber = self.trigger.saber or saber;
     self.trigger.direct = true;
-    if ((fire or saber) and self.tools.tool != .hands) self.tools.tool = .weapon;
+    if (fire or saber) self.tools.tool = .weapon;
 }
 
 /// A body's passives on top of the party's suit: a Wildkin hero's run speed, and wings that
@@ -4084,11 +4085,13 @@ test "a guest fires their own blaster with the trigger and downs a drone" {
 
 /// Stable regional destinations shared by the map and fast travel.
 pub const detroit_travel_count = 3 + Metro.stop_nodes.len;
+pub const authored_travel_count = 1;
+pub const TravelDestinationKind = enum { base_camp, shrine, metro, region, region_site };
 pub const TravelDestination = struct {
     label: []const u8,
     menu_label: []const u8,
     map_title: []const u8,
-    kind: enum { base_camp, shrine, metro, region },
+    kind: TravelDestinationKind,
     index: usize = 0,
 };
 pub const region_destination_count = blk: {
@@ -4100,7 +4103,7 @@ pub const region_destination_count = blk: {
 };
 /// One ordered destination table drives world-map rows, titles, and fast-travel dispatch.
 pub const travel_destinations = blk: {
-    var list: [detroit_travel_count + region_destination_count]TravelDestination = undefined;
+    var list: [detroit_travel_count + region_destination_count + authored_travel_count]TravelDestination = undefined;
     list[0] = .{ .label = "BASE CAMP", .menu_label = "TRAVEL: BASE CAMP", .map_title = Region.default_title, .kind = .base_camp };
     list[1] = .{ .label = "ROOTDEEP 1", .menu_label = "TRAVEL: ROOTDEEP SHRINE 1", .map_title = Region.default_title, .kind = .shrine, .index = 0 };
     list[2] = .{ .label = "ROOTDEEP 2", .menu_label = "TRAVEL: ROOTDEEP SHRINE 2", .map_title = Region.default_title, .kind = .shrine, .index = 1 };
@@ -4111,6 +4114,8 @@ pub const travel_destinations = blk: {
         list[destination_index] = .{ .label = label, .menu_label = std.fmt.comptimePrint("TRAVEL: {s}", .{label}), .map_title = region.title, .kind = .region, .index = region_index };
         destination_index += 1;
     }
+    list[destination_index] = .{ .label = "CLOUDWATER BASIN", .menu_label = "TRAVEL: CLOUDWATER BASIN", .map_title = "K2 / CLOUDWATER BASIN", .kind = .region_site };
+    destination_index += 1;
     std.debug.assert(destination_index == list.len);
     break :blk list;
 };
@@ -4149,6 +4154,7 @@ pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
     const entry = travel_destinations[destination];
     switch (entry.kind) {
         .region => return regionArrival(self.seed, Region.all[entry.index]),
+        .region_site => return .{ Cloudwater.arrival[0], Terrain.surface(self.seed, Cloudwater.arrival[0], Cloudwater.arrival[1]).height + 0.1, Cloudwater.arrival[1] },
         .metro => {
             const node_id = Metro.destinationNode(entry.index).?;
             const node = self.catalog.district.nodes[node_id];
@@ -4361,6 +4367,58 @@ test "every travel destination has a safe arrival a player can be placed on" {
     }
 }
 
+test "Cloudwater Basin is a distinct map stop nested inside the K2 expedition" {
+    var basin: ?usize = null;
+    var k2: ?usize = null;
+    for (travel_destinations, 0..) |entry, index| {
+        if (std.mem.eql(u8, entry.label, "CLOUDWATER BASIN")) basin = index;
+        if (std.mem.eql(u8, entry.label, "K2 EXPEDITION")) k2 = index;
+    }
+    try std.testing.expect(basin != null and k2 != null and basin.? != k2.?);
+    try std.testing.expectEqual(TravelDestinationKind.region_site, travel_destinations[basin.?].kind);
+    try std.testing.expectEqualStrings("K2 / CLOUDWATER BASIN", travel_destinations[basin.?].map_title);
+    const basin_key = Key.fromPosition(Cloudwater.arrival[0], Cloudwater.arrival[1]);
+    const k2_key = Key.fromPosition(Region.k2.arrival[0], Region.k2.arrival[1]);
+    try std.testing.expect(Region.k2.contains(basin_key.x, basin_key.z));
+    try std.testing.expect(Region.k2.contains(k2_key.x, k2_key.z));
+}
+
+test "Antarctic landing opens onto traversable terrain beyond the north ramparts" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+
+    var destination: ?usize = null;
+    for (travel_destinations, 0..) |entry, index| if (std.mem.eql(u8, entry.label, "ANTARCTICA")) {
+        destination = index;
+        break;
+    };
+    try std.testing.expect(destination != null);
+    try std.testing.expect(sb.fastTravel(0, destination.?, &camera));
+
+    // Clear the terrain while flying north so this checks the actual region movement path over
+    // the landing threshold, not just the presence of a map marker.
+    sb.player.mode = .fly;
+    sb.player.feet[1] += 30;
+    sb.player.velocity = @splat(0);
+    camera.yaw = std.math.pi;
+    camera.pitch = 0;
+    for (0..600) |_| sb.player.stepIn(&sb.physics, &camera, .{ .forward = 1 }, .{}, 1.0 / 60.0);
+    try std.testing.expect(sb.player.feet[2] < Region.antarctica.arrival[1] - 152);
+
+    // Also verify the landing opens for ordinary ground movement, which follows the same route
+    // without relying on powered flight.
+    sb.player.mode = .walk;
+    sb.player.feet = sb.travelArrival(destination.?).?;
+    sb.player.velocity = @splat(0);
+    sb.player.grounded = false;
+    for (0..2400) |_| sb.player.stepIn(&sb.physics, &camera, .{ .forward = 1 }, .{}, 1.0 / 60.0);
+    try std.testing.expect(sb.player.feet[2] < Region.antarctica.arrival[1] - 152);
+}
+
 test "travel searches around obstructions and leaves state untouched when no arrival fits" {
     var catalog: Catalog = undefined;
     var camera: Camera = .{};
@@ -4389,7 +4447,6 @@ test "P1's controller: the right trigger fires the energy gun and the right bump
     try testSandbox(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
     defer sb.deinit();
-    sb.tools.tool = .weapon;
     sb.combat.arsenals[0].active = .machine_gun;
     sb.combat.arsenals[0].ranged = .machine_gun;
     var pads: Gamepads = .{};
@@ -4408,6 +4465,7 @@ test "P1's controller: the right trigger fires the energy gun and the right bump
         pads.consume();
     }
     try std.testing.expect(pads.commands[0].fire);
+    try std.testing.expectEqual(Build.Tool.weapon, sb.tools.tool);
     try std.testing.expectEqual(@as(?@import("../combat/Weapon.zig").WeaponKind, .machine_gun), sb.combat.arsenals[0].active);
     try std.testing.expect(fired > 0);
     // Right bumper: the saber is drawn and swings.
@@ -4423,4 +4481,27 @@ test "P1's controller: the right trigger fires the energy gun and the right bump
     }
     try std.testing.expect(pads.commands[0].alt);
     try std.testing.expect(swung);
+
+    // Releasing the saber returns to the ranged weapon, and RT still fires it from the same
+    // controller mapping instead of remaining latched to the melee action.
+    samples[0] = .{ .connected = 1 };
+    for (0..45) |_| {
+        pads.sample(samples);
+        sb.trigger = .{};
+        sb.padWeapons(pads.commands[0].fire, pads.commands[0].alt);
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        pads.consume();
+    }
+    samples[0] = .{ .connected = 1, .rt = 1 };
+    var fired_after_saber: usize = 0;
+    for (0..30) |_| {
+        pads.sample(samples);
+        sb.trigger = .{};
+        sb.padWeapons(pads.commands[0].fire, pads.commands[0].alt);
+        try sb.step(&camera, .{}, .{}, 1.0 / 60.0);
+        for (sb.combat.arsenals[0].system.projectiles.items) |p| fired_after_saber += @intFromBool(p.active and p.kind == .mg_bolt);
+        pads.consume();
+    }
+    try std.testing.expectEqual(@as(?@import("../combat/Weapon.zig").WeaponKind, .machine_gun), sb.combat.arsenals[0].active);
+    try std.testing.expect(fired_after_saber > 0);
 }

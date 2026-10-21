@@ -1740,6 +1740,16 @@ fn showcase(self: *App) void {
         self.sandbox.player.feet = .{ arrival[0], ground + 4, arrival[1] };
         target = .{ arrival[0] + 116, ground + 5, arrival[1] };
         eye = .{ arrival[0] + 20, ground + 27, arrival[1] + 125 };
+    } else if (v == 90) {
+        const Cloudwater = @import("procedural/Cloudwater.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const at = Cloudwater.arrival;
+        const town: [2]f32 = .{ at[0] - 72, at[1] + 52 };
+        const ground = Terrain.surface(self.sandbox.seed, town[0], town[1]).height;
+        self.sandbox.player.mode = .fly;
+        self.sandbox.player.feet = .{ town[0] - 55, ground + 15, town[1] + 65 };
+        target = .{ town[0], ground + 12, town[1] };
+        eye = .{ town[0] - 115, ground + 100, town[1] + 130 };
     } else if (v == 87 or v == 88) {
         const Region = @import("world/Region.zig");
         const Terrain = @import("procedural/Terrain.zig");

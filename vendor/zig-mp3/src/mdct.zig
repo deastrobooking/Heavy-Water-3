@@ -263,7 +263,8 @@ fn roundTrip(
 }
 
 test "a run of long blocks survives the transform and its inverse" {
-    const snr = try roundTrip(&(.{.normal} ** 8), 0, 0x1d);
+    const blocks: [8]BlockType = @splat(.normal);
+    const snr = try roundTrip(&blocks, 0, 0x1d);
     testing.expect(snr > 80) catch |err| {
         std.debug.print("long block round trip {d:.2} dB\n", .{snr});
         return err;
@@ -271,7 +272,8 @@ test "a run of long blocks survives the transform and its inverse" {
 }
 
 test "a run of short blocks survives the transform and its inverse" {
-    const snr = try roundTrip(&(.{.short} ** 8), 0, 0x2e);
+    const blocks: [8]BlockType = @splat(.short);
+    const snr = try roundTrip(&blocks, 0, 0x2e);
     testing.expect(snr > 80) catch |err| {
         std.debug.print("short block round trip {d:.2} dB\n", .{snr});
         return err;
@@ -279,7 +281,8 @@ test "a run of short blocks survives the transform and its inverse" {
 }
 
 test "a run of mixed blocks survives the transform and its inverse" {
-    const snr = try roundTrip(&(.{.short} ** 8), 2, 0x3f);
+    const blocks: [8]BlockType = @splat(.short);
+    const snr = try roundTrip(&blocks, 2, 0x3f);
     testing.expect(snr > 80) catch |err| {
         std.debug.print("mixed block round trip {d:.2} dB\n", .{snr});
         return err;

@@ -177,7 +177,7 @@ const stereo_header = Header.parse(.{ 0xff, 0xfb, 0x90, 0x00 }).?; // MPEG-1 ste
 const mono_header = Header.parse(.{ 0xff, 0xfb, 0x90, 0xc0 }).?; // MPEG-1 mono
 
 test "an Info header is found after the side information" {
-    var frame = [_]u8{0} ** 417;
+    var frame: [417]u8 = @splat(0);
     @memcpy(frame[0..4], &[_]u8{ 0xff, 0xfb, 0x90, 0x00 });
     const at = 4 + 32;
     @memcpy(frame[at..][0..4], "Info");
@@ -197,7 +197,7 @@ test "an Info header is found after the side information" {
 }
 
 test "the header sits closer to the front of a mono frame" {
-    var frame = [_]u8{0} ** 417;
+    var frame: [417]u8 = @splat(0);
     const at = 4 + 17;
     @memcpy(frame[at..][0..4], "Xing");
     std.mem.writeInt(u32, frame[at + 4 ..][0..4], 1, .big);
@@ -210,7 +210,7 @@ test "the header sits closer to the front of a mono frame" {
 }
 
 test "the LAME extension gives the encoder delay and padding" {
-    var frame = [_]u8{0} ** 417;
+    var frame: [417]u8 = @splat(0);
     const at = 4 + 32;
     @memcpy(frame[at..][0..4], "Info");
     std.mem.writeInt(u32, frame[at + 4 ..][0..4], 1, .big);
@@ -238,7 +238,7 @@ test "the LAME extension gives the encoder delay and padding" {
 }
 
 test "without a LAME extension there is nothing to trim" {
-    var frame = [_]u8{0} ** 417;
+    var frame: [417]u8 = @splat(0);
     const at = 4 + 32;
     @memcpy(frame[at..][0..4], "Xing");
     std.mem.writeInt(u32, frame[at + 4 ..][0..4], 1, .big);
@@ -252,7 +252,7 @@ test "without a LAME extension there is nothing to trim" {
 }
 
 test "a VBRI header is found at its own fixed offset" {
-    var frame = [_]u8{0} ** 417;
+    var frame: [417]u8 = @splat(0);
     const at = 36;
     @memcpy(frame[at..][0..4], "VBRI");
     std.mem.writeInt(u16, frame[at + 8 ..][0..2], 75, .big);
@@ -266,7 +266,7 @@ test "a VBRI header is found at its own fixed offset" {
 }
 
 test "an ordinary audio frame has no header in it" {
-    var frame = [_]u8{0xa5} ** 417;
+    var frame: [417]u8 = @splat(0xa5);
     @memcpy(frame[0..4], &[_]u8{ 0xff, 0xfb, 0x90, 0x00 });
     try testing.expect(parse(stereo_header, &frame) == null);
 }

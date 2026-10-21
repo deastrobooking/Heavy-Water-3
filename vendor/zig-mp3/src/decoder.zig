@@ -410,12 +410,13 @@ test "a tag larger than the input is stepped over across calls" {
     var decoder = Decoder.init();
     var out: FrameBuffer = undefined;
     // An ID3v2 tag claiming 1000 bytes of body, of which we offer 20.
-    var head = [_]u8{ 'I', 'D', '3', 4, 0, 0, 0, 0, 7, 0x68 } ++ [_]u8{0} ** 10;
+    var head: [20]u8 = @splat(0);
+    @memcpy(head[0..10], &[_]u8{ 'I', 'D', '3', 4, 0, 0, 0, 0, 7, 0x68 });
     try testing.expectEqual(@as(usize, 1010), tags.detect(&head).found.size);
 
     try testing.expectEqual(Step{ .skipped = 20 }, decoder.next(&head, &out, .{}));
     try testing.expectEqual(@as(usize, 990), decoder.skipping);
-    const more = [_]u8{0} ** 500;
+    const more: [500]u8 = @splat(0);
     try testing.expectEqual(Step{ .skipped = 500 }, decoder.next(&more, &out, .{}));
     try testing.expectEqual(@as(usize, 490), decoder.skipping);
 }
@@ -424,7 +425,7 @@ test "a tag larger than the input is stepped over across calls" {
 /// The side information is zeroed apart from `main_data_begin`, so the frame
 /// decodes to silence, and the main data is whatever is left of the frame.
 fn silentFrame(crc: bool, main_data_begin: u9) [104]u8 {
-    var frame = [_]u8{0} ** 104;
+    var frame: [104]u8 = @splat(0);
     frame[0] = 0xff;
     frame[1] = if (crc) 0xfa else 0xfb; // protection bit is active low
     frame[2] = 0x10; // bit rate index 1, sampling frequency index 0

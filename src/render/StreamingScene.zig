@@ -4,6 +4,7 @@ const gpu = mach.gpu;
 const Streamer = @import("../world/Streamer.zig");
 const Key = @import("../world/ChunkKey.zig");
 const Region = @import("../world/Region.zig");
+const Cloudwater = @import("../procedural/Cloudwater.zig");
 const Chunk = @import("../procedural/Chunk.zig");
 const CityHeightmaps = @import("../procedural/CityHeightmaps.zig");
 const Scatter = @import("../procedural/Scatter.zig");
@@ -304,12 +305,11 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
     for (self.residents) |resident| {
         if (!resident.visible) continue;
         const view = resident.view.?;
-        // The glacier is intentionally bare; keep stale or future scatter payloads from adding
-        // trees back onto K2 even if its scatter recipe changes independently.
-        if (kind == .vegetation and Region.k2.contains(view.key.x, view.key.z)) continue;
         const data = self.stream.payload(view).?;
         for (data.objects[0..data.object_count]) |object| {
             if (object.kind != kind) continue;
+            // K2 stays bare except for the authored sheltered Cloudwater pockets.
+            if (kind == .vegetation and Region.k2.contains(view.key.x, view.key.z) and !Cloudwater.isSheltered(object.transform.position[0], object.transform.position[2])) continue;
             // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
             if (self.flora_review and kind == .vegetation) continue;
             if (variant) |v| if (object.variant != v) continue;

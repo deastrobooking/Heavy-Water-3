@@ -185,7 +185,7 @@ test "MPEG-1 stereo side information is 32 bytes of two granules" {
     const header = Header.parse(.{ 0xff, 0xfb, 0x90, 0x00 }).?;
     try testing.expectEqual(@as(usize, 32), header.sideInfoSize());
 
-    var bytes = [_]u8{0} ** 32;
+    var bytes: [32]u8 = @splat(0);
     var pos: usize = 0;
     putBits(&bytes, &pos, 0x1ff, 9); // main_data_begin
     putBits(&bytes, &pos, 0, 3); // private bits
@@ -200,7 +200,7 @@ test "MPEG-1 stereo side information is 32 bytes of two granules" {
 test "MPEG-1 mono side information is 17 bytes and has no second channel" {
     const header = Header.parse(.{ 0xff, 0xfb, 0x90, 0xc0 }).?;
     try testing.expectEqual(@as(usize, 17), header.sideInfoSize());
-    const bytes = [_]u8{0} ** 17;
+    const bytes: [17]u8 = @splat(0);
     const info = try parse(header, &bytes);
     try testing.expectEqual(@as(u16, 0), info.main_data_begin);
     // The unused channel is inert rather than undefined.
@@ -210,7 +210,7 @@ test "MPEG-1 mono side information is 17 bytes and has no second channel" {
 
 test "a granule reads its fields in order" {
     const header = Header.parse(.{ 0xff, 0xfb, 0x90, 0xc0 }).?; // MPEG-1 mono
-    var bytes = [_]u8{0} ** 17;
+    var bytes: [17]u8 = @splat(0);
     var pos: usize = mono_granule_start;
     putBits(&bytes, &pos, 1234, 12); // part2_3_length
     putBits(&bytes, &pos, 100, 9); // big_values
@@ -243,7 +243,7 @@ test "a granule reads its fields in order" {
 
 test "window switching implies a block type and fixed regions" {
     const header = Header.parse(.{ 0xff, 0xfb, 0x90, 0xc0 }).?;
-    var bytes = [_]u8{0} ** 17;
+    var bytes: [17]u8 = @splat(0);
     var pos: usize = mono_granule_start + 12 + 9 + 8 + 4;
     putBits(&bytes, &pos, 1, 1); // window_switching
     putBits(&bytes, &pos, @intFromEnum(BlockType.short), 2);
@@ -269,7 +269,7 @@ test "window switching implies a block type and fixed regions" {
 test "MPEG-2 has one granule, no scfsi and a nine bit scalefac_compress" {
     const header = Header.parse(.{ 0xff, 0xf3, 0x40, 0xc0 }).?; // MPEG-2 mono
     try testing.expectEqual(@as(usize, 9), header.sideInfoSize());
-    var bytes = [_]u8{0} ** 9;
+    var bytes: [9]u8 = @splat(0);
     var pos: usize = 0;
     putBits(&bytes, &pos, 0xff, 8); // main_data_begin is eight bits here
     putBits(&bytes, &pos, 0, 1); // private bit
@@ -289,7 +289,7 @@ test "MPEG-2 has one granule, no scfsi and a nine bit scalefac_compress" {
 
 test "rejects block type 0 with window switching" {
     const header = Header.parse(.{ 0xff, 0xfb, 0x90, 0xc0 }).?;
-    var bytes = [_]u8{0} ** 17;
+    var bytes: [17]u8 = @splat(0);
     var pos: usize = mono_granule_start + 12 + 9 + 8 + 4;
     putBits(&bytes, &pos, 1, 1); // window_switching
     putBits(&bytes, &pos, 0, 2); // block_type 0: forbidden here
@@ -298,7 +298,7 @@ test "rejects block type 0 with window switching" {
 
 test "rejects the Huffman tables the standard leaves undefined" {
     const header = Header.parse(.{ 0xff, 0xfb, 0x90, 0xc0 }).?;
-    var bytes = [_]u8{0} ** 17;
+    var bytes: [17]u8 = @splat(0);
     var pos: usize = mono_granule_start + 12 + 9 + 8 + 4;
     putBits(&bytes, &pos, 0, 1); // no window switching
     putBits(&bytes, &pos, 14, 5); // table_select[0] = 14
