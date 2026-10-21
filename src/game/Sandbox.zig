@@ -148,13 +148,13 @@ pub const Target = union(enum) {
     city_discovery: u8,
 };
 
-/// A live case clue stays targetable when a salvage object also crosses the ray; other
-/// Frontier-only targets fill an empty ray without stealing closer machine or market targets.
+/// Live case clues and landmark pickups stay targetable when a salvage object also crosses the
+/// ray; other Frontier-only targets fill an empty ray without stealing machine or market targets.
 fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
     const found = candidate orelse return current;
     return switch (found) {
         .evidence, .foundry_terminal, .windsor_evidence, .bile_trace, .bile_relay, .bile_notes => found,
-        .city_discovery => if (current == .none) found else current,
+        .city_discovery => if (current == .none or current == .relic) found else current,
         .hero, .wild_pet, .pet => if (current == .none) found else current,
         else => current,
     };
@@ -2643,6 +2643,7 @@ test "an active Foundry clue stays aimable when a relic also occupies the ray" {
     try std.testing.expect(chosen == .evidence);
     try std.testing.expectEqual(@as(u8, 1), chosen.evidence);
     try std.testing.expectEqual(Target.foundry_terminal, preferFrontierTarget(relic, .foundry_terminal));
+    try std.testing.expectEqual(Target{ .city_discovery = 5 }, preferFrontierTarget(relic, .{ .city_discovery = 5 }));
 
     const hero: Target = .{ .hero = 3 };
     try std.testing.expectEqual(Target{ .relic = relic.relic }, preferFrontierTarget(relic, hero));

@@ -1947,12 +1947,12 @@ fn showcase(self: *App) void {
         const CityDiscoveries = @import("game/CityDiscoveries.zig");
         var points: [@import("game/CityContent.zig").discovery_count][3]f32 = undefined;
         CityDiscoveries.positions(layout, self.sandbox.seed, &points);
-        const point = points[2];
+        const point = points[1];
         self.sandbox.player.mode = .fly;
         self.sandbox.view = .first;
         self.sandbox.player.feet = .{ point[0] + 8, point[1] - 2, point[2] + 10 };
         self.sandbox.player.velocity = .{ 0, 0, 0 };
-        self.sandbox.target = .{ .city_discovery = 2 };
+        self.sandbox.target = .{ .city_discovery = 1 };
         target = point;
         const player_eye = self.sandbox.player.eye();
         eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
@@ -3021,81 +3021,106 @@ fn smokeCityTitan(self: *App) void {
     std.log.info("Smoke Collaborators' Titan: three ally flags and a cleared Frontier opened the bridge fight; the Titan called one Hive reinforcement wave and exposed its core; P1 defeated the group and both kits received the boss reward; Detroit was marked free", .{});
 }
 
-/// Recover a personal discovery through P1 and P2's separate aim/interact paths, then a shared
-/// find, and confirm the two kit claims survive a world save round-trip.
+/// Recover all ten discoveries through the normal aim/interact path for all four seats, then
+/// confirm each personal claim and the shared keepsakes survive a world save round-trip.
 fn smokeCityDiscoveries(self: *App) void {
     const sb = &self.sandbox;
     const camera = &self.engine.camera;
     const baseline = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE DISCOVERIES BASELINE {s}", .{@errorName(err)});
     defer self.allocator.free(baseline);
     defer sb.restore(self.allocator, baseline, camera) catch |err| self.smokeFail("SMOKE DISCOVERIES RESTORE {s}", .{@errorName(err)});
-    defer sb.leaveGuest(0);
+    defer for (0..Sandbox.max_players - 1) |i| sb.leaveGuest(i);
 
     const CityContent = @import("game/CityContent.zig");
     const CityDiscoveries = @import("game/CityDiscoveries.zig");
+    const Player = @import("game/Player.zig");
+    const Camera_ = @import("world/Camera.zig");
+    const SmokeAim = struct {
+        fn place(player: *Player, aim: *Camera_, point: [3]f32) void {
+            player.mode = .fly;
+            player.feet = .{ point[0], point[1] - 2, point[2] - 4 };
+            player.velocity = .{ 0, 0, 0 };
+            const eye = player.eye();
+            const dx = point[0] - eye.x();
+            const dy = point[1] - eye.y();
+            const dz = point[2] - eye.z();
+            aim.position = eye;
+            aim.yaw = std.math.atan2(dx, dz);
+            aim.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        }
+        fn guest(guest_player: *Sandbox.Guest, point: [3]f32) void {
+            guest_player.view = .first;
+            place(&guest_player.player, &guest_player.camera, point);
+        }
+    };
     var points: [CityContent.discovery_count][3]f32 = undefined;
     CityDiscoveries.positions(&sb.catalog.district, sb.seed, &points);
-    const personal: usize = 0;
-    const shared: usize = 3;
-    if (CityContent.detroit.discoveries[personal].reward != .personal or CityContent.detroit.discoveries[shared].reward != .shared) return self.smokeFail("SMOKE DISCOVERY REWARD MAP CHANGED", .{});
-
-    sb.joinGuest(0);
+    for (0..Sandbox.max_players - 1) |i| sb.joinGuest(i);
     sb.tools.tool = .hands;
     sb.view = .first;
-    sb.player.mode = .fly;
-    sb.kits[0].city_discoveries = 0;
-    sb.kits[1].city_discoveries = 0;
-    const p1_level = sb.kits[0].level(.fuel_tank);
-    const p2_level = sb.kits[1].level(.fuel_tank);
+    for (0..Sandbox.max_players) |owner| {
+        const kit = &sb.kits[owner];
+        kit.city_discoveries = 0;
+        kit.levels[@intFromEnum(Sandbox.Kit.Upgrade.fuel_tank)] = 0;
+        kit.levels[@intFromEnum(Sandbox.Kit.Upgrade.sprint_servos)] = 0;
+        kit.levels[@intFromEnum(Sandbox.Kit.Upgrade.jet_efficiency)] = 0;
+        kit.levels[@intFromEnum(Sandbox.Kit.Upgrade.grapple_reel)] = 0;
+        kit.wallet.scrap = 0;
+        kit.armors &= ~Sandbox.Kit.armorBit(.gem_aegis);
+        kit.pets = 0;
+        kit.pet_active = null;
+    }
 
-    sb.player.feet = .{ points[personal][0], points[personal][1] - 2, points[personal][2] - 4 };
-    sb.player.velocity = .{ 0, 0, 0 };
-    var eye = sb.player.eye();
-    var dx = points[personal][0] - eye.x();
-    var dy = points[personal][1] - eye.y();
-    var dz = points[personal][2] - eye.z();
-    camera.position = eye;
-    camera.yaw = std.math.atan2(dx, dz);
-    camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
-    sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P1 DISCOVERY {s}", .{@errorName(err)});
-    if (sb.target != .city_discovery or sb.target.city_discovery != personal or !sb.kits[0].hasCityDiscovery(personal) or sb.kits[0].level(.fuel_tank) != p1_level + 1) return self.smokeFail("SMOKE P1 PERSONAL DISCOVERY FAILED (target {s})", .{@tagName(sb.target)});
-
-    var guest = &sb.guests[0];
-    guest.view = .first;
-    guest.player.mode = .fly;
-    guest.player.feet = .{ points[personal][0], points[personal][1] - 2, points[personal][2] - 4 };
-    guest.player.velocity = .{ 0, 0, 0 };
-    eye = guest.player.eye();
-    dx = points[personal][0] - eye.x();
-    dy = points[personal][1] - eye.y();
-    dz = points[personal][2] - eye.z();
-    guest.camera.position = eye;
-    guest.camera.yaw = std.math.atan2(dx, dz);
-    guest.camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
-    guest.interact = true;
-    sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P2 DISCOVERY {s}", .{@errorName(err)});
-    if (guest.target != .city_discovery or guest.target.city_discovery != personal or !sb.kits[1].hasCityDiscovery(personal) or sb.kits[1].level(.fuel_tank) != p2_level + 1) return self.smokeFail("SMOKE P2 PERSONAL DISCOVERY FAILED (target {s})", .{@tagName(guest.target)});
-
-    sb.player.feet = .{ points[shared][0], points[shared][1] - 2, points[shared][2] - 4 };
-    sb.player.velocity = .{ 0, 0, 0 };
-    eye = sb.player.eye();
-    dx = points[shared][0] - eye.x();
-    dy = points[shared][1] - eye.y();
-    dz = points[shared][2] - eye.z();
-    camera.position = eye;
-    camera.yaw = std.math.atan2(dx, dz);
-    camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
-    sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE SHARED DISCOVERY {s}", .{@errorName(err)});
-    const shared_flag = CityContent.detroit.discoveries[shared].reward.shared;
-    if (sb.target != .city_discovery or sb.target.city_discovery != shared or !sb.progress.hasFlag(shared_flag)) return self.smokeFail("SMOKE SHARED DISCOVERY FAILED (target {s})", .{@tagName(sb.target)});
+    var shared_count: usize = 0;
+    for (CityContent.detroit.discoveries, 0..) |discovery, index| switch (discovery.reward) {
+        .personal => |reward| for (0..Sandbox.max_players) |owner| {
+            const before = sb.kits[owner];
+            var target: Sandbox.Target = .none;
+            if (owner == 0) {
+                SmokeAim.place(&sb.player, camera, points[index]);
+                sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P{d} DISCOVERY {s}", .{ owner + 1, @errorName(err) });
+                target = sb.target;
+            } else {
+                const guest = &sb.guests[owner - 1];
+                SmokeAim.guest(guest, points[index]);
+                guest.interact = true;
+                sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P{d} DISCOVERY {s}", .{ owner + 1, @errorName(err) });
+                target = guest.target;
+            }
+            if (target != .city_discovery or target.city_discovery != index) return self.smokeFail("SMOKE P{d} DISCOVERY {d} NOT TARGETED ({s})", .{ owner + 1, index + 1, @tagName(target) });
+            const kit = &sb.kits[owner];
+            if (!kit.hasCityDiscovery(index)) return self.smokeFail("SMOKE P{d} DISCOVERY {d} NOT CLAIMED", .{ owner + 1, index + 1 });
+            const reward_ok = switch (reward) {
+                .flight_cell => kit.level(.fuel_tank) == before.level(.fuel_tank) + 1,
+                .suit_upgrade => kit.level(.sprint_servos) == before.level(.sprint_servos) + 1,
+                .energy_upgrade => kit.level(.jet_efficiency) == before.level(.jet_efficiency) + 1,
+                .grapple_upgrade => kit.level(.grapple_reel) == before.level(.grapple_reel) + 1,
+                .travel_item => kit.wallet.scrap == before.wallet.scrap + 60,
+                .armor_gem => kit.ownsArmor(.gem_aegis) and !before.ownsArmor(.gem_aegis),
+                .pet_freed => kit.hasPet(.moth) and !before.hasPet(.moth),
+                .growth_item => true,
+            };
+            if (!reward_ok) return self.smokeFail("SMOKE P{d} DISCOVERY {d} REWARD FAILED", .{ owner + 1, index + 1 });
+        },
+        .shared => |flag| {
+            SmokeAim.place(&sb.player, camera, points[index]);
+            sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE SHARED DISCOVERY {s}", .{@errorName(err)});
+            if (sb.target != .city_discovery or sb.target.city_discovery != index or !sb.progress.hasFlag(flag)) return self.smokeFail("SMOKE SHARED DISCOVERY {d} FAILED (target {s})", .{ index + 1, @tagName(sb.target) });
+            shared_count += 1;
+        },
+    };
+    if (shared_count != 3) return self.smokeFail("SMOKE DISCOVERY SHARED COUNT {d}", .{shared_count});
 
     const bytes = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE DISCOVERY SAVE {s}", .{@errorName(err)});
     defer self.allocator.free(bytes);
-    sb.kits[0].city_discoveries = 0;
-    sb.kits[1].city_discoveries = 0;
+    for (0..Sandbox.max_players) |owner| sb.kits[owner].city_discoveries = 0;
+    sb.progress = .{};
     sb.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE DISCOVERY LOAD {s}", .{@errorName(err)});
-    if (!sb.kits[0].hasCityDiscovery(personal) or !sb.kits[1].hasCityDiscovery(personal) or !sb.progress.hasFlag(shared_flag)) return self.smokeFail("SMOKE DISCOVERY SAVE ROUND TRIP FAILED", .{});
-    std.log.info("Smoke Detroit discoveries: P1 and P2 independently recovered the Bell Tower Cache, Plaza 5's Rootmap became shared, and both kit claims plus the shared flag survived save/load", .{});
+    for (0..Sandbox.max_players) |owner| for (CityContent.detroit.discoveries, 0..) |discovery, index| switch (discovery.reward) {
+        .personal => if (!sb.kits[owner].hasCityDiscovery(index)) return self.smokeFail("SMOKE P{d} DISCOVERY {d} SAVE ROUND TRIP FAILED", .{ owner + 1, index + 1 }),
+        .shared => |flag| if (!sb.progress.hasFlag(flag)) return self.smokeFail("SMOKE SHARED DISCOVERY {d} SAVE ROUND TRIP FAILED", .{index + 1}),
+    };
+    std.log.info("Smoke Detroit discoveries: all four seats recovered each of seven personal items and checked its reward; P1 recovered the three shared keepsakes; all claims and flags survived save/load", .{});
 }
 
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {

@@ -824,6 +824,13 @@ fn anyPlayerNeedsDiscovery(sb: *const Sandbox, index: usize) bool {
     };
 }
 
+fn anyPlayerNear(sb: *const Sandbox, point: V, radius: f32) bool {
+    for (0..Sandbox.max_players) |owner| {
+        if (sb.present(owner) and R.length(R.sub(point, sb.feetOf(owner))) <= radius) return true;
+    }
+    return false;
+}
+
 fn awardDiscoveryUpgrade(sb: *Sandbox, owner: usize, upgrade: Sandbox.Kit.Upgrade) bool {
     const kit = &sb.kits[owner];
     const level = kit.level(upgrade);
@@ -2592,7 +2599,7 @@ fn publishCityDiscoveries(sb: *const Sandbox, out: []World.Prop, start: usize, t
     var n = start;
     const c = &sb.catalog.content;
     for (sb.city_discovery_positions, 0..) |point, index| {
-        if (!anyPlayerNeedsDiscovery(sb, index) or R.length(R.sub(point, sb.player.feet)) > 520 or n + 3 > out.len) continue;
+        if (!anyPlayerNeedsDiscovery(sb, index) or !anyPlayerNear(sb, point, 520) or n + 3 > out.len) continue;
         const rgb = colors[index];
         const selected = sb.target == .city_discovery and sb.target.city_discovery == @as(u8, @intCast(index));
         const pulse = 0.72 + 0.28 * @sin(t * 2.3 + @as(f32, @floatFromInt(index)));

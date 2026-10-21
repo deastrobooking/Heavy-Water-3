@@ -35,7 +35,12 @@ pub fn positions(layout: *const District.Layout, seed: u64, out: *[CityContent.d
     out[0] = if (bell_tower) |building| building.beacon() else layout.nodes[4].position;
 
     const undercroft = District.marketPosition(layout, 1);
-    out[1] = .{ undercroft[0], undercroft[1] + 1.35, undercroft[2] };
+    const market_inboard = R.normalize(R.sub(layout.nodes[1].position, undercroft));
+    const market_side = .{ -market_inboard[2], 0, market_inboard[0] };
+    // The stall owns its canopy volume and takes aim priority, so keep this cache on the
+    // plaza side aisle instead of directly beneath the counter.
+    const undercroft_cache = R.add(layout.nodes[1].position, R.add(R.scale(market_inboard, 9), R.scale(market_side, 8)));
+    out[1] = .{ undercroft_cache[0], layout.nodes[1].position[1] + 1.35, undercroft_cache[2] };
 
     const node3 = layout.nodes[3].position;
     const market = District.marketPosition(layout, 3);
