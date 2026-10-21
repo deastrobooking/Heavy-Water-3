@@ -10,6 +10,7 @@ const V = @import("../physics/Rotation.zig").Vec3;
 pub const checkpoint_count = 3;
 pub const complete_flag = "foundry_pages_complete";
 pub const reported_flag = "foundry_reported";
+pub const confrontation_flag = "foundry_ambush_started";
 pub const exposed_flag = "foundry_exposed";
 const checkpoint_flags = [_][]const u8{
     "foundry_manifest_1",
@@ -131,9 +132,16 @@ pub fn report(progress: *Progress) bool {
     return true;
 }
 
-/// Publishing the dossier at the dock exposes the steward and opens the yard gate.
-pub fn exposeAtDock(progress: *Progress) bool {
-    if (!progress.hasFlag(reported_flag) or progress.hasFlag(exposed_flag)) return false;
+/// The dock console publishes Maro's dossier and reveals the steward's armed ambush.
+pub fn beginDockConfrontation(progress: *Progress) bool {
+    if (!progress.hasFlag(reported_flag) or progress.hasFlag(confrontation_flag) or progress.hasFlag(exposed_flag)) return false;
+    progress.setFlag(confrontation_flag);
+    return true;
+}
+
+/// Defeating the steward and brood guards exposes the foundry ally and opens the yard.
+pub fn finishDockConfrontation(progress: *Progress) bool {
+    if (!progress.hasFlag(confrontation_flag) or progress.hasFlag(exposed_flag)) return false;
     progress.setFlag(exposed_flag);
     return true;
 }
@@ -144,6 +152,13 @@ pub fn consolePosition(layout: *const District.Layout) ?V {
     var points: [checkpoint_count]V = undefined;
     if (positions(layout, &points) == 0) return null;
     return .{ points[0][0], points[0][1] + 0.48, points[0][2] };
+}
+
+/// The closed gate and the steward's stand point across the loading-dock road from the console.
+pub fn gatePosition(layout: *const District.Layout) ?V {
+    var points: [checkpoint_count]V = undefined;
+    if (positions(layout, &points) == 0) return null;
+    return .{ points[0][0], points[0][1] - 0.9, points[0][2] + 8 };
 }
 
 /// A checkpoint can only be recovered after Maro starts the case; duplicate pickup is harmless.
@@ -185,20 +200,25 @@ test "Foundry Ledger checkpoints require the case, collect once, and persist in 
     try std.testing.expectEqual(@as(u8, checkpoint_count), count(&restored));
     try std.testing.expect(report(&progress));
     try std.testing.expect(!report(&progress));
-    try std.testing.expect(exposeAtDock(&progress));
-    try std.testing.expect(!exposeAtDock(&progress));
+    try std.testing.expect(beginDockConfrontation(&progress));
+    try std.testing.expect(!beginDockConfrontation(&progress));
+    try std.testing.expect(!progress.hasFlag(exposed_flag));
+    try std.testing.expect(finishDockConfrontation(&progress));
+    try std.testing.expect(!finishDockConfrontation(&progress));
 }
 
 test "Foundry Ledger report and dock exposure require the correct shared progression order" {
     var progress: Progress = .{};
     try std.testing.expect(!report(&progress));
-    try std.testing.expect(!exposeAtDock(&progress));
+    try std.testing.expect(!beginDockConfrontation(&progress));
+    try std.testing.expect(!finishDockConfrontation(&progress));
     progress.setFlag("foundry_started");
     try std.testing.expect(!report(&progress));
     for (0..checkpoint_count) |index| try std.testing.expect(collect(&progress, index));
     try std.testing.expect(report(&progress));
     try std.testing.expect(!progress.hasFlag(exposed_flag));
-    try std.testing.expect(exposeAtDock(&progress));
+    try std.testing.expect(beginDockConfrontation(&progress));
+    try std.testing.expect(finishDockConfrontation(&progress));
     try std.testing.expect(progress.hasFlag(exposed_flag));
 }
 

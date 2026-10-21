@@ -72,20 +72,22 @@ pub const tuning = .{
 /// Three nests on the surface, then one in the heart of each cave system.
 pub const surface_nests = tuning.surface_nests;
 pub const max_seeded_nests = 3;
-/// Surface, seeded and cave nests, plus stable Scalari practice/patrol and arena slots.
-pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems + 2;
+/// Surface, seeded and cave nests, plus stable Scalari practice, foundry and arena slots.
+pub const max_nests = surface_nests + max_seeded_nests + @import("../procedural/Caves.zig").max_systems + 3;
 /// The renewable Scalari practice slot is reused for roaming Wilds patrols.
 pub const field_patrol_count = 1;
-pub const field_patrol_start: u8 = max_nests - 2;
+pub const field_patrol_start: u8 = max_nests - 3;
 pub const regular_nest_limit: usize = field_patrol_start;
 pub fn fieldPatrolNest(_: usize) u8 {
     return field_patrol_start;
 }
 /// Stable private slot for the renewable Scalari patrol, near spawn or roaming in the Wilds.
-pub const training_nest: u8 = max_nests - 2;
+pub const training_nest: u8 = field_patrol_start;
+/// Reserved home anchor for Detroit's loading-dock steward encounter.
+pub const foundry_nest: u8 = max_nests - 2;
 comptime {
-    // Blades and dashes remember regular nests cut per swing in a u16. The last two slots are
-    // non-campaign encounter anchors (field patrol and arena), so only the regular limit matters.
+    // Blades and dashes remember regular nests cut per swing in a u16. The last three slots are
+    // non-campaign anchors (field patrol, foundry and arena), so only the regular limit matters.
     std.debug.assert(regular_nest_limit <= 16);
 }
 pub const max_units = 32;
@@ -224,6 +226,7 @@ pub fn init(seed: u64, spawn: V, avoid: []const V, clear: f32) Enemies {
     const practice_z = spawn[2] + 16;
     self.training_position = .{ practice_x, Terrain.surface(seed, practice_x, practice_z).height, practice_z };
     self.nests[training_nest] = .{ .position = self.training_position, .alive = false, .health = 0, .spawn_timer = 2 };
+    self.nests[foundry_nest] = .{ .position = .{ 0, 0, 0 }, .alive = false, .health = 0 };
     return self;
 }
 
@@ -1048,6 +1051,14 @@ test "nest sites avoid landmarks and sleep until a player comes near" {
     var events: [16]Event = undefined;
     for (0..600) |_| _ = far.step(&physics, &.{.{ .chest = .{ 0, 1.4, 0 }, .velocity = @splat(0) }}, 1.0 / 60.0, &events);
     try std.testing.expectEqual(@as(usize, 0), far.unitCount(null));
+}
+
+test "the Foundry encounter has a reserved nest anchor outside campaign and patrol slots" {
+    const e = init(7, .{ 0, 0, 0 }, &.{}, 0);
+    try std.testing.expect(training_nest != foundry_nest);
+    try std.testing.expect(foundry_nest != arena_nest);
+    try std.testing.expect(foundry_nest >= e.nest_count);
+    try std.testing.expect(!e.nests[foundry_nest].alive);
 }
 
 test "campaign spore nests use stable seeded positions and respect the hard cap" {

@@ -1133,7 +1133,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         .wild_pet => |sp| Frontier.freePet(self, slot, sp),
         .pet => |owner| Frontier.petPet(self, slot, owner),
         .evidence => |i| Frontier.collectFoundryEvidence(self, i),
-        .foundry_terminal => Frontier.exposeFoundrySteward(self),
+        .foundry_terminal => Frontier.startFoundryDockEncounter(self),
         else => {},
     };
     if (g.interact and g.target == .stall) {
@@ -1322,7 +1322,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .wild_pet => |sp| Frontier.freePet(self, 0, sp),
                     .pet => |owner| Frontier.petPet(self, 0, owner),
                     .evidence => |i| Frontier.collectFoundryEvidence(self, i),
-                    .foundry_terminal => Frontier.exposeFoundrySteward(self),
+                    .foundry_terminal => Frontier.startFoundryDockEncounter(self),
                     .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {

@@ -1853,6 +1853,34 @@ fn showcase(self: *App) void {
             target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
             eye = .{ target[0] + 4, target[1] + 3, target[2] + 5 };
         }
+    } else if (v == 94) {
+        const FoundryCase = @import("game/FoundryCase.zig");
+        const Frontier = @import("game/Frontier.zig");
+        self.sandbox.progress.setFlag("foundry_started");
+        self.sandbox.progress.setFlag(FoundryCase.complete_flag);
+        self.sandbox.progress.setFlag(FoundryCase.reported_flag);
+        Frontier.startFoundryDockEncounter(&self.sandbox);
+        const Enemies = @import("game/Enemies.zig");
+        for (&self.sandbox.enemies.units) |*slot| if (slot.*) |*unit| if (unit.nest == Enemies.foundry_nest) {
+            // Hold the formation in place for a readable scene capture.
+            unit.velocity = .{ 0, 0, 0 };
+            unit.walk_amount = 0;
+            unit.stun = 1000;
+        };
+        if (FoundryCase.gatePosition(layout)) |gate| {
+            // Lift the camera above the street trees and offset it across the road for a clear
+            // three-character view. Gameplay still uses the normal first-person street camera.
+            self.sandbox.player.mode = .fly;
+            self.sandbox.view = .first;
+            self.sandbox.player.feet = .{ gate[0] - 14, gate[1] + 7, gate[2] - 19 };
+            self.sandbox.player.velocity = .{ 0, 0, 0 };
+            self.sandbox.target = .none;
+            target = .{ gate[0], gate[1] + 1.2, gate[2] };
+            eye = .{ gate[0] - 14, gate[1] + 8.8, gate[2] - 19 };
+        } else {
+            target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
+            eye = .{ target[0] + 4, target[1] + 3, target[2] + 5 };
+        }
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -2653,8 +2681,48 @@ fn smokeFoundryCase(self: *App) void {
     camera.yaw = std.math.atan2(dx, dz);
     camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
     sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY CONSOLE {s}", .{@errorName(err)});
-    if (sb.target != .foundry_terminal or !sb.progress.hasFlag(FoundryCase.exposed_flag) or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY CONSOLE, EXPOSURE OR KIT REWARD FAILED (target {s})", .{@tagName(sb.target)});
-    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; the dock console exposed the steward, opened the yard gate, and granted P1 Sprint Servos +1", .{count});
+    const Enemies = @import("game/Enemies.zig");
+    const Combat = @import("game/Combat.zig");
+    if (sb.target != .foundry_terminal or !sb.progress.hasFlag(FoundryCase.confrontation_flag) or sb.progress.hasFlag(FoundryCase.exposed_flag) or sb.enemies.unitCount(Enemies.foundry_nest) != 3 or sb.kits[0].level(.sprint_servos) != level) return self.smokeFail("SMOKE FOUNDRY DOCK AMBUSH FAILED (target {s}, fighters {d})", .{ @tagName(sb.target), sb.enemies.unitCount(Enemies.foundry_nest) });
+
+    // Lower health only for the smoke run, then defeat each visible fighter through the actual
+    // sniper combat path so the last-down event must open the yard and award the personal upgrade.
+    const sniper_bit = @as(u16, 1) << @intFromEnum(Combat.WeaponKind.sniper_rifle);
+    sb.kits[0].weapons |= sniper_bit;
+    sb.tools.tool = .weapon;
+    sb.combat.arsenals[0].active = .sniper_rifle;
+    sb.combat.arsenals[0].ranged = .sniper_rifle;
+    for (0..6) |_| {
+        if (sb.enemies.unitCount(Enemies.foundry_nest) == 0) break;
+        var chosen: ?Enemies.Unit = null;
+        var best = std.math.inf(f32);
+        for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.nest == Enemies.foundry_nest) {
+            unit.health = 1;
+            unit.stun = 20;
+            const d = .{ unit.position[0] - sb.player.feet[0], unit.position[2] - sb.player.feet[2] };
+            const distance = d[0] * d[0] + d[1] * d[1];
+            if (distance < best) {
+                chosen = unit.*;
+                best = distance;
+            }
+        };
+        const foe = chosen orelse break;
+        const target = foe.center();
+        const eye_now = sb.player.eye();
+        const aim_x = target[0] - eye_now.x();
+        const aim_y = target[1] - eye_now.y();
+        const aim_z = target[2] - eye_now.z();
+        camera.position = eye_now;
+        camera.yaw = std.math.atan2(aim_x, aim_z);
+        camera.pitch = std.math.atan2(aim_y, @sqrt(aim_x * aim_x + aim_z * aim_z));
+        sb.combat.arsenals[0].firearm.cooldown = 0;
+        sb.trigger = .{ .fire = true, .direct = true };
+        sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY COMBAT {s}", .{@errorName(err)});
+        sb.trigger = .{};
+        sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY COMBAT RELEASE {s}", .{@errorName(err)});
+    }
+    if (sb.enemies.unitCount(Enemies.foundry_nest) != 0 or !sb.progress.hasFlag(FoundryCase.exposed_flag) or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY STEWARD FIGHT OR REWARD FAILED (fighters {d})", .{sb.enemies.unitCount(Enemies.foundry_nest)});
+    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; the console started the steward ambush; P1 cleared the steward and two brood scavengers, opened the gate and earned Sprint Servos +1", .{count});
 }
 
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
@@ -3339,8 +3407,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
-    renderer.views[0].hide_owner = if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 94 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
@@ -3403,7 +3471,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
         .evidence => |i| renderer.hud_lines[1].set("FOUNDRY LEDGER PAGE {d}/3  X / CLICK RECOVER", .{i + 1}),
-        .foundry_terminal => renderer.hud_lines[1].set("LOADING DOCK CONSOLE  X / CLICK TO EXPOSE STEWARD", .{}),
+        .foundry_terminal => renderer.hud_lines[1].set("LOADING DOCK CONSOLE  X / CLICK TO DRAW OUT STEWARD", .{}),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
             renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
         else
@@ -3484,7 +3552,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             }
         }
     }
-    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66) renderer.hud_lines = @splat(.{});
+    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66 or options.showcase == 94) renderer.hud_lines = @splat(.{});
     self.publishGui(renderer, minutes);
 }
 

@@ -748,7 +748,7 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
             };
         }
     }
-    if (sb.progress.hasFlag(FoundryCase.reported_flag) and !sb.progress.hasFlag(FoundryCase.exposed_flag)) {
+    if (sb.progress.hasFlag(FoundryCase.reported_flag) and !sb.progress.hasFlag(FoundryCase.confrontation_flag)) {
         if (FoundryCase.consolePosition(&sb.catalog.district)) |console| {
             if (Physics.rayBox(eye, dir, console, .{ 0.8, 0.9, 0.75 })) |hit| if (hit.distance < nearest) {
                 nearest = hit.distance;
@@ -767,16 +767,34 @@ pub fn collectFoundryEvidence(sb: *Sandbox, index: u8) void {
     sb.cue(.pickup, foundryCasePosition(sb, index));
 }
 
-/// Publish the case at the loading dock terminal. The shared exposure flag opens the visible
-/// yard barrier; every present player's personal reward stays in their own Kit.
-pub fn exposeFoundrySteward(sb: *Sandbox) void {
-    if (!FoundryCase.exposeAtDock(&sb.progress)) return;
+/// Publish the case at the loading dock terminal and draw the steward and brood scavengers out.
+pub fn startFoundryDockEncounter(sb: *Sandbox) void {
+    if (!FoundryCase.beginDockConfrontation(&sb.progress)) return;
+    ensureFoundryDockEncounter(sb);
+    sb.say("ledger published: the foundry steward and brood scavengers are at the yard gate", .{});
+    sb.cue(.hive_zap, FoundryCase.gatePosition(&sb.catalog.district));
+}
+
+fn awardFoundrySuitUpgrade(sb: *Sandbox) u8 {
     var rewarded: u8 = @intFromBool(FoundryCase.awardSuitUpgrade(&sb.kits[0]));
     for (&sb.guests, 1..) |*guest, slot| if (guest.active) {
         rewarded += @intFromBool(FoundryCase.awardSuitUpgrade(&sb.kits[slot]));
     };
-    sb.say("steward exposed; foundry yard gate open; Sprint Servos for {d} active ranger(s)", .{rewarded});
-    sb.cue(.ui_confirm, FoundryCase.consolePosition(&sb.catalog.district));
+    return rewarded;
+}
+
+fn ensureFoundryDockEncounter(sb: *Sandbox) void {
+    if (!sb.progress.hasFlag(FoundryCase.confrontation_flag) or sb.progress.hasFlag(FoundryCase.exposed_flag)) return;
+    const gate = FoundryCase.gatePosition(&sb.catalog.district) orelse return;
+    sb.enemies.nests[Enemies.foundry_nest] = .{ .position = gate, .alive = false, .health = 0 };
+    if (sb.enemies.unitCount(Enemies.foundry_nest) > 0) return;
+    var free_slots: usize = 0;
+    for (sb.enemies.units) |unit| free_slots += @intFromBool(unit == null);
+    if (free_slots < 3) return;
+    // Stage them on the approach side so the gate panel cannot hide their legs or trap them.
+    _ = sb.enemies.spawnAt(.bulwark, Enemies.foundry_nest, R.add(gate, .{ 0, 0, -2 }), 1);
+    _ = sb.enemies.spawnAt(.trooper, Enemies.foundry_nest, R.add(gate, .{ -3.4, 0, -2.6 }), 1);
+    _ = sb.enemies.spawnAt(.skirmisher, Enemies.foundry_nest, R.add(gate, .{ 3.4, 0, -2.6 }), 1);
 }
 
 fn foundryCasePosition(sb: *const Sandbox, index: usize) V {
@@ -923,6 +941,11 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 sb.say("hive {s} down: +{d} XP", .{ @tagName(u.kind), xp });
             }
             petLearns(sb, u.position);
+            if (u.nest == Enemies.foundry_nest and sb.enemies.unitCount(Enemies.foundry_nest) == 0 and FoundryCase.finishDockConfrontation(&sb.progress)) {
+                const rewarded = awardFoundrySuitUpgrade(sb);
+                sb.say("steward defeated; foundry yard gate open; Sprint Servos for {d} active ranger(s)", .{rewarded});
+                sb.cue(.vault, FoundryCase.gatePosition(&sb.catalog.district));
+            }
         },
         .deflected => |d| {
             sb.combat.deflect(d.player, d.position, d.velocity);
@@ -1036,6 +1059,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
 
     // The Hive.
     if (timing != null) phase_timer.reset();
+    ensureFoundryDockEncounter(sb);
     var who: [Sandbox.max_players]Enemies.Target = undefined;
     var events: [32]Enemies.Event = undefined;
     const count = sb.enemies.step(&sb.physics, targets(sb, &who), dt, &events);
@@ -1618,7 +1642,9 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .strike => 1 - u.melee_anim / 0.62,
             else => 0,
         };
-        const profile = switch (u.kind) {
+        const profile: Profile = if (u.nest == Enemies.foundry_nest and u.kind == .bulwark)
+            foundry_steward_profile
+        else switch (u.kind) {
             .trooper => trooper_profile,
             .skirmisher => skirmisher_profile,
             .bulwark => bulwark_profile,
@@ -2033,7 +2059,8 @@ fn objectiveTarget(sb: *const Sandbox) ?V {
     if (CityContent.nextMission(&CityContent.detroit, p)) |mission| {
         if (mission == 0) {
             if (!p.hasFlag("foundry_started")) return sb.keeperPosition(0);
-            if (p.hasFlag(FoundryCase.reported_flag)) return FoundryCase.consolePosition(&sb.catalog.district);
+            if (p.hasFlag(FoundryCase.reported_flag) and !p.hasFlag(FoundryCase.confrontation_flag)) return FoundryCase.consolePosition(&sb.catalog.district);
+            if (p.hasFlag(FoundryCase.confrontation_flag) and !p.hasFlag(FoundryCase.exposed_flag)) return FoundryCase.gatePosition(&sb.catalog.district);
             if (FoundryCase.next(p)) |index| return foundryCasePosition(sb, index);
             return sb.keeperPosition(0);
         }
@@ -2680,6 +2707,7 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
 const trooper_profile: @import("Profile.zig") = .{ .outfit = 3, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 2, .skin = 7, .build = 1.1, .height = 1.05 };
 const skirmisher_profile: @import("Profile.zig") = .{ .outfit = 7, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 3, .skin = 7, .build = 0.92, .height = 0.96 };
 const bulwark_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 1, .skin = 7, .build = 1.18, .height = 1.15 };
+const foundry_steward_profile: Profile = .{ .outfit = 5, .clothing = .field_jacket, .armor = .none, .helmet = .open, .accent = 1, .skin = 2, .hair_style = .side_part, .hair_color = 5, .build = 1.08, .height = 1.08 };
 const scalari_scout_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing = .exo_rig, .armor = .scout, .helmet = .visor, .accent = 4, .skin = 5, .build = 0.7, .height = 0.78 };
 const scalari_stinger_profile: @import("Profile.zig") = .{ .outfit = 4, .clothing = .hardsuit, .armor = .sentinel, .helmet = .sealed, .accent = 4, .skin = 6, .build = 0.95, .height = 1.05 };
 const scalari_titan_profile: @import("Profile.zig") = .{ .outfit = 5, .clothing = .vanguard, .armor = .sentinel, .helmet = .sealed, .accent = 4, .skin = 4, .build = 2.7, .height = 4.8 };

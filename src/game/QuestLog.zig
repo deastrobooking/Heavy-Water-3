@@ -64,8 +64,10 @@ pub fn city(progress: *const Progress, content: *const CityContent.CityContent) 
                 0 => "Recover the three manifest pages from the marked factory checkpoints (0/3).",
                 1 => "Recover the remaining manifest pages from the factory checkpoints (1/3).",
                 2 => "Recover the last manifest page from the factory checkpoints (2/3).",
-                else => if (progress.hasFlag(FoundryCase.reported_flag))
-                    "Publish the ledger at the marked loading-dock console to expose the steward and open the yard."
+                else => if (progress.hasFlag(FoundryCase.confrontation_flag))
+                    "Defeat the foundry steward and brood scavengers at the loading-dock gate."
+                else if (progress.hasFlag(FoundryCase.reported_flag))
+                    "Publish the ledger at the loading-dock console to draw the steward out."
                 else
                     "Take the three manifest pages back to Maro, then carry the report to the loading dock.",
             },
@@ -95,6 +97,21 @@ test "once the wilds are broken the quest log moves to Detroit: three exposures,
     try std.testing.expectEqualStrings("THE FRONTIER IS SECURE", current(&progress, &enemies, &skies).title);
     try std.testing.expect(CityContent.updateLiberation(&CityContent.detroit, &progress, true));
     try std.testing.expectEqualStrings("DETROIT IS FREE", current(&progress, &enemies, &skies).title);
+}
+
+test "Foundry Ledger stays active through the dock fight and advances after the yard clears" {
+    var progress: Progress = .{};
+    progress.setFlag("foundry_started");
+    for (0..FoundryCase.checkpoint_count) |index| try std.testing.expect(FoundryCase.collect(&progress, index));
+    try std.testing.expect(FoundryCase.report(&progress));
+    try std.testing.expectEqualStrings("Publish the ledger at the loading-dock console to draw the steward out.", city(&progress, &CityContent.detroit).detail);
+
+    try std.testing.expect(FoundryCase.beginDockConfrontation(&progress));
+    const fight = city(&progress, &CityContent.detroit);
+    try std.testing.expectEqualStrings("THE FOUNDRY LEDGER", fight.title);
+    try std.testing.expectEqualStrings("Defeat the foundry steward and brood scavengers at the loading-dock gate.", fight.detail);
+    try std.testing.expect(FoundryCase.finishDockConfrontation(&progress));
+    try std.testing.expectEqualStrings("THE WINDSOR GATE", city(&progress, &CityContent.detroit).title);
 }
 
 test "Hive quest follows story flags, a surface spire, the Kestrel, and war state" {

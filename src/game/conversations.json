@@ -203,7 +203,7 @@
         },
         {
           "id": "foundry_case_status",
-          "text": "The three manifest pages tie the foundry shipments to the Hive. Take them to the loading-dock console; publishing the ledger will expose the steward and open the yard.",
+          "text": "The three manifest pages tie the foundry shipments to the Hive. Publish the ledger at the loading-dock console. The steward will try to silence you before the yard opens.",
           "choices": [
             {
               "text": "Remind me of the checkpoints.",
@@ -225,7 +225,7 @@
         },
         {
           "id": "foundry_exposure",
-          "text": "The pages trace rotor cores, sap and alloy from the yards to the brood. The steward's seal is on every shipment. Carry the report to the loading-dock console and publish it to the civic registry.",
+          "text": "The pages trace rotor cores, sap and alloy from the yards to the brood. The steward's seal is on every shipment. Publish the report at the loading-dock console; his brood guards will answer.",
           "next": "hello"
         }
       ]
