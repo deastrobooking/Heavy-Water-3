@@ -17,6 +17,7 @@ const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Scene3D = @import("../engine/Scene3D.zig");
 const Modifications = @import("../world/Modifications.zig");
+const TerrainEdit = @import("../world/TerrainEdit.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Machine = @import("../machine/Machine.zig");
@@ -199,7 +200,7 @@ pub const Actions = packed struct {
     toggle_view: bool = false,
     /// Open the character creator.
     open_creator: bool = false,
-    /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges.
+    /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges, 5 weapon, 6 terrain.
     select_tool: u3 = 0,
     /// Climb out of the Kestrel (its primary button fires).
     leave_jet: bool = false,
@@ -411,6 +412,8 @@ city_discovery_positions: [CityDiscoveries.count]Physics.Vec3 = undefined,
 /// Runtime-only Titan phase; an unfinished encounter restarts from phase one after loading.
 city_titan_phase: u8 = 0,
 modifications: Modifications = .{},
+/// Player terrain sculpting, heap allocated and published to the terrain sampler.
+terrain_edit: *TerrainEdit = undefined,
 nearby_center: ?Key = null,
 nearby: [9]NearbyChunk = undefined,
 tick: u64 = 0,
@@ -428,6 +431,10 @@ notice_until: u64 = 0,
 /// Initializes in place: physics keeps a pointer to `caves` (and its seed) for terrain queries.
 pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *const Catalog, camera: *Camera) !void {
     self.* = .{ .seed = seed, .catalog = catalog, .allocator = allocator, .physics = undefined, .scripts = .init(allocator) };
+    self.terrain_edit = try TerrainEdit.create(allocator);
+    errdefer self.terrain_edit.destroy();
+    TerrainEdit.active.store(self.terrain_edit, .release);
+    errdefer _ = TerrainEdit.active.cmpxchgStrong(self.terrain_edit, null, .acq_rel, .acquire);
     self.bile_sequence = BileCase.sequence(seed);
     CityDiscoveries.positions(&catalog.district, seed, &self.city_discovery_positions);
     self.caves = Caves.layout(seed);
@@ -683,6 +690,9 @@ fn checkShrines(self: *Sandbox) void {
 
 /// Frees mesh colliders. Bodies and machines own no heap memory.
 pub fn deinit(self: *Sandbox) void {
+    // Stop the sampler reading the overlay before it is freed (the streamer workers stop first).
+    _ = TerrainEdit.active.cmpxchgStrong(self.terrain_edit, null, .acq_rel, .acquire);
+    self.terrain_edit.destroy();
     self.dialogue.deinit();
     self.scripts.deinit();
     for (&self.rigs) |*slot| if (slot.*) |*r| r.deinit(self.allocator);
@@ -1373,7 +1383,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                 else => {},
             };
         },
-        .build, .wire, .bridge => try Build.update(self, aim, primary, actions),
+        .build, .wire, .bridge, .terrain => try Build.update(self, aim, primary, actions),
         // The arsenal fires from `Frontier.step`, from the held triggers.
         .weapon => {},
     }
@@ -2406,6 +2416,20 @@ fn publishVehicle(self: *const Sandbox, placed: *const Placed, vehicle: Vehicle,
     return n;
 }
 
+fn terrainTiles(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.TerrainTile {
+    const edit = self.terrain_edit;
+    const n = edit.count.load(.acquire);
+    const tiles = try arena.alloc(Save.TerrainTile, n);
+    var kept: usize = 0;
+    for (edit.tiles[0..n]) |*tile| {
+        // A tile whose edits were all undone back to zero is not worth a line in the save.
+        if (std.mem.allEqual(i16, &tile.cells, 0)) continue;
+        tiles[kept] = .{ .x = tile.key.x, .z = tile.key.z, .data = try TerrainEdit.encodeTile(arena, &tile.cells) };
+        kept += 1;
+    }
+    return tiles[0..kept];
+}
+
 pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) ![]u8 {
     var arena_state: std.heap.ArenaAllocator = .init(allocator);
     defer arena_state.deinit();
@@ -2448,6 +2472,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .profile = self.profile.toDoc(),
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
+        .terrain = try self.terrainTiles(arena),
         .machines = machines[0..machine_count],
         .members = members: {
             var list: std.ArrayList(Save.MemberState) = .empty;
@@ -2498,6 +2523,15 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     const doc = parsed.value;
     const profile = try Profile.fromDoc(doc.profile);
     const progress = Progress.fromDoc(doc.progress) catch return error.InvalidSave;
+    // Sculpted terrain is decoded and checked before anything is torn down.
+    var terrain_arena: std.heap.ArenaAllocator = .init(allocator);
+    defer terrain_arena.deinit();
+    const terrain = try terrain_arena.allocator().alloc([TerrainEdit.tile_cells]i16, doc.terrain.len);
+    for (doc.terrain, terrain, 0..) |tile, *cells, i| {
+        TerrainEdit.decodeTile(tile.data, cells) catch return error.InvalidSave;
+        for (doc.terrain[0..i]) |other| if (other.x == tile.x and other.z == tile.z) return error.InvalidSave;
+        if (@abs(tile.x) > Key.limit or @abs(tile.z) > Key.limit) return error.InvalidSave;
+    }
     // Every player's character and kit; a format 12 save's one wallet and personal progression
     // become P1's kit.
     var kits: [max_players]Kit = @splat(.{});
@@ -2572,6 +2606,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.prefab_count = doc.prefabs.len;
     self.modifications.clear();
     for (doc.collected) |ref| _ = try self.modifications.remove(ref);
+    self.terrain_edit.clear();
+    for (terrain, 0..) |tile, i| self.terrain_edit.loadTile(.{ .x = doc.terrain[i].x, .z = doc.terrain[i].z }, &tile) catch unreachable; // checked above
     self.profile = profile;
     self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
@@ -2850,6 +2886,44 @@ test "salvage removes a relic by stable ID, survives regeneration, and round-tri
     try std.testing.expect(for (again[0..count]) |o| {
         if (o.local_id == relic.local_id) break std.meta.eql(o.transform.position, p);
     } else false);
+}
+
+test "sculpting with the terrain tool reshapes the ground players stand on and survives a save" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    sandbox.player.mode = .fly;
+    const spot = [2]f32{ 150, -420 };
+    const ground = Terrain.surface(sandbox.seed, spot[0], spot[1]).height;
+    sandbox.player.feet = .{ spot[0], ground + 6, spot[1] - 12 };
+    camera.position = sandbox.player.eye();
+    aimAt(&camera, .{ spot[0], ground, spot[1] });
+    try run(&sandbox, &camera, .{}, .{ .select_tool = 6 }, 1);
+    try std.testing.expectEqual(Build.Tool.terrain, sandbox.tools.tool);
+    sandbox.trigger = .{ .fire = true };
+    try run(&sandbox, &camera, .{}, .{}, 60);
+    sandbox.trigger = .{};
+    try run(&sandbox, &camera, .{}, .{}, 1);
+    const raised = Terrain.surface(sandbox.seed, spot[0], spot[1]).height;
+    try std.testing.expect(raised > ground + 1);
+    var dirty_buffer: [TerrainEdit.dirty_capacity]Key = undefined;
+    try std.testing.expect(sandbox.terrain_edit.takeDirty(&dirty_buffer).keys.len > 0);
+
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sandbox.terrain_edit.clear();
+    try std.testing.expectApproxEqAbs(ground, Terrain.surface(sandbox.seed, spot[0], spot[1]).height, 1e-4);
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectApproxEqAbs(raised, Terrain.surface(sandbox.seed, spot[0], spot[1]).height, 1e-4);
+
+    // A save with a damaged tile is refused and leaves the sculpting as it was.
+    const broken = try std.mem.replaceOwned(u8, std.testing.allocator, bytes, "\"data\": \"", "\"data\": \"!!");
+    defer std.testing.allocator.free(broken);
+    try std.testing.expectError(error.InvalidSave, sandbox.restore(std.testing.allocator, broken, &camera));
+    try std.testing.expectApproxEqAbs(raised, Terrain.surface(sandbox.seed, spot[0], spot[1]).height, 1e-4);
 }
 
 /// Points the camera at a world position.

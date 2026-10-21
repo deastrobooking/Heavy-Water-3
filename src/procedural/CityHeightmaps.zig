@@ -6,6 +6,7 @@ const CityGeography = @import("CityGeography.zig");
 const Region = @import("../world/Region.zig");
 const ChunkKey = @import("../world/ChunkKey.zig");
 const Cloudwater = @import("Cloudwater.zig");
+const TerrainEdit = @import("../world/TerrainEdit.zig");
 
 const detroit_bytes = @embedFile("../assets/detroit_terrain.hwmh");
 const nyc_bytes = @embedFile("../assets/nyc_terrain.hwmh");
@@ -37,7 +38,13 @@ const k2_anchor_x = (CityGeography.k2_raster_anchor.anchor_u - 0.5) * k2_map.set
 const k2_anchor_z = (CityGeography.k2_raster_anchor.anchor_v - 0.5) * k2_map.settings.world_depth;
 const blend_width: f32 = 9000;
 
+/// The ground height everything samples: the generated terrain plus the player's sculpting.
 pub fn heightAt(seed: u64, x: f32, z: f32) f32 {
+    return generatedHeight(seed, x, z) + TerrainEdit.delta(x, z);
+}
+
+/// The terrain before any player edit.
+pub fn generatedHeight(seed: u64, x: f32, z: f32) f32 {
     const key = ChunkKey.fromPosition(x, z);
     if (Region.new_york.contains(key.x, key.z)) {
         if (sampleMap(nyc_map, x - nyc_center[0] + nyc_anchor_x, z - nyc_center[1] + nyc_anchor_z)) |height| {

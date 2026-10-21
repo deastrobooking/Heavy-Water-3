@@ -31,13 +31,17 @@ const District = @import("../procedural/District.zig");
 /// Isle and Windsor bridges, and preserves plaza, player bridge, and collected-object identities;
 /// v24 corrects Rootway gallery geometry while retaining district and bridge identities;
 /// v25 adds the selectable Captain test-mesh body style to saved player profiles; v26 stores
-/// each ranger's Detroit discoveries independently in their kit.
+/// each ranger's Detroit discoveries independently in their kit;
+/// v27 adds the sculpted-terrain tiles (absent means untouched ground).
 /// Format 13 is the oldest supported save; its four-player kits default combat XP to zero.
 /// Older saves are rejected deliberately. Bumping the current format does not move this floor.
-pub const format_version: u32 = 26;
+pub const format_version: u32 = 27;
 pub const min_supported_format: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
+
+/// One tile of sculpted terrain: its tile coordinates and run-length text (`TerrainEdit.encodeTile`).
+pub const TerrainTile = struct { x: i32, z: i32, data: []const u8 };
 
 /// A crate slot; `id` is its slot index in the session.
 pub const PropState = struct { id: u32, position: [3]f32, velocity: [3]f32 };
@@ -97,6 +101,8 @@ pub const Document = struct {
     market_stock: []const [Market.ware_count]u8,
     /// Mods installed when saved (name and "major.minor.patch").
     mods: []const ModState = &.{},
+    /// Sculpted terrain (format 27).
+    terrain: []const TerrainTile = &.{},
 };
 
 pub fn encode(allocator: std.mem.Allocator, doc: Document) ![]u8 {
@@ -142,6 +148,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8, seed: u64, prop_c
     if (!finite(doc.player.yaw) or !finite(doc.player.pitch)) return error.InvalidSave;
     if (doc.machines.len > machine_slots) return error.InvalidSave;
     if (doc.mods.len > 16) return error.InvalidSave;
+    if (doc.terrain.len > @import("../world/TerrainEdit.zig").tile_capacity) return error.InvalidSave;
     if (doc.members.len > 4) return error.InvalidSave;
     for (doc.members, 0..) |m, i| {
         if (m.slot >= 4) return error.InvalidSave;

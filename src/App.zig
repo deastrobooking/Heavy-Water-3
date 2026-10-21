@@ -7,6 +7,8 @@ const CelStyle = @import("character/CelStyle.zig");
 const Time = @import("engine/Time.zig");
 const Sky = @import("engine/Sky.zig");
 const World = @import("world/World.zig");
+const ChunkKey = @import("world/ChunkKey.zig");
+const TerrainEdit = @import("world/TerrainEdit.zig");
 const Renderer = @import("render/Renderer.zig");
 const Overlay = @import("render/Overlay.zig");
 const TestWorld = @import("game/TestWorld.zig");
@@ -82,6 +84,9 @@ captured: bool = false,
 rendered_frames_seen: u64 = 0,
 smoke_stage: u64 = 0,
 smoke_rover_start: ?[3]f32 = null,
+/// Chunk rebuild requests the renderer received from sculpting, and the mound the smoke raised.
+smoke_terrain_dirty: u32 = 0,
+smoke_mound: ?struct { x: f32, z: f32, height: f32 } = null,
 status: Overlay.Line = .{},
 status_until: u64 = 0,
 published_revision: ?u64 = null,
@@ -1227,6 +1232,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .tool_wire => self.actions.select_tool = 3,
             .tool_bridge => self.actions.select_tool = 4,
             .tool_weapon => self.actions.select_tool = 5,
+            .tool_terrain => self.actions.select_tool = 6,
             .next_item => self.actions.next_item = true,
             .rotate => self.actions.rotate = true,
             .capture_prefab => self.actions.capture = true,
@@ -2661,8 +2667,10 @@ fn exerciseSmoke(self: *App) void {
             std.log.info("Smoke interaction: held={any}, machines={d}, save round trip {d} bytes", .{ held, self.sandbox.machineCount(), bytes.len });
             // Build a powered lamp circuit directly through the tool APIs, then drive.
             self.smokeBuild();
+            self.smokeSculpt(camera);
         },
         5 => {
+            if (self.smoke_terrain_dirty == 0) return self.smokeFail("SMOKE SCULPT NEVER REACHED THE RENDERER", .{});
             if (self.sandbox.workshop) |w| std.log.info("Smoke lamp: lit={d:.0}", .{self.sandbox.machines[w].machine.outputs[3][2]});
             if (self.smoke_rover_start == null) self.smoke_rover_start = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
             // Press the door button, then take the rover for the rest of the run.
@@ -3542,6 +3550,30 @@ fn smokeSap(self: *App) void {
     }
 }
 
+/// Raise a mound with the brush, undo it, redo it, and remember it for the save check at stage 9.
+fn smokeSculpt(self: *App, camera: *@import("world/Camera.zig")) void {
+    const sb = &self.sandbox;
+    const Terrain = @import("procedural/Terrain.zig");
+    const x = self.engine.camera.position.x() + 40;
+    const z = self.engine.camera.position.z() + 40;
+    const before = Terrain.surface(sb.seed, x, z).height;
+    sb.terrain_edit.beginStroke();
+    for (0..6) |_| _ = @import("procedural/TerrainBrush.zig").apply(sb.terrain_edit, sb.seed, .{ .kind = .raise, .x = x, .z = z, .radius = 10, .strength = 1 }) catch |err| return self.smokeFail("SMOKE SCULPT {s}", .{@errorName(err)});
+    const raised = Terrain.surface(sb.seed, x, z).height;
+    if (raised < before + 3) return self.smokeFail("SMOKE SCULPT DID NOT RAISE THE GROUND ({d:.2} to {d:.2})", .{ before, raised });
+    if (!sb.terrain_edit.undo() or @abs(Terrain.surface(sb.seed, x, z).height - before) > 0.01) return self.smokeFail("SMOKE SCULPT UNDO", .{});
+    if (!sb.terrain_edit.redo() or @abs(Terrain.surface(sb.seed, x, z).height - raised) > 0.01) return self.smokeFail("SMOKE SCULPT REDO", .{});
+    // The sculpt rides the save: clear it, load it back, and the mound must return.
+    const bytes = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE SCULPT SAVE {s}", .{@errorName(err)});
+    defer self.allocator.free(bytes);
+    sb.terrain_edit.clear();
+    if (@abs(Terrain.surface(sb.seed, x, z).height - before) > 0.01) return self.smokeFail("SMOKE SCULPT CLEAR", .{});
+    sb.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE SCULPT LOAD {s}", .{@errorName(err)});
+    if (@abs(Terrain.surface(sb.seed, x, z).height - raised) > 0.01) return self.smokeFail("SMOKE SCULPT DID NOT SURVIVE THE SAVE", .{});
+    self.smoke_mound = .{ .x = x, .z = z, .height = raised };
+    std.log.info("Smoke sculpt: mound {d:.1} m high undone, redone and restored from a {d} byte save", .{ raised - before, bytes.len });
+}
+
 fn smokeBuild(self: *App) void {
     const sb = &self.sandbox;
     const base = self.engine.camera.position;
@@ -3764,6 +3796,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.prop_count = scene.count;
     } else {
         renderer.prop_count = self.sandbox.publishProps(&renderer.props);
+    }
+    {
+        // Sculpting rebuilds only the chunks it touched, in every split-screen view.
+        var keys: [TerrainEdit.dirty_capacity]ChunkKey = undefined;
+        const dirty = self.sandbox.terrain_edit.takeDirty(&keys);
+        if (dirty.all) renderer.invalidateTerrain(null) else for (dirty.keys) |key| renderer.invalidateTerrain(key);
+        if (dirty.all or dirty.keys.len > 0) self.smoke_terrain_dirty += 1;
     }
     if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76)) renderer.prop_count = 0;
     renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74 or options.showcase == 75;

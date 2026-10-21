@@ -5,6 +5,7 @@ const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Mesh = @import("Mesh.zig");
 const Scene = @import("StreamingScene.zig");
+const ChunkKey = @import("../world/ChunkKey.zig");
 const Seed = @import("../procedural/Seed.zig");
 const FrameStats = @import("../engine/FrameStats.zig");
 const Flythrough = @import("../engine/Flythrough.zig");
@@ -205,6 +206,12 @@ pub fn init(self: *Renderer, world: *World, io: std.Io, allocator: std.mem.Alloc
 
 /// App.publish queues these while holding the render snapshot mutex; render consumes them before
 /// encoding this frame, so the catalog's CPU model and GPU buffers stay in step.
+/// Terrain under `key` changed (a sculpt edit); null rebuilds every chunk in every view.
+pub fn invalidateTerrain(self: *Renderer, key: ?ChunkKey) void {
+    self.scene.invalidateTerrain(key);
+    for (self.extra_scenes) |maybe| if (maybe) |scene| scene.invalidateTerrain(key);
+}
+
 pub fn queueMeshPatch(self: *Renderer, patch: Scene.MeshPatch) void {
     if (self.mesh_patch_count < self.mesh_patches.len) {
         self.mesh_patches[self.mesh_patch_count] = patch;

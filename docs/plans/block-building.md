@@ -1,6 +1,6 @@
 # Block building and terrain sculpting
 
-**Status:** planned 2026-10-21, owner decisions below. BT0 (terrain single-source cleanup) is done; nothing else is built. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
+**Status:** planned 2026-10-21, owner decisions below. BT0 (terrain single-source cleanup) and BT1 (terrain sculpting, player 1) are done; the block grid is not started. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
 
 **Owner decisions (2026-10-21):**
 - A chunked block grid (Minecraft/Lego feel), not free-placed props. The existing machine Build tool stays for mechanisms (doors, lifts, logic) that snap into the grid.
@@ -24,7 +24,7 @@
 | Phase | Deliverable | Status |
 | --- | --- | --- |
 | BT0 | Docs aligned; stray `Noise.height` callers (`Biome.coverAt`, flora review position) moved to `CityHeightmaps.heightAt`; its tests registered | done 2026-10-21 |
-| BT1 | Terrain edit layer, `Streamer.invalidate`, raise/lower/level/smooth in one claim, undo, save migration | planned |
+| BT1 | Terrain edit layer, `Streamer.invalidate`, raise/lower/level/smooth with the terrain tool (key 6), undo and redo, save format 27 | done 2026-10-21, for player 1; claims, ramp and pit brushes, and guest input are still open |
 | BT2 | Block store, shapes, meshing and collider per chunk, place and remove, castle style | planned |
 | BT3 | Four-player build input, `Kit` block inventory, palette, fill and box tools | planned |
 | BT4 | Style table, dungeon, eco city and farm styles, style swap, block prefabs | planned |

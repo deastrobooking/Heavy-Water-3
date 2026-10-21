@@ -42,6 +42,7 @@ pub const Stats = struct {
     generated: u64 = 0,
     canceled: u64 = 0,
     evicted: u64 = 0,
+    invalidated: u64 = 0,
     generation_ms: f32 = 0,
     max_generation_ms: f32 = 0,
     chunk_fill_p50_ms: f32 = 0,
@@ -150,6 +151,23 @@ pub fn plan(self: *Streamer, center: Key) void {
     self.condition.signal(self.io);
 }
 
+/// The terrain under `key` changed (a sculpt edit). A ready chunk goes back in the queue and its
+/// handle generation changes, so the renderer replaces its GPU copy; one being generated is
+/// discarded when the worker finishes and planned again. Pass null to rebuild every chunk.
+pub fn invalidate(self: *Streamer, key: ?Key) void {
+    self.mutex.lockUncancelable(self.io);
+    defer self.mutex.unlock(self.io);
+    for (&self.slots) |*slot| {
+        if (slot.state == .empty or slot.state == .canceling or slot.state == .queued) continue;
+        if (key) |k| if (!Key.eql(slot.key, k)) continue;
+        _ = slot.token.fetchAdd(1, .release);
+        self.stats.invalidated += 1;
+        // A running fill sees the token change, drops its result, and the next plan() requeues it.
+        if (slot.state == .ready) slot.state = .queued;
+    }
+    self.condition.signal(self.io);
+}
+
 pub fn snapshot(self: *Streamer) Snapshot {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
@@ -247,6 +265,32 @@ fn recordSample(samples: *[256]f32, len: *usize, next: *usize, value: f32, p50: 
     std.mem.sort(f32, ordered[0..len.*], {}, std.sort.asc(f32));
     p50.* = ordered[(len.* * 50 + 99) / 100 - 1];
     p99.* = ordered[(len.* * 99 + 99) / 100 - 1];
+}
+
+test "invalidate requeues a ready chunk under a new handle and leaves other chunks alone" {
+    const stream = try create(std.testing.allocator, std.testing.io, 42);
+    defer stream.destroy();
+    stream.plan(.{ .x = 0, .z = 0 });
+    for (&stream.slots) |*slot| slot.state = .ready;
+    const before = stream.snapshot();
+    var target: usize = 0;
+    for (before.views, 0..) |view, i| if (view.key.x == 1 and view.key.z == 0) {
+        target = i;
+    };
+    stream.invalidate(.{ .x = 1, .z = 0 });
+    const after = stream.snapshot();
+    for (after.views, before.views, 0..) |a, b, i| {
+        if (i == target) {
+            try std.testing.expectEqual(State.queued, a.state);
+            try std.testing.expect(!Handle.eql(a.handle, b.handle));
+        } else {
+            try std.testing.expectEqual(State.ready, a.state);
+            try std.testing.expect(Handle.eql(a.handle, b.handle));
+        }
+    }
+    try std.testing.expectEqual(@as(u64, 1), after.stats.invalidated);
+    stream.invalidate(null);
+    try std.testing.expectEqual(@as(usize, capacity), stream.snapshot().stats.queued);
 }
 
 test "planner bounds work, prioritizes center and invalidates recycled handles" {

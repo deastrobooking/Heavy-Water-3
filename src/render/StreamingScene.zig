@@ -208,7 +208,9 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
     for (&self.residents) |*resident| {
         if (resident.view) |view| {
             const now = snapshot.views[view.handle.slot];
-            if (!Streamer.Handle.eql(view.handle, now.handle) or now.state != .ready or Key.distance(view.key, center) > Streamer.render_radius) {
+            // A rebuilt chunk (a sculpt edit) keeps showing its old copy until the new one is ready.
+            const rebuilt = Key.eql(view.key, now.key) and !Streamer.Handle.eql(view.handle, now.handle) and now.state != .empty;
+            if ((!Streamer.Handle.eql(view.handle, now.handle) and !rebuilt) or (now.state != .ready and !rebuilt) or Key.distance(view.key, center) > Streamer.render_radius) {
                 resident.view = null;
                 self.evictions += 1;
             }
@@ -232,7 +234,10 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         }
         const view = candidate orelse break;
         var free: ?usize = null;
-        for (self.residents, 0..) |resident, i| if (resident.view == null) {
+        for (self.residents, 0..) |resident, i| if (resident.view) |v| {
+            if (Key.eql(v.key, view.key)) free = i; // replace this chunk's stale copy in place
+        };
+        if (free == null) for (self.residents, 0..) |resident, i| if (resident.view == null) {
             free = i;
             break;
         };
@@ -305,7 +310,7 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
     for (self.residents) |resident| {
         if (!resident.visible) continue;
         const view = resident.view.?;
-        const data = self.stream.payload(view).?;
+        const data = self.stream.payload(view) orelse continue; // stale during a terrain rebuild
         for (data.objects[0..data.object_count]) |object| {
             if (object.kind != kind) continue;
             // K2 stays bare except for the authored sheltered Cloudwater pockets.
@@ -465,6 +470,11 @@ pub fn drawSolids(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
         next += count;
     }
     for (self.draws[0..self.draw_count]) |d| if (!d.ground) d.mesh.drawRange(pass, d.first_index, d.index_count, d.instances, d.first_instance);
+}
+
+/// Terrain under `key` changed; null rebuilds every chunk.
+pub fn invalidateTerrain(self: *Scene, key: ?Key) void {
+    self.stream.invalidate(key);
 }
 
 pub fn destroy(self: *Scene) void {
