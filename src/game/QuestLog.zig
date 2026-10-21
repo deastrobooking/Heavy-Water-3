@@ -5,6 +5,7 @@ const Progress = @import("Progress.zig");
 const Skies = @import("Skies.zig");
 const CityContent = @import("CityContent.zig");
 const FoundryCase = @import("FoundryCase.zig");
+const WindsorCase = @import("WindsorCase.zig");
 
 pub const Objective = struct {
     title: []const u8,
@@ -73,6 +74,16 @@ pub fn city(progress: *const Progress, content: *const CityContent.CityContent) 
             },
             .draft = content.draft,
         };
+        if (i == 1 and CityContent.started(content, progress, i)) return .{
+            .title = m.title,
+            .detail = switch (WindsorCase.count(progress)) {
+                0 => "Watch the west Windsor crossing after dark and recover its toll-gate log (0/3).",
+                1 => "Recover the second Windsor bridge log, then find the closed-session recording at the Gothic civic hall (1/3).",
+                2 => "Recover the closed-session recording outside the Gothic civic hall (2/3).",
+                else => "Take both gate logs and the hall recording back to Ines to expose the councillor.",
+            },
+            .draft = content.draft,
+        };
         return .{ .title = m.title, .detail = m.detail, .draft = content.draft };
     }
     if (!CityContent.bossDefeated(content, progress)) return .{ .title = content.boss.name, .detail = content.boss.detail, .draft = content.draft };
@@ -112,6 +123,17 @@ test "Foundry Ledger stays active through the dock fight and advances after the 
     try std.testing.expectEqualStrings("Defeat the foundry steward and brood scavengers at the loading-dock gate.", fight.detail);
     try std.testing.expect(FoundryCase.finishDockConfrontation(&progress));
     try std.testing.expectEqualStrings("THE WINDSOR GATE", city(&progress, &CityContent.detroit).title);
+}
+
+test "Windsor Gate stays active through evidence and waits for Ines to expose the councillor" {
+    var progress: Progress = .{};
+    progress.setFlag("foundry_exposed");
+    progress.setFlag(WindsorCase.started_flag);
+    try std.testing.expectEqualStrings("Watch the west Windsor crossing after dark and recover its toll-gate log (0/3).", city(&progress, &CityContent.detroit).detail);
+    for (0..WindsorCase.checkpoint_count) |index| try std.testing.expect(WindsorCase.collect(&progress, index));
+    try std.testing.expectEqualStrings("Take both gate logs and the hall recording back to Ines to expose the councillor.", city(&progress, &CityContent.detroit).detail);
+    try std.testing.expect(WindsorCase.expose(&progress));
+    try std.testing.expectEqualStrings("THE BILE ARCHIVE", city(&progress, &CityContent.detroit).title);
 }
 
 test "Hive quest follows story flags, a surface spire, the Kestrel, and war state" {

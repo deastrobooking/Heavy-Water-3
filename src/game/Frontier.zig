@@ -42,6 +42,7 @@ const DroidCompanion = @import("DroidCompanion.zig");
 const Arena = @import("Arena.zig");
 const QuestLog = @import("QuestLog.zig");
 const FoundryCase = @import("FoundryCase.zig");
+const WindsorCase = @import("WindsorCase.zig");
 const CityContent = @import("CityContent.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
@@ -748,6 +749,17 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
             };
         }
     }
+    if (sb.progress.hasFlag(WindsorCase.started_flag) and !sb.progress.hasFlag(WindsorCase.exposed_flag)) {
+        var points: [WindsorCase.checkpoint_count]V = undefined;
+        const count = WindsorCase.positions(&sb.catalog.district, &points);
+        for (points[0..count], 0..) |point, index| {
+            if (WindsorCase.collected(&sb.progress, index)) continue;
+            if (Physics.rayBox(eye, dir, point, .{ 0.85, 1.0, 0.85 })) |hit| if (hit.distance < nearest) {
+                nearest = hit.distance;
+                result = .{ .windsor_evidence = @intCast(index) };
+            };
+        }
+    }
     if (sb.progress.hasFlag(FoundryCase.reported_flag) and !sb.progress.hasFlag(FoundryCase.confrontation_flag)) {
         if (FoundryCase.consolePosition(&sb.catalog.district)) |console| {
             if (Physics.rayBox(eye, dir, console, .{ 0.8, 0.9, 0.75 })) |hit| if (hit.distance < nearest) {
@@ -765,6 +777,17 @@ pub fn collectFoundryEvidence(sb: *Sandbox, index: u8) void {
     const recovered = FoundryCase.count(&sb.progress);
     sb.say("manifest page recovered: {d}/{d}", .{ recovered, FoundryCase.checkpoint_count });
     sb.cue(.pickup, foundryCasePosition(sb, index));
+}
+
+/// File a bridge toll log or closed-session recording into the shared Windsor case.
+pub fn collectWindsorEvidence(sb: *Sandbox, index: u8) void {
+    if (!WindsorCase.collect(&sb.progress, index)) return;
+    const recovered = WindsorCase.count(&sb.progress);
+    const label: []const u8 = if (index < 2) "toll-gate log" else "council recording";
+    sb.say("{s} recovered: {d}/{d}", .{ label, recovered, WindsorCase.checkpoint_count });
+    var points: [WindsorCase.checkpoint_count]V = undefined;
+    const count = WindsorCase.positions(&sb.catalog.district, &points);
+    sb.cue(.pickup, if (index < count) points[index] else sb.player.feet);
 }
 
 /// Publish the case at the loading dock terminal and draw the steward and brood scavengers out.
@@ -1554,6 +1577,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishObjectiveBeacon(sb, out, n, t);
     n = publishFoundryEvidence(sb, out, n, t);
     n = publishFoundryDock(sb, out, n, t);
+    n = publishWindsorEvidence(sb, out, n, t);
+    n = publishWindsorGates(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
     n = publishCityGardenFoliage(sb, out, n);
     n = publishAntarcticPerimeter(sb, out, n, t);
@@ -2064,6 +2089,12 @@ fn objectiveTarget(sb: *const Sandbox) ?V {
             if (FoundryCase.next(p)) |index| return foundryCasePosition(sb, index);
             return sb.keeperPosition(0);
         }
+        if (mission == 1 and sb.progress.hasFlag(WindsorCase.started_flag)) {
+            if (WindsorCase.next(p)) |index| {
+                var points: [WindsorCase.checkpoint_count]V = undefined;
+                if (WindsorCase.positions(&sb.catalog.district, &points) > index) return points[index];
+            }
+        }
         return sb.keeperPosition(mission);
     }
     return null;
@@ -2143,6 +2174,53 @@ fn publishFoundryEvidence(sb: *const Sandbox, out: []World.Prop, start: usize, t
         out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], ground + 0.7, point[2] } }, .tint = Material.emissive(.{ 0.92, 0.78, 0.42, 1 }, 0.55 + 0.25 * pulse), .size = .{ 0.56, 0.05, 0.68 }, .rotation = yawQuat(-0.18) };
         out[n + 3] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], ground + 1.13 + 0.08 * @sin(t * 2 + @as(f32, @floatFromInt(index))), point[2] } }, .tint = Material.emissive(.{ 0.98, 0.72, 0.28, 1 }, pulse), .size = @splat(0.19), .rotation = yawQuat(t * 0.7) };
         n += 4;
+    }
+    return n;
+}
+
+/// Toll logs and the session recorder appear only while Ines's Windsor investigation is active.
+fn publishWindsorEvidence(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    if (!sb.progress.hasFlag(WindsorCase.started_flag) or sb.progress.hasFlag(WindsorCase.exposed_flag)) return start;
+    var points: [WindsorCase.checkpoint_count]V = undefined;
+    const count = WindsorCase.positions(&sb.catalog.district, &points);
+    var n = start;
+    const c = &sb.catalog.content;
+    for (points[0..count], 0..) |point, index| {
+        if (WindsorCase.collected(&sb.progress, index)) continue;
+        if (R.length(R.sub(point, sb.player.feet)) > 520 or n + 3 > out.len) continue;
+        const floor = point[1] - 1.1;
+        const selected = sb.target == .windsor_evidence and sb.target.windsor_evidence == @as(u8, @intCast(index));
+        const pulse = 0.72 + 0.28 * @sin(t * 2.4 + @as(f32, @floatFromInt(index)));
+        const tint: [4]f32 = if (index == 2) .{ 0.18, 0.66, 0.72, 1 } else .{ 0.3, 0.34, 0.38, 1 };
+        const glow = if (selected) Material.emissive(.{ 0.35, 0.98, 0.91, 1 }, 0.85 + pulse * 0.2) else Material.emissive(.{ 0.96, 0.68, 0.28, 1 }, 0.48 + pulse * 0.3);
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], floor + 0.48, point[2] } }, .tint = tint, .size = .{ 0.85, 0.96, 0.7 } };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], floor + 1.04, point[2] - 0.38 } }, .tint = glow, .size = .{ 0.74, 0.36, 0.08 } };
+        out[n + 2] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], point[1] + 0.18 + @sin(t * 2 + @as(f32, @floatFromInt(index))) * 0.05, point[2] } }, .tint = glow, .size = @splat(0.14), .rotation = yawQuat(t * 0.6) };
+        n += 3;
+    }
+    return n;
+}
+
+/// The two Windsor crossing barriers lift as soon as Ines publishes the recorded evidence.
+/// Like the Foundry yard gate, these clear visual passage and do not alter bridge collision.
+fn publishWindsorGates(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    if (!sb.progress.hasFlag(WindsorCase.started_flag) and !sb.progress.hasFlag(WindsorCase.exposed_flag)) return start;
+    var n = start;
+    const open = sb.progress.hasFlag(WindsorCase.exposed_flag);
+    const c = &sb.catalog.content;
+    const pulse = 0.75 + 0.25 * @sin(t * 2.2);
+    for (0..2) |index| {
+        const gate = WindsorCase.gatePosition(sb.catalog.district.seed, index) orelse continue;
+        if (R.length(R.sub(gate, sb.player.feet)) > 520) continue;
+        if (n + 3 > out.len) break;
+        const width: f32 = if (index == 0) 18 else 24;
+        const tint = if (open) Material.emissive(.{ 0.16, 0.84, 0.68, 1 }, 0.8 + pulse * 0.2) else Material.emissive(.{ 0.94, 0.18, 0.12, 1 }, 0.75 + pulse * 0.25);
+        const lift: f32 = if (open) 3.8 else 0;
+        const post = .{ 0.6, 2.3, 0.8 };
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ gate[0] - width * 0.46, gate[1] + 1.15, gate[2] } }, .tint = .{ 0.22, 0.27, 0.29, 1 }, .size = post };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ gate[0] + width * 0.46, gate[1] + 1.15, gate[2] } }, .tint = .{ 0.22, 0.27, 0.29, 1 }, .size = post };
+        out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ gate[0], gate[1] + 1.25 + lift, gate[2] } }, .tint = tint, .size = .{ width, 0.5, 0.36 } };
+        n += 3;
     }
     return n;
 }

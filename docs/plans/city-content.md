@@ -35,7 +35,9 @@ The totals are plain arithmetic from the budget and the catalog in `procedural/W
 
 Detroit is "Detroit, Michigan reimagined as a canopy city" with six plazas (0 to 5), three keepers (Maro at plaza 1, Ines at plaza 3, Tavi at plaza 5), Gothic civic halls with clustered spires, a foundry and rail-yard industrial belt (an intentional Hive pressure point), the wide Detroit River with dry, wooded Belle Isle, two heavy bridges toward Windsor, Rootway galleries, a canopy metro, about twenty skyscrapers with sky lobbies, and two Rootdeep shrines below ([city](../city.md), [world](../world.md)). Lore anchor: Dr. Sergio Bile was the Hive's human ally a thousand years ago ([Story](../Story.md)); today's allies are his heirs in spirit.
 
-**Playable slice, 2026-10-21:** Maro can start The Foundry Ledger; three deterministic manifest checkpoints appear beside generated industrial buildings, are recoverable through the normal hands target, and update the quest count. The collected flags persist in shared `Progress`. Once all three pages are recovered, Maro's report conversation sets `foundry_reported`; publishing at the targetable loading-dock console draws out a human steward and two Hive guards. Defeating the group sets `foundry_exposed`, awards Sprint Servos +1 to each active player's own `Kit`, and slides open a visible yard gate. The gate is presentation-only and does not block movement. An unfinished fight respawns after loading because enemy combat state is not saved. The other two missions, the Titan, the ten discoveries and the city liberation transition are not implemented yet; Detroit remains occupied.
+**Playable slice, 2026-10-21:** Maro can start The Foundry Ledger; three deterministic manifest checkpoints appear beside generated industrial buildings, are recoverable through the normal hands target, and update the quest count. The collected flags persist in shared `Progress`. Once all three pages are recovered, Maro's report conversation sets `foundry_reported`; publishing at the targetable loading-dock console draws out a human steward and two Hive guards. Defeating the group sets `foundry_exposed`, awards Sprint Servos +1 to each active player's own `Kit`, and slides open a visible yard gate. The gate is presentation-only and does not block movement. An unfinished fight respawns after loading because enemy combat state is not saved.
+
+Ines can start The Windsor Gate after the party has met her. Three deterministic records appear: a log at each bridge control tower and a recording outside the nearest Gothic civic hall. They use normal aim-and-interact targeting, persist as shared flags, and update the quest log. Returning the complete set to Ines sets `windsor_exposed` and animates open the two visual crossing gates. The world map then enables a safe fast-travel stop at each Detroit-side crossing; both rows are visible but disabled beforehand. Dialogue describes a night watch, but this first playable slice has no time-of-day lock, so evidence can be recovered at any hour. The gates are visual and do not change collision. The Bile Archive, Titan, ten discoveries and final city liberation are not implemented yet; Detroit remains occupied.
 
 ### 3.1 Sub-missions (proposed)
 
@@ -52,7 +54,7 @@ Each mission ends with an **exposure scene** (a short cinematic, see [engine fea
 | Mission | Shared result | Personal reward (each player) |
 | --- | --- | --- |
 | The Foundry Ledger | the steward is exposed; the foundry yard opens | a suit upgrade from Maro |
-| The Windsor Gate | the councillor is exposed; the Windsor bridge gates open for the party | a travel upgrade (a fast-travel stop at the crossings) |
+| The Windsor Gate | the councillor is exposed; the Windsor bridge gates open for the party | a travel upgrade (fast-travel stops at both crossings) |
 | The Bile Archive | the director is exposed; the Bile notes are read | a Wildkin or pet growth item |
 
 ### 3.2 Boss battle (proposed)

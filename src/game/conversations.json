@@ -315,6 +315,12 @@
               "next": "windsor_reminder"
             },
             {
+              "text": "I have the gate logs and the hall recording.",
+              "requires": "windsor_records_complete",
+              "unless": "windsor_exposed",
+              "next": "windsor_report"
+            },
+            {
               "text": "Goodbye."
             }
           ]
@@ -353,6 +359,12 @@
         {
           "id": "windsor_reminder",
           "text": "Night watch on the Windsor bridges first, then the Gothic civic hall. The gate logs will name the councillor.",
+          "next": "hello"
+        },
+        {
+          "id": "windsor_report",
+          "sets": "windsor_exposed",
+          "text": "Those records tie the councillor to the carrier crossings. The gates are clear now; the city can use both Windsor bridges again.",
           "next": "hello"
         }
       ]

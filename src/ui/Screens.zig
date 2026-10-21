@@ -1754,14 +1754,20 @@ fn trackedTarget(kind: Menu.MapTarget, sb: *const Sandbox, from: [3]f32, player:
     return best;
 }
 
-/// Vertical step of the world-map rows (a row is this minus 3 units tall).
-const map_row_step: f32 = 24;
+/// Keep the map's destination list readable while fitting the panel on short windows.
+fn mapRowStep(panel_height: f32, zoom: u8) f32 {
+    const row_count: f32 = @floatFromInt(Menu.map_items.len);
+    const zoom_reserve: f32 = if (zoom == 3) 60 else 0;
+    const available = panel_height - (55 + 40 + 60 + 63 + zoom_reserve);
+    return @min(24, @max(14, available / row_count));
+}
 
 fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     const r = menuRect(c, @min(720, c.width - 30), @min(690, c.height - 30));
     panel(c, r, "WORLD MAP / FAST TRAVEL");
     // The rows (every travel destination, the frame row and RESUME) set the map's height, so the
     // list always fits: the panel used to overflow once there were more than eight rows.
+    const map_row_step = mapRowStep(r.h, menu.map_zoom);
     const rows_h = @as(f32, @floatFromInt(Menu.map_items.len)) * map_row_step;
     const map: Rect = .{ .x = r.x + 20, .y = r.y + 55, .w = r.w - 40, .h = @max(60, r.h - (55 + 40 + rows_h + 63 + (if (menu.map_zoom == 3) @as(f32, 60) else 0))) };
     c.rect(map, .{ 0.025, 0.09, 0.075, 1 });
@@ -1874,6 +1880,7 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
 }
 
 fn drawPlanetMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox, panel_rect: Rect, map: Rect, destination: usize) void {
+    const map_row_step = mapRowStep(panel_rect.h, menu.map_zoom);
     c.rect(map, .{ 0.012, 0.035, 0.075, 1 });
     c.hit(map, hitId(.planet_globe, 0));
     const radius = @min(map.h * 0.43, map.w * 0.24);

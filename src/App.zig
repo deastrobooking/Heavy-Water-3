@@ -625,6 +625,10 @@ fn syncTravelMenu(self: *App) void {
     for (0..4) |p| if (self.sandbox.travelBlocked(p) == null) {
         self.menu.travel_players |= @as(u8, 1) << @intCast(p);
     };
+    self.menu.travel_unlocked = 0;
+    for (0..Sandbox.travel_count) |destination| if (self.sandbox.travelDestinationUnlocked(destination)) {
+        self.menu.travel_unlocked |= @as(u32, 1) << @intCast(destination);
+    };
     self.menu.build_counts = .{
         @intCast(Build.paletteCount(&self.sandbox, .structures)),
         @intCast(Build.paletteCount(&self.sandbox, .kits)),
@@ -704,6 +708,7 @@ fn runCommand(self: *App, command: Menu.Command) void {
         },
         .travel => {
             if (self.sandbox.travelBlocked(self.menu.hero_player)) |reason| return self.report("{s}", .{reason});
+            if (!self.sandbox.travelDestinationUnlocked(self.menu.row)) return self.report("WINDSOR CROSSINGS ARE STILL CLOSED", .{});
             if (!self.sandbox.fastTravel(self.menu.hero_player, self.menu.row, &self.engine.camera)) return self.report("NO SAFE ARRIVAL NEAR DESTINATION", .{});
             self.menu.open(.none);
             self.engine.input = .{};
@@ -1881,6 +1886,26 @@ fn showcase(self: *App) void {
             target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
             eye = .{ target[0] + 4, target[1] + 3, target[2] + 5 };
         }
+    } else if (v == 95) {
+        const WindsorCase = @import("game/WindsorCase.zig");
+        self.sandbox.progress.setFlag(WindsorCase.started_flag);
+        var points: [WindsorCase.checkpoint_count][3]f32 = undefined;
+        if (WindsorCase.positions(layout, &points) > 0) {
+            const log = points[0];
+            self.sandbox.player.mode = .walk;
+            self.sandbox.view = .first;
+            self.sandbox.player.feet = .{ log[0] + 3, log[1] - 1.1, log[2] + 6 };
+            self.sandbox.player.velocity = .{ 0, 0, 0 };
+            self.sandbox.target = .{ .windsor_evidence = 0 };
+            self.sandbox.notice_len = 0;
+            self.sandbox.notice_until = 0;
+            target = log;
+            const player_eye = self.sandbox.player.eye();
+            eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
+        } else {
+            target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
+            eye = .{ target[0] + 4, target[1] + 3, target[2] + 5 };
+        }
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -1906,7 +1931,7 @@ fn showcase(self: *App) void {
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
-    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65;
+    const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65 or v == 95;
     self.sandbox.tick = if (v == 85 or v == 86 or v == 87 or v == 88) 0 else if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
@@ -2511,6 +2536,7 @@ fn exerciseSmoke(self: *App) void {
             // Visit every fast-travel destination; the last (New York) stays loaded for the frames
             // until stage 2, so its chunks stream and draw under the Metal validation layer.
             for (0..Sandbox.travel_count) |destination| {
+                if (!self.sandbox.travelDestinationUnlocked(destination)) continue;
                 if (!self.sandbox.fastTravel(0, destination, camera)) return self.smokeFail("SMOKE TRAVEL {s} REFUSED", .{Sandbox.travel_labels[destination]});
                 const feet = self.sandbox.player.feet;
                 // Metro platforms are decks above the ground; only the open-terrain arrival is checked.
@@ -2527,6 +2553,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeGui();
             self.smokeFrontier();
             self.smokeFoundryCase();
+            self.smokeWindsorCase();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -2723,6 +2750,56 @@ fn smokeFoundryCase(self: *App) void {
     }
     if (sb.enemies.unitCount(Enemies.foundry_nest) != 0 or !sb.progress.hasFlag(FoundryCase.exposed_flag) or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY STEWARD FIGHT OR REWARD FAILED (fighters {d})", .{sb.enemies.unitCount(Enemies.foundry_nest)});
     std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; the console started the steward ambush; P1 cleared the steward and two brood scavengers, opened the gate and earned Sprint Servos +1", .{count});
+}
+
+/// Start Ines's case, inspect both crossing logs and the civic-hall recording through normal aim
+/// and interact, then report the councillor through the existing keeper conversation.
+fn smokeWindsorCase(self: *App) void {
+    const sb = &self.sandbox;
+    const camera = &self.engine.camera;
+    const baseline = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE WINDSOR BASELINE {s}", .{@errorName(err)});
+    defer self.allocator.free(baseline);
+    defer sb.restore(self.allocator, baseline, camera) catch |err| self.smokeFail("SMOKE WINDSOR RESTORE {s}", .{@errorName(err)});
+
+    const WindsorCase = @import("game/WindsorCase.zig");
+    sb.progress.setFlag("met_ines");
+    sb.startTalk(.{ .keeper = 1 });
+    if (!self.smokeDialogueChoose("Anything strange at the bridges after dark?")) return self.smokeFail("SMOKE WINDSOR CASE NOT OFFERED", .{});
+    if (!self.smokeDialogueContinue()) return self.smokeFail("SMOKE WINDSOR BRIEF DID NOT RETURN TO INES", .{});
+    sb.talkKey(.back);
+    sb.tools.tool = .hands;
+    sb.player.mode = .fly;
+    sb.view = .first;
+    sb.held = null;
+    var points: [WindsorCase.checkpoint_count][3]f32 = undefined;
+    const count = WindsorCase.positions(&sb.catalog.district, &points);
+    if (count != WindsorCase.checkpoint_count) return self.smokeFail("SMOKE WINDSOR HAS {d} CHECKPOINTS", .{count});
+    for (points, 0..) |point, index| {
+        sb.player.feet = .{ point[0] + 2, point[1] - 1.1, point[2] + 3.5 };
+        sb.player.velocity = .{ 0, 0, 0 };
+        const eye = sb.player.eye();
+        const dx = point[0] - eye.x();
+        const dy = point[1] - eye.y();
+        const dz = point[2] - eye.z();
+        camera.position = eye;
+        camera.yaw = std.math.atan2(dx, dz);
+        camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE WINDSOR PICKUP {s}", .{@errorName(err)});
+        if (sb.target != .windsor_evidence or sb.target.windsor_evidence != @as(u8, @intCast(index)) or !WindsorCase.collected(&sb.progress, index)) return self.smokeFail("SMOKE WINDSOR RECORD {d} NOT RECOVERED (target {s})", .{ index + 1, @tagName(sb.target) });
+    }
+    if (!sb.progress.hasFlag(WindsorCase.complete_flag)) return self.smokeFail("SMOKE WINDSOR RECORDS NOT COMPLETE", .{});
+    sb.startTalk(.{ .keeper = 1 });
+    if (!self.smokeDialogueChoose("I have the gate logs and the hall recording.")) return self.smokeFail("SMOKE WINDSOR REPORT NOT OFFERED", .{});
+    if (!sb.progress.hasFlag(WindsorCase.exposed_flag)) return self.smokeFail("SMOKE WINDSOR COUNCILLOR NOT EXPOSED", .{});
+    var crossing_stops: usize = 0;
+    for (Sandbox.travel_destinations, 0..) |destination, index| if (destination.kind == .windsor) {
+        crossing_stops += 1;
+        if (!sb.travelDestinationUnlocked(index)) return self.smokeFail("SMOKE WINDSOR STOP {s} STAYED LOCKED", .{destination.label});
+        if (!sb.fastTravel(0, index, camera)) return self.smokeFail("SMOKE WINDSOR STOP {s} HAS NO SAFE ARRIVAL", .{destination.label});
+        if (R3.length(R3.sub(sb.player.feet, sb.travelPoint(index))) > 70) return self.smokeFail("SMOKE WINDSOR STOP {s} LANDED TOO FAR AWAY", .{destination.label});
+    };
+    if (crossing_stops != 2) return self.smokeFail("SMOKE WINDSOR UNLOCKED {d} CROSSING STOPS", .{crossing_stops});
+    std.log.info("Smoke Windsor Gate: Ines started the case; two bridge logs and the hall recording were recovered through aim/interact; the report exposed the councillor and opened the crossings", .{});
 }
 
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
@@ -3472,6 +3549,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
         .evidence => |i| renderer.hud_lines[1].set("FOUNDRY LEDGER PAGE {d}/3  X / CLICK RECOVER", .{i + 1}),
         .foundry_terminal => renderer.hud_lines[1].set("LOADING DOCK CONSOLE  X / CLICK TO DRAW OUT STEWARD", .{}),
+        .windsor_evidence => |i| renderer.hud_lines[1].set("WINDSOR CASE RECORD {d}/3  X / CLICK REVIEW", .{i + 1}),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
             renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
         else

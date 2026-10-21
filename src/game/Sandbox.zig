@@ -34,6 +34,7 @@ const Arbor = @import("../procedural/Arbor.zig");
 const Sap = @import("../machine/Sap.zig");
 const District = @import("../procedural/District.zig");
 const Metro = @import("../procedural/Metro.zig");
+const WindsorCase = @import("WindsorCase.zig");
 const Rootsong = @import("../machine/Rootsong.zig");
 const Shrine = @import("../procedural/Shrine.zig");
 const Seed = @import("../procedural/Seed.zig");
@@ -135,6 +136,8 @@ pub const Target = union(enum) {
     evidence: u8,
     /// The loading-dock console that publishes the reported ledger and exposes the steward.
     foundry_terminal,
+    /// A toll-gate log or civic-hall recording in the Windsor Gate investigation.
+    windsor_evidence: u8,
 };
 
 /// A live case clue stays targetable when a salvage object also crosses the ray; other
@@ -142,7 +145,7 @@ pub const Target = union(enum) {
 fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
     const found = candidate orelse return current;
     return switch (found) {
-        .evidence, .foundry_terminal => found,
+        .evidence, .foundry_terminal, .windsor_evidence => found,
         .hero, .wild_pet, .pet => if (current == .none) found else current,
         else => current,
     };
@@ -1134,6 +1137,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         .pet => |owner| Frontier.petPet(self, slot, owner),
         .evidence => |i| Frontier.collectFoundryEvidence(self, i),
         .foundry_terminal => Frontier.startFoundryDockEncounter(self),
+        .windsor_evidence => |i| Frontier.collectWindsorEvidence(self, i),
         else => {},
     };
     if (g.interact and g.target == .stall) {
@@ -1323,6 +1327,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .pet => |owner| Frontier.petPet(self, 0, owner),
                     .evidence => |i| Frontier.collectFoundryEvidence(self, i),
                     .foundry_terminal => Frontier.startFoundryDockEncounter(self),
+                    .windsor_evidence => |i| Frontier.collectWindsorEvidence(self, i),
                     .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
@@ -4110,9 +4115,9 @@ test "a guest fires their own blaster with the trigger and downs a drone" {
 }
 
 /// Stable regional destinations shared by the map and fast travel.
-pub const detroit_travel_count = 3 + Metro.stop_nodes.len;
+pub const detroit_travel_count = 5 + Metro.stop_nodes.len;
 pub const authored_travel_count = 1;
-pub const TravelDestinationKind = enum { base_camp, shrine, metro, region, region_site };
+pub const TravelDestinationKind = enum { base_camp, shrine, metro, windsor, region, region_site };
 pub const TravelDestination = struct {
     label: []const u8,
     menu_label: []const u8,
@@ -4134,6 +4139,9 @@ pub const travel_destinations = blk: {
     list[1] = .{ .label = "ROOTDEEP 1", .menu_label = "TRAVEL: ROOTDEEP SHRINE 1", .map_title = Region.default_title, .kind = .shrine, .index = 0 };
     list[2] = .{ .label = "ROOTDEEP 2", .menu_label = "TRAVEL: ROOTDEEP SHRINE 2", .map_title = Region.default_title, .kind = .shrine, .index = 1 };
     for (Metro.stop_names, 0..) |name, i| list[3 + i] = .{ .label = name, .menu_label = std.fmt.comptimePrint("METRO: {s}", .{name}), .map_title = Region.default_title, .kind = .metro, .index = i };
+    const windsor_start = 3 + Metro.stop_names.len;
+    list[windsor_start] = .{ .label = "WINDSOR WEST CROSSING", .menu_label = "TRAVEL: WINDSOR WEST CROSSING", .map_title = Region.default_title, .kind = .windsor, .index = 0 };
+    list[windsor_start + 1] = .{ .label = "WINDSOR EAST CROSSING", .menu_label = "TRAVEL: WINDSOR EAST CROSSING", .map_title = Region.default_title, .kind = .windsor, .index = 1 };
     var destination_index = detroit_travel_count;
     for (Region.all, 0..) |region, region_index| {
         const label = region.travel_label orelse continue;
@@ -4146,6 +4154,9 @@ pub const travel_destinations = blk: {
     break :blk list;
 };
 pub const travel_count = travel_destinations.len;
+comptime {
+    if (travel_count > 32) @compileError("world-map travel unlock mask supports at most 32 destinations");
+}
 pub const travel_labels = blk: {
     var labels: [travel_count][]const u8 = undefined;
     for (travel_destinations, 0..) |destination, i| labels[i] = destination.label;
@@ -4187,12 +4198,22 @@ pub fn travelPoint(self: *const Sandbox, destination: usize) Physics.Vec3 {
             // Station platform top, plus a small clearance for the ranger's feet.
             return R.add(node.position, .{ 0, 0.78, 0 });
         },
+        .windsor => return WindsorCase.travelPoint(self.seed, entry.index) orelse spawn,
         .base_camp, .shrine => {
             var point = if (entry.kind == .base_camp or entry.index >= self.shrines.len) spawn else R.add(self.shrines[entry.index].origin, .{ 0, 0, -12 });
             point[1] = Terrain.surface(self.seed, point[0], point[2]).height + 0.1;
             return point;
         },
     }
+}
+
+/// Whether a world-map destination can currently be used by this shared campaign.
+pub fn travelDestinationUnlocked(self: *const Sandbox, destination: usize) bool {
+    if (destination >= travel_count) return false;
+    return switch (travel_destinations[destination].kind) {
+        .windsor => self.progress.hasFlag(WindsorCase.exposed_flag),
+        else => true,
+    };
 }
 
 /// Compact hand-authored procedural skyline gives the playable NYC arrival a clear identity.
@@ -4284,7 +4305,7 @@ pub fn walkableCave(self: *const Sandbox) ?usize {
 }
 
 pub fn fastTravel(self: *Sandbox, p: usize, destination: usize, camera: *Camera) bool {
-    if (destination >= travel_count or self.travelBlocked(p) != null) return false;
+    if (!self.travelDestinationUnlocked(destination) or self.travelBlocked(p) != null) return false;
     const point = self.travelArrival(destination) orelse return false;
     if (p == 0) {
         self.release();
@@ -4352,6 +4373,36 @@ test "regional travel moves only its player, resets motion, and rejects invalid 
     try std.testing.expect(R.length(R.sub(sb.travelPoint(detroit_travel_count), sb.player.feet)) < 25);
 }
 
+test "Windsor crossing fast-travel stops unlock after Ines exposes the councillor" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+
+    var stops: [2]usize = undefined;
+    var found: usize = 0;
+    for (travel_destinations, 0..) |destination, index| if (destination.kind == .windsor) {
+        try std.testing.expectEqualStrings(Region.default_title, destination.map_title);
+        try std.testing.expect(!sb.travelDestinationUnlocked(index));
+        try std.testing.expect(!sb.fastTravel(0, index, &camera));
+        stops[found] = index;
+        found += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 2), found);
+
+    sb.progress.setFlag(WindsorCase.exposed_flag);
+    for (stops) |index| {
+        try std.testing.expect(sb.travelDestinationUnlocked(index));
+        const safe = travelArrival(&sb, index) orelse return error.TestUnexpectedResult;
+        try std.testing.expect(!sb.physics.overlapsBox(R.add(safe, .{ 0, 0.9, 0 }), .{ 0.4, 0.9, 0.4 }));
+        try std.testing.expect(sb.fastTravel(0, index, &camera));
+        try std.testing.expect(R.length(R.sub(sb.player.feet, sb.travelPoint(index))) <= 70);
+    }
+    try std.testing.expect(!sb.travelDestinationUnlocked(travel_count));
+}
+
 test "New York has deterministic regional terrain, skyline landmarks, and a safe arrival" {
     var catalog: Catalog = undefined;
     var camera: Camera = .{};
@@ -4378,6 +4429,8 @@ test "every travel destination has a safe arrival a player can be placed on" {
     try testSandbox(&sb, &catalog, &camera);
     defer catalog.deinit(std.testing.allocator);
     defer sb.deinit();
+    // This test verifies all arrival coordinates after the campaign has earned both Windsor stops.
+    sb.progress.setFlag(WindsorCase.exposed_flag);
     for (0..travel_count) |destination| {
         // A destination with no arrival is refused in the game ("no safe arrival"), so every row
         // of the map must resolve to a spot on walkable ground.

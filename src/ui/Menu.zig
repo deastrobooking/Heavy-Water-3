@@ -8,6 +8,10 @@ const PadBindings = @import("../engine/PadBindings.zig");
 const Sandbox = @import("../game/Sandbox.zig");
 const Menu = @This();
 
+comptime {
+    if (Sandbox.travel_count > 32) @compileError("world-map travel unlock mask supports at most 32 destinations");
+}
+
 pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
 pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
@@ -118,6 +122,8 @@ map_frame_destination: bool = false,
 map_destination: u8 = 0,
 map_target: MapTarget = .none,
 travel_players: u8 = 15,
+/// The application refreshes this bitset from the active campaign before map input.
+travel_unlocked: u32 = std.math.maxInt(u32),
 /// The inventory is three fixed pages of at most sixteen entries, so building never needs a
 /// long scrolling list. The application refreshes the counts from the loaded world.
 build_tab: u8 = 0,
@@ -206,7 +212,7 @@ pub fn rows(self: *const Menu) u8 {
 pub fn enabled(self: *const Menu, row: usize) bool {
     if (row >= self.rows()) return false;
     if (self.screen == .build) return row < self.build_counts[self.build_tab];
-    if (self.screen == .world_map and row < Sandbox.travel_count) return self.hero_player < 4 and self.travel_players & (@as(u8, 1) << @intCast(self.hero_player)) != 0;
+    if (self.screen == .world_map and row < Sandbox.travel_count) return self.hero_player < 4 and self.travel_players & (@as(u8, 1) << @intCast(self.hero_player)) != 0 and self.travel_unlocked & (@as(u32, 1) << @intCast(row)) != 0;
     if (self.screen == .title and row == 0) return self.has_save;
     if (self.screen == .pause and pause_items[row].command == .load) return self.has_save;
     if (self.screen == .arena) return switch (arena_items[row].command) {
@@ -732,6 +738,27 @@ test "every world-map destination row travels and only the frame row cycles the 
     m.row = frame_row;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(MapTarget.nest, m.map_target);
+}
+
+test "locked Windsor crossings stay visible but cannot be selected until their unlock bit arrives" {
+    var m: Menu = .{};
+    m.open(.world_map);
+    m.hero_player = 0;
+    m.travel_players = 1;
+    var tested: usize = 0;
+    for (Sandbox.travel_destinations, 0..) |destination, row| if (destination.kind == .windsor) {
+        tested += 1;
+        m.travel_unlocked &= ~(@as(u32, 1) << @intCast(row));
+        try std.testing.expect(!m.enabled(row));
+        m.select(@intCast(row));
+        try std.testing.expect(m.row != row);
+        m.row = @intCast(row);
+        try std.testing.expectEqual(Command.none, m.key(.confirm));
+        m.travel_unlocked |= @as(u32, 1) << @intCast(row);
+        try std.testing.expect(m.enabled(row));
+        try std.testing.expectEqual(Command.travel, m.key(.confirm));
+    };
+    try std.testing.expectEqual(@as(usize, 2), tested);
 }
 
 test "map zoom stays bounded and preserves destination selection" {
