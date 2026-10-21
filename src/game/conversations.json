@@ -203,7 +203,7 @@
         },
         {
           "id": "foundry_case_status",
-          "text": "The three manifest pages will tie the foundry shipments to the Hive. What do you need?",
+          "text": "The three manifest pages tie the foundry shipments to the Hive. Take them to the loading-dock console; publishing the ledger will expose the steward and open the yard.",
           "choices": [
             {
               "text": "Remind me of the checkpoints.",
@@ -213,8 +213,8 @@
             {
               "text": "I have all three manifest pages.",
               "requires": "foundry_pages_complete",
-              "unless": "foundry_exposed",
-              "sets": "foundry_exposed",
+              "unless": "foundry_reported",
+              "sets": "foundry_reported",
               "next": "foundry_exposure"
             },
             {
@@ -225,7 +225,7 @@
         },
         {
           "id": "foundry_exposure",
-          "text": "The pages trace rotor cores, sap and alloy from the yards to the brood. The steward's seal is on every shipment. I'll take the ledger to the civic registry and open the yard back to its workers.",
+          "text": "The pages trace rotor cores, sap and alloy from the yards to the brood. The steward's seal is on every shipment. Carry the report to the loading-dock console and publish it to the civic registry.",
           "next": "hello"
         }
       ]

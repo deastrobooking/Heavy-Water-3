@@ -748,6 +748,14 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
             };
         }
     }
+    if (sb.progress.hasFlag(FoundryCase.reported_flag) and !sb.progress.hasFlag(FoundryCase.exposed_flag)) {
+        if (FoundryCase.consolePosition(&sb.catalog.district)) |console| {
+            if (Physics.rayBox(eye, dir, console, .{ 0.8, 0.9, 0.75 })) |hit| if (hit.distance < nearest) {
+                nearest = hit.distance;
+                result = .foundry_terminal;
+            };
+        }
+    }
     return result;
 }
 
@@ -757,6 +765,18 @@ pub fn collectFoundryEvidence(sb: *Sandbox, index: u8) void {
     const recovered = FoundryCase.count(&sb.progress);
     sb.say("manifest page recovered: {d}/{d}", .{ recovered, FoundryCase.checkpoint_count });
     sb.cue(.pickup, foundryCasePosition(sb, index));
+}
+
+/// Publish the case at the loading dock terminal. The shared exposure flag opens the visible
+/// yard barrier; every present player's personal reward stays in their own Kit.
+pub fn exposeFoundrySteward(sb: *Sandbox) void {
+    if (!FoundryCase.exposeAtDock(&sb.progress)) return;
+    var rewarded: u8 = @intFromBool(FoundryCase.awardSuitUpgrade(&sb.kits[0]));
+    for (&sb.guests, 1..) |*guest, slot| if (guest.active) {
+        rewarded += @intFromBool(FoundryCase.awardSuitUpgrade(&sb.kits[slot]));
+    };
+    sb.say("steward exposed; foundry yard gate open; Sprint Servos for {d} active ranger(s)", .{rewarded});
+    sb.cue(.ui_confirm, FoundryCase.consolePosition(&sb.catalog.district));
 }
 
 fn foundryCasePosition(sb: *const Sandbox, index: usize) V {
@@ -1509,6 +1529,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishShrines(sb, out, n, t);
     n = publishObjectiveBeacon(sb, out, n, t);
     n = publishFoundryEvidence(sb, out, n, t);
+    n = publishFoundryDock(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
     n = publishCityGardenFoliage(sb, out, n);
     n = publishAntarcticPerimeter(sb, out, n, t);
@@ -2012,6 +2033,7 @@ fn objectiveTarget(sb: *const Sandbox) ?V {
     if (CityContent.nextMission(&CityContent.detroit, p)) |mission| {
         if (mission == 0) {
             if (!p.hasFlag("foundry_started")) return sb.keeperPosition(0);
+            if (p.hasFlag(FoundryCase.reported_flag)) return FoundryCase.consolePosition(&sb.catalog.district);
             if (FoundryCase.next(p)) |index| return foundryCasePosition(sb, index);
             return sb.keeperPosition(0);
         }
@@ -2094,6 +2116,46 @@ fn publishFoundryEvidence(sb: *const Sandbox, out: []World.Prop, start: usize, t
         out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], ground + 0.7, point[2] } }, .tint = Material.emissive(.{ 0.92, 0.78, 0.42, 1 }, 0.55 + 0.25 * pulse), .size = .{ 0.56, 0.05, 0.68 }, .rotation = yawQuat(-0.18) };
         out[n + 3] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], ground + 1.13 + 0.08 * @sin(t * 2 + @as(f32, @floatFromInt(index))), point[2] } }, .tint = Material.emissive(.{ 0.98, 0.72, 0.28, 1 }, pulse), .size = @splat(0.19), .rotation = yawQuat(t * 0.7) };
         n += 4;
+    }
+    return n;
+}
+
+/// The dock terminal receives the shared dossier, and the non-blocking yard barrier changes
+/// from Hive red to clear cyan once the steward is publicly exposed.
+fn publishFoundryDock(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    if (!sb.progress.hasFlag("foundry_started")) return start;
+    var points: [FoundryCase.checkpoint_count]V = undefined;
+    const count = FoundryCase.positions(&sb.catalog.district, &points);
+    if (count == 0 or R.length(R.sub(points[0], sb.player.feet)) > 520 or start + 8 > out.len) return start;
+
+    const dock = points[0];
+    const ground = dock[1] - 0.9;
+    const gate_z = dock[2] + 8;
+    const open = sb.progress.hasFlag(FoundryCase.exposed_flag);
+    const pulse = 0.76 + 0.24 * @sin(t * 2.4);
+    const metal: [4]f32 = .{ 0.13, 0.19, 0.23, 1 };
+    const hostile = Material.emissive(.{ 0.92, 0.18, 0.12, 1 }, 0.82 + 0.2 * pulse);
+    const clear = Material.emissive(.{ 0.16, 0.86, 0.77, 1 }, 0.82 + 0.2 * pulse);
+    const barrier = if (open) clear else hostile;
+    const slide: f32 = if (open) 6 else 0;
+    const c = &sb.catalog.content;
+    var n = start;
+
+    // Two dock uprights, a cross beam, and a sliding panel make the access state readable from
+    // the approach. The gate is presentation geometry; navigation remains on the open road.
+    out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0] - 5.1, ground + 2.3, gate_z } }, .tint = metal, .size = .{ 0.8, 4.6, 0.9 } };
+    out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0] + 5.1, ground + 2.3, gate_z } }, .tint = metal, .size = .{ 0.8, 4.6, 0.9 } };
+    out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0], ground + 4.7, gate_z } }, .tint = metal, .size = .{ 11.5, 0.65, 1 } };
+    out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0] + slide, ground + 1.45, gate_z - 0.18 } }, .tint = barrier, .size = .{ 9.8, 2.5, 0.35 } };
+    out[n + 4] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0], ground + 0.12, gate_z } }, .tint = Material.emissive(if (open) .{ 0.12, 0.55, 0.48, 1 } else .{ 0.58, 0.17, 0.14, 1 }, 0.55), .size = .{ 11, 0.18, 1.4 } };
+    n += 5;
+
+    if (sb.progress.hasFlag(FoundryCase.complete_flag)) {
+        const screen_color = if (sb.progress.hasFlag(FoundryCase.reported_flag)) clear else Material.emissive(.{ 0.95, 0.67, 0.22, 1 }, 0.55 + pulse * 0.2);
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0], ground + 0.55, dock[2] } }, .tint = metal, .size = .{ 1.15, 1.1, 0.9 } };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ dock[0], ground + 1.25, dock[2] - 0.12 } }, .tint = screen_color, .size = .{ 0.92, 0.42, 0.14 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_x, -0.2)) };
+        out[n + 2] = .{ .mesh = c.gem, .transform = .{ .position = .{ dock[0], ground + 1.55 + @sin(t * 2) * 0.04, dock[2] - 0.12 } }, .tint = if (sb.target == .foundry_terminal) screen_color else Material.emissive(.{ 0.88, 0.62, 0.2, 1 }, 0.7), .size = @splat(0.16), .rotation = yawQuat(t * 0.45) };
+        n += 3;
     }
     return n;
 }

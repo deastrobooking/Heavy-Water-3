@@ -1834,6 +1834,25 @@ fn showcase(self: *App) void {
             target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
             eye = .{ target[0] + 4, target[1] + 4, target[2] + 8 };
         }
+    } else if (v == 93) {
+        const FoundryCase = @import("game/FoundryCase.zig");
+        self.sandbox.progress.setFlag("foundry_started");
+        self.sandbox.progress.setFlag(FoundryCase.complete_flag);
+        self.sandbox.progress.setFlag(FoundryCase.reported_flag);
+        if (FoundryCase.consolePosition(layout)) |console| {
+            // Frame the terminal and yard gate together from the approach; keep the ranger at
+            // walking height so the screenshot reads as a playable street-level interaction.
+            self.sandbox.player.mode = .walk;
+            self.sandbox.player.feet = .{ console[0] + 2.3, console[1] - 1.38, console[2] - 4 };
+            self.sandbox.player.velocity = .{ 0, 0, 0 };
+            self.sandbox.target = .foundry_terminal;
+            target = console;
+            const player_eye = self.sandbox.player.eye();
+            eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
+        } else {
+            target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
+            eye = .{ target[0] + 4, target[1] + 3, target[2] + 5 };
+        }
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -2621,8 +2640,21 @@ fn smokeFoundryCase(self: *App) void {
     if (!self.smokeDialogueChoose("About the foundry ledger.")) return self.smokeFail("SMOKE FOUNDRY REPORT NOT OFFERED", .{});
     const level = sb.kits[0].level(.sprint_servos);
     if (!self.smokeDialogueChoose("I have all three manifest pages.")) return self.smokeFail("SMOKE FOUNDRY EXPOSURE NOT OFFERED", .{});
-    if (!sb.progress.hasFlag("foundry_exposed") or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY EXPOSURE OR KIT REWARD FAILED", .{});
-    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; report exposed the steward and granted P1 Sprint Servos +1", .{count});
+    if (!sb.progress.hasFlag(FoundryCase.reported_flag) or sb.progress.hasFlag(FoundryCase.exposed_flag)) return self.smokeFail("SMOKE FOUNDRY REPORT STATE FAILED", .{});
+    sb.talkKey(.back);
+    const console = FoundryCase.consolePosition(&sb.catalog.district) orelse return self.smokeFail("SMOKE FOUNDRY CONSOLE MISSING", .{});
+    sb.player.feet = .{ console[0] + 2.3, console[1] - 1.38, console[2] + 4 };
+    sb.player.velocity = @splat(0);
+    const eye = sb.player.eye();
+    const dx = console[0] - eye.x();
+    const dy = console[1] - eye.y();
+    const dz = console[2] - eye.z();
+    camera.position = eye;
+    camera.yaw = std.math.atan2(dx, dz);
+    camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+    sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY CONSOLE {s}", .{@errorName(err)});
+    if (sb.target != .foundry_terminal or !sb.progress.hasFlag(FoundryCase.exposed_flag) or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY CONSOLE, EXPOSURE OR KIT REWARD FAILED (target {s})", .{@tagName(sb.target)});
+    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; the dock console exposed the steward, opened the yard gate, and granted P1 Sprint Servos +1", .{count});
 }
 
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
@@ -3371,6 +3403,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
         .evidence => |i| renderer.hud_lines[1].set("FOUNDRY LEDGER PAGE {d}/3  X / CLICK RECOVER", .{i + 1}),
+        .foundry_terminal => renderer.hud_lines[1].set("LOADING DOCK CONSOLE  X / CLICK TO EXPOSE STEWARD", .{}),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
             renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
         else

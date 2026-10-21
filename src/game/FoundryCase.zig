@@ -9,6 +9,8 @@ const V = @import("../physics/Rotation.zig").Vec3;
 
 pub const checkpoint_count = 3;
 pub const complete_flag = "foundry_pages_complete";
+pub const reported_flag = "foundry_reported";
+pub const exposed_flag = "foundry_exposed";
 const checkpoint_flags = [_][]const u8{
     "foundry_manifest_1",
     "foundry_manifest_2",
@@ -122,6 +124,28 @@ pub fn next(progress: *const Progress) ?usize {
     return null;
 }
 
+/// The collected pages may only be entered in Maro's report after all three are shared.
+pub fn report(progress: *Progress) bool {
+    if (!progress.hasFlag("foundry_started") or !progress.hasFlag(complete_flag) or progress.hasFlag(reported_flag)) return false;
+    progress.setFlag(reported_flag);
+    return true;
+}
+
+/// Publishing the dossier at the dock exposes the steward and opens the yard gate.
+pub fn exposeAtDock(progress: *Progress) bool {
+    if (!progress.hasFlag(reported_flag) or progress.hasFlag(exposed_flag)) return false;
+    progress.setFlag(exposed_flag);
+    return true;
+}
+
+/// The checkpoint crate occupies the loading dock's public evidence console once the pages
+/// have been reported. Its y is raised so ray targeting lands on the console face.
+pub fn consolePosition(layout: *const District.Layout) ?V {
+    var points: [checkpoint_count]V = undefined;
+    if (positions(layout, &points) == 0) return null;
+    return .{ points[0][0], points[0][1] + 0.48, points[0][2] };
+}
+
 /// A checkpoint can only be recovered after Maro starts the case; duplicate pickup is harmless.
 pub fn collect(progress: *Progress, index: usize) bool {
     if (index >= checkpoint_count or !progress.hasFlag("foundry_started") or collected(progress, index)) return false;
@@ -159,6 +183,23 @@ test "Foundry Ledger checkpoints require the case, collect once, and persist in 
     const restored = try Progress.fromDoc(try std.json.parseFromSliceLeaky(Progress.Doc, allocator, json, .{}));
     try std.testing.expect(restored.hasFlag(complete_flag));
     try std.testing.expectEqual(@as(u8, checkpoint_count), count(&restored));
+    try std.testing.expect(report(&progress));
+    try std.testing.expect(!report(&progress));
+    try std.testing.expect(exposeAtDock(&progress));
+    try std.testing.expect(!exposeAtDock(&progress));
+}
+
+test "Foundry Ledger report and dock exposure require the correct shared progression order" {
+    var progress: Progress = .{};
+    try std.testing.expect(!report(&progress));
+    try std.testing.expect(!exposeAtDock(&progress));
+    progress.setFlag("foundry_started");
+    try std.testing.expect(!report(&progress));
+    for (0..checkpoint_count) |index| try std.testing.expect(collect(&progress, index));
+    try std.testing.expect(report(&progress));
+    try std.testing.expect(!progress.hasFlag(exposed_flag));
+    try std.testing.expect(exposeAtDock(&progress));
+    try std.testing.expect(progress.hasFlag(exposed_flag));
 }
 
 test "Foundry checkpoints are distinct and use generated industrial buildings" {

@@ -256,8 +256,14 @@ test "Maro only accepts the Foundry Ledger report after all three pages are shar
     session.choice = visible_slot orelse return error.ReportChoiceMissing;
     session.reveal = @floatFromInt(d.node(session).text.len);
     _ = d.key(&session, .confirm, &progress, &wallet);
-    try std.testing.expect(progress.hasFlag("foundry_exposed"));
+    try std.testing.expect(progress.hasFlag("foundry_reported"));
+    try std.testing.expect(!progress.hasFlag("foundry_exposed"));
     try std.testing.expectEqualStrings("foundry_exposure", d.node(session).id);
+
+    session = d.begin(maro, .{ .keeper = 0 }, &progress).?;
+    try chooseNext(&d, &session, &progress, &wallet, "foundry_case_status");
+    count = d.visibleChoices(session, &progress, &visible);
+    for (visible[0..count]) |choice| try std.testing.expect(!std.mem.eql(u8, d.node(session).choices[choice].text, "I have all three manifest pages."));
 }
 
 test "conversations branch on flags, reveal text, give scrap once, and end in panels" {

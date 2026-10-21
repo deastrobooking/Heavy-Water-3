@@ -56,7 +56,6 @@ const Enemies = @import("Enemies.zig");
 const Combat = @import("Combat.zig");
 const Fabricator = @import("Fabricator.zig");
 const Frontier = @import("Frontier.zig");
-const FoundryCase = @import("FoundryCase.zig");
 const Racing = @import("Racing.zig");
 const Hangar = @import("Hangar.zig");
 const Skies = @import("Skies.zig");
@@ -134,6 +133,8 @@ pub const Target = union(enum) {
     pet: u8,
     /// A manifest page in Detroit's active Foundry Ledger investigation.
     evidence: u8,
+    /// The loading-dock console that publishes the reported ledger and exposes the steward.
+    foundry_terminal,
 };
 
 /// A live case clue stays targetable when a salvage object also crosses the ray; other
@@ -141,7 +142,7 @@ pub const Target = union(enum) {
 fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
     const found = candidate orelse return current;
     return switch (found) {
-        .evidence => found,
+        .evidence, .foundry_terminal => found,
         .hero, .wild_pet, .pet => if (current == .none) found else current,
         else => current,
     };
@@ -1132,6 +1133,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         .wild_pet => |sp| Frontier.freePet(self, slot, sp),
         .pet => |owner| Frontier.petPet(self, slot, owner),
         .evidence => |i| Frontier.collectFoundryEvidence(self, i),
+        .foundry_terminal => Frontier.exposeFoundrySteward(self),
         else => {},
     };
     if (g.interact and g.target == .stall) {
@@ -1320,6 +1322,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .wild_pet => |sp| Frontier.freePet(self, 0, sp),
                     .pet => |owner| Frontier.petPet(self, 0, owner),
                     .evidence => |i| Frontier.collectFoundryEvidence(self, i),
+                    .foundry_terminal => Frontier.exposeFoundrySteward(self),
                     .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
@@ -1694,16 +1697,8 @@ pub fn talkKey(self: *Sandbox, key: Dialogue.Key) void {
     const session = if (self.talk) |*t| t else return;
     const wallet = &self.kits[0].wallet;
     const scrap = wallet.scrap;
-    const foundry_was_exposed = self.progress.hasFlag("foundry_exposed");
     const outcome = self.dialogue.key(session, key, &self.progress, wallet);
     if (wallet.scrap > scrap) self.say("received {d} scrap", .{wallet.scrap - scrap});
-    if (!foundry_was_exposed and self.progress.hasFlag("foundry_exposed")) {
-        var rewarded: u8 = @intFromBool(FoundryCase.awardSuitUpgrade(&self.kits[0]));
-        for (&self.guests, 1..) |*guest, slot| if (guest.active) {
-            rewarded += @intFromBool(FoundryCase.awardSuitUpgrade(&self.kits[slot]));
-        };
-        self.say("Maro rewards {d} active ranger(s): Sprint Servos +1", .{rewarded});
-    }
     switch (outcome) {
         .talking => {},
         .ended => self.endTalk(),
@@ -2603,6 +2598,7 @@ test "an active Foundry clue stays aimable when a relic also occupies the ray" {
     const chosen = preferFrontierTarget(relic, page);
     try std.testing.expect(chosen == .evidence);
     try std.testing.expectEqual(@as(u8, 1), chosen.evidence);
+    try std.testing.expectEqual(Target.foundry_terminal, preferFrontierTarget(relic, .foundry_terminal));
 
     const hero: Target = .{ .hero = 3 };
     try std.testing.expectEqual(Target{ .relic = relic.relic }, preferFrontierTarget(relic, hero));

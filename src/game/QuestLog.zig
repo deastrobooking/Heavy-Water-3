@@ -64,7 +64,10 @@ pub fn city(progress: *const Progress, content: *const CityContent.CityContent) 
                 0 => "Recover the three manifest pages from the marked factory checkpoints (0/3).",
                 1 => "Recover the remaining manifest pages from the factory checkpoints (1/3).",
                 2 => "Recover the last manifest page from the factory checkpoints (2/3).",
-                else => "Take the three manifest pages back to Maro and expose the foundry steward.",
+                else => if (progress.hasFlag(FoundryCase.reported_flag))
+                    "Publish the ledger at the marked loading-dock console to expose the steward and open the yard."
+                else
+                    "Take the three manifest pages back to Maro, then carry the report to the loading dock.",
             },
             .draft = content.draft,
         };
