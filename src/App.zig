@@ -1917,6 +1917,32 @@ fn showcase(self: *App) void {
         self.sandbox.target = .none;
         target = institute;
         eye = .{ institute[0] + 32, institute[1] + 18, institute[2] - 40 };
+    } else if (v == 97) {
+        const CityContent = @import("game/CityContent.zig");
+        const Enemies = @import("game/Enemies.zig");
+        const WindsorCase = @import("game/WindsorCase.zig");
+        for (self.sandbox.enemies.nests[0..self.sandbox.enemies.nest_count]) |*nest| {
+            nest.alive = false;
+            nest.health = 0;
+        }
+        for (&self.sandbox.skies.carriers) |*carrier| carrier.alive = false;
+        for (CityContent.detroit.missions) |mission| self.sandbox.progress.setFlag(mission.exposed_flag);
+        self.sandbox.progress.setFlag(CityContent.detroit.boss.started_flag);
+        const arena = WindsorCase.titanPosition(self.sandbox.seed);
+        self.sandbox.enemies.nests[Enemies.foundry_nest] = .{ .position = arena, .alive = false, .health = 0 };
+        _ = self.sandbox.enemies.spawnAt(.scalari_titan, Enemies.foundry_nest, arena, 2.5);
+        _ = self.sandbox.enemies.spawnAt(.drone, Enemies.foundry_nest, R3.add(arena, .{ -7, 0, -2 }), 1.4);
+        _ = self.sandbox.enemies.spawnAt(.drone, Enemies.foundry_nest, R3.add(arena, .{ 7, 0, 2 }), 1.4);
+        _ = self.sandbox.enemies.spawnAt(.bulwark, Enemies.foundry_nest, R3.add(arena, .{ 0, 0, 10 }), 1.15);
+        for (&self.sandbox.enemies.units) |*slot| if (slot.*) |*unit| if (unit.nest == Enemies.foundry_nest) {
+            unit.velocity = .{ 0, 0, 0 };
+            unit.stun = 1000;
+        };
+        self.sandbox.city_titan_phase = 2;
+        self.sandbox.player.mode = .fly;
+        self.sandbox.player.feet = R3.add(arena, .{ 70, 30, 12 });
+        target = R3.add(arena, .{ 0, 4, 0 });
+        eye = R3.add(arena, .{ 110, 180, 0 });
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -2566,6 +2592,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeFoundryCase();
             self.smokeWindsorCase();
             self.smokeBileCase();
+            self.smokeCityTitan();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -2894,6 +2921,90 @@ fn smokeBileCase(self: *App) void {
     if (!sb.progress.hasFlag(BileCase.exposed_flag)) return self.smokeFail("SMOKE BILE CASE NOT EXPOSED", .{});
     if (sb.kits[0].pet_xp[@intFromEnum(p1_pet)] != p1_xp + 60 or sb.kits[1].pet_xp[@intFromEnum(p2_pet)] != p2_xp + 60) return self.smokeFail("SMOKE BILE PERSONAL PET REWARD FAILED", .{});
     std.log.info("Smoke Bile Archive: Tavi started the case; all three traces revealed the relay order; the archive opened, notes were read and reported; P1 and P2 each received 60 pet XP in their own kit", .{});
+}
+
+/// Reach the bridge Titan after the three exposures and clear Frontier, trigger its phases,
+/// defeat it through the player firearm, and check both kits plus the shared city-free flag.
+fn smokeCityTitan(self: *App) void {
+    const sb = &self.sandbox;
+    const camera = &self.engine.camera;
+    const baseline = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE TITAN BASELINE {s}", .{@errorName(err)});
+    defer self.allocator.free(baseline);
+    defer sb.restore(self.allocator, baseline, camera) catch |err| self.smokeFail("SMOKE TITAN RESTORE {s}", .{@errorName(err)});
+    defer sb.leaveGuest(0);
+
+    const CityContent = @import("game/CityContent.zig");
+    const Enemies = @import("game/Enemies.zig");
+    const WindsorCase = @import("game/WindsorCase.zig");
+    for (sb.enemies.nests[0..sb.enemies.nest_count]) |*nest| {
+        nest.alive = false;
+        nest.health = 0;
+    }
+    for (&sb.skies.carriers) |*carrier| carrier.alive = false;
+    for (CityContent.detroit.missions) |mission| {
+        sb.progress.setFlag(mission.started_flag);
+        sb.progress.setFlag(mission.exposed_flag);
+    }
+    sb.joinGuest(0);
+    const arena = WindsorCase.titanPosition(sb.seed);
+    sb.player.mode = .fly;
+    sb.player.feet = R3.add(arena, .{ 0, 0, -20 });
+    sb.player.velocity = .{ 0, 0, 0 };
+    sb.guests[0].player.feet = arena;
+    sb.guests[0].player.velocity = .{ 0, 0, 0 };
+    sb.tools.tool = .weapon;
+    sb.view = .first;
+    camera.position = sb.player.eye();
+    sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE TITAN START {s}", .{@errorName(err)});
+    if (!sb.progress.hasFlag(CityContent.detroit.boss.started_flag) or sb.enemies.unitCount(Enemies.foundry_nest) != 1) return self.smokeFail("SMOKE TITAN DID NOT START AT THE CLEARED BRIDGE", .{});
+
+    var titan: ?*Enemies.Unit = null;
+    for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.kind == .scalari_titan and unit.nest == Enemies.foundry_nest) {
+        titan = unit;
+        break;
+    };
+    const boss = titan orelse return self.smokeFail("SMOKE TITAN UNIT MISSING", .{});
+    const max_health = Enemies.stats(.scalari_titan).health * 2.5;
+    boss.health = max_health * 0.65;
+    sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE TITAN PHASE 2 {s}", .{@errorName(err)});
+    if (sb.city_titan_phase != 2) return self.smokeFail("SMOKE TITAN DID NOT CALL REINFORCEMENTS", .{});
+    boss.health = max_health * 0.32;
+    sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE TITAN PHASE 3 {s}", .{@errorName(err)});
+    if (sb.city_titan_phase != 3 or boss.stun < 2.7) return self.smokeFail("SMOKE TITAN CORE DID NOT OPEN", .{});
+
+    for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.nest == Enemies.foundry_nest) {
+        unit.health = 1;
+        unit.velocity = .{ 0, 0, 0 };
+        unit.stun = 10;
+    };
+    var shots: usize = 0;
+    while (sb.enemies.unitCount(Enemies.foundry_nest) > 0 and shots < 10) : (shots += 1) {
+        var target: ?R3.Vec3 = null;
+        for (sb.enemies.units) |maybe| if (maybe) |unit| if (unit.nest == Enemies.foundry_nest) {
+            target = unit.center();
+            break;
+        };
+        const point = target orelse return self.smokeFail("SMOKE TITAN LIVE COUNT LOST ITS UNIT", .{});
+        sb.player.feet = .{ point[0], point[1] - 1.7, point[2] - 12 };
+        sb.player.velocity = .{ 0, 0, 0 };
+        const eye = sb.player.eye();
+        const dx = point[0] - eye.x();
+        const dy = point[1] - eye.y();
+        const dz = point[2] - eye.z();
+        camera.position = eye;
+        camera.yaw = std.math.atan2(dx, dz);
+        camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        sb.combat.arsenals[0].firearm.cooldown = 0;
+        sb.trigger = .{ .fire = true, .direct = true };
+        sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE TITAN SHOT {s}", .{@errorName(err)});
+        sb.trigger = .{};
+        sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE TITAN RELEASE {s}", .{@errorName(err)});
+    }
+    if (sb.enemies.unitCount(Enemies.foundry_nest) != 0) return self.smokeFail("SMOKE TITAN GROUP STILL HAS {d} ENEMIES", .{sb.enemies.unitCount(Enemies.foundry_nest)});
+    if (!CityContent.bossDefeated(&CityContent.detroit, &sb.progress) or !CityContent.liberated(&CityContent.detroit, &sb.progress)) return self.smokeFail("SMOKE TITAN DID NOT FREE DETROIT", .{});
+    if (sb.kits[0].combat_xp < 1200 or sb.kits[1].combat_xp < 1200 or sb.kits[0].wallet.parts < 18 or sb.kits[1].wallet.parts < 18) return self.smokeFail("SMOKE TITAN PARTY REWARD FAILED", .{});
+    if (sb.kits[0].count(.rotor_core) < 2 or sb.kits[1].count(.rotor_core) < 2) return self.smokeFail("SMOKE TITAN ROTOR REWARD FAILED", .{});
+    std.log.info("Smoke Collaborators' Titan: three ally flags and a cleared Frontier opened the bridge fight; the Titan called one Hive reinforcement wave and exposed its core; P1 defeated the group and both kits received the boss reward; Detroit was marked free", .{});
 }
 
 fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
@@ -3578,8 +3689,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
-    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 94 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and options.showcase != 97 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 94 or options.showcase == 97 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
@@ -3727,7 +3838,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             }
         }
     }
-    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66 or options.showcase == 94) renderer.hud_lines = @splat(.{});
+    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66 or options.showcase == 94 or options.showcase == 97) renderer.hud_lines = @splat(.{});
     self.publishGui(renderer, minutes);
 }
 

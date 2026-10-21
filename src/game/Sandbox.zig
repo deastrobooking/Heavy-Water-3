@@ -402,6 +402,8 @@ target: Target = .none,
 bile_relay_step: u8 = 0,
 /// Seeded once from the verified Shrine solver; the frame path only reads these three symbols.
 bile_sequence: [BileCase.relay_count]u8 = @splat(0),
+/// Runtime-only Titan phase; an unfinished encounter restarts from phase one after loading.
+city_titan_phase: u8 = 0,
 modifications: Modifications = .{},
 nearby_center: ?Key = null,
 nearby: [9]NearbyChunk = undefined,
@@ -2592,6 +2594,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.trading = null;
     self.target = .none;
     self.bile_relay_step = 0;
+    self.city_titan_phase = 0;
     // Saves remember which mods they were made with; a missing or different mod is reported, not
     // fatal (its blueprints are in the save; its scripts output 0 until it is installed).
     self.mod_warnings = 0;

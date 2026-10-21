@@ -46,6 +46,7 @@ pub const Boss = struct {
     name: []const u8,
     place: []const u8,
     detail: []const u8,
+    started_flag: []const u8,
     defeated_flag: []const u8,
 };
 
@@ -113,7 +114,8 @@ pub const detroit: CityContent = .{
         .id = "collaborators_titan",
         .name = "THE COLLABORATORS' TITAN",
         .place = "a bridge deck with cover and open sky",
-        .detail = "The three exposed allies' grafted machine. Each exposure has weakened one of its modules.",
+        .detail = "Reach the west Windsor crossing after the three reports and a cleared frontier; break the Titan and its Hive waves.",
+        .started_flag = "titan_started",
         .defeated_flag = "titan_defeated",
     },
     .discoveries = .{
@@ -142,7 +144,7 @@ fn legalFlag(name: []const u8) bool {
 pub fn validate(city: CityContent) Error!void {
     if (city.id.len == 0 or city.name.len == 0) return error.EmptyText;
     // Flags: every flag a city can set, legal as a story flag and unique across the city.
-    var flags: [mission_count * 2 + 2 + discovery_count + 1][]const u8 = undefined;
+    var flags: [mission_count * 2 + 3 + discovery_count][]const u8 = undefined;
     var n: usize = 0;
     for (city.missions) |m| {
         if (m.id.len == 0 or m.title.len == 0 or m.giver.len == 0 or m.detail.len == 0 or m.place.len == 0) return error.EmptyText;
@@ -150,7 +152,9 @@ pub fn validate(city: CityContent) Error!void {
         flags[n + 1] = m.exposed_flag;
         n += 2;
     }
-    if (city.boss.id.len == 0 or city.boss.name.len == 0 or city.boss.detail.len == 0) return error.EmptyText;
+    if (city.boss.id.len == 0 or city.boss.name.len == 0 or city.boss.detail.len == 0 or city.boss.place.len == 0) return error.EmptyText;
+    flags[n] = city.boss.started_flag;
+    n += 1;
     flags[n] = city.boss.defeated_flag;
     flags[n + 1] = city.liberated_flag;
     n += 2;
@@ -223,6 +227,10 @@ pub fn bossReady(city: *const CityContent, progress: *const Progress) bool {
 
 pub fn bossDefeated(city: *const CityContent, progress: *const Progress) bool {
     return progress.hasFlag(city.boss.defeated_flag);
+}
+
+pub fn bossStarted(city: *const CityContent, progress: *const Progress) bool {
+    return progress.hasFlag(city.boss.started_flag);
 }
 
 pub fn liberated(city: *const CityContent, progress: *const Progress) bool {

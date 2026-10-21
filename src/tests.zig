@@ -74,6 +74,7 @@ test {
     _ = @import("game/CityContent.zig");
     _ = @import("game/FoundryCase.zig");
     _ = @import("game/BileCase.zig");
+    _ = @import("game/Frontier.zig");
     _ = @import("game/EditedMesh.zig");
     _ = @import("ui/MeshToolsPanel.zig");
     _ = @import("character/Retarget.zig");

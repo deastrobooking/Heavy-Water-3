@@ -883,6 +883,82 @@ fn ensureFoundryDockEncounter(sb: *Sandbox) void {
     _ = sb.enemies.spawnAt(.skirmisher, Enemies.foundry_nest, R.add(gate, .{ 3.4, 0, -2.6 }), 1);
 }
 
+fn cityFrontierClear(sb: *const Sandbox) bool {
+    return QuestLog.remainingNests(&sb.enemies) == 0 and QuestLog.remainingCarriers(&sb.skies) == 0;
+}
+
+fn freeEnemySlots(enemies: *const Enemies) usize {
+    var count: usize = 0;
+    for (enemies.units) |unit| count += @intFromBool(unit == null);
+    return count;
+}
+
+/// The Titan wakes when the cleared campaign reaches the west Windsor bridge. Its saved
+/// encounter flag survives; live enemies and phase are rebuilt after a load or a long retreat.
+fn ensureCityTitanEncounter(sb: *Sandbox) void {
+    const city = &CityContent.detroit;
+    if (!CityContent.bossReady(city, &sb.progress) or !cityFrontierClear(sb) or CityContent.bossDefeated(city, &sb.progress)) return;
+    const arena = WindsorCase.titanPosition(sb.seed);
+    var nearby = false;
+    for (0..Sandbox.max_players) |player| if (sb.present(player)) {
+        nearby = nearby or R.length(R.sub(sb.feetOf(player), arena)) <= Enemies.wake_distance;
+    };
+    if (!nearby) return;
+    if (!CityContent.bossStarted(city, &sb.progress)) {
+        sb.progress.setFlag(city.boss.started_flag);
+        sb.say("THE COLLABORATORS' TITAN: cross the bridge and engage the siege frame", .{});
+        sb.cue(.hive_zap, arena);
+    }
+    sb.enemies.nests[Enemies.foundry_nest] = .{ .position = arena, .alive = false, .health = 0 };
+    if (sb.enemies.unitCount(Enemies.foundry_nest) == 0) {
+        if (!sb.enemies.spawnAt(.scalari_titan, Enemies.foundry_nest, arena, 2.5)) return;
+        sb.city_titan_phase = 1;
+        sb.say("PHASE 1: the Titan guards the crossing", .{});
+        return;
+    }
+
+    var titan: ?*Enemies.Unit = null;
+    for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.nest == Enemies.foundry_nest and unit.kind == .scalari_titan) {
+        titan = unit;
+        break;
+    };
+    const boss = titan orelse return;
+    if (sb.city_titan_phase < 2 and boss.health <= Enemies.stats(.scalari_titan).health * 2.5 * 0.66) {
+        if (freeEnemySlots(&sb.enemies) < 3) return;
+        sb.city_titan_phase = 2;
+        _ = sb.enemies.spawnAt(.drone, Enemies.foundry_nest, R.add(arena, .{ -7, 0, -2 }), 1.4);
+        _ = sb.enemies.spawnAt(.drone, Enemies.foundry_nest, R.add(arena, .{ 7, 0, 2 }), 1.4);
+        _ = sb.enemies.spawnAt(.bulwark, Enemies.foundry_nest, R.add(arena, .{ 0, 0, 10 }), 1.15);
+        sb.say("PHASE 2: Hive reinforcements hit the bridge", .{});
+    } else if (sb.city_titan_phase < 3 and boss.health <= Enemies.stats(.scalari_titan).health * 2.5 * 0.34) {
+        sb.city_titan_phase = 3;
+        boss.stun = 2.8;
+        boss.flash = 2.8;
+        sb.say("PHASE 3: the three weakened modules fail; strike the exposed core", .{});
+        sb.cue(.vault, boss.position);
+    }
+}
+
+fn finishCityTitan(sb: *Sandbox) void {
+    const city = &CityContent.detroit;
+    if (CityContent.bossDefeated(city, &sb.progress)) return;
+    sb.progress.setFlag(city.boss.defeated_flag);
+    for (0..Sandbox.max_players) |player| if (sb.present(player)) {
+        const kit = &sb.kits[player];
+        const leveled = kit.awardCombatXP(1200);
+        kit.wallet.scrap +|= 120;
+        kit.wallet.parts +|= 18;
+        kit.inventory[@intFromEnum(Collectibles.Kind.rotor_core)] +|= 2;
+        sb.say("P{d}: Titan reward +1200 XP, +120 scrap, +18 parts, +2 rotor cores", .{player + 1});
+        if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player + 1, kit.combatLevel() });
+    };
+    sb.cue(.vault, WindsorCase.titanPosition(sb.seed));
+    if (CityContent.updateLiberation(city, &sb.progress, cityFrontierClear(sb))) {
+        sb.say("DETROIT IS FREE: the Hive's allies and bridge Titan have fallen", .{});
+        sb.cue(.vault, sb.catalog.district.nodes[0].position);
+    }
+}
+
 fn foundryCasePosition(sb: *const Sandbox, index: usize) V {
     var points: [FoundryCase.checkpoint_count]V = undefined;
     const count = FoundryCase.positions(&sb.catalog.district, &points);
@@ -954,12 +1030,13 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
         .unit_down => |u| {
             const random = sb.enemies.rng.random();
             const scalari = Enemies.isScalari(u.kind);
+            const city_titan = u.kind == .scalari_titan and u.nest == Enemies.foundry_nest and CityContent.bossStarted(&CityContent.detroit, &sb.progress);
             const k2_boss = blk: {
                 if (u.kind != .scalari_titan) break :blk false;
                 const cave = caveSystemForNest(sb, u.nest) orelse break :blk false;
                 break :blk sb.caves.systems[cave].range == @import("../procedural/Mountains.zig").count;
             };
-            const xp: u32 = if (k2_boss) 1200 else switch (u.kind) {
+            const xp: u32 = if (k2_boss) 1200 else if (city_titan) 0 else switch (u.kind) {
                 .scalari_scout => 30,
                 .scalari_stinger => 55,
                 .scalari_titan => 300,
@@ -969,7 +1046,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 .trooper => 65,
                 .sentinel, .bulwark => 100,
             };
-            const scrap_reward: u32 = if (!scalari) 0 else switch (u.kind) {
+            const scrap_reward: u32 = if (!scalari or city_titan) 0 else switch (u.kind) {
                 .scalari_scout => 3,
                 .scalari_stinger => 6,
                 .scalari_titan => 40,
@@ -977,7 +1054,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 .scalari_hybrid => 8,
                 else => 0,
             };
-            const parts_reward: u32 = if (!scalari) 0 else switch (u.kind) {
+            const parts_reward: u32 = if (!scalari or city_titan) 0 else switch (u.kind) {
                 .scalari_scout => 1,
                 .scalari_stinger => 2,
                 .scalari_titan => 8,
@@ -998,19 +1075,21 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 }
             };
             if (winner) |player_index| {
-                const kit = &sb.kits[player_index];
-                const leveled = kit.awardCombatXP(xp);
-                kit.wallet.scrap +|= scrap_reward;
-                kit.wallet.parts +|= parts_reward;
-                kit.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] +|= alloy_reward;
-                kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= lumen_reward;
-                if (scalari) {
-                    sb.say("P{d}: +{d} combat XP, +{d} scrap, +{d} parts", .{ player_index + 1, xp, scrap_reward, parts_reward });
-                } else {
-                    sb.say("P{d}: +{d} combat XP, +{d} Hive alloy, +{d} lumen (auto-collected)", .{ player_index + 1, xp, alloy_reward, lumen_reward });
+                if (!city_titan) {
+                    const kit = &sb.kits[player_index];
+                    const leveled = kit.awardCombatXP(xp);
+                    kit.wallet.scrap +|= scrap_reward;
+                    kit.wallet.parts +|= parts_reward;
+                    kit.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] +|= alloy_reward;
+                    kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= lumen_reward;
+                    if (scalari) {
+                        sb.say("P{d}: +{d} combat XP, +{d} scrap, +{d} parts", .{ player_index + 1, xp, scrap_reward, parts_reward });
+                    } else {
+                        sb.say("P{d}: +{d} combat XP, +{d} Hive alloy, +{d} lumen (auto-collected)", .{ player_index + 1, xp, alloy_reward, lumen_reward });
+                    }
+                    if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
                 }
-                if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
-            } else {
+            } else if (!city_titan) {
                 sb.collectibles.drop(.hive_alloy, u.position);
             }
             robotLearns(sb, u.position);
@@ -1021,16 +1100,20 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             }
             if (scalari) {
                 sb.progress.setFlag("scalari_fought");
-                sb.say("scalari {s} down: +{d} XP", .{ @tagName(u.kind), xp });
+                if (city_titan) sb.say("the Titan core is down; clear the remaining Hive units", .{}) else sb.say("scalari {s} down: +{d} XP", .{ @tagName(u.kind), xp });
             } else {
                 sb.progress.setFlag("hive_fought");
                 sb.say("hive {s} down: +{d} XP", .{ @tagName(u.kind), xp });
             }
             petLearns(sb, u.position);
-            if (u.nest == Enemies.foundry_nest and sb.enemies.unitCount(Enemies.foundry_nest) == 0 and FoundryCase.finishDockConfrontation(&sb.progress)) {
-                const rewarded = awardFoundrySuitUpgrade(sb);
-                sb.say("steward defeated; foundry yard gate open; Sprint Servos for {d} active ranger(s)", .{rewarded});
-                sb.cue(.vault, FoundryCase.gatePosition(&sb.catalog.district));
+            if (u.nest == Enemies.foundry_nest and sb.enemies.unitCount(Enemies.foundry_nest) == 0) {
+                if (CityContent.bossStarted(&CityContent.detroit, &sb.progress) and !CityContent.bossDefeated(&CityContent.detroit, &sb.progress)) {
+                    finishCityTitan(sb);
+                } else if (FoundryCase.finishDockConfrontation(&sb.progress)) {
+                    const rewarded = awardFoundrySuitUpgrade(sb);
+                    sb.say("steward defeated; foundry yard gate open; Sprint Servos for {d} active ranger(s)", .{rewarded});
+                    sb.cue(.vault, FoundryCase.gatePosition(&sb.catalog.district));
+                }
             }
         },
         .deflected => |d| {
@@ -1145,6 +1228,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
 
     // The Hive.
     if (timing != null) phase_timer.reset();
+    ensureCityTitanEncounter(sb);
     ensureFoundryDockEncounter(sb);
     var who: [Sandbox.max_players]Enemies.Target = undefined;
     var events: [32]Enemies.Event = undefined;
@@ -1643,6 +1727,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishWindsorEvidence(sb, out, n, t);
     n = publishWindsorGates(sb, out, n, t);
     n = publishBileArchive(sb, out, n, t);
+    n = publishCityTitanArena(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
     n = publishCityGardenFoliage(sb, out, n);
     n = publishAntarcticPerimeter(sb, out, n, t);
@@ -2077,14 +2162,14 @@ fn publishCityHiveBases(sb: *const Sandbox, out: []World.Prop, start: usize, t: 
     var n = start;
     const pulse = 0.62 + 0.3 * @sin(t * 1.45);
     const detroit_sites = [_][2]f32{ .{ 350, 95 }, .{ -350, 185 }, .{ 0, 445 } };
-    for (detroit_sites) |site| {
+    if (!CityContent.liberated(&CityContent.detroit, &sb.progress)) for (detroit_sites) |site| {
         if (!room(out, n, 2)) return n;
         const ground = Terrain.surface(sb.seed, site[0], site[1]).height;
         const at: V = .{ site[0], ground, site[1] };
         out[n] = .{ .mesh = c.hive_base, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .size = @splat(0.78) };
         out[n + 1] = .{ .mesh = c.hive_base_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = @splat(0.78) };
         n += 2;
-    }
+    };
     const ny_seed = Region.new_york.seed(sb.seed);
     const ny_sites = [_][2]f32{ .{ 249845, 0 }, .{ 250170, 0 }, .{ 250000, 160 }, .{ 250000, -170 } };
     for (ny_sites) |site| {
@@ -2093,6 +2178,29 @@ fn publishCityHiveBases(sb: *const Sandbox, out: []World.Prop, start: usize, t: 
         const at: V = .{ site[0], ground, site[1] };
         out[n] = .{ .mesh = c.hive_base, .transform = .{ .position = at }, .tint = .{ 1, 1, 1, 1 }, .size = @splat(0.78) };
         out[n + 1] = .{ .mesh = c.hive_base_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, pulse), .size = @splat(0.78) };
+        n += 2;
+    }
+    return n;
+}
+
+/// Three lit bridge pylons mark the exposed ally modules and frame the open-sky boss stage.
+fn publishCityTitanArena(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const city = &CityContent.detroit;
+    if (!CityContent.bossStarted(city, &sb.progress) or CityContent.bossDefeated(city, &sb.progress)) return start;
+    const center = WindsorCase.titanPosition(sb.seed);
+    if (R.length(R.sub(center, sb.player.feet)) > 540 or start + CityContent.mission_count * 2 > out.len) return start;
+    const c = &sb.catalog.content;
+    const colors = [_][4]f32{ .{ 0.3, 0.82, 0.72, 1 }, .{ 0.95, 0.7, 0.28, 1 }, .{ 0.68, 0.47, 0.93, 1 } };
+    var n = start;
+    for (city.missions, 0..) |mission, index| {
+        const z_offset = (@as(f32, @floatFromInt(index)) - 1) * 15;
+        const x_offset: f32 = if (index == 1) -16 else 16;
+        const at = R.add(center, .{ x_offset, 0, z_offset });
+        const color = colors[index];
+        const live = sb.progress.hasFlag(mission.exposed_flag);
+        const power = if (live) 0.82 + 0.18 * @sin(t * 2 + @as(f32, @floatFromInt(index))) else 0.12;
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = R.add(at, .{ 0, 3.5, 0 }) }, .size = .{ 1.6, 7, 1.6 }, .tint = .{ 0.18, 0.24, 0.27, 1 } };
+        out[n + 1] = .{ .mesh = c.gem, .transform = .{ .position = R.add(at, .{ 0, 7.8, 0 }) }, .size = @splat(1.05), .tint = Material.emissive(color, power) };
         n += 2;
     }
     return n;
@@ -2172,6 +2280,7 @@ fn objectiveTarget(sb: *const Sandbox) ?V {
         }
         return sb.keeperPosition(mission);
     }
+    if (CityContent.bossReady(&CityContent.detroit, p) and cityFrontierClear(sb) and !CityContent.bossDefeated(&CityContent.detroit, p)) return WindsorCase.titanPosition(sb.seed);
     return null;
 }
 
@@ -3054,6 +3163,70 @@ fn titanLayer(out: []World.Prop, count: *usize, mesh: @import("../asset/Catalog.
 /// Isolated art-review frame used by the metal and carapace showcases.
 pub fn publishTitanPreview(sb: *const Sandbox, out: []World.Prop, at: V, yaw: f32) usize {
     return scalariTitan(out, sb.catalog.content.block, sb.catalog.content.orb, sb.catalog.content.spike, sb.catalog.content.gem, at, yaw, @as(f32, @floatFromInt(sb.tick)) / 60, 0, sb.creator.enemy_design);
+}
+
+test "Detroit Titan opens after the frontier, runs three phases, rewards the party, and frees the city" {
+    var catalog: @import("../asset/Catalog.zig") = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try Sandbox.testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+
+    for (sb.enemies.nests[0..sb.enemies.nest_count]) |*nest| nest.alive = false;
+    for (&sb.skies.carriers) |*carrier| carrier.alive = false;
+    for ([_][]const u8{ "met_tavi", "tavi_scouted", "first_spire_broken", "ines_sap_warned", "carrier_seen", "kestrel_blueprint" }) |flag| sb.progress.setFlag(flag);
+    sb.progress.fighter = true;
+    for (CityContent.detroit.missions) |mission| sb.progress.setFlag(mission.exposed_flag);
+    sb.joinGuest(0);
+    const arena = WindsorCase.titanPosition(sb.seed);
+    sb.player.feet = arena;
+    sb.guests[0].player.feet = arena;
+    sb.enemies.nests[0].alive = true;
+    sb.enemies.nests[0].position = R.add(arena, .{ 300, 0, 0 });
+    const frontier_target = objectiveTarget(&sb) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(R.length(R.sub(frontier_target, arena)) > 100);
+    ensureCityTitanEncounter(&sb);
+    try std.testing.expect(!CityContent.bossStarted(&CityContent.detroit, &sb.progress));
+    sb.enemies.nests[0].alive = false;
+    sb.skies.carriers[0].alive = true;
+    ensureCityTitanEncounter(&sb);
+    try std.testing.expect(!CityContent.bossStarted(&CityContent.detroit, &sb.progress));
+    sb.skies.carriers[0].alive = false;
+    ensureCityTitanEncounter(&sb);
+    try std.testing.expect(CityContent.bossStarted(&CityContent.detroit, &sb.progress));
+    try std.testing.expectEqual(@as(usize, 1), sb.enemies.unitCount(Enemies.foundry_nest));
+
+    var titan: ?*Enemies.Unit = null;
+    for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.kind == .scalari_titan and unit.nest == Enemies.foundry_nest) {
+        titan = unit;
+        break;
+    };
+    const boss = titan orelse return error.TestUnexpectedResult;
+    const max_health = Enemies.stats(.scalari_titan).health * 2.5;
+    boss.health = max_health * 0.65;
+    ensureCityTitanEncounter(&sb);
+    try std.testing.expectEqual(@as(u8, 2), sb.city_titan_phase);
+    try std.testing.expectEqual(@as(usize, 4), sb.enemies.unitCount(Enemies.foundry_nest));
+    boss.health = max_health * 0.32;
+    ensureCityTitanEncounter(&sb);
+    try std.testing.expectEqual(@as(u8, 3), sb.city_titan_phase);
+    try std.testing.expect(boss.stun > 2.7);
+
+    const p1_xp = sb.kits[0].combat_xp;
+    const p2_xp = sb.kits[1].combat_xp;
+    const p1_parts = sb.kits[0].wallet.parts;
+    const p2_parts = sb.kits[1].wallet.parts;
+    sb.enemies.units = @splat(null);
+    hive(&sb, .{ .unit_down = .{ .kind = .scalari_titan, .nest = Enemies.foundry_nest, .position = arena } }, &camera);
+    try std.testing.expect(CityContent.bossDefeated(&CityContent.detroit, &sb.progress));
+    try std.testing.expect(CityContent.liberated(&CityContent.detroit, &sb.progress));
+    try std.testing.expectEqual(p1_xp + 1200, sb.kits[0].combat_xp);
+    try std.testing.expectEqual(p2_xp + 1200, sb.kits[1].combat_xp);
+    try std.testing.expectEqual(p1_parts + 18, sb.kits[0].wallet.parts);
+    try std.testing.expectEqual(p2_parts + 18, sb.kits[1].wallet.parts);
+    try std.testing.expectEqual(@as(u32, 2), sb.kits[0].count(.rotor_core));
+    try std.testing.expectEqual(@as(u32, 2), sb.kits[1].count(.rotor_core));
 }
 
 fn gem(out: []World.Prop, kind: Collectibles.Kind, at: V, t: f32, mesh: @import("../asset/Catalog.zig").MeshHandle) usize {

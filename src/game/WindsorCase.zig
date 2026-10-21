@@ -70,6 +70,11 @@ pub fn travelPoint(seed: u64, index: usize) ?V {
     return .{ x, Terrain.surface(seed, x, bank).height + 0.1, bank };
 }
 
+/// The Detroit-to-Windsor crossing midpoint, reserved for the city's open-sky Titan battle.
+pub fn titanPosition(seed: u64) V {
+    return bridgeControl(seed, -315, 0.5);
+}
+
 fn bridgeControl(seed: u64, x: f32, t: f32) V {
     const center = Hydrology.centerZ(seed, 0, x);
     const half = Hydrology.surfaceHalfWidth(0, x) + 9;
@@ -142,4 +147,12 @@ test "Windsor gate logs align with both river crossings and the hall record has 
     try std.testing.expect(@abs(a[0][2] - Hydrology.centerZ(first.seed, 0, a[0][0])) < 300);
     try std.testing.expect(@abs(a[1][2] - Hydrology.centerZ(first.seed, 0, a[1][0])) < 300);
     try std.testing.expect(a[2][1] > Terrain.surface(first.seed, a[2][0], a[2][2]).height);
+}
+
+test "the Titan stage sits on the elevated west Windsor bridge deck" {
+    const seed: u64 = 0x57494e44534f52;
+    const point = titanPosition(seed);
+    try std.testing.expectEqual(@as(f32, -315), point[0]);
+    try std.testing.expect(point[1] > Hydrology.level(seed, 0, point[0]) + 2);
+    try std.testing.expect(@abs(point[2] - Hydrology.centerZ(seed, 0, point[0])) < 20);
 }
