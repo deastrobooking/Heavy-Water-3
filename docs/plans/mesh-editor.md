@@ -1,12 +1,54 @@
-# In-Game Imported Character Editor
+# Character Generator Mesh Tools
 
 Engineering design, defect review and milestone plan for this editor: [mesheditor](mesheditor.md).
 
 ## Product boundary
 
-Keep routine imported-character customization in the game's Character Designer. The offline
-`asset-compiler` remains the batch importer and diagnostic path; Blender remains appropriate for
-topology, UVs, complex rig work, and other tasks that need a full DCC tool.
+The mesh tools are an overlay inside the native Character Designer. The generated character
+(`Profile` → `Ranger`) remains the source of truth; opening the tools must not turn the character
+into a separate mesh asset or add another runtime mesh layer. Edits belong to that character's
+generator-backed appearance and are flattened into its normal render mesh when the character is
+rebuilt. Keep imported-GLB editing as a secondary workflow in the same tool shell.
+
+The offline `asset-compiler` remains the batch importer and diagnostic path; Blender remains
+appropriate for topology, UVs, complex rig work, and other tasks that need a full DCC tool.
+
+## Owner clarification: generator overlay and battle performance (2026-10-20)
+
+The current **VERTEX TOOLS** mode is nested in Character Designer, but only edits imported GLB
+models. The next character-editor slice must open on a native generated Ranger and edit its
+generator-backed appearance. The viewport tools are an overlay over that character, not an
+independent mesh product. The imported GLB workflow remains useful for references and optional
+custom bodies, but it is not the target architecture for generated player characters.
+
+Keep the runtime result cheap for four-player combat:
+
+- Preserve the generator's profile and procedural parts as the base. Store only the authoring
+  layer required to reproduce an edit; do not save a second full mesh for a generated character.
+- Apply edits when a profile or edit layer changes, then upload dirty vertex ranges. Do not rebuild
+  meshes or allocate in the frame path, and do not add an extra draw or skinning pass per overlay.
+- Keep visual detail in silhouette, shape, material, cel pen and palette choices before adding
+  dense topology. Any topology increase needs a before/after vertex, index, upload-byte and memory
+  count for the light and heaviest generated Ranger.
+- Re-run the four-player frontier benchmark after renderer or mesh-budget changes. The recorded
+  2026-10-11 M3 Pro baseline was 0.129 ms character-skinning p99 and 4.799 ms render-CPU p99,
+  against 3 ms and 16.667 ms budgets. The 2026-10-20 rerun found higher full-scene CPU and GPU
+  times; see [the current four-player measurement](mesheditor.md#native-character-generator-overlay-and-performance-gate-2026-10-20).
+
+### Next native-generator slice
+
+1. **Target the generated Ranger:** expose the Character Designer's native preview mesh and profile
+   to the existing overlay tools without creating an imported-model or catalog entry.
+2. **Make edits generator-backed:** keep generator parameters as the base and represent authored
+   paint, cel-pen, weight and sculpt changes in a bounded per-character overlay. Regeneration must
+   either reapply compatible edits or explain which edits need rebinding. Keep undo/redo and preview
+   patches in the existing tool shell.
+3. **Persist per character:** attach overlay data to the owning player's character profile and
+   migrate saves deliberately when its schema is stable. Teammates and shared world progression do
+   not own these edits.
+4. **Gate detail by cost:** compare a light Ranger, default Ranger, and the heaviest outfit at one
+   and four players; record generated vertices/triangles, mesh bytes, preview rebuild time, frontier
+   skinning p99, render CPU p99, and Metal captures before raising the visual detail budget.
 
 ## Current slice
 

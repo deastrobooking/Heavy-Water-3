@@ -20,10 +20,10 @@ To match anime-level heroism and freedom across vertical ecosystems:
 1. **Jetpacks & Hover Jets:**
    - Sustained vertical and forward thrust for ascending trunks, hovering across open canopies, and hovering during gun battles.
 2. **Sonic Double-Tap Dashes:**
-   - Double-tap dodge within 0.42 s to burst at 42 m/s in the chosen ground or air direction. Repeat the double-tap within the 1.35 s chain window for up to four bursts per chain. Hold forward and tap dodge three times within 0.92 s to launch into sustained forward flight. Flight cruises at 32 m/s, boosts to 52 m/s, and its dash reaches 76 m/s. Holding boost doubles the speed every 1.2 s up to boost tier 3 (416 m/s; the free-fly camera mode goes 55 to 440 m/s), and letting go or braking returns to cruise; flight consumes the expanded jet fuel reserve. A single dodge still rolls on foot or boosts the board; dashing does not grant invulnerability.
+   - Double-tap dodge within 0.42 s to burst at 42 m/s in the chosen ground or air direction. Repeat the double-tap within the 1.35 s chain window for up to four bursts per chain. Hold forward and tap dodge three times within 0.92 s to launch into sustained forward flight. Flight cruises at 32 m/s, boosts to 52 m/s, and its dash reaches 76 m/s. Holding boost doubles the speed every 1.2 s up to boost tier 3 (416 m/s; the free-fly camera mode goes 55 to 440 m/s). Left Alt on keyboard or a held, remappable B button on controller brakes toward a hover; releasing boost or braking drops the boost tier. Flight consumes the expanded jet fuel reserve. A single dodge still rolls on foot or boosts the board; dashing does not grant invulnerability.
    - Sprint-jump gives a long horizontal leap. From the air, stomp commits to a downward energy kick; the landing pulse damages and pushes nearby Hive units. A dash can carry into this finisher.
 3. **Superman / DBZ 3D Aerial Flight:**
-   - Full 3D free-flight mode with supersonic boost, mid-air hover-braking, and dogfighting against Hive aerial swarms around Arbors and sky towers.
+   - Full 3D free-flight mode with supersonic boost, deliberate mid-air braking, and dogfighting against Hive aerial swarms around Arbors and sky towers.
 4. **Flying Jumps & Warp-Strikes:**
    - Charged high-altitude catapult leaps launching hundreds of meters into the air.
    - **Warp Strike Arrow (The Fast-Travel One-Shot):** An Energy Bow warp arrow fired into any distant target or structure instantly teleports the player over the enemy with a downward execution dive.

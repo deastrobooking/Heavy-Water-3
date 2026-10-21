@@ -8,9 +8,9 @@ const PadBindings = @import("../engine/PadBindings.zig");
 const Sandbox = @import("../game/Sandbox.zig");
 const Menu = @This();
 
-pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, confirm_quit };
+pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel };
+pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel, music_previous, music_toggle, music_next };
 pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
@@ -22,6 +22,7 @@ pub const title_items = [_]Item{
     .{ .label = "CONTROLS", .opens = .controls },
     .{ .label = "QUIT", .opens = .confirm_quit },
     .{ .label = "LOCAL CO-OP SETUP", .opens = .party },
+    .{ .label = "MUSIC PLAYER", .opens = .music },
 };
 pub const pause_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
@@ -36,6 +37,13 @@ pub const pause_items = [_]Item{
     .{ .label = "QUIT GAME", .opens = .confirm_quit },
     .{ .label = "FOUR PLAYER SETUP", .opens = .party },
     .{ .label = "WORLD MAP / FAST TRAVEL", .opens = .world_map },
+    .{ .label = "MUSIC PLAYER", .opens = .music },
+};
+pub const music_items = [_]Item{
+    .{ .label = "PREVIOUS TRACK", .command = .music_previous },
+    .{ .label = "PLAY / PAUSE", .command = .music_toggle },
+    .{ .label = "NEXT TRACK", .command = .music_next },
+    .{ .label = "BACK" },
 };
 pub const confirm_items = [_]Item{
     .{ .label = "QUIT TO DESKTOP", .command = .quit },
@@ -163,6 +171,7 @@ pub fn items(self: *const Menu) []const Item {
         .party => &party_items,
         .player => &player_items,
         .world_map => &map_items,
+        .music => &music_items,
         else => &.{},
     };
 }
@@ -249,6 +258,7 @@ pub fn key(self: *Menu, k: Key) Command {
         },
         .back => return self.back(),
         .confirm => {
+            if (self.screen == .music and self.row == music_items.len - 1) return self.back();
             if (self.screen == .settings) {
                 if (self.row == Settings.field_count) return self.back();
                 self.settings.adjust(@enumFromInt(self.row), 1);
@@ -322,8 +332,10 @@ fn padControlsKey(self: *Menu, k: Key) Command {
         .left, .right => {
             const delta: i32 = if (k == .left) -1 else 1;
             if (row < PadBindings.action_count) {
-                const old = self.settings.pad_mapping.buttons[row];
-                self.settings.pad_mapping.buttons[row] = @intCast(@mod(@as(i32, old) + delta, @as(i32, PadBindings.physical_button_count)));
+                const action: PadBindings.Action = @enumFromInt(row);
+                const old = self.settings.pad_mapping.button(action);
+                const next: u8 = @intCast(@mod(@as(i32, old) + delta, @as(i32, PadBindings.physical_button_count)));
+                if (action == .air_brake) self.settings.pad_mapping.air_brake_button = next else self.settings.pad_mapping.buttons[row] = next;
                 return .settings_changed;
             }
             if (row >= pad_axis_start and row < pad_deadzone) {
@@ -437,7 +449,7 @@ fn back(self: *Menu) Command {
         return .none;
     }
     switch (self.screen) {
-        .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .confirm_quit => {
+        .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .music, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.
@@ -460,8 +472,8 @@ test "title skips continue without a save, and sub-screens return to their entry
     m.open(.title);
     try std.testing.expectEqual(@as(u8, 1), m.row);
     _ = m.key(.up);
-    // Wraps past the disabled CONTINUE to QUIT.
-    try std.testing.expectEqual(@as(u8, 6), m.row);
+    // Wraps past the disabled CONTINUE to the last title option.
+    try std.testing.expectEqual(@as(u8, 7), m.row);
     m.row = 3;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.settings, m.screen);
@@ -476,6 +488,25 @@ test "title skips continue without a save, and sub-screens return to their entry
     m.has_save = true;
     m.open(.title);
     try std.testing.expectEqual(Command.continue_game, m.key(.confirm));
+}
+
+test "the packaged music player opens from title and pause menus and exposes skip controls" {
+    var m: Menu = .{};
+    m.open(.title);
+    m.row = title_items.len - 1;
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.music, m.screen);
+    try std.testing.expectEqual(Command.music_previous, m.key(.confirm));
+    m.row = music_items.len - 1;
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.title, m.screen);
+
+    m.open(.pause);
+    m.row = pause_items.len - 1;
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.music, m.screen);
+    m.row = 1;
+    try std.testing.expectEqual(Command.music_toggle, m.key(.confirm));
 }
 
 test "quest log opens from pause and returns to its menu row" {

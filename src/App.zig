@@ -704,6 +704,9 @@ fn runCommand(self: *App, command: Menu.Command) void {
             self.engine.input = .{};
             self.capture(self.core, true);
         },
+        .music_previous => if (self.audio) |a| if (a.music) |music| music.previous(),
+        .music_toggle => if (self.audio) |a| if (a.music) |music| music.toggle(),
+        .music_next => if (self.audio) |a| if (a.music) |music| music.next(),
         .@"resume" => {
             self.menu.open(.none);
             self.capture(self.core, true);
@@ -884,6 +887,7 @@ fn pointAt(self: *App, click: bool) void {
     // Only the top layer takes the mouse: a menu over a panel blocks the panel beneath.
     const menu_area = switch (Screens.hitArea(hit)) {
         .menu, .setting_left, .setting_right, .planet_globe => true,
+        .music_previous, .music_toggle, .music_next => self.menu.screen != .none,
         else => false,
     };
     if (menu_area != (self.menu.screen != .none)) return;
@@ -893,6 +897,9 @@ fn pointAt(self: *App, click: bool) void {
             if (click and self.menu.row == row) self.menuKey(.confirm);
         },
         .planet_globe => {},
+        .music_previous => if (click) if (self.audio) |a| if (a.music) |music| music.previous(),
+        .music_toggle => if (click) if (self.audio) |a| if (a.music) |music| music.toggle(),
+        .music_next => if (click) if (self.audio) |a| if (a.music) |music| music.next(),
         .setting_left, .setting_right => {
             self.menu.select(row);
             if (click) self.menuKey(if (Screens.hitArea(hit) == .setting_left) .left else .right);
@@ -1181,7 +1188,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             self.menu.hero_player = 0;
         } else if (self.menu.settings.bindings.action(key.key)) |action| switch (action) {
             // Held movement keys are sampled each frame; these are the press edges.
-            .forward, .back, .left, .right, .sprint, .ascend, .descend => {},
+            .forward, .back, .left, .right, .sprint, .air_brake, .ascend, .descend => {},
             // Mantle is held while climbing; pressed in the Kestrel it climbs out.
             .mantle => if (self.sandbox.hangar.piloting) {
                 self.actions.leave_jet = true;
@@ -1380,7 +1387,7 @@ fn pollPads(self: *App) void {
     if (self.menu.screen == .pad_controls) if (self.menu.pad_capturing_action) |action| {
         for (self.pads.button_edges, 0..) |edges, controller| if (edges != 0) {
             const physical = @as(u8, @intCast(@ctz(edges)));
-            self.menu.settings.pad_mapping.buttons[@intFromEnum(action)] = physical;
+            if (action == .air_brake) self.menu.settings.pad_mapping.air_brake_button = physical else self.menu.settings.pad_mapping.buttons[@intFromEnum(action)] = physical;
             self.menu.pad_capturing_action = null;
             self.pads.commands[controller] = .{ .connected = self.pads.commands[controller].connected };
             self.runCommand(.settings_changed);
@@ -1410,7 +1417,16 @@ fn pollPads(self: *App) void {
                 self.menu_controller = c;
             }
             cmd.join = false;
-            if (!self.uiActive()) self.engine.input.merge(cmd.input);
+            if (!self.uiActive()) {
+                var input = cmd.input;
+                const flying = self.sandbox.player.mode == .fly or self.sandbox.player.flight_engaged or self.sandbox.hangar.piloting;
+                const brake_is_dodge = self.pads.mapping.button(.air_brake) == self.pads.mapping.button(.dodge);
+                if (flying and input.brake and brake_is_dodge) {
+                    input.dodge = false;
+                    input.dodge_held = false;
+                }
+                self.engine.input.merge(input);
+            }
             continue;
         }
         const g = p - 1;
@@ -1459,15 +1475,20 @@ fn routePads(self: *App) void {
         if (p == 0) {
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
             // P1 shares the same direct energy/saber path as the guests.
-            self.sandbox.padWeapons(cmd.fire, cmd.alt);
+            if (self.sandbox.hangar.piloting) {
+                self.sandbox.trigger.fire = self.sandbox.trigger.fire or cmd.fire;
+                self.sandbox.trigger.alt = self.sandbox.trigger.alt or cmd.alt;
+            } else self.sandbox.padWeapons(cmd.fire, cmd.alt);
             self.actions.interact = self.actions.interact or cmd.interact;
             if (cmd.interact and self.sandbox.target == .structure) self.inspecting = !self.inspecting;
             // D-pad edges reach gameplay only after the UI routing branch above. Left/right
-            // cycle owned weapons; up/down choose the same three specials as keyboard Z/C/H.
+            // cycle owned weapons; up/down choose specials on foot and altitude in flight.
             self.actions.next_item = self.actions.next_item or cmd.left or cmd.right;
-            self.actions.special_1 = self.actions.special_1 or (cmd.up and !cmd.alt);
-            self.actions.special_2 = self.actions.special_2 or cmd.down;
-            self.actions.special_3 = self.actions.special_3 or (cmd.up and cmd.alt);
+            if (self.sandbox.player.mode != .fly and !self.sandbox.player.flight_engaged and !self.sandbox.hangar.piloting) {
+                self.actions.special_1 = self.actions.special_1 or (cmd.up and !cmd.alt);
+                self.actions.special_2 = self.actions.special_2 or cmd.down;
+                self.actions.special_3 = self.actions.special_3 or (cmd.up and cmd.alt);
+            }
             if (self.sandbox.hangar.piloting and cmd.interact) self.actions.leave_jet = true;
             self.actions.toggle_view = self.actions.toggle_view or cmd.view;
             continue;
@@ -1475,13 +1496,19 @@ fn routePads(self: *App) void {
         if (!self.sandbox.guests[p - 1].active) continue;
         const g = &self.sandbox.guests[p - 1];
         g.input = cmd.input;
+        const flying = g.player.mode == .fly or g.player.flight_engaged;
+        const brake_is_dodge = self.pads.mapping.button(.air_brake) == self.pads.mapping.button(.dodge);
+        if (flying and g.input.brake and brake_is_dodge) {
+            g.input.dodge = false;
+            g.input.dodge_held = false;
+        }
         g.interact = g.interact or cmd.interact;
         g.toggle_view = g.toggle_view or cmd.view;
         g.trade_up = g.trade_up or cmd.up;
         g.trade_down = g.trade_down or cmd.down;
         g.fire = cmd.fire;
         g.alt = cmd.alt;
-        if (g.trading == null) {
+        if (g.trading == null and g.player.mode != .fly and !g.player.flight_engaged) {
             g.special[0] = g.special[0] or (cmd.up and !cmd.alt);
             g.special[1] = g.special[1] or cmd.down;
             g.special[2] = g.special[2] or (cmd.up and cmd.alt);
@@ -3808,6 +3835,19 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         guests[guest_count] = .{ .index = @intCast(i), .view = .{ .x = r.x * ui.width, .y = r.y * ui.height, .w = r.w * ui.width, .h = r.h * ui.height }, .prompt = renderer.views[view].lines[1].slice() };
         guest_count += 1;
     };
+    var music_available = false;
+    var music_playing = false;
+    var music_track: []const u8 = "";
+    var music_track_index: usize = 0;
+    var music_track_count: usize = 0;
+    if (self.audio) |a| {
+        const status = a.musicStatus();
+        music_available = status.available;
+        music_playing = status.playing;
+        music_track = status.track_name;
+        music_track_index = status.track_index;
+        music_track_count = status.track_count;
+    }
     Screens.draw(ui, &self.menu, sandbox, .{
         .view = .{ .x = f.x * ui.width, .y = f.y * ui.height, .w = f.w * ui.width, .h = f.h * ui.height },
         .clock = std.fmt.bufPrint(&clock, "DAY {d}  {d:0>2}:{d:0>2}", .{ sandbox.market.day, minutes / 60, minutes % 60 }) catch "",
@@ -3816,6 +3856,11 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         .inspect = inspect_slices[0..inspect_count],
         .time = self.seconds,
         .seed = sandbox.seed,
+        .music_available = music_available,
+        .music_playing = music_playing,
+        .music_track = music_track,
+        .music_track_index = music_track_index,
+        .music_track_count = music_track_count,
         .guests = guests[0..guest_count],
         .marks = marks[0..mark_count],
         .scroll = self.ui_scroll,

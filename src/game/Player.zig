@@ -225,13 +225,17 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         const look = camera.forward();
         const forward: V = .{ look.x(), look.y(), look.z() };
         const right: V = .{ @cos(camera.yaw), 0, -@sin(camera.yaw) };
-        const vertical = std.math.clamp(input.up + @as(f32, @floatFromInt(@intFromBool(input.jump))) - @as(f32, @floatFromInt(@intFromBool(input.dodge_held))), -1, 1);
+        const vertical = std.math.clamp(input.up + @as(f32, @floatFromInt(@intFromBool(input.jump))), -1, 1);
         const raw = R.add(R.add(R.scale(forward, input.forward), R.scale(right, input.right)), .{ 0, vertical, 0 });
         const magnitude = R.length(raw);
         const direction = if (magnitude > 0.05) R.scale(raw, 1 / magnitude) else R.scale(forward, 0.72);
-        self.boost_hold = if (input.fast) self.boost_hold + dt else 0;
+        self.boost_hold = if (input.fast and !input.brake) self.boost_hold + dt else 0;
         const speed: f32 = if (input.fast) 55 * boostScale(self.boostTier()) else 28;
-        self.velocity = approach(self.velocity, R.scale(direction, speed), self.flightAccel(if (input.fast) 56 else 38, speed) * dt);
+        if (input.brake) {
+            self.velocity = approach(self.velocity, @as(V, @splat(0)), @max(80, R.length(self.velocity) * 1.8) * dt);
+        } else {
+            self.velocity = approach(self.velocity, R.scale(direction, speed), self.flightAccel(if (input.fast) 56 else 38, speed) * dt);
+        }
         self.grounded = false;
         self.support = .none;
         self.motion = .jet;
@@ -598,10 +602,14 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
                 const flight_length = R.length(flight_raw);
                 const flight_strength = @min(1, flight_length);
                 const flight_dir = if (flight_length > 0.05) R.scale(flight_raw, 1 / flight_length) else @as(V, .{ 0, 0, 0 });
-                self.boost_hold = if (input.fast and flight_strength >= 0.05) self.boost_hold + dt else 0;
+                self.boost_hold = if (input.fast and !input.brake and flight_strength >= 0.05) self.boost_hold + dt else 0;
                 const flight_speed: f32 = if (input.fast) 52 * boostScale(self.boostTier()) else if (input.forward < -0.1) 18 else 32;
                 const target_velocity = R.scale(flight_dir, flight_speed * flight_strength);
-                self.velocity = approach(self.velocity, target_velocity, self.flightAccel(if (input.fast) 44 else 32, flight_speed * flight_strength) * dt);
+                if (input.brake) {
+                    self.velocity = approach(self.velocity, @as(V, @splat(0)), @max(80, R.length(self.velocity) * 1.8) * dt);
+                } else {
+                    self.velocity = approach(self.velocity, target_velocity, self.flightAccel(if (input.fast) 44 else 32, flight_speed * flight_strength) * dt);
+                }
                 self.grounded = false;
                 self.motion = .jet;
                 const burn: f32 = if (flight_strength < 0.05) 1.2 else if (input.fast) 6 else 3.2;

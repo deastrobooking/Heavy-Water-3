@@ -5,8 +5,10 @@
 const std = @import("std");
 const enum_compat = @import("enum_compat");
 
-pub const Action = enum { jump, dodge, interact, grapple, traversal, view, sprint, fire, alt, stomp, join, respawn, up, down, left, right };
+pub const Action = enum { jump, dodge, interact, grapple, traversal, view, sprint, fire, alt, stomp, join, respawn, up, down, left, right, air_brake };
 pub const action_count = enum_compat.fields(Action).len;
+/// The original 16-entry button table stays unchanged so existing controller presets load as-is.
+pub const mapped_action_count = action_count - 1;
 pub const axis_count = 4;
 pub const physical_button_count = 16;
 pub const trigger_threshold_default: f32 = 0.15;
@@ -15,7 +17,9 @@ pub const deadzone_default: f32 = 0.18;
 /// Axis ids follow the standardized profile: left X/Y, then right X/Y. Button ids are documented
 /// in `buttonName`; triggers remain analog in Sample and can be activated with a lighter pull.
 pub const Mapping = struct {
-    buttons: [action_count]u8 = .{ 0, 1, 2, 4, 3, 11, 6, 7, 5, 10, 8, 9, 12, 13, 14, 15 },
+    buttons: [mapped_action_count]u8 = .{ 0, 1, 2, 4, 3, 11, 6, 7, 5, 10, 8, 9, 12, 13, 14, 15 },
+    /// B doubles as the brake in flight; elsewhere it remains the dodge button.
+    air_brake_button: u8 = 1,
     axes: [axis_count]u8 = .{ 0, 1, 2, 3 },
     invert: [axis_count]bool = .{ false, false, false, false },
     deadzone: f32 = deadzone_default,
@@ -23,13 +27,14 @@ pub const Mapping = struct {
 
     pub fn validate(self: Mapping) bool {
         for (self.buttons) |physical| if (physical >= physical_button_count) return false;
+        if (self.air_brake_button >= physical_button_count) return false;
         for (self.axes) |physical_axis| if (physical_axis >= axis_count) return false;
         return std.math.isFinite(self.deadzone) and self.deadzone >= 0 and self.deadzone < 0.8 and
             std.math.isFinite(self.trigger_threshold) and self.trigger_threshold >= 0 and self.trigger_threshold <= 1;
     }
 
     pub fn button(self: Mapping, action: Action) u8 {
-        return self.buttons[@intFromEnum(action)];
+        return if (action == .air_brake) self.air_brake_button else self.buttons[@intFromEnum(action)];
     }
 
     pub fn isDown(self: Mapping, action: Action, buttons: u32) bool {
@@ -82,6 +87,7 @@ pub fn actionName(action: Action) []const u8 {
         .down => "UI DOWN",
         .left => "UI LEFT",
         .right => "UI RIGHT",
+        .air_brake => "AIR BRAKE / HOLD",
     };
 }
 

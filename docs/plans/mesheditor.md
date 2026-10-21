@@ -1,12 +1,57 @@
 # Mesh editor and importer: engineering design
 
-**Status:** M0–M3 implemented, 2026-10-14. The imported-mesh MVP overhaul (section 0) replaces the next steps; E1, the headless vertex editing core, is implemented 2026-10-19 and E2 is next. Later milestone designs remain planning. M1 adds v2 weld-cell metadata while preserving the v1 index-only analysis path. M3 keeps GPU index and submesh ranges stable by degenerating hidden triangle triplets in place.
+**Status:** M0–M3, E1/E1b, E2, the first E3/E4 viewport, and stylization S1–S5b are implemented. The live editor currently targets imported GLBs. The next character-editor priority is a generator-backed overlay for the native Ranger, as clarified in [the product plan](mesh-editor.md#owner-clarification-generator-overlay-and-battle-performance-2026-10-20); broadening the imported-mesh editor remains secondary. M1 adds v2 weld-cell metadata while preserving the v1 index-only analysis path. M3 keeps GPU index and submesh ranges stable by degenerating hidden triangle triplets in place.
 
-**Scope update (2026-10-15):** the editor is to grow beyond characters into specialized studios for vehicles, nature and city assets, with touch and pen drawing and node-based reuse. That direction is planned in [asset studio](asset-studio.md); this document remains the engineering design of the shared mesh-editing foundation.
+**Scope update (2026-10-15):** specialized studios for vehicles, nature and cities, plus touch, pen and node-based reuse, remain planned in [asset studio](asset-studio.md). The 2026-10-20 owner clarification sets the character editor's immediate direction: the native character generator stays the source of truth, and mesh tools operate as an overlay on its generated character.
 
 **Audience:** low-level Zig game developers working in this repository. It assumes you know `std.mem.Allocator`, `extern struct` layout and the project rules in [AGENTS.md](../../AGENTS.md).
 
 **Relationship to other docs:** [mesh-editor.md](mesh-editor.md) owns the product boundary and the user-facing slices. [asset-pipeline.md](asset-pipeline.md) and [skeletal-animation.md](skeletal-animation.md) own formats and runtime animation. [nature-upgrade.md](nature-upgrade.md) owns the tree and terrain upgrade that section 4.14 plugs into. This document owns the engineering design of the editor itself.
+
+## Native character generator overlay and performance gate (2026-10-20)
+
+The current VERTEX TOOLS session is inside Character Designer UI but operates on an imported GLB
+`Model`; it does not edit the procedural Ranger generated from `Profile`. The native character is
+assembled by `character/character.zig` and `character/Ranger.zig`, then rendered through the
+existing GPU-skinned `render/Characters.zig` path. The new target is to run the tools over that
+generated preview and keep the generated character plus a small, reversible authoring overlay as
+the source of truth. A generated Ranger must not become a detached `.hwmesh`, a catalog slot, or a
+second draw layer just because it was edited.
+
+This needs an adapter rather than reinterpreting layouts: the generator's vertex carries material,
+skin and region information in `character/mesh.zig`, while `MeshEdit` currently edits the runtime
+`asset/Model.zig` mesh and its optional skin payload. The adapter must preserve generated skin
+weights, rigid bindings, material/region identity, colors and cel pens as tools modify the visible
+surface. Store authored deltas against a generator signature or stable semantic regions so a
+profile change cannot silently apply an old vertex index to a different part. Keep the existing
+imported-GLB path separate within the shared tool shell.
+
+**Runtime and visual constraints:** apply an edit only when the profile or overlay changes, then
+feed the result to the existing Ranger mesh and GPU skinning path. A layer may not add per-frame
+allocation, a second mesh draw, another skinning pass, or full-mesh CPU rebuild on ordinary frames.
+Prefer profile, silhouette, material, cel-pen and sparse sculpt changes before adding topology.
+Before raising detail, report vertex and triangle counts, vertex/index bytes and build/preview time
+for light, default and heaviest generated Rangers. Run `tools/benchmark.py --frontier --frames 600`
+for the four-player combat route and keep skinning below its existing 3 ms p99 and render CPU below
+16.667 ms p99. Record the available whole-command-buffer GPU timings too, but do not assign cost to
+a render pass: per-pass timestamp queries are still unavailable. Capture the same character before
+and after under Metal validation.
+
+**First current baseline (2026-10-20, Apple M3 Pro, ReleaseFast):** the standard run measured
+character-skinning p99 0.161 ms, render-CPU p99 17.316 ms and GPU p99 23.299 ms, with failed
+render-CPU, simulation and streaming-coverage checks. With the cel ink hull disabled, one comparison
+measured render-CPU p99 14.247 ms and GPU p99 23.398 ms; simulation and streaming coverage still
+failed. The GPU result is effectively unchanged. One run per setting is not enough to attribute the
+CPU difference to the ink hull. These results show that native character skinning is comfortably
+inside its existing budget while the full four-view scene is not; profile the total scene and repeat
+the ink comparison before removing character detail.
+
+**Acceptance:** the native Character Designer opens these tools on the generated Ranger, edits are
+undoable and visible in the same game renderer, saving and reloading preserves them with the owning
+player's profile, and no standalone generated-mesh asset is created. A regeneration either reapplies
+edits with a matching generator signature or reports incompatible edits without corrupting the
+profile. One- and four-player frontier results and mesh byte/count budgets are recorded before new
+dense geometry is accepted.
 
 **How the code in this document was checked.** The blocks share one file, so a later block uses helpers from an earlier one (the vector helpers in 4.7 are used by 4.8, and `find` and `merge` in 4.4 by its test).
 

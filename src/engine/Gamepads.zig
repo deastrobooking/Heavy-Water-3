@@ -55,11 +55,13 @@ pub fn sample(self: *Gamepads, samples: [4]Sample) void {
         const cmd = &self.commands[i];
         cmd.input.forward = move[1];
         cmd.input.right = move[0];
+        cmd.input.up = @as(f32, @floatFromInt(@intFromBool(self.mapping.isDown(.up, buttons)))) - @as(f32, @floatFromInt(@intFromBool(self.mapping.isDown(.down, buttons))));
         cmd.input.look_x = look[0];
         cmd.input.look_y = -look[1];
         const down = self.mapping;
         cmd.input.jump = down.isDown(.jump, buttons);
         cmd.input.fast = down.isDown(.sprint, buttons);
+        cmd.input.brake = down.isDown(.air_brake, buttons);
         cmd.fire = down.isDown(.fire, buttons);
         cmd.alt = down.isDown(.alt, buttons);
         cmd.input.dodge_held = down.isDown(.dodge, buttons);

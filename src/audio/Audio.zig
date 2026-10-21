@@ -7,6 +7,7 @@ const mach = @import("mach");
 const sysaudio = mach.sysaudio;
 const Synth = @import("Synth.zig");
 const Mixer = @import("Mixer.zig");
+const Music = @import("Music.zig");
 pub const Director = @import("Director.zig");
 const Settings = @import("../game/Settings.zig");
 const FrameStats = @import("../engine/FrameStats.zig");
@@ -21,6 +22,7 @@ io: std.Io,
 measure_callbacks: bool = false,
 callback_times: FrameStats = .{},
 callback_utilization: FrameStats = .{},
+music: ?*Music = null,
 clips: [Synth.sound_count][]const f32,
 mixer: Mixer,
 director: Director = .{},
@@ -53,6 +55,11 @@ pub fn create(allocator: std.mem.Allocator, io: std.Io, measure_callbacks: bool)
     self.format = self.player.format();
     self.mixer.rate = self.player.sampleRate();
     if (self.channels == 0 or self.channels > max_channels) return error.UnsupportedAudioDevice;
+    self.music = Music.create(allocator, io, self.mixer.rate) catch |err| blk: {
+        std.log.warn("Packaged music unavailable ({s})", .{@errorName(err)});
+        break :blk null;
+    };
+    errdefer if (self.music) |music| music.destroy();
     try self.player.start();
     std.log.info("Audio: {d} Hz, {d} channels, {s}", .{ self.mixer.rate, self.channels, @tagName(self.format) });
     return self;
@@ -61,6 +68,7 @@ pub fn create(allocator: std.mem.Allocator, io: std.Io, measure_callbacks: bool)
 pub fn destroy(self: *Audio) void {
     // Stops the device thread before the mixer it reads goes away.
     self.player.deinit();
+    if (self.music) |music| music.destroy();
     if (self.measure_callbacks) {
         const elapsed = self.callback_times.summary();
         const utilization = self.callback_utilization.summary();
@@ -82,6 +90,10 @@ pub fn destroy(self: *Audio) void {
 
 pub fn send(self: *Audio, command: Mixer.Command) void {
     self.mixer.send(command);
+}
+
+pub fn musicStatus(self: *const Audio) Music.Status {
+    return if (self.music) |music| music.status() else .{};
 }
 
 /// Applies the volume settings (percentages) to the master and the buses.
@@ -110,6 +122,7 @@ fn write(user: ?*anyopaque, output: []u8) void {
         // `@min` with a comptime bound narrows its type (to u9 here); widen before multiplying.
         const n: usize = @min(chunk, frames - done);
         self.mixer.render(self.stereo[0 .. n * 2]);
+        if (self.music) |music| music.mix(self.stereo[0 .. n * 2], self.mixer.master);
         for (0..n) |f| for (0..self.channels) |c| {
             self.spread[f * self.channels + c] = if (c < 2) self.stereo[f * 2 + c] else 0;
         };

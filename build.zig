@@ -38,6 +38,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "audio", b.option(bool, "audio", "Open the system audio device (default true; false runs silent)") orelse true);
     const mach = b.dependency("mach", .{ .target = target, .optimize = optimize, .mach = true, .core = true, .sysaudio = true, .sysgpu_backend = mach_gpu_backend });
     const enum_compat = b.createModule(.{ .root_source_file = b.path("src/compat/enum.zig"), .target = target, .optimize = optimize });
+    const mp3_decoder = b.createModule(.{ .root_source_file = b.path("vendor/zig-mp3/src/decoder.zig"), .target = target, .optimize = optimize });
     // Versioned glTF → runtime model path. The host tool runs as part of the build graph and its
     // output is embedded, so the app never parses glTF at runtime.
     const compiler = b.addExecutable(.{ .name = "asset-compiler", .root_module = b.createModule(.{ .root_source_file = b.path("src/asset_compiler.zig"), .target = b.graph.host, .optimize = .ReleaseSafe }) });
@@ -82,6 +83,12 @@ pub fn build(b: *std.Build) void {
     manifest.addFileArg(b.path("assets/source/crate.gltf.meta"));
     manifest.addArgs(&.{ "crate", "crate.hwmesh" });
     const assets = b.step("assets", "Compile source assets into zig-out/assets");
+    assets.dependOn(&b.addInstallDirectory(.{
+        .source_dir = b.path("assets/Music"),
+        .install_dir = .{ .custom = "assets" },
+        .install_subdir = "Music",
+        .include_extensions = &.{ ".mp3" },
+    }).step);
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
     assets.dependOn(&b.addInstallFileWithDir(captain_mesh, .{ .custom = "assets" }, "captain.hwmesh").step);
     // Blueprints are validated by the same tool; an invalid machine fails the build.
@@ -126,6 +133,7 @@ pub fn build(b: *std.Build) void {
     const app = b.createModule(.{ .root_source_file = b.path("src/App.zig"), .target = target, .optimize = optimize });
     app.addImport("mach", mach.module("mach"));
     app.addImport("enum_compat", enum_compat);
+    app.addImport("mp3", mp3_decoder);
     app.addOptions("options", options);
     app.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     app.addAnonymousImport("captain.hwmesh", .{ .root_source_file = captain_mesh });
@@ -156,6 +164,7 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("src/tests.zig"), .target = target, .optimize = optimize }), .filters = test_filters });
     tests.root_module.addImport("mach", mach.module("mach"));
     tests.root_module.addImport("enum_compat", enum_compat);
+    tests.root_module.addImport("mp3", mp3_decoder);
     tests.root_module.addAnonymousImport("crate.gltf", .{ .root_source_file = b.path("assets/source/crate.gltf") });
     tests.root_module.addAnonymousImport("crate.hwmesh", .{ .root_source_file = crate });
     tests.root_module.addAnonymousImport("captain.hwmesh", .{ .root_source_file = captain_mesh });

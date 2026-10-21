@@ -2,7 +2,8 @@
 //! boards it by clicking it and flies with mouse aim: the chase camera orbits with the mouse,
 //! and the flight computer flies toward where the camera points (`vehicle/jet.zig`). W/S set
 //! the throttle, A/D roll, Space/E and Q climb and sink while hovering, Shift lights the
-//! afterburner. The jet probes the real world for its gear, the floor and walls. A wrecked jet
+//! afterburner and Left Alt (or held B) engages the air brake. The jet probes the real world for
+//! its gear, the floor and walls. A wrecked jet
 //! throws its pilot clear and is rebuilt on its pad. Saves keep where it was left.
 const std = @import("std");
 const math = @import("mach").math;
@@ -47,7 +48,7 @@ pub fn config(levels: [Progress.kestrel_upgrade_count]u8) jet.Config {
     return .{
         .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), tuning.wing_area),
         .thrust = 58_000 * (1 + engine * 0.12),
-        .afterburner = 95_000 * (1 + engine * 0.12),
+        .afterburner = 155_000 * (1 + engine * 0.12),
         .hull_max = 300 + armor * 75,
     };
 }
@@ -95,7 +96,7 @@ pub fn controls(input: Input, camera: Camera) jet.Input {
         .roll = input.right,
         .climb = std.math.clamp(input.up + @as(f32, if (input.jump) 1 else 0), -1, 1),
         .afterburner = input.fast,
-        .brake = input.forward < -0.1,
+        .brake = input.brake or input.forward < -0.1,
         .barrel_roll = input.dodge,
     };
 }

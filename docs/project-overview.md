@@ -32,6 +32,7 @@ The campaign expansion spans the Arbor Frontier, Hive/Scalari Homeworld, Gaia an
 | W / A / S / D | Move |
 | Space | Jump; use traversal abilities while airborne |
 | Shift | Sprint or increase flight speed |
+| Left Alt | Air brake in powered or free flight; also brakes the Kestrel |
 | Left Ctrl | Ground roll / dodge, hoverboard boost, or flight dash; double tap on foot for a powered dash |
 | X | Air stomp |
 | G | Grapple (grapple traversal kit) |
@@ -44,7 +45,7 @@ The campaign expansion spans the Arbor Frontier, Hive/Scalari Homeworld, Gaia an
 | Z / C / H | Class specials. Ranger: arc grenade, sentry turret, overshield. Synthetic: phase dash, kinetic slam, lumen lance |
 | Left click the starter Skimmer, hands | Board it. W / S drive, A / D turn, Space or E climb, Q descend, Shift boost, F to leave |
 | Left click the fabricator kiosk | Fabricate cars, suits, armor, weapons and the Kestrel fighter from pickups |
-| Left click the Kestrel, hands | Board it. Mouse aims (the jet flies where you point), W / S throttle, A / D roll, Space or E climb and Q sink while hovering, Shift afterburner, left button cannons, hold right button to lock and release to fire a missile, F climbs out |
+| Left click the Kestrel, hands | Board it. Mouse aims (the jet flies where you point), W / S throttle (S also brakes), A / D roll, Space or E climb and Q sink while hovering, Shift afterburner, Left Alt air brake, left button cannons, hold right button to lock and release to fire a missile, F climbs out |
 | Q / E | Descend / ascend in flight |
 | Left click and mouse / trackpad | Capture pointer and aim; the click also fires the current weapon or performs the current hands action |
 | Left click (captured), hands | Grab or drop a crate, press a machine button, enter or exit the rover |
@@ -75,14 +76,14 @@ Up to four players share one window in split screen. On macOS, controllers expos
 | Controller input | Action |
 | --- | --- |
 | Left / right stick | Move / look |
-| A | Jump |
-| B | Roll, boost, or dash; closes a market stall (P1: back in any menu) |
+| A | Jump or lift the Kestrel vertically from its pad |
+| B | On foot, tap to roll, boost, or dash; in flight, hold to air-brake; closes a market stall (P1: back in any menu) |
 | X (left face button) | One contextual interact button: meet/recruit a nearby hero, talk or trade, board/exit nearby vehicles from any selected tool, operate machine buttons, salvage relics, or inspect an aimed machine structure; hold to hang and mantle. A remains jump. |
-| D-pad | In gameplay, left / right switch owned weapons for P1 and guests; up / down trigger specials 1 and 2 (up with RB held: special 3). P1's menus and panels use the D-pad for navigation; a market stall uses up/down for rows. |
-| Movement gestures | Hold W + Shift and press Space for a long jump; hold S and press Space while moving for a backflip. Tap Left Ctrl for a ground roll or short air evade; double tap within 0.42 seconds for a powered dash, then repeat to chain up to four boosts. Hold W and tap Left Ctrl three times within 0.92 seconds to launch into sustained forward flight; hold Shift to accelerate (every 1.2 seconds of held boost doubles your speed, up to four times the boost speed), steer with movement/look, use Space to climb, and dash again for a 76 m/s burst. Controller: hold forward + LT and press A for a long jump; hold back and press A while moving for a backflip; tap B to dodge, double tap B to dash, and hold forward while tapping B three times to engage flight. |
+| D-pad | On foot, left / right switch owned weapons and up / down trigger specials 1 and 2 (up with RB held: special 3). During flight, up / down climb and descend. P1's menus and panels use the D-pad for navigation; a market stall uses up/down for rows. |
+| Movement gestures | Hold W + Shift and press Space for a long jump; hold S and press Space while moving for a backflip. Tap Left Ctrl for a ground roll or short air evade; double tap within 0.42 seconds for a powered dash, then repeat to chain up to four boosts. Hold W and tap Left Ctrl three times within 0.92 seconds to launch into sustained forward flight; hold Shift to accelerate (every 1.2 seconds of held boost doubles your speed, up to four times the boost speed), steer with movement/look, use Space to climb, Left Alt to brake, and dash for a 76 m/s burst. Controller: hold forward + LT and press A for a long jump; hold back and press A while moving for a backflip; on foot, tap B to dodge or double tap to dash, and hold forward while tapping B three times to engage flight. In flight, hold B to air-brake. |
 | In any menu or panel (P1's controller) | D-pad or left stick moves (hold to repeat), A or X chooses, B goes back, right stick scrolls panels taller than the screen |
-| Right trigger | Fire the selected energy weapon; starts with level 1 rapid shot (machine gun) |
-| RB | Quick-draw the beam saber; tap for a cut, three quick cuts fire a weaker crescent, hold then release for a charged wave |
+| Right trigger | Fire the selected energy weapon; starts with level 1 rapid shot (machine gun). In the Kestrel, fires its cannons |
+| RB | Quick-draw the beam saber; tap for a cut, three quick cuts fire a weaker crescent, hold then release for a charged wave. In the Kestrel, hold to lock a missile and release to fire |
 | RB + B | Throw the saber; it pierces enemies and returns |
 | Menu (P1's controller) | On the title, start (CONTINUE or NEW GAME, whichever is highlighted); in the creator, finish; in play, open or close the pause menu. P1 can start and play the whole game from a controller |
 | Right stick click (R3) | First- / third-person view |
@@ -99,7 +100,7 @@ Use **Local Co-op Setup** on the title or **Four Player Setup** from pause to se
 
 Guests can traverse, press machine buttons, and trade using the shared wallet. Building, wiring, carrying, driving, salvage, and saving remain P1's actions. Guests are not saved and rejoin beside P1 after loading.
 
-Choose **Controls → Gamepad Setup** to capture each action onto a button, change which physical stick axes drive movement and aiming, invert individual axes, and tune the stick deadzone or analog trigger point. Eight JSON preset slots live in `saves/controller-presets/`; Export creates a shareable file through the macOS Save dialog, and Import selects a downloaded preset through the Open dialog. The format is platform-neutral and records the controller label when one is available. macOS also scans generic HID gamepads; devices with unusual interfaces or unavailable OS access may still need backend support. Linux and Windows gamepad backends are not implemented yet.
+The Controls screen keeps keyboard bindings and gamepad setup in separate tabs and includes short flight and combat guides. **Controls → Gamepad Setup** can capture each action onto a button, including the air brake; it also changes which physical stick axes drive movement and aiming, inverts individual axes, and tunes the stick deadzone or analog trigger point. Eight JSON preset slots live in `saves/controller-presets/`; Export creates a shareable file through the macOS Save dialog, and Import selects a downloaded preset through the Open dialog. Older presets keep their existing mappings and get the default air-brake button. The format is platform-neutral and records the controller label when one is available. macOS also scans generic HID gamepads; devices with unusual interfaces or unavailable OS access may still need backend support. Linux and Windows gamepad backends are not implemented yet.
 
 The [controller preset format](controller-presets.md) documents the upload/import flow and field meanings for the community preset page.
 

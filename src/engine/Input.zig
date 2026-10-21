@@ -4,6 +4,7 @@ forward: f32 = 0,
 right: f32 = 0,
 up: f32 = 0,
 fast: bool = false,
+brake: bool = false,
 jump: bool = false,
 jump_pressed: bool = false,
 dodge: bool = false,
@@ -21,6 +22,7 @@ pub fn sample(self: *Input, core: *mach.Core, keys: @import("../game/Bindings.zi
     self.right = axis(core, keys.key(.right), keys.key(.left));
     self.up = axis(core, keys.key(.ascend), keys.key(.descend));
     self.fast = core.keyPressed(keys.key(.sprint));
+    self.brake = core.keyPressed(keys.key(.air_brake));
     self.jump = core.keyPressed(keys.key(.jump));
     self.dodge_held = core.keyPressed(keys.key(.roll));
     self.mantle = core.keyPressed(keys.key(.mantle));
@@ -37,7 +39,8 @@ pub fn merge(self: *Input, pad: Input) void {
         self.forward = pad.forward;
         self.right = pad.right;
     }
-    inline for (.{ "fast", "jump", "jump_pressed", "dodge", "dodge_held", "stomp", "grapple", "mantle", "cycle_mode" }) |field| {
+    if (pad.up != 0) self.up = pad.up;
+    inline for (.{ "fast", "brake", "jump", "jump_pressed", "dodge", "dodge_held", "stomp", "grapple", "mantle", "cycle_mode" }) |field| {
         @field(self, field) = @field(self, field) or @field(pad, field);
     }
 }

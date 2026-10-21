@@ -44,7 +44,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe, music_previous, music_toggle, music_next };
 pub fn hitId(area: Area, row: usize) u16 {
     // The row is one byte; lists longer than that pass `row & 0xff` and resolve it on click.
     std.debug.assert(row < 256);
@@ -77,6 +77,11 @@ pub const Hud = struct {
     scroll: f32 = 0,
     /// P1's keys for class specials 1–3.
     special_keys: [3][]const u8 = .{ "Z", "C", "H" },
+    music_available: bool = false,
+    music_playing: bool = false,
+    music_track: []const u8 = "",
+    music_track_index: usize = 0,
+    music_track_count: usize = 0,
 
     pub const Guest = struct { index: u8, view: Rect, prompt: []const u8 = "" };
     pub const Mark = struct { x: f32, y: f32, kind: enum { nose, lock }, progress: f32 = 0 };
@@ -169,7 +174,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
             c.endScroll();
             c.rect(.{ .x = 0, .y = 0, .w = c.width, .h = c.height }, shade);
             c.beginScroll(hud.scroll);
-            drawMenu(c, menu, sb);
+            drawMenu(c, menu, sb, hud);
         },
     }
 }
@@ -187,7 +192,7 @@ fn drawTitle(c: *Canvas, menu: *const Menu, hud: Hud) void {
     c.text(x + 2, y, "THE CANOPY FRONTIER", 2, accent);
     y += 34;
     c.text(x + 2, y, "Explore the Rootdeep. Engineer the city. Grow the Arbors.", 1, dim);
-    y = c.height * 0.44;
+    y = c.height * 0.41;
     if (menu.screen == .title) {
         for (Menu.title_items, 0..) |item, i| {
             const r: Rect = .{ .x = x - 14, .y = y, .w = w - x - 30, .h = 34 };
@@ -197,36 +202,82 @@ fn drawTitle(c: *Canvas, menu: *const Menu, hud: Hud) void {
             if (on) c.hit(r, hitId(.menu, i));
             y += 40;
         }
-    } else drawMenu(c, menu, null);
+    } else drawMenu(c, menu, null, hud);
+    const music_width = @min(408, @max(220, c.width * 0.32));
+    drawMusicPlayer(c, hud, .{ .x = c.width - music_width - 24, .y = c.height - 134, .w = music_width, .h = 84 }, music_width < 340);
     // Load failures and other notices still need to reach the player here.
     if (hud.toast.len > 0) c.text(x, c.height - 70, hud.toast, 1.1, bad);
     c.text(x, c.height - 44, "ARROWS OR MOUSE  ENTER SELECT  ESC BACK", 1, dim);
     c.print(x, c.height - 26, 1, alpha(dim, 0.7), "SEED {d}  NATIVE ZIG  MACH", .{hud.seed});
 }
 
+fn drawMusicPlayer(c: *Canvas, hud: Hud, r: Rect, compact: bool) void {
+    c.rect(r, .{ 0.012, 0.026, 0.036, 0.9 });
+    c.frame(r, 1, alpha(accent, 0.55));
+    c.text(r.x + 10, r.y + 7, "ECOSYSTEM MUSIC", 0.8, accent);
+    if (!hud.music_available) {
+        c.text(r.x + 10, r.y + 28, "NO PACKAGED MP3 TRACKS", 0.9, dim);
+        return;
+    }
+    const max_name: usize = if (compact) (if (r.w < 220) 18 else 30) else 31;
+    var shortened: [31]u8 = undefined;
+    const name = if (hud.music_track.len > max_name) blk: {
+        const prefix_len = max_name - 3;
+        @memcpy(shortened[0..prefix_len], hud.music_track[0..prefix_len]);
+        @memcpy(shortened[prefix_len..max_name], "...");
+        break :blk shortened[0..max_name];
+    } else hud.music_track;
+    c.text(r.x + 10, r.y + 29, name, if (compact) 0.78 else 0.95, ink);
+    // Keep the track label on its own row; centering these buttons used to put their labels
+    // directly over the song title on both the title card and the compact gameplay widget.
+    const button_y = r.y + r.h - 28;
+    const button_w: f32 = 32;
+    const gap: f32 = 4;
+    const right = r.x + r.w - 10;
+    const next: Rect = .{ .x = right - button_w, .y = button_y, .w = button_w, .h = 28 };
+    const play: Rect = .{ .x = next.x - gap - button_w, .y = button_y, .w = button_w, .h = 28 };
+    const previous: Rect = .{ .x = play.x - gap - button_w, .y = button_y, .w = button_w, .h = 28 };
+    button(c, previous, "<<", hitId(.music_previous, 0), false);
+    button(c, play, if (hud.music_playing) "II" else ">", hitId(.music_toggle, 0), false);
+    button(c, next, ">>", hitId(.music_next, 0), false);
+}
+
 fn menuRect(c: *const Canvas, width: f32, height: f32) Rect {
     return .{ .x = (c.width - width) / 2, .y = (c.height - height) / 2, .w = width, .h = height };
 }
 
-fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
+fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
     switch (menu.screen) {
-        .pause, .confirm_quit, .party, .player => {
+        .pause, .confirm_quit, .party, .player, .music => {
             const list = menu.items();
             // The party setup is wider: each seat shows its pad, its character and their scrap.
             const r = menuRect(c, if (menu.screen == .party) @min(560, c.width - 24) else 400, 92 + @as(f32, @floatFromInt(list.len)) * 36 + (if (sb != null) @as(f32, 34) else 0));
             panel(c, r, switch (menu.screen) {
                 .party => "FOUR PLAYER SETUP",
                 .player => "PLAYER MENU",
+                .music => "ECOSYSTEM MUSIC PLAYER",
                 .pause => "PAUSED",
                 else => "QUIT HEAVY WATER?",
             });
             if (menu.screen == .player) c.print(r.x + 240, r.y + 20, 1, accent, "P{d}", .{menu.hero_player + 1});
-            var y = r.y + 54;
+            if (menu.screen == .music) {
+                const track = if (hud.music_available) hud.music_track else "NO PACKAGED MP3 TRACKS";
+                c.text(r.x + 18, r.y + 38, track, 0.9, if (hud.music_available) gold else dim);
+            }
+            var y = r.y + (if (menu.screen == .music) @as(f32, 70) else 54);
             for (list, 0..) |item, i| {
                 const row: Rect = .{ .x = r.x + 12, .y = y, .w = r.w - 24, .h = 30 };
                 const on = menu.enabled(i);
                 rowBack(c, row, menu.row == i);
-                c.text(row.x + 16, row.y + 9, if (menu.screen == .party and menu.base == .title and item.command == .@"resume") "START GAME" else item.label, if (menu.screen == .party) 1 else 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
+                const label = if (menu.screen == .party and menu.base == .title and item.command == .@"resume")
+                    "START GAME"
+                else if (menu.screen == .music and item.command == .music_toggle and hud.music_playing)
+                    "PAUSE MUSIC"
+                else if (menu.screen == .music and item.command == .music_toggle)
+                    "PLAY MUSIC"
+                else
+                    item.label;
+                c.text(row.x + 16, row.y + 9, label, if (menu.screen == .party) 1 else 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
                 if (on) c.hit(row, hitId(.menu, i));
                 if (menu.screen == .party and i < 4) {
                     var controller: usize = 0;
@@ -514,8 +565,10 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
         std.fmt.bufPrint(&note, "{s} TOOK THE OLD KEY", .{Bindings.label(a)}) catch ""
     else
         "ENTER REBIND  LEFT RIGHT COLUMN  SAVED WHEN YOU LEAVE";
-    c.text(r.x + 24, r.y + r.h - 90, message, 1, if (menu.swapped != null and !menu.capturing) gold else dim);
-    c.text(r.x + 24, r.y + r.h - 68, "GESTURES: FORWARD+SHIFT+JUMP LONG JUMP  DASH+JUMP BOOST  BACK+JUMP FLIP", 0.9, dim);
+    c.text(r.x + 24, r.y + r.h - 124, message, 0.84, if (menu.swapped != null and !menu.capturing) gold else dim);
+    c.text(r.x + 24, r.y + r.h - 102, "FLIGHT: V TOGGLE  SHIFT ACCELERATE  ALT BRAKE  SPACE UP  E/Q CLIMB / DESCEND", 0.8, dim);
+    c.text(r.x + 24, r.y + r.h - 80, "KESTREL: MOUSE AIM  SHIFT BOOST  ALT BRAKE  CTRL ROLL  CLICK GUNS  HOLD/RELEASE RMB MISSILE  F EXIT", 0.76, dim);
+    c.text(r.x + 24, r.y + r.h - 58, "COMBAT: CLICK ATTACK  RMB WEAPON FIRE / SABER GUARD  X DIVE KICK  Z/C/H SPECIALS", 0.76, dim);
     const gamepad: Rect = .{ .x = r.x + 18, .y = r.y + r.h - 40, .w = 170, .h = 26 };
     button(c, gamepad, "GAMEPAD SETUP", hitId(.menu, Menu.controls_gamepad), menu.row == Menu.controls_gamepad);
     const reset: Rect = .{ .x = r.x + r.w - 290, .y = r.y + r.h - 40, .w = 150, .h = 26 };
@@ -542,10 +595,11 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
         rowBack(c, item, selected);
         c.hit(item, hitId(.menu, i));
         c.text(item.x + 10, item.y + 6, PadBindings.actionName(@enumFromInt(i)), 0.9, if (selected) accent else ink);
-        const value = if (menu.pad_capturing_action == @as(?PadBindings.Action, @enumFromInt(i)))
+        const action: PadBindings.Action = @enumFromInt(i);
+        const value = if (menu.pad_capturing_action == action)
             (if (@mod(menu.seconds, 1) < 0.6) "PRESS PAD BUTTON" else "")
         else
-            PadBindings.buttonName(mapping.buttons[i]);
+            PadBindings.buttonName(mapping.button(action));
         c.text(item.x + item.w - 10 - Canvas.textWidth(value, 0.85), item.y + 6, value, 0.85, gold);
     }
 
@@ -577,8 +631,10 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
     const preset_name = std.mem.sliceTo(&menu.pad_preset_label, 0);
     c.print(slot_row.x + 9, slot_row.y + 7, 0.85, if (menu.row == Menu.pad_preset_slot) accent else ink, "PRESET SLOT {d}  {s}", .{ menu.pad_preset_slot_index + 1, if (preset_name.len == 0) "(EMPTY OR CUSTOM)" else preset_name });
 
-    c.text(r.x + 24, r.y + r.h - 82, "ENTER CAPTURES  ARROWS CHANGE  AXIS ENTER INVERTS", 0.9, dim);
-    c.text(r.x + 24, r.y + r.h - 62, "EXPORT CREATES A SHAREABLE JSON FILE; IMPORT LOADS A DOWNLOADED PRESET INTO THIS SLOT", 0.82, dim);
+    c.text(r.x + 24, r.y + r.h - 118, "MOVE / AIM: LEFT STICK / RIGHT STICK  LT BOOSTS  B DODGES ON FOOT / BRAKES IN FLIGHT", 0.82, dim);
+    c.text(r.x + 24, r.y + r.h - 98, "FLIGHT: Y CYCLES / EXITS SUIT  A ASCENDS  D-PAD UP / DOWN CLIMBS / DESCENDS  X EXITS KESTREL", 0.78, dim);
+    c.text(r.x + 24, r.y + r.h - 78, "COMBAT: RT FIRES  RB SABER / GUARD; IN KESTREL RT FIRES, RB LOCKS / RELEASES MISSILES", 0.78, dim);
+    c.text(r.x + 24, r.y + r.h - 58, "ENTER CAPTURES  ARROWS CHANGE  AXIS ENTER INVERTS  EXPORT / IMPORT SHAREABLE PRESETS", 0.78, dim);
     const y = r.y + r.h - 38;
     const export_button: Rect = .{ .x = r.x + r.w - 445, .y = y, .w = 104, .h = 25 };
     const import_button: Rect = .{ .x = r.x + r.w - 335, .y = y, .w = 104, .h = 25 };
@@ -629,6 +685,7 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
             c.print(box.x + 10, box.y + 10, 1.05, gold, "{s}  {d:.0}M  {s}", .{ label, @sqrt(dx * dx + dz * dz), cardinal[direction] });
         }
     }
+    if (hud.music_available) drawMusicPlayer(c, hud, .{ .x = v.x + v.w - 266, .y = v.y + v.h - 90, .w = 250, .h = 72 }, true);
     if (panels) return;
     // The Starbowl's wave banner, top centre.
     if (sb.arena.active) {

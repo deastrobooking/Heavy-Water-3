@@ -31,10 +31,10 @@ pub const Config = struct {
     /// Side-force area for sideslip.
     side_area: f32 = 9,
     thrust: f32 = 58_000,
-    afterburner: f32 = 95_000,
+    afterburner: f32 = 155_000,
     /// Arcade boost is stored as seconds of afterburner; it regenerates while coasting.
-    boost_capacity: f32 = 2.6,
-    boost_recharge: f32 = 0.55,
+    boost_capacity: f32 = 8.0,
+    boost_recharge: f32 = 0.9,
     /// Lift jets: the most they can hold, as a multiple of the weight.
     vtol: f32 = 1.25,
     /// Below `vtol_full` m/s the lift jets carry the whole weight; above `vtol_off` none.
@@ -138,10 +138,11 @@ pub const Fighter = struct {
         } else if (!input.afterburner and !input.brake) {
             self.boost_charge = @min(cfg.boost_capacity, self.boost_charge + cfg.boost_recharge * dt);
         }
-        const thrust = if (input.afterburner) (if (boosting) cfg.afterburner else cfg.thrust * 1.12) else cfg.thrust * self.throttle;
-        self.burn += ((if (boosting) @as(f32, 1) else if (input.afterburner) @as(f32, 0.68) else self.throttle * 0.6) - self.burn) * @min(1, dt * 6);
+        const thrust = if (input.brake) @as(f32, 0) else if (input.afterburner) (if (boosting) cfg.afterburner else cfg.thrust * 1.12) else cfg.thrust * self.throttle;
+        const burn = if (input.brake) @as(f32, 0) else if (boosting) @as(f32, 1) else if (input.afterburner) @as(f32, 0.68) else self.throttle * 0.6;
+        self.burn += (burn - self.burn) * @min(1, dt * 6);
         b.addForce(self.forward().scale(thrust));
-        if (input.brake) b.addForce(b.vel.scale(-b.mass * 1.35));
+        if (input.brake) b.addForce(b.vel.scale(-b.mass * 2.4));
 
         if (input.barrel_roll and !self.grounded and self.barrel_roll_timer <= 0) {
             self.barrel_roll_timer = 0.85;

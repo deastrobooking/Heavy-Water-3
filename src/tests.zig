@@ -96,6 +96,7 @@ test {
     _ = @import("game/Bindings.zig");
     _ = @import("audio/Synth.zig");
     _ = @import("audio/Mixer.zig");
+    _ = @import("audio/Music.zig");
     _ = @import("audio/Director.zig");
     _ = @import("vehicle.zig");
     _ = @import("vehicle/Designs.zig");

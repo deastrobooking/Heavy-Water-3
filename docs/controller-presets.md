@@ -2,7 +2,7 @@
 
 Gamepad profiles use portable JSON, so players can export a mapping, upload it to the community preset page, and import a downloaded file without platform-specific data.
 
-In **Controls → Gamepad Setup**, capture actions from the controller, tune the axes and thresholds, and select one of eight slots. **Export** saves the profile to the selected slot and opens a native Save dialog for a portable JSON file; upload that file to the community site. **Import** opens a file picker for a downloaded profile, validates it, applies the mapping, and saves a copy into the selected slot. The current mapping is shared by all connected controllers. On platforms without the native macOS picker, the slot JSON files can be exchanged directly under `saves/controller-presets/`.
+In **Controls → Gamepad Setup**, capture actions from the controller, including **Air Brake**, tune the axes and thresholds, and select one of eight slots. By default, B taps dodge or dash on foot and holding B brakes in flight. **Export** saves the profile to the selected slot and opens a native Save dialog for a portable JSON file; upload that file to the community site. **Import** opens a file picker for a downloaded profile, validates it, applies the mapping, and saves a copy into the selected slot. The current mapping is shared by all connected controllers. Older profiles retain their original button mappings and receive the default brake button. On platforms without the native macOS picker, the slot JSON files can be exchanged directly under `saves/controller-presets/`.
 
 An exported file has this shape:
 
