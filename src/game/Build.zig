@@ -15,6 +15,7 @@ const Sandbox = @import("Sandbox.zig");
 const Vec3 = Physics.Vec3;
 
 pub const Tool = enum { hands, build, wire, bridge, weapon };
+pub const Palette = enum { structures, kits, blueprints };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
 pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon, root_sender, root_listener, platform };
 pub const build_reach: f32 = 14;
@@ -84,6 +85,37 @@ pub fn platformEditorAction(sb: *Sandbox, action: PlatformEditorAction) void {
 
 pub fn paletteLen(sb: *const Sandbox) usize {
     return builtin_count + Market.ware_count + sb.prefab_count;
+}
+
+pub fn paletteCount(sb: *const Sandbox, palette: Palette) usize {
+    return switch (palette) {
+        .structures => builtin_count,
+        .kits => Market.ware_count,
+        .blueprints => sb.prefab_count,
+    };
+}
+
+pub fn paletteEntry(sb: *const Sandbox, palette: Palette, index: usize) ?Entry {
+    if (index >= paletteCount(sb, palette)) return null;
+    return switch (palette) {
+        .structures => .{ .item = @enumFromInt(index) },
+        .kits => .{ .kit = @enumFromInt(index) },
+        .blueprints => .{ .prefab = index },
+    };
+}
+
+/// Select one card from the bounded in-game inventory. Floating platforms immediately open
+/// their height and orientation panel so they need no separate keyboard shortcut.
+pub fn selectPaletteEntry(sb: *Sandbox, palette: Palette, index: usize) bool {
+    const entry = paletteEntry(sb, palette, index) orelse return false;
+    sb.tools.slot = switch (palette) {
+        .structures => index,
+        .kits => builtin_count + index,
+        .blueprints => builtin_count + Market.ware_count + index,
+    };
+    selectTool(sb, .build);
+    if (entry == .item and entry.item == .platform) openPlatformEditor(sb);
+    return true;
 }
 
 pub fn current(sb: *const Sandbox) Entry {
@@ -201,10 +233,6 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
             try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary);
         },
         .build => {
-            if (actions.next_item) {
-                st.slot = (st.slot + 1) % paletteLen(sb);
-                sb.say("{s}", .{entryName(sb, current(sb))});
-            }
             if (actions.rotate) st.yaw +%= 1;
             st.preview = preview(sb, camera);
             if (primary) {
@@ -382,7 +410,7 @@ pub fn remove(sb: *Sandbox, target: Sandbox.Target) void {
             if (!sb.closeBridge(i)) return sb.say("bridge closed: removed once traffic clears", .{});
             sb.say("removed bridge", .{});
         },
-        .relic, .stall, .walker, .car, .fabricator, .jet, .hero, .wild_pet, .pet, .none => sb.say("nothing to remove", .{}),
+        .relic, .stall, .walker, .car, .fabricator, .jet, .hero, .wild_pet, .pet, .evidence, .none => sb.say("nothing to remove", .{}),
     }
 }
 
@@ -618,8 +646,8 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
         } else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
         .bridge => @import("BridgeTool.zig").hint(sb, buffer),
         .build => switch (current(sb)) {
-            .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  TAB NEXT  T TURN  CLICK PLACE", .{ entryName(sb, current(sb)), sb.kits[0].wallet.kits[@intFromEnum(ware)] }) catch buffer,
-            else => std.fmt.bufPrint(buffer, "BUILD {s}  TAB NEXT  T TURN  CLICK PLACE  RMB REMOVE  P CAPTURE  O PLATFORM EDITOR", .{entryName(sb, current(sb))}) catch buffer,
+            .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  T TURN  CLICK PLACE  ESC > BUILD MENU", .{ entryName(sb, current(sb)), sb.kits[0].wallet.kits[@intFromEnum(ware)] }) catch buffer,
+            else => std.fmt.bufPrint(buffer, "BUILD {s}  T TURN  CLICK PLACE  RMB REMOVE  P SAVE BLUEPRINT  ESC > BUILD MENU", .{entryName(sb, current(sb))}) catch buffer,
         },
         .wire => if (pendingWire(sb)) |w| blk: {
             const bp = &sb.machines[st.wire_from.?.machine].blueprint;

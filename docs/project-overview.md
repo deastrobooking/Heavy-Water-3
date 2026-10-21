@@ -52,7 +52,7 @@ The campaign expansion spans the Arbor Frontier, Hive/Scalari Homeworld, Gaia an
 | Right click (captured), hands | Salvage the relic under the crosshair |
 | Left click a stall keeper or pedestrian, hands | Talk. Up / Down or 1–6 choose a reply, Enter says it, Escape leaves. Keeper replies open the trade, upgrade, or wardrobe panels |
 | In any menu or panel | Arrows or W / S choose, Left / Right change, Enter or Space confirm, Escape back; the mouse hovers and clicks |
-| Build tool | Tab changes palette item; T rotates; left click places; right click removes |
+| Build tool | Escape → BUILD opens the inventory; choose a card; T rotates; left click places; right click removes |
 | Wire tool | Click source then target; Tab cycles port pairs; right click disconnects or cancels |
 | Bridge tool | Tab selects bridge style; click two plaza markers to build; right click cancels or removes |
 | P / I | Capture the aimed machine as a prefab / inspect the aimed machine |

@@ -102,10 +102,10 @@
               "next": "foundry_brief"
             },
             {
-              "text": "Remind me about the foundry ledger.",
+              "text": "About the foundry ledger.",
               "requires": "foundry_started",
               "unless": "foundry_exposed",
-              "next": "foundry_reminder"
+              "next": "foundry_case_status"
             },
             {
               "text": "Any spare scrap for a beginner?",
@@ -199,6 +199,33 @@
         {
           "id": "foundry_reminder",
           "text": "Three checkpoints in the machine works and the rail yards. The steward keeps a ledger for the Hive; find it and bring it into the open.",
+          "next": "hello"
+        },
+        {
+          "id": "foundry_case_status",
+          "text": "The three manifest pages will tie the foundry shipments to the Hive. What do you need?",
+          "choices": [
+            {
+              "text": "Remind me of the checkpoints.",
+              "unless": "foundry_pages_complete",
+              "next": "foundry_reminder"
+            },
+            {
+              "text": "I have all three manifest pages.",
+              "requires": "foundry_pages_complete",
+              "unless": "foundry_exposed",
+              "sets": "foundry_exposed",
+              "next": "foundry_exposure"
+            },
+            {
+              "text": "Back.",
+              "next": "hello"
+            }
+          ]
+        },
+        {
+          "id": "foundry_exposure",
+          "text": "The pages trace rotor cores, sap and alloy from the yards to the brood. The steward's seal is on every shipment. I'll take the ledger to the civic registry and open the yard back to its workers.",
           "next": "hello"
         }
       ]

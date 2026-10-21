@@ -625,6 +625,11 @@ fn syncTravelMenu(self: *App) void {
     for (0..4) |p| if (self.sandbox.travelBlocked(p) == null) {
         self.menu.travel_players |= @as(u8, 1) << @intCast(p);
     };
+    self.menu.build_counts = .{
+        @intCast(Build.paletteCount(&self.sandbox, .structures)),
+        @intCast(Build.paletteCount(&self.sandbox, .kits)),
+        @intCast(Build.paletteCount(&self.sandbox, .blueprints)),
+    };
 }
 
 fn menuKey(self: *App, k: Menu.Key) void {
@@ -703,6 +708,13 @@ fn runCommand(self: *App, command: Menu.Command) void {
             self.menu.open(.none);
             self.engine.input = .{};
             self.capture(self.core, true);
+        },
+        .select_build => {
+            const palette: Build.Palette = @enumFromInt(self.menu.build_tab);
+            if (!Build.selectPaletteEntry(&self.sandbox, palette, self.menu.row)) return;
+            self.menu.open(.none);
+            self.engine.input = .{};
+            if (!self.uiActive()) self.capture(self.core, true);
         },
         .music_previous => if (self.audio) |a| if (a.music) |music| music.previous(),
         .music_toggle => if (self.audio) |a| if (a.music) |music| music.toggle(),
@@ -887,6 +899,7 @@ fn pointAt(self: *App, click: bool) void {
     // Only the top layer takes the mouse: a menu over a panel blocks the panel beneath.
     const menu_area = switch (Screens.hitArea(hit)) {
         .menu, .setting_left, .setting_right, .planet_globe => true,
+        .build_tab => self.menu.screen == .build,
         .music_previous, .music_toggle, .music_next => self.menu.screen != .none,
         else => false,
     };
@@ -895,6 +908,11 @@ fn pointAt(self: *App, click: bool) void {
         .menu => {
             self.menu.select(row);
             if (click and self.menu.row == row) self.menuKey(.confirm);
+        },
+        .build_tab => if (self.menu.screen == .build and click and row < Menu.build_tabs) {
+            self.menu.build_tab = row;
+            self.menu.build_tabs_focus = false;
+            self.menu.row = 0;
         },
         .planet_globe => {},
         .music_previous => if (click) if (self.audio) |a| if (a.music) |music| music.previous(),
@@ -1181,8 +1199,6 @@ pub fn update(self: *App, core: *mach.Core) void {
                 }
             };
             if (self.navKey(key.key)) |k| self.uiNav(k);
-        } else if (key.key == .o and self.sandbox.tools.tool == .build) {
-            Build.openPlatformEditor(&self.sandbox);
         } else if (key.key == .escape) {
             self.menu.open(.pause);
             self.menu.hero_player = 0;
@@ -1569,7 +1585,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82 or v == 91) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -1801,6 +1817,23 @@ fn showcase(self: *App) void {
         };
         target = .{ building.base[0], building.roof + 4, building.base[2] };
         eye = .{ building.base[0] + 46, building.roof + 26, building.base[2] + 56 };
+    } else if (v == 92) {
+        const FoundryCase = @import("game/FoundryCase.zig");
+        self.sandbox.progress.setFlag("foundry_started");
+        var points: [FoundryCase.checkpoint_count][3]f32 = undefined;
+        const count = FoundryCase.positions(layout, &points);
+        if (count > 0) {
+            const page = points[0];
+            self.sandbox.player.feet = .{ page[0] + 2.3, page[1] - 0.9, page[2] + 4 };
+            self.sandbox.player.velocity = .{ 0, 0, 0 };
+            self.sandbox.target = .{ .evidence = 0 };
+            target = .{ page[0], page[1], page[2] };
+            const player_eye = self.sandbox.player.eye();
+            eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
+        } else {
+            target = .{ layout.nodes[3].position[0], layout.nodes[3].position[1], layout.nodes[3].position[2] };
+            eye = .{ target[0] + 4, target[1] + 4, target[2] + 8 };
+        }
     } else if (v == 47) {
         // Scalari fleet art review: two capital ships behind three dragon-armored fighters.
         target = .{ 0, 480, -45 };
@@ -1983,6 +2016,15 @@ fn guiShowcase(self: *App, v: u32) void {
             self.menu.map_zoom = 3;
             self.menu.row = 0;
             self.menu.map_destination = 0;
+        },
+        91 => {
+            self.menu.open(.pause);
+            self.menu.open(.build);
+            self.menu.build_counts = .{
+                @intCast(Build.paletteCount(sb, .structures)),
+                @intCast(Build.paletteCount(sb, .kits)),
+                @intCast(Build.paletteCount(sb, .blueprints)),
+            };
         },
         82 => {
             sb.creator.begin(sb.profile);
@@ -2437,6 +2479,7 @@ fn exerciseSmoke(self: *App) void {
             std.log.info("Smoke mesh editor: restored component with a second partial patch", .{});
             self.smokeGui();
             self.smokeFrontier();
+            self.smokeFoundryCase();
             // Look away to exercise a frame with zero visible relics.
             camera.yaw = std.math.pi;
             camera.position = mach.math.vec3(-400, 35, -300);
@@ -2528,6 +2571,83 @@ fn exerciseSmoke(self: *App) void {
         else => {},
     }
     std.log.info("Smoke stage {d}: culling={any}, hud={any}, mode={s}, players={d}", .{ stage, self.culling, self.show_metrics, @tagName(self.sandbox.player.mode), 1 + self.sandbox.guestCount() });
+}
+
+/// Start Maro's investigation, recover each page through the hands target, save the shared case
+/// state, report back through the conversation, and verify the private Kit reward.
+fn smokeFoundryCase(self: *App) void {
+    const sb = &self.sandbox;
+    const camera = &self.engine.camera;
+    const baseline = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE FOUNDRY BASELINE {s}", .{@errorName(err)});
+    defer self.allocator.free(baseline);
+    defer sb.restore(self.allocator, baseline, camera) catch |err| self.smokeFail("SMOKE FOUNDRY RESTORE {s}", .{@errorName(err)});
+
+    if (!sb.fastTravel(0, 0, camera)) return self.smokeFail("SMOKE FOUNDRY BASE CAMP REFUSED", .{});
+    sb.tools.tool = .hands;
+    sb.player.mode = .fly;
+    sb.view = .first;
+    sb.held = null;
+    sb.talk = null;
+    sb.progress.setFlag("met_maro");
+    sb.startTalk(.{ .keeper = 0 });
+    if (!self.smokeDialogueChoose("Rotor cores keep vanishing. Know anything?")) return self.smokeFail("SMOKE FOUNDRY CASE NOT OFFERED", .{});
+    if (!self.smokeDialogueContinue()) return self.smokeFail("SMOKE FOUNDRY BRIEF DID NOT RETURN TO MARO", .{});
+    sb.talkKey(.back);
+
+    const FoundryCase = @import("game/FoundryCase.zig");
+    var points: [FoundryCase.checkpoint_count][3]f32 = undefined;
+    const count = FoundryCase.positions(&sb.catalog.district, &points);
+    if (count != FoundryCase.checkpoint_count) return self.smokeFail("SMOKE FOUNDRY HAS {d} CHECKPOINTS", .{count});
+    for (points, 0..) |point, index| {
+        sb.player.feet = .{ point[0] + 2.3, point[1] - 0.9, point[2] + 4 };
+        sb.player.velocity = @splat(0);
+        const eye = sb.player.eye();
+        const dx = point[0] - eye.x();
+        const dy = point[1] - eye.y();
+        const dz = point[2] - eye.z();
+        camera.position = eye;
+        camera.yaw = std.math.atan2(dx, dz);
+        camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+        sb.step(camera, .{}, .{ .interact = true }, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY PICKUP {s}", .{@errorName(err)});
+        if (!FoundryCase.collected(&sb.progress, index)) return self.smokeFail("SMOKE FOUNDRY PAGE {d} NOT COLLECTED (target {s})", .{ index + 1, @tagName(sb.target) });
+    }
+
+    const case_save = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE FOUNDRY SAVE {s}", .{@errorName(err)});
+    defer self.allocator.free(case_save);
+    sb.restore(self.allocator, case_save, camera) catch |err| return self.smokeFail("SMOKE FOUNDRY LOAD {s}", .{@errorName(err)});
+    if (FoundryCase.count(&sb.progress) != FoundryCase.checkpoint_count or !sb.progress.hasFlag(FoundryCase.complete_flag)) return self.smokeFail("SMOKE FOUNDRY PAGES DID NOT SURVIVE SAVE", .{});
+
+    sb.startTalk(.{ .keeper = 0 });
+    if (!self.smokeDialogueChoose("About the foundry ledger.")) return self.smokeFail("SMOKE FOUNDRY REPORT NOT OFFERED", .{});
+    const level = sb.kits[0].level(.sprint_servos);
+    if (!self.smokeDialogueChoose("I have all three manifest pages.")) return self.smokeFail("SMOKE FOUNDRY EXPOSURE NOT OFFERED", .{});
+    if (!sb.progress.hasFlag("foundry_exposed") or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY EXPOSURE OR KIT REWARD FAILED", .{});
+    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; report exposed the steward and granted P1 Sprint Servos +1", .{count});
+}
+
+fn smokeDialogueChoose(self: *App, choice_text: []const u8) bool {
+    const session = self.sandbox.talk orelse return false;
+    const node = self.sandbox.dialogue.node(session);
+    var visible: [Dialogue.max_choices]u8 = undefined;
+    const count = self.sandbox.dialogue.visibleChoices(session, &self.sandbox.progress, &visible);
+    var selected: ?u8 = null;
+    for (visible[0..count], 0..) |choice_index, slot| if (std.mem.eql(u8, node.choices[choice_index].text, choice_text)) {
+        selected = @intCast(slot);
+        break;
+    };
+    const slot = selected orelse return false;
+    self.sandbox.talk.?.choice = slot;
+    self.sandbox.talkKey(.confirm);
+    self.sandbox.talkKey(.confirm);
+    return true;
+}
+
+fn smokeDialogueContinue(self: *App) bool {
+    const session = self.sandbox.talk orelse return false;
+    if (self.sandbox.dialogue.node(session).choices.len != 0) return false;
+    self.sandbox.talkKey(.confirm);
+    self.sandbox.talkKey(.confirm);
+    return self.sandbox.talk != null;
 }
 
 /// Drives the menus, a conversation and the tinker's panel through the same navigation the
@@ -3250,6 +3370,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         .jet => renderer.hud_lines[1].set("KESTREL FIGHTER  X (LEFT FACE) / CLICK BOARD", .{}),
         .fabricator => renderer.hud_lines[1].set("FABRICATOR  X / CLICK OPEN", .{}),
         .hero => |i| renderer.hud_lines[1].set("MEET {s}, {s}  X / CLICK", .{ Sandbox.Heroes.roster[i].name, Sandbox.Heroes.roster[i].title }),
+        .evidence => |i| renderer.hud_lines[1].set("FOUNDRY LEDGER PAGE {d}/3  X / CLICK RECOVER", .{i + 1}),
         .wild_pet => |sp| if (sandbox.pets.canCaptureWild(sp))
             renderer.hud_lines[1].set("{s} SNARED {d}%  X / CLICK TO CATCH", .{ Sandbox.Pets.info(sp).name, @as(u32, @intFromFloat(sandbox.pets.wild_health[@intFromEnum(sp)])) })
         else

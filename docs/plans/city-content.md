@@ -1,6 +1,6 @@
 # City content plan: three sub-missions, one boss battle and ten item discoveries per city
 
-**Status:** Detroit content draft proposed, 2026-10-15; campaign direction updated 2026-10-19. Documentation only; nothing here is built. The owner has set Detroit and New York City as captured and directed synthetic humanoid warriors to lead their liberation alongside humanity. The Detroit names, boss and discoveries below remain proposals. New York's detailed missions and rewards are intentionally deferred until Detroit's loop is proven. The [roadmap](../roadmap.md) stays the single plan; this is the detail behind milestone B in [next steps](next-steps.md).
+**Status:** Detroit content draft proposed, 2026-10-15; campaign direction updated 2026-10-19. A first playable Foundry Ledger checkpoint/report slice was added on 2026-10-21; the proposed steward encounter, other missions, boss and discoveries remain drafts. The owner has set Detroit and New York City as captured and directed synthetic humanoid warriors to lead their liberation alongside humanity. New York's detailed missions and rewards are intentionally deferred until Detroit's loop is proven. The [roadmap](../roadmap.md) stays the single plan; this is the detail behind milestone B in [next steps](next-steps.md).
 
 **Audience:** the project owner (content), and engineers who will build it. Part 1 to 3 are content; part 4 onward is the technical plan.
 
@@ -34,6 +34,8 @@ The totals are plain arithmetic from the budget and the catalog in `procedural/W
 ## 3. Detroit Arbor Reach (the first city)
 
 Detroit is "Detroit, Michigan reimagined as a canopy city" with six plazas (0 to 5), three keepers (Maro at plaza 1, Ines at plaza 3, Tavi at plaza 5), Gothic civic halls with clustered spires, a foundry and rail-yard industrial belt (an intentional Hive pressure point), the wide Detroit River with dry, wooded Belle Isle, two heavy bridges toward Windsor, Rootway galleries, a canopy metro, about twenty skyscrapers with sky lobbies, and two Rootdeep shrines below ([city](../city.md), [world](../world.md)). Lore anchor: Dr. Sergio Bile was the Hive's human ally a thousand years ago ([Story](../Story.md)); today's allies are his heirs in spirit.
+
+**Playable slice, 2026-10-21:** Maro can start The Foundry Ledger; three deterministic manifest checkpoints appear beside generated industrial buildings, are recoverable through the normal hands target, and update the quest count. The collected flags persist in shared `Progress`. Once all three pages are recovered, Maro's report conversation sets `foundry_exposed` and awards Sprint Servos +1 to each active player's own `Kit`. A scripted Metal smoke exercises the case start, all pickups, save/load, report and P1 reward. The loading-dock steward and brood-scavenger encounter, opening the yard, the other two missions, the Titan, the ten discoveries and the city liberation transition are not implemented yet; Detroit remains occupied.
 
 ### 3.1 Sub-missions (proposed)
 

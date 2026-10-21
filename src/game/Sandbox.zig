@@ -56,6 +56,7 @@ const Enemies = @import("Enemies.zig");
 const Combat = @import("Combat.zig");
 const Fabricator = @import("Fabricator.zig");
 const Frontier = @import("Frontier.zig");
+const FoundryCase = @import("FoundryCase.zig");
 const Racing = @import("Racing.zig");
 const Hangar = @import("Hangar.zig");
 const Skies = @import("Skies.zig");
@@ -131,7 +132,20 @@ pub const Target = union(enum) {
     wild_pet: Pets.Species,
     /// A player's pet, by owner slot (pet it; your own, with more freed, swaps to the next).
     pet: u8,
+    /// A manifest page in Detroit's active Foundry Ledger investigation.
+    evidence: u8,
 };
+
+/// A live case clue stays targetable when a salvage object also crosses the ray; other
+/// Frontier-only targets fill an empty ray without stealing closer machine or market targets.
+fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
+    const found = candidate orelse return current;
+    return switch (found) {
+        .evidence => found,
+        .hero, .wild_pet, .pet => if (current == .none) found else current,
+        else => current,
+    };
+}
 /// Panels the tinker opens from a conversation: suit upgrades or the armor wardrobe.
 /// A sound for the application to play, placed in the world when it has a position.
 pub const Cue = struct { sound: @import("../audio/Synth.zig").Sound, position: ?Physics.Vec3 = null, pitch: f32 = 1 };
@@ -1111,17 +1125,13 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
     // Hands only: aim from the eyes, press buttons, and open market stalls.
     const eye = g.player.eye();
     g.target = self.pick(eye, g.camera.forward(), reach, false, true);
-    if (g.target == .none) {
-        const f = g.camera.forward();
-        if (Frontier.pick(self, .{ eye.x(), eye.y(), eye.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |t| switch (t) {
-            .hero, .wild_pet, .pet => g.target = t,
-            else => {},
-        };
-    }
+    const gf = g.camera.forward();
+    g.target = preferFrontierTarget(g.target, Frontier.pick(self, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, reach + 2, reach + 2));
     if (g.interact) switch (g.target) {
         .hero => |i| Frontier.recruit(self, i),
         .wild_pet => |sp| Frontier.freePet(self, slot, sp),
         .pet => |owner| Frontier.petPet(self, slot, owner),
+        .evidence => |i| Frontier.collectFoundryEvidence(self, i),
         else => {},
     };
     if (g.interact and g.target == .stall) {
@@ -1262,9 +1272,9 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     // Build and wire tools reach farther and ignore relics.
     const hands = self.tools.tool == .hands;
     self.target = self.pick(aim.position, aim.forward(), if (hands) reach else Build.build_reach, hands, hands);
-    if (hands and self.target == .none) {
+    if (hands) {
         const f = aim.forward();
-        if (Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2)) |t| self.target = t;
+        self.target = preferFrontierTarget(self.target, Frontier.pick(self, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, reach + 2, reach + 2));
     }
     if (!hands) {
         const f = aim.forward();
@@ -1309,6 +1319,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .hero => |i| Frontier.recruit(self, i),
                     .wild_pet => |sp| Frontier.freePet(self, 0, sp),
                     .pet => |owner| Frontier.petPet(self, 0, owner),
+                    .evidence => |i| Frontier.collectFoundryEvidence(self, i),
                     .relic => |relic| try self.salvageRelic(relic.ref),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
@@ -1683,8 +1694,16 @@ pub fn talkKey(self: *Sandbox, key: Dialogue.Key) void {
     const session = if (self.talk) |*t| t else return;
     const wallet = &self.kits[0].wallet;
     const scrap = wallet.scrap;
+    const foundry_was_exposed = self.progress.hasFlag("foundry_exposed");
     const outcome = self.dialogue.key(session, key, &self.progress, wallet);
     if (wallet.scrap > scrap) self.say("received {d} scrap", .{wallet.scrap - scrap});
+    if (!foundry_was_exposed and self.progress.hasFlag("foundry_exposed")) {
+        var rewarded: u8 = @intFromBool(FoundryCase.awardSuitUpgrade(&self.kits[0]));
+        for (&self.guests, 1..) |*guest, slot| if (guest.active) {
+            rewarded += @intFromBool(FoundryCase.awardSuitUpgrade(&self.kits[slot]));
+        };
+        self.say("Maro rewards {d} active ranger(s): Sprint Servos +1", .{rewarded});
+    }
     switch (outcome) {
         .talking => {},
         .ended => self.endTalk(),
@@ -2576,6 +2595,17 @@ pub fn testSandbox(sandbox: *Sandbox, catalog: *Catalog, camera: *Camera) !void 
     try catalog.load(std.testing.allocator);
     errdefer catalog.deinit(std.testing.allocator);
     try sandbox.init(std.testing.allocator, 310399555161, catalog, camera);
+}
+
+test "an active Foundry clue stays aimable when a relic also occupies the ray" {
+    const relic: Target = .{ .relic = .{ .ref = .{ .x = 2, .z = 1, .id = 70 }, .position = .{ 0, 0, 0 } } };
+    const page: Target = .{ .evidence = 1 };
+    const chosen = preferFrontierTarget(relic, page);
+    try std.testing.expect(chosen == .evidence);
+    try std.testing.expectEqual(@as(u8, 1), chosen.evidence);
+
+    const hero: Target = .{ .hero = 3 };
+    try std.testing.expectEqual(Target{ .relic = relic.relic }, preferFrontierTarget(relic, hero));
 }
 
 const FoundRelic = struct { key: Key, object: Scatter.Object };

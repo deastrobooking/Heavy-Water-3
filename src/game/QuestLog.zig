@@ -4,6 +4,7 @@ const Enemies = @import("Enemies.zig");
 const Progress = @import("Progress.zig");
 const Skies = @import("Skies.zig");
 const CityContent = @import("CityContent.zig");
+const FoundryCase = @import("FoundryCase.zig");
 
 pub const Objective = struct {
     title: []const u8,
@@ -57,6 +58,16 @@ pub fn city(progress: *const Progress, content: *const CityContent.CityContent) 
     if (CityContent.liberated(content, progress)) return .{ .title = "DETROIT IS FREE", .detail = "The Hive's allies are exposed and its occupation is broken. The canopy is yours.", .draft = content.draft };
     if (CityContent.nextMission(content, progress)) |i| {
         const m = content.missions[i];
+        if (i == 0 and CityContent.started(content, progress, i)) return .{
+            .title = m.title,
+            .detail = switch (FoundryCase.count(progress)) {
+                0 => "Recover the three manifest pages from the marked factory checkpoints (0/3).",
+                1 => "Recover the remaining manifest pages from the factory checkpoints (1/3).",
+                2 => "Recover the last manifest page from the factory checkpoints (2/3).",
+                else => "Take the three manifest pages back to Maro and expose the foundry steward.",
+            },
+            .draft = content.draft,
+        };
         return .{ .title = m.title, .detail = m.detail, .draft = content.draft };
     }
     if (!CityContent.bossDefeated(content, progress)) return .{ .title = content.boss.name, .detail = content.boss.detail, .draft = content.draft };

@@ -165,10 +165,10 @@ Acceptance: the benchmark meets its budgets on the M3 Pro; the playtest checklis
 
 The combat campaign foundation is playable and has an end state, but the world premise requires two connected halves: clear the Hive from the wilds and expose its human allies inside a Hive-occupied city. Complete that loop in the existing Frontier before making the other planet and ocean catalogs playable.
 
-1. Trace the current save, quest, dialogue, evidence/investigation, nest, carrier, and city interaction paths against the liberation loop. Write down only the concrete missing links before implementation.
-2. Connect the city investigation outcome to persistent shared story progress. Keep personal loot, currency, gear, XP, and pet growth in each player's `Kit`.
-3. Make the city and wilds objectives discoverable from the in-game quest UI, and make the liberation state survive save/load.
-4. Add deterministic coverage for the complete state transition and save round trip, plus a real-game smoke stage that completes or reaches the final gate.
+1. **Audit complete, 2026-10-21:** see [Detroit liberation loop audit](../validation.md#detroit-liberation-loop-audit--2026-10-21). The audit found no runtime evidence collection, exposure, boss completion or liberation path; shared flags already save with the world.
+2. **First Foundry Ledger slice implemented, 2026-10-21:** Maro starts the draft case, three generated industrial checkpoints appear and can be recovered with normal hands targeting, the quest log shows the page count, and Maro's report sets shared `foundry_exposed` while granting Sprint Servos +1 to each active player's private `Kit`. Deterministic tests cover the shared flags, save round trip, dialogue gating and Kit cap. The scripted Metal smoke starts the case, collects all pages, saves and reloads them, reports to Maro and verifies the exposure and reward. The case remains draft content.
+3. **Complete the city loop:** add the physical loading-dock steward encounter and yard access outcome; implement the other two Detroit exposures, boss battle, ten discoveries and final liberation transition. Keep the city and wilds objectives visible in the quest UI, shared state in `Progress`, and personal rewards in each player's `Kit`.
+4. Extend the scripted smoke and deterministic coverage across the complete Detroit liberation state transition. Verify four-player interactions and rewards, and record the remaining hands-on play checks in validation before starting another city.
 
 Content budget per city (owner, 2026-10-15): three sub-missions, one boss battle and ten item discoveries. Detroit's draft content and the build phases are in [city content](city-content.md).
 

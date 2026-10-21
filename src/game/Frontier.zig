@@ -41,6 +41,8 @@ const Pets = @import("Pets.zig");
 const DroidCompanion = @import("DroidCompanion.zig");
 const Arena = @import("Arena.zig");
 const QuestLog = @import("QuestLog.zig");
+const FoundryCase = @import("FoundryCase.zig");
+const CityContent = @import("CityContent.zig");
 const R = Physics.Rotation;
 /// Character ids: troopers take 16–23, Wildkin heroes met in the world 24–31.
 pub const hero_first_id: u8 = 32;
@@ -735,7 +737,32 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32) ?Sandbox.
             result = .{ .hero = spot.hero };
         }
     };
+    if (sb.progress.hasFlag("foundry_started") and !sb.progress.hasFlag("foundry_exposed")) {
+        var points: [FoundryCase.checkpoint_count]V = undefined;
+        const count = FoundryCase.positions(&sb.catalog.district, &points);
+        for (points[0..count], 0..) |point, index| {
+            if (FoundryCase.collected(&sb.progress, index)) continue;
+            if (Physics.rayBox(eye, dir, point, .{ 0.7, 0.9, 0.7 })) |hit| if (hit.distance < nearest) {
+                nearest = hit.distance;
+                result = .{ .evidence = @intCast(index) };
+            };
+        }
+    }
     return result;
+}
+
+/// Recover one manifest page from a generated industrial checkpoint. Story state is shared.
+pub fn collectFoundryEvidence(sb: *Sandbox, index: u8) void {
+    if (!FoundryCase.collect(&sb.progress, index)) return;
+    const recovered = FoundryCase.count(&sb.progress);
+    sb.say("manifest page recovered: {d}/{d}", .{ recovered, FoundryCase.checkpoint_count });
+    sb.cue(.pickup, foundryCasePosition(sb, index));
+}
+
+fn foundryCasePosition(sb: *const Sandbox, index: usize) V {
+    var points: [FoundryCase.checkpoint_count]V = undefined;
+    const count = FoundryCase.positions(&sb.catalog.district, &points);
+    return if (index < count) points[index] else sb.player.feet;
 }
 
 /// Chest positions the Hive aims at: P1 (or P1's car) and active guests.
@@ -1481,6 +1508,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishArena(sb, out, n, t);
     n = publishShrines(sb, out, n, t);
     n = publishObjectiveBeacon(sb, out, n, t);
+    n = publishFoundryEvidence(sb, out, n, t);
     n = publishCityHiveBases(sb, out, n, t);
     n = publishCityGardenFoliage(sb, out, n);
     n = publishAntarcticPerimeter(sb, out, n, t);
@@ -1981,6 +2009,14 @@ fn objectiveTarget(sb: *const Sandbox) ?V {
     if (!p.fighter) return kioskPosition(sb);
     if (QuestLog.remainingNests(&sb.enemies) > 0) return nearestLiveNest(sb, false);
     if (QuestLog.remainingCarriers(&sb.skies) > 0) return nearestCarrier(sb);
+    if (CityContent.nextMission(&CityContent.detroit, p)) |mission| {
+        if (mission == 0) {
+            if (!p.hasFlag("foundry_started")) return sb.keeperPosition(0);
+            if (FoundryCase.next(p)) |index| return foundryCasePosition(sb, index);
+            return sb.keeperPosition(0);
+        }
+        return sb.keeperPosition(mission);
+    }
     return null;
 }
 
@@ -2037,6 +2073,29 @@ fn publishObjectiveBeacon(sb: *const Sandbox, out: []World.Prop, start: usize, t
     out[start + 1] = .{ .mesh = sb.catalog.content.block, .transform = .{ .position = R.add(base, .{ 0, 0.12, 0 }) }, .size = .{ 4.2, 0.2, 4.2 }, .tint = ground };
     out[start + 2] = .{ .mesh = sb.catalog.content.gem, .transform = .{ .position = R.add(base, .{ 0, height + 4 + @sin(t * 1.8) * 1.2, 0 }) }, .size = @splat(5.5), .rotation = yawQuat(t * 0.24), .tint = Material.emissive(.{ 0.42, 0.9, 1, 1 }, 1.8 * pulse) };
     return start + 3;
+}
+
+/// Manifest pages appear at the industrial checkpoints after Maro starts the draft case.
+fn publishFoundryEvidence(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    if (!sb.progress.hasFlag("foundry_started") or sb.progress.hasFlag("foundry_exposed")) return start;
+    var points: [FoundryCase.checkpoint_count]V = undefined;
+    const count = FoundryCase.positions(&sb.catalog.district, &points);
+    var n = start;
+    const c = &sb.catalog.content;
+    for (points[0..count], 0..) |point, index| {
+        if (FoundryCase.collected(&sb.progress, index)) continue;
+        if (R.length(R.sub(point, sb.player.feet)) > 520 or n + 4 > out.len) continue;
+        const ground = point[1] - 0.9;
+        const selected = sb.target == .evidence and sb.target.evidence == @as(u8, @intCast(index));
+        const pulse = 0.72 + 0.28 * @sin(t * 2.6 + @as(f32, @floatFromInt(index)));
+        const crate_tint: [4]f32 = if (selected) .{ 0.58, 0.68, 0.72, 1 } else .{ 0.24, 0.3, 0.34, 1 };
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], ground + 0.24, point[2] } }, .tint = crate_tint, .size = .{ 1.25, 0.48, 0.92 } };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], ground + 0.52, point[2] } }, .tint = .{ 0.42, 0.48, 0.5, 1 }, .size = .{ 0.98, 0.09, 0.12 } };
+        out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = .{ point[0], ground + 0.7, point[2] } }, .tint = Material.emissive(.{ 0.92, 0.78, 0.42, 1 }, 0.55 + 0.25 * pulse), .size = .{ 0.56, 0.05, 0.68 }, .rotation = yawQuat(-0.18) };
+        out[n + 3] = .{ .mesh = c.gem, .transform = .{ .position = .{ point[0], ground + 1.13 + 0.08 * @sin(t * 2 + @as(f32, @floatFromInt(index))), point[2] } }, .tint = Material.emissive(.{ 0.98, 0.72, 0.28, 1 }, pulse), .size = @splat(0.19), .rotation = yawQuat(t * 0.7) };
+        n += 4;
+    }
+    return n;
 }
 
 /// Rootdeep vaults grow as a fusion of living rootwork and old machine craft. These exterior

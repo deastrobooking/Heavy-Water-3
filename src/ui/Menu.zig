@@ -8,9 +8,9 @@ const PadBindings = @import("../engine/PadBindings.zig");
 const Sandbox = @import("../game/Sandbox.zig");
 const Menu = @This();
 
-pub const Screen = enum { none, title, pause, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit };
+pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel, music_previous, music_toggle, music_next };
+pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
 pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
@@ -25,6 +25,7 @@ pub const title_items = [_]Item{
     .{ .label = "MUSIC PLAYER", .opens = .music },
 };
 pub const pause_items = [_]Item{
+    .{ .label = "BUILD", .opens = .build },
     .{ .label = "RESUME", .command = .@"resume" },
     .{ .label = "HEROES", .opens = .heroes },
     .{ .label = "HERO ARENA", .opens = .arena },
@@ -69,6 +70,9 @@ pub const map_items = blk: {
     list[frame_row + 1] = .{ .label = "RESUME", .command = .@"resume" };
     break :blk list;
 };
+pub const build_slots = 16;
+pub const build_tabs = 3;
+pub const build_columns = 4;
 pub const quest_items = [_]Item{.{ .label = "BACK" }};
 pub const arena_items = [_]Item{
     .{ .label = "START THE ARENA", .command = .start_arena },
@@ -114,6 +118,11 @@ map_frame_destination: bool = false,
 map_destination: u8 = 0,
 map_target: MapTarget = .none,
 travel_players: u8 = 15,
+/// The inventory is three fixed pages of at most sixteen entries, so building never needs a
+/// long scrolling list. The application refreshes the counts from the loaded world.
+build_tab: u8 = 0,
+build_tabs_focus: bool = true,
+build_counts: [build_tabs]u8 = .{ 16, 3, 0 },
 parents: [8]Parent = undefined,
 parent_count: usize = 0,
 /// The screen "back" returns to from settings, controls and quit (title or pause).
@@ -155,6 +164,10 @@ pub fn open(self: *Menu, screen: Screen) void {
     }
     self.screen = screen;
     self.row = 0;
+    if (screen == .build) {
+        self.build_tab = 0;
+        self.build_tabs_focus = true;
+    }
     self.capturing = false;
     self.pad_capturing_action = null;
     self.swapped = null;
@@ -181,6 +194,7 @@ pub fn rows(self: *const Menu) u8 {
         .settings => settings_rows,
         .controls => controls_rows,
         .pad_controls => pad_controls_rows,
+        .build => build_slots,
         .quest_log => 1,
         .heroes => heroes_rows,
         .none => 0,
@@ -191,6 +205,7 @@ pub fn rows(self: *const Menu) u8 {
 /// Whether a row can be chosen (CONTINUE and LOAD need a save).
 pub fn enabled(self: *const Menu, row: usize) bool {
     if (row >= self.rows()) return false;
+    if (self.screen == .build) return row < self.build_counts[self.build_tab];
     if (self.screen == .world_map and row < Sandbox.travel_count) return self.hero_player < 4 and self.travel_players & (@as(u8, 1) << @intCast(self.hero_player)) != 0;
     if (self.screen == .title and row == 0) return self.has_save;
     if (self.screen == .pause and pause_items[row].command == .load) return self.has_save;
@@ -222,12 +237,14 @@ fn step(self: *Menu, delta: i32) void {
 pub fn select(self: *Menu, row: u8) void {
     if (row < self.rows() and self.enabled(row)) {
         self.row = row;
+        if (self.screen == .build) self.build_tabs_focus = false;
         if (self.screen == .world_map and row < Sandbox.travel_count) self.map_destination = row;
     }
 }
 
 pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .none) return .none;
+    if (self.screen == .build) return self.buildKey(k);
     if (self.screen == .controls) return self.controlsKey(k);
     if (self.screen == .pad_controls) return self.padControlsKey(k);
     if (self.screen == .world_map and self.row < Sandbox.travel_count) self.map_destination = self.row;
@@ -274,6 +291,46 @@ pub fn key(self: *Menu, k: Key) Command {
             if (self.screen == .party and self.base == .title and item.command == .@"resume") return .new_game;
             return item.command;
         },
+    }
+    return .none;
+}
+
+/// Tabs choose a bounded page; the selected page is a four-by-four inventory grid.
+fn buildKey(self: *Menu, k: Key) Command {
+    if (k == .back) return self.back();
+    if (self.build_tabs_focus) {
+        switch (k) {
+            .left => self.build_tab = @intCast(@mod(@as(i32, self.build_tab) - 1, build_tabs)),
+            .right => self.build_tab = @intCast(@mod(@as(i32, self.build_tab) + 1, build_tabs)),
+            .down, .confirm => {
+                self.build_tabs_focus = false;
+                self.row = 0;
+            },
+            .up => {},
+            .back => unreachable,
+        }
+        return .none;
+    }
+
+    const count = self.build_counts[self.build_tab];
+    switch (k) {
+        .left => {
+            if (self.row % build_columns > 0) self.row -= 1;
+        },
+        .right => {
+            if (self.row % build_columns + 1 < build_columns and self.row + 1 < count) self.row += 1;
+        },
+        .up => {
+            if (self.row < build_columns) {
+                self.build_tabs_focus = true;
+                self.row = self.build_tab;
+            } else self.row -= build_columns;
+        },
+        .down => {
+            if (self.row + build_columns < count) self.row += build_columns;
+        },
+        .confirm => if (self.enabled(self.row)) return .select_build,
+        .back => unreachable,
     }
     return .none;
 }
@@ -449,7 +506,7 @@ fn back(self: *Menu) Command {
         return .none;
     }
     switch (self.screen) {
-        .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .music, .confirm_quit => {
+        .build, .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .music, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.
@@ -512,18 +569,18 @@ test "the packaged music player opens from title and pause menus and exposes ski
 test "quest log opens from pause and returns to its menu row" {
     var m: Menu = .{};
     m.open(.pause);
-    m.row = 4;
+    m.row = 5;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.quest_log, m.screen);
     try std.testing.expectEqual(Command.none, m.key(.back));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 4), m.row);
+    try std.testing.expectEqual(@as(u8, 5), m.row);
 }
 
 test "heroes are chosen per player from unlocked cards, and the arena starts or leaves" {
     var m: Menu = .{ .heroes_unlocked = 0b101, .players_present = 0b11 };
     m.open(.pause);
-    m.row = 1;
+    m.row = 2;
     _ = m.key(.confirm);
     try std.testing.expectEqual(Screen.heroes, m.screen);
     // Tabs: only present players can be chosen.
@@ -543,7 +600,7 @@ test "heroes are chosen per player from unlocked cards, and the arena starts or 
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     _ = m.key(.back);
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 1), m.row);
+    try std.testing.expectEqual(@as(u8, 2), m.row);
     // Arena: start when outside, leave when in.
     m.open(.arena);
     try std.testing.expect(m.enabled(0) and !m.enabled(1));
@@ -606,20 +663,20 @@ test "pause resumes on back, confirms quit, and cancels back to pause" {
     var m: Menu = .{};
     m.open(.pause);
     try std.testing.expectEqual(Command.@"resume", m.key(.back));
-    m.row = 9;
+    m.row = 10;
     _ = m.key(.confirm);
     try std.testing.expectEqual(Screen.confirm_quit, m.screen);
     m.select(1);
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 9), m.row);
+    try std.testing.expectEqual(@as(u8, 10), m.row);
     _ = m.key(.confirm);
     try std.testing.expectEqual(Command.quit, m.key(.confirm));
     // LOAD is skipped without a save.
     m.open(.pause);
-    m.row = 5;
+    m.row = 6;
     _ = m.key(.down);
-    try std.testing.expectEqual(@as(u8, 7), m.row);
+    try std.testing.expectEqual(@as(u8, 8), m.row);
 }
 
 /// Exchange assignments rather than allowing two controllers to own one slot.

@@ -19,6 +19,7 @@ const Build = @import("../game/Build.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
 const CityContent = @import("../game/CityContent.zig");
+const FoundryCase = @import("../game/FoundryCase.zig");
 const Heroes = @import("../game/Heroes.zig");
 const Specials = @import("../game/Specials.zig");
 const Pets = @import("../game/Pets.zig");
@@ -44,7 +45,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe, music_previous, music_toggle, music_next };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe, music_previous, music_toggle, music_next, build_tab };
 pub fn hitId(area: Area, row: usize) u16 {
     // The row is one byte; lists longer than that pass `row & 0xff` and resolve it on click.
     std.debug.assert(row < 256);
@@ -301,6 +302,7 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
             };
         },
         .world_map => if (sb) |s| drawWorldMap(c, menu, s),
+        .build => if (sb) |s| drawBuildMenu(c, menu, s),
         .settings => drawSettings(c, menu),
         .controls => drawControls(c, menu),
         .pad_controls => drawPadControls(c, menu),
@@ -309,6 +311,90 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
         .arena => drawArena(c, menu, sb),
         else => {},
     }
+}
+
+/// A compact, Minecraft-style inventory: category tabs and a fixed four-by-four card grid.
+/// The three pages are bounded independently, so even a full blueprint library never scrolls.
+fn drawBuildMenu(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const width = @min(940, c.width - 32);
+    const height = @min(620, c.height - 32);
+    const r = menuRect(c, width, height);
+    panel(c, r, "BUILD INVENTORY");
+    c.text(r.x + r.w - 262, r.y + 21, "CHOOSE A PIECE TO PLACE", 0.9, dim);
+
+    const labels = [_][]const u8{ "STRUCTURES", "KITS", "BLUEPRINTS" };
+    const tab_gap: f32 = 8;
+    const tab_width = (r.w - 40 - 2 * tab_gap) / 3;
+    for (labels, 0..) |label, i| {
+        const tab: Rect = .{ .x = r.x + 20 + @as(f32, @floatFromInt(i)) * (tab_width + tab_gap), .y = r.y + 50, .w = tab_width, .h = 36 };
+        const active = menu.build_tab == i;
+        const focused = active and menu.build_tabs_focus;
+        c.rect(tab, if (active) alpha(accent, 0.24) else alpha(accent, 0.07));
+        c.frame(tab, if (focused) 2 else 1, if (active) accent else alpha(accent, 0.45));
+        if (focused) c.focus(tab);
+        const count = Build.paletteCount(sb, @enumFromInt(i));
+        var title: [48]u8 = undefined;
+        const text = std.fmt.bufPrint(&title, "{s}  {d}", .{ label, count }) catch label;
+        c.centered(tab.x + tab.w / 2, tab.y + 11, text, 0.95, if (active) ink else dim);
+        c.hit(tab, hitId(.build_tab, i));
+    }
+
+    const grid_x = r.x + 20;
+    const grid_y = r.y + 102;
+    const gap_x: f32 = 8;
+    const gap_y: f32 = 7;
+    const card_w = (r.w - 40 - 3 * gap_x) / 4;
+    const card_h = @min(82, (height - 102 - 79 - 22 - 3 * gap_y) / 4);
+    const palette: Build.Palette = @enumFromInt(menu.build_tab);
+    for (0..Menu.build_slots) |i| {
+        const x = grid_x + @as(f32, @floatFromInt(i % Menu.build_columns)) * (card_w + gap_x);
+        const y = grid_y + @as(f32, @floatFromInt(i / Menu.build_columns)) * (card_h + gap_y);
+        const card: Rect = .{ .x = x, .y = y, .w = card_w, .h = card_h };
+        const entry = Build.paletteEntry(sb, palette, i) orelse {
+            c.rect(card, .{ 1, 1, 1, 0.025 });
+            c.frame(card, 1, .{ 1, 1, 1, 0.04 });
+            continue;
+        };
+        const selected = !menu.build_tabs_focus and menu.row == i;
+        c.rect(card, if (selected) alpha(accent, 0.21) else .{ 1, 1, 1, 0.055 });
+        c.frame(card, if (selected) 2 else 1, if (selected) accent else .{ 0.32, 0.48, 0.52, 0.45 });
+        if (selected) {
+            c.focus(card);
+            c.hit(card, hitId(.menu, i));
+        } else c.hit(card, hitId(.menu, i));
+
+        const tint: Color = switch (palette) {
+            .structures => .{ 0.36 + @as(f32, @floatFromInt(i % 3)) * 0.08, 0.51, 0.43, 1 },
+            .kits => .{ 0.26, 0.57 + @as(f32, @floatFromInt(i % 3)) * 0.08, 0.69, 1 },
+            .blueprints => .{ 0.54, 0.43 + @as(f32, @floatFromInt(i % 3)) * 0.08, 0.69, 1 },
+        };
+        const icon_size = @min(36, card_h * 0.45);
+        const icon: Rect = .{ .x = card.x + (card.w - icon_size) / 2, .y = card.y + 5, .w = icon_size, .h = icon_size };
+        c.rect(icon, tint);
+        c.rect(.{ .x = icon.x + icon_size * 0.12, .y = icon.y + icon_size * 0.12, .w = icon_size * 0.72, .h = 3 }, alpha(ink, 0.35));
+        c.rect(.{ .x = icon.x + icon_size - 5, .y = icon.y + icon_size * 0.28, .w = 3, .h = icon_size * 0.58 }, alpha(.{ 0, 0, 0, 1 }, 0.24));
+
+        var name_buffer: [64]u8 = undefined;
+        const name = pretty(&name_buffer, Build.entryName(sb, entry));
+        const fit = @min(1, (card.w - 12) / @max(1, Canvas.textWidth(name, 1)));
+        c.centered(card.x + card.w / 2, card.y + card_h - 18, name, fit, ink);
+    }
+
+    const count = Build.paletteCount(sb, palette);
+    if (count == 0) {
+        c.text(grid_x + 8, grid_y + 44, "NO SAVED BLUEPRINTS YET  —  CAPTURE A BUILD WITH P", 1, dim);
+    } else if (!menu.build_tabs_focus and menu.row < count) {
+        if (Build.paletteEntry(sb, palette, menu.row)) |entry| {
+            var detail: [96]u8 = undefined;
+            const name = Build.entryName(sb, entry);
+            const description = if (entry == .item and entry.item == .platform)
+                "SELECT TO SET DECK DIRECTION AND HEIGHT"
+            else
+                "SELECT TO EQUIP  •  AIM AND PLACE IN THE WORLD";
+            c.print(grid_x + 2, r.y + height - 79, 0.92, gold, "{s}   {s}", .{ pretty(&detail, name), description });
+        }
+    }
+    c.text(grid_x + 2, r.y + height - 43, "ARROWS / D-PAD MOVE  UP TO TABS  ENTER / A SELECT  ESC / B BACK", 0.88, dim);
 }
 
 /// Who a player is playing: their hero's name, or their own ranger's.
@@ -498,7 +584,7 @@ fn drawQuestLog(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         const begun = CityContent.started(detroit, &sb.progress, i);
         c.text(r.x + 24, y, if (done) "[x]" else "[ ]", 1, if (done) good else dim);
         c.text(r.x + 58, y, m.title, 1, if (done) dim else ink);
-        if (!done and begun) c.text(r.x + r.w - 130, y, "IN PROGRESS", 0.8, gold);
+        if (!done and begun and i == 0) c.print(r.x + r.w - 130, y, 0.8, gold, "PAGES {d}/3", .{FoundryCase.count(&sb.progress)}) else if (!done and begun) c.text(r.x + r.w - 130, y, "IN PROGRESS", 0.8, gold);
         y += 21;
     }
     const boss_done = CityContent.bossDefeated(detroit, &sb.progress);

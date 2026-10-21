@@ -234,6 +234,32 @@ test "the built-in conversations load and every keeper and walker has one" {
     try std.testing.expect(d.walker(0) != null and d.walker(7) != null);
 }
 
+test "Maro only accepts the Foundry Ledger report after all three pages are shared" {
+    var d = try load(std.testing.allocator, builtin);
+    defer d.deinit();
+    var progress: Progress = .{};
+    progress.setFlag("met_maro");
+    progress.setFlag("foundry_started");
+    var wallet: Market.Wallet = .{};
+    const maro = d.find("keeper_0").?;
+    var session = d.begin(maro, .{ .keeper = 0 }, &progress).?;
+    var visible: [max_choices]u8 = undefined;
+    try chooseNext(&d, &session, &progress, &wallet, "foundry_case_status");
+    var count = d.visibleChoices(session, &progress, &visible);
+    for (visible[0..count]) |choice| try std.testing.expect(!std.mem.eql(u8, d.node(session).choices[choice].text, "I have all three manifest pages."));
+    progress.setFlag("foundry_pages_complete");
+    count = d.visibleChoices(session, &progress, &visible);
+    var visible_slot: ?u8 = null;
+    for (visible[0..count], 0..) |choice, slot| {
+        if (std.mem.eql(u8, d.node(session).choices[choice].text, "I have all three manifest pages.")) visible_slot = @intCast(slot);
+    }
+    session.choice = visible_slot orelse return error.ReportChoiceMissing;
+    session.reveal = @floatFromInt(d.node(session).text.len);
+    _ = d.key(&session, .confirm, &progress, &wallet);
+    try std.testing.expect(progress.hasFlag("foundry_exposed"));
+    try std.testing.expectEqualStrings("foundry_exposure", d.node(session).id);
+}
+
 test "conversations branch on flags, reveal text, give scrap once, and end in panels" {
     var d = try load(std.testing.allocator, builtin);
     defer d.deinit();
@@ -313,6 +339,7 @@ test "each keeper hands over their Detroit mission once, then reminds, and the g
             1 => "windsor_reminder",
             else => "bile_reminder",
         };
+        if (i == 0) try chooseNext(&d, &session, &progress, &wallet, "foundry_case_status");
         try chooseNext(&d, &session, &progress, &wallet, reminder);
         // Once exposed, the reminder goes away too.
         progress.setFlag(m.exposed_flag);

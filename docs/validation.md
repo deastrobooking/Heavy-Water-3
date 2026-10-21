@@ -1472,10 +1472,16 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 
 ## Floating platform editor — 2026-10-20
 
-- **Added:** O in the build tool opens a popup with horizontal and vertical 16 m square decks and 1 m / 10 m height adjustments from the aimed surface, clamped to −1,000…+1,200 m. Platforms are saved as ordinary body-plate machines. Their placement preview now renders the body device and permits unsupported placement at the chosen offset; overlap and player collision checks still apply. P remains prefab capture.
+- **Added:** the initial editor was opened with O in the build tool. The current entry path is Pause → BUILD → STRUCTURES → FLOATING PLATFORM. The popup offers horizontal and vertical 16 m square decks and 1 m / 10 m height adjustments from the aimed surface, clamped to −1,000…+1,200 m. Platforms are saved as ordinary body-plate machines. Their placement preview renders the body device and permits unsupported placement at the chosen offset; overlap and player collision checks still apply. P remains prefab capture.
 - **Checked:** default `python3 tools/zig.py build check` and `git diff --check` passed. `MTL_DEBUG_LAYER=1` ReleaseSafe showcase 80 captured frame 120 and exited cleanly with Metal API Validation enabled; the popup is readable and the aimed platform preview is visible, red where it overlaps nearby geometry.
 - **Not checked:** hands-on input and placement, save/reload in the game, and headless tests. The existing elevator ride test remains the current evidence for elevator operation; it does not prove a continuous ascent route through the new skyline.
 - **Still open:** playable route walkability across the crown loop, Hive patrols on elevated skyways, and civilian flight from threats.
+
+## Build inventory menu — 2026-10-20
+
+- **Added:** pause-menu BUILD is the first option. It opens a fixed four-by-four inventory with STRUCTURES, KITS, and BLUEPRINTS tabs. Selecting a card equips it; choosing FLOATING PLATFORM opens the existing orientation and height popup. Build placement no longer cycles its palette with Tab, and the O shortcut is removed; the inventory is the selection path. Showcase 91 opens this inventory for review.
+- **Checked:** the default `python3 tools/zig.py build check` and installed `python3 tools/zig.py build` pass. The first compile caught two new Zig typing errors in grid navigation and card colors; both were corrected. The full headless suite passed **532/532** on the working tree. The first Metal showcase attempt exposed a dispatcher omission: showcase 91 configured the inventory but fell through to the world camera. It now routes through the GUI showcase. After the fix, the build check and install build passed, and `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=91 -Dcapture-frame=30` captured frame 30 at 2560×1600 with Metal API Validation enabled; the inventory tabs, 4×4 structure grid, focus outline, instructions and background are visible. `git diff --check` passes; no Metal validation errors appeared.
+- **Not checked:** keyboard/controller or mouse interaction, placement via the new route, save/reload, and performance. The capture confirms the menu's rendered layout but not hands-on use.
 
 ## Chicago heightmap and rotating Earth map — 2026-10-20
 
@@ -1719,4 +1725,24 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** full suite 516/516 on the whole working tree (this session's changes and another session's uncommitted flight-controls work); default and 0.17 `build check` pass; the Metal smoke visits all ten destinations and walks into a cave.
 - **Seen:** showcase 42 (the cave mouth) under `MTL_DEBUG_LAYER=1` shows the restored mountainside, a steep snow-covered flank; showcase 41 (the foothills panorama) is mostly forest and shows no obvious range, so the far look of the four ridges was not judged.
 - **Not checked:** hands-on cave entry and swimming; the other session's flight and gamepad edits by hand; the audit's claim that seven test files were unregistered was wrong (their tests already ran) and `Renderer.zig`'s two tests cannot compile as a unit (they need the build's `options` module and have a division-coercion error), so they do not run.
+
+## Nature benchmark rebaseline — 2026-10-21
+
+- **Measured:** four consecutive ReleaseFast `python3 tools/benchmark.py --nature --frames 600 --silent` runs on Apple M3 Pro / Metal. Every run passed all benchmark checks, including complete frames, upload budget, bounded GPU residency/pools, active-ring coverage, streaming exercised and GPU timing collected.
+- **Results:** all runs reported 83 visible vegetation instances and 5,579,930 submitted triangles. Median whole-command-buffer GPU p50/p95/p99 was **5.623/10.264/12.439 ms** (p99 range **12.086–12.622 ms**), with 598 GPU samples per run. Median CPU p99 was **4.101 ms**; no active-ring frames were underfilled. The current GPU p99 is below the 16.667 ms target.
+- **Discrepancy:** this run did not reproduce the 2026-10-14 notes' 551 visible vegetation instances, 12,248,988 triangles, and 19.690 ms GPU p99. This review did not isolate why the benchmark draw set differs. Keep tree LOD as the next nature step before further crown detail, and reconcile the measurement change before treating it as a current budget failure.
+- **Report:** `.tools/nature-benchmark.json` contains the final run; the four results are summarized here because each run overwrites that report.
+
+## Detroit liberation loop audit — 2026-10-21
+
+- **Already connected:** `CityContent.detroit` defines the three draft missions, boss and ten discoveries; keeper conversations can start each mission; `QuestLog` selects the current mission from shared `Progress` flags; those flags are part of the existing world save.
+- **Concrete gaps:** there is no runtime evidence collection or mission-completion interaction, so no gameplay path sets `foundry_exposed`, `windsor_exposed`, or `bile_exposed`. `titan_defeated` is only set in tests, and the runtime never calls `CityContent.updateLiberation`; Detroit therefore cannot become free in a playthrough. The ten discoveries and declared personal rewards have no runtime placement or award path.
+- **Next slice:** implement only the existing draft Foundry Ledger proposal: three shipment checkpoints, shared evidence progress, a Maro exposure conversation, and a per-player Kit reward. Preserve the draft label. Add deterministic progression and save coverage plus a real-game smoke before beginning the next mission.
+- **Not changed or verified in this audit:** no game code changed for city content; no build, tests, smoke, or hands-on city play were run for this audit. The fresh nature benchmark above was the only executable validation in this pass.
+
+## Detroit Foundry Ledger first playable slice — 2026-10-21
+
+- **Added:** Maro starts the draft case; three deterministic checkpoint props are placed at generated industrial buildings, highlighted when aimed at, and collected through normal hands interaction. Shared `Progress` flags persist each page, and the quest log/HUD report the count. After the last page, Maro's ledger report sets `foundry_exposed` and rewards Sprint Servos +1 in each active player's `Kit`.
+- **Checked:** default `python3 tools/zig.py build check` passes; the full headless suite passes **537/537**. `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dshowcase=92 -Dcapture-frame=30` captured frame 30 at 2560×1600 with Metal API Validation enabled; the manifest prop and `FOUNDRY LEDGER PAGE 1/3 X / CLICK RECOVER` prompt were visually confirmed under the crosshair. The full `MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=300` passed all 300 frames. Its in-game smoke started the case through Maro's dialogue, recovered all three pages through aim/interact, saved and restored them, exposed the case through Maro's report, and verified P1's Sprint Servos reward. No Metal validation errors appeared.
+- **Still open:** the page/checkpoint visuals are temporary world props. There is no brood-scavenger fight, physical foundry steward, loading-dock confrontation or yard opening yet. The other two Detroit missions, Titan boss, ten discoveries and final liberation outcome remain unimplemented. Hands-on keyboard/controller play and active-guest reward delivery were not checked.
 
