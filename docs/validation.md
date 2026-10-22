@@ -1,3 +1,11 @@
+## Farming (BT6, part) — 2026-10-21
+
+- **Added:** crops (`game/Farm.zig`). In the farm style the block tool offers SEEDS; a seed on tilled soil costs one hay, grows through three stages over 180 s, and a ripe harvest gives the harvester four hay blocks (their own kit), so farming funds building. Crops are shared, saved (format 30, fixture checked in), refuse building on their cell, and die when their soil is dug out. Drawn with the scatter plant mesh, scaled by growth and gold when ripe.
+- **Tests added:** growth stages; a Sandbox test that plants through the block tool aimed at soil, charges the seed, refuses building on the crop, grows it, has P2 harvest it for P2's hay while the soil stays, restores the saved crop, kills it when the soil goes and refuses seeds off soil.
+- **Checked:** default and 0.17 `build check`; the full suite passed 588/588; the Metal smoke exited 0 with a farm stage (five seeds planted, four left at different stages, a ripe one harvested into P1's kit); a capture showed the crops too small to read, they were scaled up 2.4 times and a second capture shows sprouts growing along the soil row.
+- **Committed tree alone** (clean checkout without the other session's uncommitted work): 587/587 tests and the full Metal smoke exit 0.
+- **Deferred:** dungeon spawner and treasure chest (to the generated dungeon work), a swinging drawbridge, and strategy hooks; crops ignore seasons, weather and water. **Not checked:** hands-on farming, cross-compiles.
+
 ## Platformer blocks (BT5) — 2026-10-21
 
 - **Added:** a PLATFORMER style whose eight materials are mechanisms (`game/Platformer.zig`): springs launch at 15 m/s, boost strips fling along their facing, crumbling blocks drop 0.6 s after a landing and return 4 s later, hazards deal 20 damage every 0.6 s, checkpoints set a per-player recovery point (also used when the wilds knock a player out), pressure plates hold every gate open, movers are kinematic bodies sliding 4 m and back. Hidden cells (crumbled, open gates, movers) are left out of the mesh and collider through `Mesher.Hide`. `build/Course.zig` checks a course can be finished. Starter pieces: jump course, gate room, mover bridge.

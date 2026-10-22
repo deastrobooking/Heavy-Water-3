@@ -70,6 +70,7 @@ test {
     _ = @import("build/Prefabs.zig");
     _ = @import("build/Course.zig");
     _ = @import("game/Platformer.zig");
+    _ = @import("game/Farm.zig");
     _ = @import("ui/BlockPalette.zig");
     _ = @import("procedural/Heightmap.zig");
     _ = @import("procedural/Landscape.zig");

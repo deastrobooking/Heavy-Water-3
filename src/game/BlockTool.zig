@@ -15,6 +15,7 @@ const Materials = @import("../build/Materials.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const Kit = @import("Kit.zig");
 const Prefabs = @import("../build/Prefabs.zig");
+const Farm = @import("Farm.zig");
 
 pub const reach: f32 = 14;
 /// Largest box one fill may cover.
@@ -54,17 +55,23 @@ pub const Command = struct {
 };
 
 /// The palette position: one of the four shapes, a starter prefab of the style, or the clipboard.
-pub const Entry = union(enum) { shape: Blocks.Shape, prefab: Prefabs.Prefab };
+pub const Entry = union(enum) { shape: Blocks.Shape, seed, prefab: Prefabs.Prefab };
+
+/// The farm style also offers seeds, right after the shapes.
+fn seeds(st: State) usize {
+    return @intFromBool(st.style == .farm);
+}
 
 pub fn entryCount(sb: *const Sandbox, slot: usize, st: State) usize {
-    return Blocks.placeable_shapes.len + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0);
+    return Blocks.placeable_shapes.len + seeds(st) + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0);
 }
 
 pub fn entry(sb: *const Sandbox, slot: usize, st: State) Entry {
     const i = st.shape % entryCount(sb, slot, st);
     if (i < Blocks.placeable_shapes.len) return .{ .shape = Blocks.placeable_shapes[i] };
+    if (seeds(st) == 1 and i == Blocks.placeable_shapes.len) return .seed;
     const starters = Prefabs.starters(st.style);
-    const p = i - Blocks.placeable_shapes.len;
+    const p = i - Blocks.placeable_shapes.len - seeds(st);
     return .{ .prefab = if (p < starters.len) starters[p] else sb.block_clips[slot].prefab() };
 }
 
@@ -77,6 +84,7 @@ pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
             .stair => "STAIR",
             else => "",
         },
+        .seed => "SEEDS",
         .prefab => |p| p.name,
     };
 }
@@ -96,6 +104,7 @@ fn floorCell(p: [3]f32) [3]i32 {
 pub fn refusal(sb: *const Sandbox, c: [3]i32, alone: bool) ?[]const u8 {
     const blocks = sb.block_world.blocks;
     if (!blocks.get(c[0], c[1], c[2]).isEmpty()) return "occupied";
+    if (sb.farm.find(c) != null) return "a crop grows there";
     if (!sb.block_world.hasRoom(Blocks.chunkOf(c[0], c[2]))) return "block budget full: build near your other blocks";
     const lo: [3]f32 = .{ @floatFromInt(c[0]), @floatFromInt(c[1]), @floatFromInt(c[2]) };
     // Never build into a player.
@@ -184,7 +193,11 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
     };
     if (cmd.place) {
         const c = st.place orelse return sb.sayTo(slot, "aim at the ground or a block within {d:.0} m", .{reach});
-        if (entry(sb, slot, st.*) == .prefab) return stamp(sb, slot, entry(sb, slot, st.*).prefab, st.rot, c);
+        switch (entry(sb, slot, st.*)) {
+            .prefab => |p| return stamp(sb, slot, p, st.rot, c),
+            .seed => return Farm.plant(sb, slot, c),
+            .shape => {},
+        }
         if (refusal(sb, c, true)) |why| return sb.sayTo(slot, "blocked: {s}", .{why});
         const want = cell(st.*);
         if (kit.blocks[want.material] == 0) return sb.sayTo(slot, "no {s} blocks left", .{Materials.all[want.material].name});
@@ -194,6 +207,8 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
     }
     if (cmd.remove) {
         const c = st.remove orelse return;
+        // Aiming at a field's soil takes the crop growing on it first.
+        if (Farm.harvest(sb, slot, .{ c[0], c[1] + 1, c[2] })) return;
         const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
         try sb.block_world.blocks.set(c[0], c[1], c[2], .empty);
         kit.blocks[old.material] +|= 1;
@@ -424,6 +439,15 @@ pub fn ghost(sb: *const Sandbox, slot: usize, st: State, out: []World.Prop, star
     var n = start;
     const c = st.place orelse return n;
     if (n == out.len) return n;
+    if (entry(sb, slot, st) == .seed) {
+        out[n] = .{
+            .mesh = sb.catalog.content.block,
+            .transform = .{ .position = .{ @as(f32, @floatFromInt(c[0])) + 0.5, @as(f32, @floatFromInt(c[1])) + 0.15, @as(f32, @floatFromInt(c[2])) + 0.5 } },
+            .tint = if (Farm.refusal(sb, slot, c) == null) .{ 0.45, 0.95, 0.4, 1 } else .{ 1.0, 0.3, 0.25, 1 },
+            .size = .{ 0.3, 0.3, 0.3 },
+        };
+        return n + 1;
+    }
     if (entry(sb, slot, st) == .prefab) {
         const prefab = entry(sb, slot, st).prefab;
         const size = Prefabs.turnedSize(prefab.size, st.rot);

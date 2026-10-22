@@ -21,6 +21,7 @@ const TerrainEdit = @import("../world/TerrainEdit.zig");
 const BlockWorld = @import("../build/BlockWorld.zig");
 const BlockTool = @import("BlockTool.zig");
 const Platformer = @import("Platformer.zig");
+const Farm = @import("Farm.zig");
 const Blocks = @import("../build/Blocks.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
@@ -428,6 +429,8 @@ terrain_edit: *TerrainEdit = undefined,
 block_world: BlockWorld = undefined,
 /// Platformer block state: checkpoints, crumbling blocks, plates and movers.
 platform: Platformer.State = .{},
+/// Crops growing on tilled soil (shared, saved).
+farm: Farm.State = .{},
 /// Each player's copied block piece (session only).
 block_clips: [max_players]@import("../build/Prefabs.zig").Clip = @splat(.{}),
 nearby_center: ?Key = null,
@@ -1283,6 +1286,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (timing != null) stage_timer.reset();
     Frontier.step(self, camera, input, actions, frozen, dt, timing);
     Platformer.step(self, camera, dt) catch |err| self.say("blocks failed: {s}", .{@errorName(err)});
+    Farm.step(self, dt);
     if (timing) |profile| profile.metrics.record(.frontier, stage_timer.lap() * 1000);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
@@ -2463,6 +2467,12 @@ pub fn syncBlocks(self: *Sandbox) !void {
     try Platformer.refreshMovers(self);
 }
 
+fn cropDocs(self: *const Sandbox, arena: std.mem.Allocator) ![]const Farm.Doc {
+    const docs = try arena.alloc(Farm.Doc, self.farm.len);
+    for (docs, self.farm.crops[0..self.farm.len]) |*d, crop| d.* = .{ .x = crop.cell[0], .y = crop.cell[1], .z = crop.cell[2], .growth = crop.growth };
+    return docs;
+}
+
 fn blockSections(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.BlockSection {
     const blocks = self.block_world.blocks;
     const sections = try arena.alloc(Save.BlockSection, blocks.count);
@@ -2531,6 +2541,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .collected = self.modifications.slice(),
         .terrain = try self.terrainTiles(arena),
         .blocks = try self.blockSections(arena),
+        .crops = try self.cropDocs(arena),
         .machines = machines[0..machine_count],
         .members = members: {
             var list: std.ArrayList(Save.MemberState) = .empty;
@@ -2589,6 +2600,12 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
         TerrainEdit.decodeTile(tile.data, cells) catch return error.InvalidSave;
         for (doc.terrain[0..i]) |other| if (other.x == tile.x and other.z == tile.z) return error.InvalidSave;
         if (@abs(tile.x) > Key.limit or @abs(tile.z) > Key.limit) return error.InvalidSave;
+    }
+    // Crops: within the field cap, growth in range, one per cell.
+    if (doc.crops.len > Farm.capacity) return error.InvalidSave;
+    for (doc.crops, 0..) |crop, i| {
+        if (!std.math.isFinite(crop.growth) or crop.growth < 0 or crop.growth > 1) return error.InvalidSave;
+        for (doc.crops[0..i]) |other| if (other.x == crop.x and other.y == crop.y and other.z == crop.z) return error.InvalidSave;
     }
     // Blocks too: every section decodes, none repeats, and the chunks they fill fit.
     const block_cells = try terrain_arena.allocator().alloc([Blocks.section_cells]Blocks.Cell, doc.blocks.len);
@@ -2686,6 +2703,11 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (terrain, 0..) |tile, i| self.terrain_edit.loadTile(.{ .x = doc.terrain[i].x, .z = doc.terrain[i].z }, &tile) catch unreachable; // checked above
     self.block_world.blocks.clear();
     Platformer.reset(self);
+    self.farm = .{};
+    for (doc.crops) |crop| {
+        self.farm.crops[self.farm.len] = .{ .cell = .{ crop.x, crop.y, crop.z }, .growth = crop.growth };
+        self.farm.len += 1;
+    }
     for (doc.blocks, block_cells, block_filled) |section, *cells, filled| self.block_world.blocks.loadSection(.{ .x = section.x, .y = section.y, .z = section.z }, cells, filled) catch unreachable; // checked above
     try self.syncBlocks();
     self.profile = profile;
@@ -3254,6 +3276,59 @@ test "platformer blocks launch, crumble and return, hurt, hold checkpoints, open
     }
     const moved = sandbox.physics.position(sandbox.platform.movers[0].body).?;
     try std.testing.expect(moved[2] - start[2] > 1);
+}
+
+test "a seed planted on tilled soil grows, pays the harvester in hay, and survives a save" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const spot = [2]f32{ 230.5, -490.5 };
+    const y: i32 = @intFromFloat(@ceil(Terrain.surface(sandbox.seed, spot[0], spot[1]).height));
+    const x: i32 = @intFromFloat(@floor(spot[0]));
+    const z: i32 = @intFromFloat(@floor(spot[1]));
+    sandbox.player.feet = .{ spot[0] + 30, @floatFromInt(y), spot[1] };
+    try sandbox.block_world.blocks.set(x, y, z, .{ .shape = .cube, .material = Farm.soil() });
+    try sandbox.block_world.blocks.set(x + 1, y, z, .{ .shape = .cube, .material = Farm.soil() });
+    try sandbox.syncBlocks();
+    // Aim down at the soil from above: the tool's empty cell is the one on top of it.
+    const eye: [3]f32 = .{ spot[0], @as(f32, @floatFromInt(y)) + 4, spot[1] };
+    var st: BlockTool.State = .{ .style = .farm, .shape = Blocks.placeable_shapes.len };
+    try std.testing.expect(BlockTool.entry(&sandbox, 0, st) == .seed);
+    const hay = sandbox.kits[0].blocks[Farm.hay()];
+    try BlockTool.step(&sandbox, 0, &st, eye, .{ 0, -1, 0 }, .{ .place = true });
+    try std.testing.expectEqual(@as(usize, 1), sandbox.farm.len);
+    try std.testing.expectEqual(hay - Farm.seed_cost, sandbox.kits[0].blocks[Farm.hay()]);
+    // Nothing can be built where the crop grows.
+    try std.testing.expect(BlockTool.refusal(&sandbox, .{ x, y + 1, z }, false) != null);
+
+    // Grown, then harvested by P2: the hay goes to P2.
+    Farm.step(&sandbox, Farm.grow_seconds);
+    try std.testing.expect(Farm.State.ripe(sandbox.farm.crops[0]));
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sandbox.joinGuest(0);
+    sandbox.guests[0].player.feet = .{ spot[0] - 30, @floatFromInt(y), spot[1] };
+    const p2_hay = sandbox.kits[1].blocks[Farm.hay()];
+    var p2: BlockTool.State = .{};
+    try BlockTool.step(&sandbox, 1, &p2, eye, .{ 0, -1, 0 }, .{ .remove = true });
+    try std.testing.expectEqual(@as(usize, 0), sandbox.farm.len);
+    try std.testing.expectEqual(p2_hay + Farm.harvest_yield, sandbox.kits[1].blocks[Farm.hay()]);
+    try std.testing.expect(!sandbox.block_world.blocks.get(x, y, z).isEmpty()); // the soil stays
+
+    // The ripe crop was saved; restoring brings it back.
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.farm.len);
+    try std.testing.expect(Farm.State.ripe(sandbox.farm.crops[0]));
+
+    // Digging out the soil kills the crop; soil elsewhere still takes seeds.
+    try sandbox.block_world.blocks.set(x, y, z, .empty);
+    Farm.step(&sandbox, 1);
+    try std.testing.expectEqual(@as(usize, 0), sandbox.farm.len);
+    try std.testing.expect(Farm.refusal(&sandbox, 0, .{ x + 1, y + 1, z }) == null);
+    try std.testing.expect(Farm.refusal(&sandbox, 0, .{ x + 5, y + 1, z }) != null);
 }
 
 /// Points the camera at a world position.

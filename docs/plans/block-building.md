@@ -1,6 +1,6 @@
 # Block building and terrain sculpting
 
-**Status:** planned 2026-10-21, owner decisions below. BT0 to BT5 are done: terrain sculpting (player 1) and a block grid in four styles plus platformer mechanisms, with starter prefabs, restyling, copy and paste and a course reachability check, that all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
+**Status:** planned 2026-10-21, owner decisions below. BT0 to BT5 and the farming part of BT6 are done: terrain sculpting (player 1) and a block grid in four styles plus platformer mechanisms, with starter prefabs, restyling, copy and paste and a course reachability check, that all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
 
 **Owner decisions (2026-10-21):**
 - A chunked block grid (Minecraft/Lego feel), not free-placed props. The existing machine Build tool stays for mechanisms (doors, lifts, logic) that snap into the grid.
@@ -29,7 +29,7 @@
 | BT3 | Four-player build input, `Kit` block inventory, palette, fill and box tools | done 2026-10-21: pad chord for every player, 64 starter blocks per material, refunds to the remover, pick, box fill and clear up to 512 cells, palette strip per view. Open: earning blocks in the wilds, guests cannot sculpt terrain |
 | BT4 | Style table, dungeon, eco city and farm styles, style swap, block prefabs | done 2026-10-21: role-based styles, ten starter prefabs, restyle a box, copy a box to a per-player clipboard and paste it. Open: the clipboard is not saved or shared as a file, prefabs have no doors, torches or other mechanisms yet (BT5 and BT6) |
 | BT5 | Platformer blocks and hazards, reachability validator | done 2026-10-21: spring, boost strip, crumble, hazard, checkpoint, pressure plate and gate, mover; `Course.reachable`. Open: key doors and wiring blocks to the machine signal bus (plates open every gate for now), a kill plane, crumble and gate state are not saved (a load restores them) |
-| BT6 | Crops, spawner, chest, gate, strategy hooks | planned |
+| BT6 | Crops, spawner, chest, gate, strategy hooks | crops done 2026-10-21: seeds on tilled soil, three growth stages over three minutes, ripe harvest pays the harvester four hay, saved in format 30. Deferred, with reasons: a dungeon spawner and treasure chest only make sense in generated dungeons (a player-built chest that pays loot is an exploit), so they move to the Interiors dungeon work; castle gates are covered by plates and gates (BT5), a drawbridge that swings is not built; room roles and other strategy hooks wait for the settlement layer. Crops ignore seasons, weather and water for now |
 | BT7 | Polish, benchmarks, hands-on checklist | planned |
 
 Risks: terrain edit thread safety (do BT1 alone first); `Physics.max_meshes` of 64; the Canvas cap of 640 commands for palette UI; the 8 MB module-state stack; the 4 MiB save cap.

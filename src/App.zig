@@ -2716,6 +2716,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeSculpt(camera);
             self.smokeBlocks(camera);
             self.smokePrefabs(camera);
+            self.smokeFarm(camera);
         },
         5 => {
             if (self.smoke_terrain_dirty == 0) return self.smokeFail("SMOKE SCULPT NEVER REACHED THE RENDERER", .{});
@@ -3715,6 +3716,26 @@ fn smokePrefabs(self: *App, camera: *@import("world/Camera.zig")) void {
         }
     }
     std.log.info("Smoke prefabs: tower, cell, greenhouse, barn and jump course laid ({d} blocks); the barn restyled as eco city; the course is reachable", .{laid});
+}
+
+/// A row of tilled soil in front of the camera: plant four seeds, grow them to different stages
+/// (left in place to be seen), and harvest a ripe one into P1's kit.
+fn smokeFarm(self: *App, camera: *@import("world/Camera.zig")) void {
+    const sb = &self.sandbox;
+    const Farm = @import("game/Farm.zig");
+    const Terrain = @import("procedural/Terrain.zig");
+    const f = camera.forward();
+    const x0: i32 = @intFromFloat(@floor(camera.position.x() + f.x() * 8 - 2));
+    const z0: i32 = @intFromFloat(@floor(camera.position.z() + f.z() * 8));
+    const y: i32 = @intFromFloat(@ceil(Terrain.surface(sb.seed, @floatFromInt(x0), @floatFromInt(z0)).height));
+    for (0..5) |i| sb.block_world.blocks.set(x0 + @as(i32, @intCast(i)), y, z0, .{ .shape = .cube, .material = Farm.soil() }) catch |err| return self.smokeFail("SMOKE FARM SOIL {s}", .{@errorName(err)});
+    sb.syncBlocks() catch |err| return self.smokeFail("SMOKE FARM SYNC {s}", .{@errorName(err)});
+    for (0..5) |i| Farm.plant(sb, 0, .{ x0 + @as(i32, @intCast(i)), y + 1, z0 });
+    if (sb.farm.len < 5) return self.smokeFail("SMOKE FARM PLANTED {d} OF 5: {s}", .{ sb.farm.len, sb.noticeText() });
+    for (sb.farm.crops[0..sb.farm.len], 0..) |*crop, i| crop.growth = @min(1, @as(f32, @floatFromInt(i)) * 0.34);
+    const hay = sb.kits[0].blocks[Farm.hay()];
+    if (!Farm.harvest(sb, 0, .{ x0 + 4, y + 1, z0 }) or sb.kits[0].blocks[Farm.hay()] != hay + Farm.harvest_yield) return self.smokeFail("SMOKE FARM HARVEST DID NOT PAY P1", .{});
+    std.log.info("Smoke farm: five seeds planted on tilled soil, four left growing in stages, a ripe one harvested for {d} hay", .{Farm.harvest_yield});
 }
 
 /// P2 is building; fill a box from P2's own kit (P2 keeps building, so
