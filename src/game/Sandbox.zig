@@ -420,6 +420,8 @@ bile_relay_step: u8 = 0,
 bile_sequence: [BileCase.relay_count]u8 = @splat(0),
 /// Seed-derived Detroit pickup anchors, computed once rather than during aiming or rendering.
 city_discovery_positions: [CityDiscoveries.count]Physics.Vec3 = undefined,
+/// The Foundry yard gate's collider while the gate is shut.
+foundry_gate: Physics.Body = .none,
 /// The approach challenge laid around each discovery (null for the landmark climbs).
 challenges: [CityDiscoveries.count]?@import("Challenges.zig").Built = @splat(null),
 /// Runtime-only Titan phase; an unfinished encounter restarts from phase one after loading.
@@ -1293,6 +1295,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (timing != null) stage_timer.reset();
     Frontier.step(self, camera, input, actions, frozen, dt, timing);
     if (self.block_world.pending()) self.syncBlocks() catch |err| self.say("blocks not rebuilt: {s}", .{@errorName(err)});
+    self.syncFoundryGate();
     Platformer.step(self, camera, dt) catch |err| self.say("blocks failed: {s}", .{@errorName(err)});
     Farm.step(self, dt);
     if (timing) |profile| profile.metrics.record(.frontier, stage_timer.lap() * 1000);
@@ -1933,6 +1936,7 @@ fn stepLife(self: *Sandbox, dt: f32) void {
         n += 1;
     };
     const graph = self.routes();
+    self.life.danger = Frontier.cityDanger(self);
     self.life.step(&self.physics, &graph, self.road_revision, others[0..n], dt);
     for (self.bridges, 0..) |maybe, i| if (maybe) |bridge| if (bridge.closing and !self.bridgeOccupied(i)) self.removeBridge(i);
 }
@@ -2466,6 +2470,19 @@ fn stepGuestBuild(self: *Sandbox, g: *Guest, slot: usize) !void {
         const eye = g.player.eye();
         const f = g.camera.forward();
         try BlockTool.step(self, slot, st, .{ eye.x(), eye.y(), eye.z() }, .{ f.x(), f.y(), f.z() }, g.build_cmd);
+    }
+}
+
+/// The Foundry yard gate is solid from Maro's case until the steward is exposed.
+pub fn syncFoundryGate(self: *Sandbox) void {
+    const shut = self.progress.hasFlag("foundry_started") and !self.progress.hasFlag(@import("FoundryCase.zig").exposed_flag);
+    const has = !self.foundry_gate.eql(.none);
+    if (shut and !has) {
+        const box = @import("FoundryCase.zig").gateBox(&self.catalog.district) orelse return;
+        self.foundry_gate = self.physics.createBody(.{ .half_extents = box.half, .position = box.center, .motion = .static, .user = world_flag }) catch .none;
+    } else if (!shut and has) {
+        self.physics.destroyBody(self.foundry_gate);
+        self.foundry_gate = .none;
     }
 }
 
@@ -3431,6 +3448,68 @@ test "Detroit's discovery challenges are laid, finishable, cage their keepsake u
     try sandbox.restore(std.testing.allocator, bytes, &camera);
     try std.testing.expect(sandbox.block_world.blocks.get(gate[0], gate[1], gate[2]).isAuthored());
     try std.testing.expect(Challenges.finishable(&sandbox, sandbox.challenges[i].?));
+}
+
+test "the Foundry yard gate is solid while shut, and the dock fight resumes with only the guards still standing" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    const FoundryCase = @import("FoundryCase.zig");
+    const box = FoundryCase.gateBox(&catalog.district).?;
+    const from: Physics.Vec3 = .{ box.center[0] + 1, box.center[1] - 1, box.center[2] - 3 };
+    try std.testing.expect(sb.physics.castRayObjects(from, .{ 0, 0, 1 }, 6, .none) == null);
+    sb.progress.setFlag("foundry_started");
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(sb.physics.castRayObjects(from, .{ 0, 0, 1 }, 6, .none) != null);
+
+    // Mid-fight load: the trooper was already down, so only the steward and the skirmisher return.
+    for ([_][]const u8{ FoundryCase.reported_flag, FoundryCase.confrontation_flag, "foundry_trooper_down" }) |flag| sb.progress.setFlag(flag);
+    sb.enemies.units = @splat(null);
+    // Stand back from the gate (units far from every player are not simulated).
+    sb.player.mode = .fly;
+    sb.player.feet = .{ box.center[0], box.center[1] + 12, box.center[2] - 30 };
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expectEqual(@as(usize, 2), sb.enemies.unitCount(Enemies.foundry_nest));
+    // Civilians keep away from the fight at the gate.
+    try std.testing.expectEqual(FoundryCase.gatePosition(&catalog.district).?, Frontier.cityDanger(&sb).?);
+    for (sb.enemies.units) |slot| if (slot) |u| if (u.nest == Enemies.foundry_nest) try std.testing.expect(u.kind != .trooper);
+    // Everyone down before a load: the fight is won on the next step, the gate opens.
+    sb.progress.setFlag("foundry_steward_down");
+    sb.progress.setFlag("foundry_skirmisher_down");
+    sb.enemies.units = @splat(null);
+    try run(&sb, &camera, .{}, .{}, 2);
+    try std.testing.expect(sb.progress.hasFlag(FoundryCase.exposed_flag));
+    try std.testing.expect(sb.physics.castRayObjects(from, .{ 0, 0, 1 }, 6, .none) == null);
+    try std.testing.expect(Frontier.cityDanger(&sb) == null);
+    try std.testing.expectEqualStrings("foundry_trooper_down", Frontier.dockDownFlag(.trooper).?);
+}
+
+test "pedestrians turn away from a city fight and hurry off" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.enableLife();
+    const graph = sb.routes();
+    // A fight at the plaza walker 0 is heading for.
+    // A fight ten metres ahead of walker 0, on the way to the plaza it is heading for.
+    const w = &sb.life.walkers[0];
+    const ahead = R.normalize(R.sub(catalog.district.nodes[w.to].position, w.player.feet));
+    const danger = R.add(w.player.feet, R.scale(.{ ahead[0], 0, ahead[2] }, 10));
+    const before = R.length(R.sub(w.player.feet, danger));
+    sb.life.danger = danger;
+    for (0..180) |_| sb.life.step(&sb.physics, &graph, sb.road_revision, &.{}, 1.0 / 60.0);
+    try std.testing.expect(sb.life.evacuations > 0);
+    try std.testing.expect(R.length(R.sub(sb.life.walkers[0].player.feet, danger)) > before + 5);
+    // With the fight over, nobody keeps fleeing.
+    sb.life.danger = null;
+    for (0..2) |_| sb.life.step(&sb.physics, &graph, sb.road_revision, &.{}, 1.0 / 60.0);
+    for (sb.life.walkers) |other| try std.testing.expect(!other.fleeing);
 }
 
 /// Points the camera at a world position.

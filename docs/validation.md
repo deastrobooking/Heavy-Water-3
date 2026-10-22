@@ -1,3 +1,12 @@
+## Foundry Ledger gaps closed: solid gate, saved fight progress, civilian evacuation (C3) — 2026-10-22
+
+- **Added:** the Foundry yard gate is a static collider from Maro's case until the steward is exposed (`FoundryCase.gateBox` matches the drawn uprights, panel and beam; too tall to jump, a flier can pass above). Each dock fighter sets `foundry_steward_down`, `foundry_trooper_down` or `foundry_skirmisher_down` when defeated; a load brings back only the fighters still standing (health and positions are still not saved), and if all were down the fight completes on the next step. `Frontier.cityDanger` names the active city fight (the dock ambush or the Titan); `Life` pedestrians within 45 m turn back if their walkway leads toward it, hurry (input 0.85 instead of 0.3), prefer roads leading away, and stop fleeing when it ends.
+- **Bug found by a test:** the first flee rule compared the two plazas' distances to the fight, which keeps a walker heading into a fight just past its start plaza; it now compares the walking direction with the direction of the fight.
+- **Tests added:** a Sandbox test that the gate blocks a ray while shut and not after exposure, a mid-fight load with the trooper down brings back only the steward and the skirmisher, all-down completes the fight, and `cityDanger` follows the fight; a pedestrian test where a walker ten metres from a fight turns back and gains distance and nobody keeps fleeing after it ends.
+- **Checked:** default and 0.17 `build check`; the full suite passed 596/596 before the last test tweak (the gate test then passed alone); the Metal smoke's Foundry stage now checks the gate is solid, saves and loads after the first takedown (two fighters return), finishes the fight and checks the gate opened. The run's only failures are the other session's intermittent P2 fabricator checks.
+- **Committed tree alone** (clean checkout without the other session's uncommitted work): 595/595 tests and the full Metal smoke exit 0.
+- **Not checked:** hands-on fighting at the gate, whether civilians fleeing reads well on screen, flee behaviour around the Titan in play (covered only through `cityDanger`), and cross-compiles.
+
 ## Detroit approved; discovery approach challenges (C0, C2) — 2026-10-22
 
 - **Owner decision:** Detroit's content approved as it stands; `CityContent.detroit.draft` is false and the quest screen drops "(DRAFT CONTENT)".

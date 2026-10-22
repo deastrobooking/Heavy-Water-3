@@ -161,6 +161,16 @@ pub fn gatePosition(layout: *const District.Layout) ?V {
     return .{ points[0][0], points[0][1] - 0.9, points[0][2] + 8 };
 }
 
+/// The solid part of the closed yard gate: both uprights, the sliding panel and the cross beam
+/// as drawn by `Frontier.publishFoundryDock`. Too tall to jump; a flier can still pass above.
+pub fn gateBox(layout: *const District.Layout) ?struct { center: V, half: V } {
+    var points: [checkpoint_count]V = undefined;
+    if (positions(layout, &points) == 0) return null;
+    const dock = points[0];
+    const ground = dock[1] - 0.9;
+    return .{ .center = .{ dock[0], ground + 2.5, dock[2] + 8 }, .half = .{ 5.5, 2.5, 0.45 } };
+}
+
 /// A checkpoint can only be recovered after Maro starts the case; duplicate pickup is harmless.
 pub fn collect(progress: *Progress, index: usize) bool {
     if (index >= checkpoint_count or !progress.hasFlag("foundry_started") or collected(progress, index)) return false;

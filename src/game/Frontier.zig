@@ -966,18 +966,48 @@ fn awardFoundrySuitUpgrade(sb: *Sandbox) u8 {
     return rewarded;
 }
 
+/// The dock group: the steward (a bulwark frame) and two guards, each with a shared flag set when
+/// it goes down, so a load brings back only the ones still standing.
+const dock_group = [_]struct { kind: Enemies.Kind, offset: V, down_flag: []const u8 }{
+    .{ .kind = .bulwark, .offset = .{ 0, 0, -2 }, .down_flag = "foundry_steward_down" },
+    .{ .kind = .trooper, .offset = .{ -3.4, 0, -2.6 }, .down_flag = "foundry_trooper_down" },
+    .{ .kind = .skirmisher, .offset = .{ 3.4, 0, -2.6 }, .down_flag = "foundry_skirmisher_down" },
+};
+
+pub fn dockDownFlag(kind: Enemies.Kind) ?[]const u8 {
+    for (dock_group) |member| if (member.kind == kind) return member.down_flag;
+    return null;
+}
+
+pub fn dockEncounterActive(p: *const Progress) bool {
+    return p.hasFlag(FoundryCase.confrontation_flag) and !p.hasFlag(FoundryCase.exposed_flag) and !CityContent.bossStarted(&CityContent.detroit, p);
+}
+
 fn ensureFoundryDockEncounter(sb: *Sandbox) void {
-    if (!sb.progress.hasFlag(FoundryCase.confrontation_flag) or sb.progress.hasFlag(FoundryCase.exposed_flag)) return;
+    if (!dockEncounterActive(&sb.progress)) return;
     const gate = FoundryCase.gatePosition(&sb.catalog.district) orelse return;
     sb.enemies.nests[Enemies.foundry_nest] = .{ .position = gate, .alive = false, .health = 0 };
     if (sb.enemies.unitCount(Enemies.foundry_nest) > 0) return;
-    var free_slots: usize = 0;
-    for (sb.enemies.units) |unit| free_slots += @intFromBool(unit == null);
-    if (free_slots < 3) return;
+    var standing: usize = 0;
+    for (dock_group) |member| standing += @intFromBool(!sb.progress.hasFlag(member.down_flag));
+    // Everyone was already down before a load: the fight is won.
+    if (standing == 0) {
+        if (FoundryCase.finishDockConfrontation(&sb.progress)) _ = awardFoundrySuitUpgrade(sb);
+        return;
+    }
+    if (freeEnemySlots(&sb.enemies) < standing) return;
     // Stage them on the approach side so the gate panel cannot hide their legs or trap them.
-    _ = sb.enemies.spawnAt(.bulwark, Enemies.foundry_nest, R.add(gate, .{ 0, 0, -2 }), 1);
-    _ = sb.enemies.spawnAt(.trooper, Enemies.foundry_nest, R.add(gate, .{ -3.4, 0, -2.6 }), 1);
-    _ = sb.enemies.spawnAt(.skirmisher, Enemies.foundry_nest, R.add(gate, .{ 3.4, 0, -2.6 }), 1);
+    for (dock_group) |member| if (!sb.progress.hasFlag(member.down_flag)) {
+        _ = sb.enemies.spawnAt(member.kind, Enemies.foundry_nest, R.add(gate, member.offset), 1);
+    };
+}
+
+/// Where a city fight is going on (the dock ambush or the Titan), for civilians to keep away from.
+pub fn cityDanger(sb: *const Sandbox) ?V {
+    if (dockEncounterActive(&sb.progress)) return FoundryCase.gatePosition(&sb.catalog.district);
+    const city = &CityContent.detroit;
+    if (CityContent.bossStarted(city, &sb.progress) and !CityContent.bossDefeated(city, &sb.progress)) return WindsorCase.titanPosition(sb.seed);
+    return null;
 }
 
 fn cityFrontierClear(sb: *const Sandbox) bool {
@@ -1203,6 +1233,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 sb.say("hive {s} down: +{d} XP", .{ @tagName(u.kind), xp });
             }
             petLearns(sb, u.position);
+            if (u.nest == Enemies.foundry_nest and dockEncounterActive(&sb.progress)) if (dockDownFlag(u.kind)) |flag| sb.progress.setFlag(flag);
             if (u.nest == Enemies.foundry_nest and sb.enemies.unitCount(Enemies.foundry_nest) == 0) {
                 if (CityContent.bossStarted(&CityContent.detroit, &sb.progress) and !CityContent.bossDefeated(&CityContent.detroit, &sb.progress)) {
                     finishCityTitan(sb);

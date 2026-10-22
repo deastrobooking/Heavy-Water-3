@@ -70,6 +70,8 @@ pub const Walker = struct {
     walk_amount: f32 = 0,
     check_timer: f32 = 0,
     check_feet: V = @splat(0),
+    /// Hurrying away from a fight (`Life.danger`).
+    fleeing: bool = false,
 };
 
 seed: u64 = 0,
@@ -85,6 +87,14 @@ resets: u32 = 0,
 deadlocks: u32 = 0,
 /// Times a car stopped at a plaza edge for a car already inside.
 plaza_waits: u32 = 0,
+/// Where a fight is going on (a city encounter); pedestrians within `danger_radius` turn away
+/// from it and hurry off. Set by the game each step.
+danger: ?V = null,
+/// Pedestrians who have fled a fight.
+evacuations: u32 = 0,
+
+pub const danger_radius: f32 = 45;
+pub const flee_input: f32 = 0.85;
 
 fn pick(seed: u64, a: u64, b: u64) u64 {
     return Seed.mix(seed ^ Seed.mix(a *% 0x9E3779B97F4A7C15 +% b));
@@ -314,6 +324,21 @@ fn plazaBusy(self: *const Life, physics: *const Physics, routes: *const Routes, 
 }
 
 fn walk(self: *Life, w: *Walker, index: usize, physics: *Physics, routes: *const Routes, dt: f32) void {
+    const threatened = if (self.danger) |d| horizontalDistance(w.player.feet, d) < danger_radius else false;
+    if (threatened and !w.fleeing) {
+        w.fleeing = true;
+        self.evacuations += 1;
+        if (self.chatting == index) self.chatting = null;
+        // Turn back if the walkway leads toward the fight, keeping to the same side of the road.
+        const d = self.danger.?;
+        const along = R.sub(routes.layout.nodes[w.to].position, routes.layout.nodes[w.from].position);
+        const toward = R.sub(d, w.player.feet);
+        if (along[0] * toward[0] + along[2] * toward[2] > 0) {
+            std.mem.swap(u8, &w.from, &w.to);
+            w.side = -w.side;
+        }
+    }
+    if (!threatened) w.fleeing = false;
     const length = routes.distance(w.from, w.to);
     const margin = (District.plaza_radius - 3) / @max(length, 1);
     const offset = w.side * Routes.walkway_offset;
@@ -334,7 +359,7 @@ fn walk(self: *Life, w: *Walker, index: usize, physics: *Physics, routes: *const
     }
     w.camera.yaw = std.math.atan2(aim[0] - f[0], aim[2] - f[2]);
     w.camera.pitch = 0;
-    w.player.step(physics, &w.camera, .{ .forward = walk_input }, dt);
+    w.player.step(physics, &w.camera, .{ .forward = if (w.fleeing) flee_input else walk_input }, dt);
     const ground = @sqrt(w.player.velocity[0] * w.player.velocity[0] + w.player.velocity[2] * w.player.velocity[2]);
     w.walk_phase = @mod(w.walk_phase + ground * dt * 2.4, 2 * std.math.pi);
     w.walk_amount = if (w.player.grounded) @min(1, ground / Player.walk_speed) else 0.3;
@@ -360,6 +385,10 @@ fn nextRoad(self: *const Life, w: *Walker, index: usize, routes: *const Routes) 
     w.legs += 1;
     var next = options[h % options.len];
     if (next == w.from and options.len > 1) next = options[(h + 1) % options.len];
+    // Fleeing pedestrians take the road whose far end is farthest from the fight.
+    if (w.fleeing) if (self.danger) |d| for (options) |o| {
+        if (horizontalDistance(routes.layout.nodes[o].position, d) > horizontalDistance(routes.layout.nodes[next].position, d)) next = o;
+    };
     w.from = w.to;
     w.to = next;
     w.side = if ((h >> 12) & 1 == 0) 1 else -1;

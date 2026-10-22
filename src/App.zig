@@ -2870,8 +2870,28 @@ fn smokeFoundryCase(self: *App) void {
     sb.tools.tool = .weapon;
     sb.combat.arsenals[0].active = .sniper_rifle;
     sb.combat.arsenals[0].ranged = .sniper_rifle;
-    for (0..6) |_| {
+    // The shut gate is solid until the steward is exposed.
+    const gate_box = FoundryCase.gateBox(&sb.catalog.district).?;
+    const gate_probe: [3]f32 = .{ gate_box.center[0] + 1, gate_box.center[1] - 1, gate_box.center[2] - 3 };
+    if (sb.physics.castRayObjects(gate_probe, .{ 0, 0, 1 }, 6, .none) == null) return self.smokeFail("SMOKE FOUNDRY GATE NOT SOLID", .{});
+    var reloaded = false;
+    for (0..8) |_| {
         if (sb.enemies.unitCount(Enemies.foundry_nest) == 0) break;
+        // After the first takedown, save and load mid-fight: only the two still standing return.
+        if (!reloaded and sb.enemies.unitCount(Enemies.foundry_nest) == 2) {
+            reloaded = true;
+            const mid = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE FOUNDRY MID-FIGHT SAVE {s}", .{@errorName(err)});
+            defer self.allocator.free(mid);
+            sb.restore(self.allocator, mid, camera) catch |err| return self.smokeFail("SMOKE FOUNDRY MID-FIGHT LOAD {s}", .{@errorName(err)});
+            sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY MID-FIGHT STEP {s}", .{@errorName(err)});
+            if (sb.enemies.unitCount(Enemies.foundry_nest) != 2) return self.smokeFail("SMOKE FOUNDRY MID-FIGHT LOAD BROUGHT BACK {d} FIGHTERS", .{sb.enemies.unitCount(Enemies.foundry_nest)});
+            // A load resets the held tool and weapon; pick the sniper up again.
+            sb.kits[0].weapons |= sniper_bit;
+            sb.tools.tool = .weapon;
+            sb.combat.arsenals[0].active = .sniper_rifle;
+            sb.combat.arsenals[0].ranged = .sniper_rifle;
+            continue;
+        }
         var chosen: ?Enemies.Unit = null;
         var best = std.math.inf(f32);
         for (&sb.enemies.units) |*slot| if (slot.*) |*unit| if (unit.nest == Enemies.foundry_nest) {
@@ -2900,7 +2920,10 @@ fn smokeFoundryCase(self: *App) void {
         sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY COMBAT RELEASE {s}", .{@errorName(err)});
     }
     if (sb.enemies.unitCount(Enemies.foundry_nest) != 0 or !sb.progress.hasFlag(FoundryCase.exposed_flag) or sb.kits[0].level(.sprint_servos) != level + 1) return self.smokeFail("SMOKE FOUNDRY STEWARD FIGHT OR REWARD FAILED (fighters {d})", .{sb.enemies.unitCount(Enemies.foundry_nest)});
-    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; the console started the steward ambush; P1 cleared the steward and two brood scavengers, opened the gate and earned Sprint Servos +1", .{count});
+    if (!reloaded) return self.smokeFail("SMOKE FOUNDRY NEVER RELOADED MID-FIGHT", .{});
+    sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE FOUNDRY AFTER {s}", .{@errorName(err)});
+    if (sb.physics.castRayObjects(gate_probe, .{ 0, 0, 1 }, 6, .none) != null) return self.smokeFail("SMOKE FOUNDRY GATE STILL SOLID AFTER EXPOSURE", .{});
+    std.log.info("Smoke Foundry Ledger: Maro started the case; {d} pages collected and saved; the console started the steward ambush; P1 cleared the steward and two brood scavengers (with a mid-fight save and load bringing back only the two still standing), opened the solid gate and earned Sprint Servos +1", .{count});
 }
 
 /// Start Ines's case, inspect both crossing logs and the civic-hall recording through normal aim
