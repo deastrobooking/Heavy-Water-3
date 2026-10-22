@@ -16,11 +16,11 @@ const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 pub const Tab = enum { vehicles, suits, armor, weapons, companions, aircraft };
 pub const tab_count = enum_compat.fields(Tab).len;
 pub const WeaponUpgrade = struct { weapon: WeaponKind, tier: u8 };
-pub const Output = union(enum) { vehicle: Designs.Design, fighter, robot_companion, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint };
+pub const Output = union(enum) { vehicle: Designs.Design, fighter, robot_companion, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint, space_frame: Progress.SpaceFrame };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
 pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0, parts: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
-pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, WeaponRequired, PreviousTierRequired, NoFighter, NoBlueprint };
+pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, WeaponRequired, PreviousTierRequired, PreviousFrameRequired, NoFighter, NoBlueprint };
 
 pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
@@ -67,6 +67,9 @@ pub const recipes = [_]Recipe{
     .{ .tab = .aircraft, .output = .{ .kestrel_paint = .azure }, .cost = .{}, .about = "Deep ocean-blue flightline finish." },
     .{ .tab = .aircraft, .output = .{ .kestrel_paint = .ember }, .cost = .{}, .about = "High-visibility ember-orange finish." },
     .{ .tab = .aircraft, .output = .{ .kestrel_paint = .moss }, .cost = .{}, .about = "Arbor-green field camouflage." },
+    .{ .tab = .aircraft, .output = .{ .space_frame = .ember_wyrm }, .cost = .{}, .about = "Fast, light space interceptor. Unlock after the Kestrel." },
+    .{ .tab = .aircraft, .output = .{ .space_frame = .void_lance }, .cost = .{}, .about = "Balanced lance fighter with improved shields and turning. Requires Ember Wyrm." },
+    .{ .tab = .aircraft, .output = .{ .space_frame = .dreadclaw }, .cost = .{}, .about = "Heavy gunship with the strongest frame shields. Requires Void Lance." },
 };
 
 pub fn name(output: Output, buffer: []u8) []const u8 {
@@ -95,6 +98,12 @@ pub fn name(output: Output, buffer: []u8) []const u8 {
             .ember => "EMBER PAINT",
             .moss => "MOSS PAINT",
         },
+        .space_frame => |frame| return switch (frame) {
+            .kestrel => "KESTREL FRAME",
+            .ember_wyrm => "EMBER WYRM FRAME",
+            .void_lance => "VOID LANCE FRAME",
+            .dreadclaw => "DREADCLAW FRAME",
+        },
     };
     const n = @min(buffer.len, tag.len);
     for (buffer[0..n], tag[0..n]) |*o, ch| o.* = if (ch == '_') ' ' else std.ascii.toUpper(ch);
@@ -122,12 +131,14 @@ pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
         .weapon_upgrade => |u| k.weaponLevel(u.weapon) >= u.tier,
         .kestrel_upgrade => |u| p.kestrelLevel(u) >= Progress.max_level,
         .kestrel_paint => |paint| p.ownsKestrelPaint(paint),
+        .space_frame => |frame| p.ownsSpaceFrame(frame),
     };
 }
 
 pub fn status(p: *const Progress, k: *const Kit, output: Output) ?[]const u8 {
     return switch (output) {
         .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
+        .space_frame => |frame| if (!p.fighter) "FABRICATE KESTREL FIRST" else if (p.ownsSpaceFrame(frame)) (if (p.space_frame == frame) "EQUIPPED" else "OWNED") else if ((frame == .void_lance and !p.ownsSpaceFrame(.ember_wyrm)) or (frame == .dreadclaw and !p.ownsSpaceFrame(.void_lance))) "PREVIOUS FRAME REQUIRED" else null,
         .robot_companion => if (k.robot_built) "BUILT" else null,
         .weapon_upgrade => |u| if (!k.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (k.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (k.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
@@ -143,6 +154,7 @@ pub fn progressCost(p: *const Progress, output: Output) ?Progress.Cost {
     return switch (output) {
         .kestrel_upgrade => |u| p.kestrelUpgradeCost(u),
         .kestrel_paint => |paint| Progress.kestrelPaintCost(paint),
+        .space_frame => |frame| Progress.spaceFrameCost(frame),
         else => null,
     };
 }
@@ -161,6 +173,22 @@ pub fn make(p: *Progress, k: *Kit, index: usize) Error!Output {
     const wallet = &k.wallet;
     const r = recipes[index];
     if (r.output == .fighter and !p.fighter and !p.hasFlag("kestrel_blueprint")) return error.NoBlueprint;
+    if (r.output == .space_frame) {
+        const frame = r.output.space_frame;
+        if (!p.fighter) return error.NoFighter;
+        if (p.ownsSpaceFrame(frame)) {
+            p.selectSpaceFrame(frame) catch return error.NotOwned;
+            return r.output;
+        }
+        p.unlockSpaceFrame(frame, wallet) catch |err| return switch (err) {
+            error.AlreadyOwned => error.AlreadyMade,
+            error.NotEnoughScrap => error.NotEnoughScrap,
+            error.NotEnoughParts => error.NotEnoughParts,
+            error.Prerequisite => error.PreviousFrameRequired,
+            error.MaxLevel, error.NotOwned => error.AlreadyMade,
+        };
+        return r.output;
+    }
     if ((r.output == .kestrel_upgrade or r.output == .kestrel_paint) and !p.fighter) return error.NoFighter;
     if (r.output == .kestrel_upgrade and p.kestrelLevel(r.output.kestrel_upgrade) >= Progress.max_level) return error.MaxLevel;
     if (r.output == .weapon_upgrade) {
@@ -212,7 +240,7 @@ pub fn make(p: *Progress, k: *Kit, index: usize) Error!Output {
         .armor => |a| k.armors |= Kit.armorBit(a),
         .weapon => |w| k.weapons |= @as(u16, 1) << @intCast(@intFromEnum(w)),
         .weapon_upgrade => |u| k.weapon_upgrades[@intFromEnum(u.weapon)] = u.tier - 1,
-        .kestrel_upgrade, .kestrel_paint => unreachable,
+        .kestrel_upgrade, .kestrel_paint, .space_frame => unreachable,
     }
     return r.output;
 }
@@ -279,7 +307,7 @@ test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint
     var kit: Kit = .{ .wallet = .{ .scrap = 5000, .parts = 100 } };
     var rows: [recipes.len]u8 = undefined;
     const aircraft = onTab(.aircraft, &rows);
-    try std.testing.expectEqual(@as(usize, 8), aircraft.len);
+    try std.testing.expectEqual(@as(usize, 11), aircraft.len);
     try std.testing.expectError(error.NoFighter, make(&progress, &kit, aircraft[2]));
     progress.fighter = true;
     _ = try make(&progress, &kit, aircraft[2]); // engine level 1
@@ -291,4 +319,29 @@ test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint
     _ = try make(&progress, &kit, aircraft[4]); // reselect the free ivory finish
     try std.testing.expectEqual(Progress.Paint.ivory, progress.kestrel_paint);
     try std.testing.expectEqualStrings("EQUIPPED", status(&progress, &kit, recipes[aircraft[4]].output).?);
+}
+
+test "Aircraft fabricator unlocks space frames in order and equips owned frames" {
+    var progress: Progress = .{ .fighter = true };
+    var kit: Kit = .{ .wallet = .{ .scrap = 1000, .parts = 40 } };
+    var rows: [recipes.len]u8 = undefined;
+    const aircraft = onTab(.aircraft, &rows);
+    const frameRecipe = struct {
+        fn find(indices: []const u8, frame: Progress.SpaceFrame) usize {
+            for (indices) |index| if (recipes[index].output == .space_frame and recipes[index].output.space_frame == frame) return index;
+            unreachable;
+        }
+    }.find;
+    const ember = frameRecipe(aircraft, .ember_wyrm);
+    const lance = frameRecipe(aircraft, .void_lance);
+    const heavy = frameRecipe(aircraft, .dreadclaw);
+    try std.testing.expectEqualStrings("PREVIOUS FRAME REQUIRED", status(&progress, &kit, recipes[lance].output).?);
+    try std.testing.expectError(error.PreviousFrameRequired, make(&progress, &kit, lance));
+    _ = try make(&progress, &kit, ember);
+    _ = try make(&progress, &kit, lance);
+    _ = try make(&progress, &kit, heavy);
+    try std.testing.expectEqual(Progress.SpaceFrame.dreadclaw, progress.space_frame);
+    _ = try make(&progress, &kit, ember);
+    try std.testing.expectEqual(Progress.SpaceFrame.ember_wyrm, progress.space_frame);
+    try std.testing.expectEqual(@as(u32, 300), kit.wallet.scrap);
 }

@@ -34,10 +34,11 @@ const District = @import("../procedural/District.zig");
 /// each ranger's Detroit discoveries independently in their kit;
 /// v27 adds the sculpted-terrain tiles (absent means untouched ground); v28 adds player-built
 /// block sections (absent means none); v29 adds each ranger's block stock to their kit (absent
-/// means the starter stock); v30 adds crops growing on tilled soil (absent means none).
+/// means the starter stock); v30 adds crops growing on tilled soil (absent means none); v31 adds
+/// owned/equipped space fighter frames (older saves keep the Kestrel).
 /// Format 13 is the oldest supported save; its four-player kits default combat XP to zero.
 /// Older saves are rejected deliberately. Bumping the current format does not move this floor.
-pub const format_version: u32 = 30;
+pub const format_version: u32 = 31;
 pub const min_supported_format: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;

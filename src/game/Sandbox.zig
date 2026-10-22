@@ -1961,6 +1961,10 @@ fn fabricateFor(self: *Sandbox, owner: usize, index: usize) void {
         .kestrel_paint => |paint| {
             self.say("P{d}: Kestrel paint set to {s}", .{ owner + 1, @tagName(paint) });
         },
+        .space_frame => |frame| {
+            self.hangar.equipFrame(frame, self.progress.kestrel_levels);
+            self.say("P{d}: space fighter frame set to {s}", .{ owner + 1, @tagName(frame) });
+        },
     }
     self.progress.setFlag("fabricated");
 }
@@ -2850,7 +2854,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.garage.race = .{ .best = doc.race_best };
     Frontier.refresh(self);
     for (doc.cars) |c| if (self.progress.ownsVehicle(c.design)) self.garage.place(self.seed, spawn, self.catalog, c.design, c.position, c.yaw);
-    if (doc.fighter) |f| if (self.progress.fighter) self.hangar.placeWithLevels(self.seed, spawn, f.position, f.yaw, self.progress.kestrel_levels);
+    if (doc.fighter) |f| if (self.progress.fighter) self.hangar.placeWithFrame(self.seed, spawn, f.position, f.yaw, self.progress.kestrel_levels, self.progress.space_frame);
     self.skies.configureKestrel(self.progress.kestrel_levels);
 }
 

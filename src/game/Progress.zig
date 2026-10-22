@@ -29,6 +29,10 @@ pub const max_flags = 128;
 pub const flag_capacity = 24;
 pub const KestrelUpgrade = enum { armor, missile_rack, engine, gun_cooling };
 pub const kestrel_upgrade_count = enum_compat.fields(KestrelUpgrade).len;
+/// Playable space-capable frames. The atmospheric Kestrel remains the starter.
+pub const SpaceFrame = enum { kestrel, ember_wyrm, void_lance, dreadclaw };
+pub const space_frame_count = enum_compat.fields(SpaceFrame).len;
+pub const SpaceFrameError = Kit.Error || error{Prerequisite};
 pub const Paint = enum { ivory, azure, ember, moss };
 pub const paint_count = enum_compat.fields(Paint).len;
 
@@ -41,6 +45,8 @@ fighter: bool = false,
 kestrel_levels: [kestrel_upgrade_count]u8 = @splat(0),
 kestrel_paints: u8 = 1,
 kestrel_paint: Paint = .ivory,
+space_frames: u8 = 1,
+space_frame: SpaceFrame = .kestrel,
 /// Wildkin heroes who have joined the roster (bit per `Heroes.roster` index); the starters
 /// begin joined.
 heroes: u32 = @import("Heroes.zig").starters(),
@@ -95,6 +101,38 @@ pub fn selectKestrelPaint(self: *Progress, paint: Paint) Error!void {
     self.kestrel_paint = paint;
 }
 
+pub fn ownsSpaceFrame(self: *const Progress, frame: SpaceFrame) bool {
+    return self.space_frames & (@as(u8, 1) << @intCast(@intFromEnum(frame))) != 0;
+}
+
+pub fn selectSpaceFrame(self: *Progress, frame: SpaceFrame) Kit.Error!void {
+    if (!self.ownsSpaceFrame(frame)) return error.NotOwned;
+    self.space_frame = frame;
+}
+
+pub fn spaceFrameCost(frame: SpaceFrame) Kit.Cost {
+    return switch (frame) {
+        .kestrel => .{ .scrap = 0, .parts = 0 },
+        .ember_wyrm => .{ .scrap = 100, .parts = 4 },
+        .void_lance => .{ .scrap = 220, .parts = 8 },
+        .dreadclaw => .{ .scrap = 380, .parts = 12 },
+    };
+}
+
+pub fn unlockSpaceFrame(self: *Progress, frame: SpaceFrame, wallet: *Market.Wallet) SpaceFrameError!void {
+    if (self.ownsSpaceFrame(frame)) return error.AlreadyOwned;
+    const prerequisite: ?SpaceFrame = switch (frame) {
+        .kestrel => null,
+        .ember_wyrm => .kestrel,
+        .void_lance => .ember_wyrm,
+        .dreadclaw => .void_lance,
+    };
+    if (prerequisite) |needed| if (!self.ownsSpaceFrame(needed)) return error.Prerequisite;
+    try Kit.pay(wallet, spaceFrameCost(frame));
+    self.space_frames |= @as(u8, 1) << @intCast(@intFromEnum(frame));
+    self.space_frame = frame;
+}
+
 pub fn hasFlag(self: *const Progress, name: []const u8) bool {
     for (0..self.flag_count) |i| if (std.mem.eql(u8, self.flag_names[i][0..self.flag_lens[i]], name)) return true;
     return false;
@@ -132,6 +170,8 @@ pub const Doc = struct {
     kestrel_levels: []const u8 = &.{},
     kestrel_paints: u8 = 1,
     kestrel_paint: Paint = .ivory,
+    space_frames: u8 = 1,
+    space_frame: SpaceFrame = .kestrel,
     suits: []const Profile.Clothing = &.{},
     flags: []const []const u8 = &.{},
     /// Joined heroes by name (stable if the roster grows); older saves omit it (starters only).
@@ -169,7 +209,7 @@ pub fn toDoc(self: *const Progress, arena: std.mem.Allocator) !Doc {
     const Heroes = @import("Heroes.zig");
     var heroes: std.ArrayList([]const u8) = .empty;
     for (Heroes.roster, 0..) |h, i| if (self.hasHero(@intCast(i))) try heroes.append(arena, h.name);
-    return .{ .heroes = heroes.items, .arena_best = self.arena_best, .flags = flags, .picked = picked.items, .vehicles = vehicles.items, .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint };
+    return .{ .heroes = heroes.items, .arena_best = self.arena_best, .flags = flags, .picked = picked.items, .vehicles = vehicles.items, .fighter = self.fighter, .kestrel_levels = try arena.dupe(u8, &self.kestrel_levels), .kestrel_paints = self.kestrel_paints, .kestrel_paint = self.kestrel_paint, .space_frames = self.space_frames, .space_frame = self.space_frame };
 }
 
 pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
@@ -186,6 +226,9 @@ pub fn fromDoc(doc: Doc) error{InvalidProgress}!Progress {
     if (doc.kestrel_paints == 0 or doc.kestrel_paints >> paint_count != 0 or (doc.kestrel_paints & (@as(u8, 1) << @intCast(@intFromEnum(doc.kestrel_paint)))) == 0) return error.InvalidProgress;
     result.kestrel_paints = doc.kestrel_paints;
     result.kestrel_paint = doc.kestrel_paint;
+    if (doc.space_frames == 0 or doc.space_frames >> space_frame_count != 0 or (doc.space_frames & (@as(u8, 1) << @intCast(@intFromEnum(doc.space_frame)))) == 0) return error.InvalidProgress;
+    result.space_frames = doc.space_frames;
+    result.space_frame = doc.space_frame;
     if (doc.heroes) |names| {
         const Heroes = @import("Heroes.zig");
         result.heroes = 0;
@@ -249,6 +292,23 @@ test "Kestrel upgrades change owned loadout and paint selection persists" {
     try std.testing.expectEqual(p.kestrel_paints, restored.kestrel_paints);
     try std.testing.expectEqual(p.kestrel_paint, restored.kestrel_paint);
     try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .kestrel_levels = &.{4} }));
+}
+
+test "space fighter frames unlock in order and persist equipped state" {
+    var p: Progress = .{};
+    var wallet: Market.Wallet = .{ .scrap = 1000, .parts = 40 };
+    try std.testing.expectError(error.Prerequisite, p.unlockSpaceFrame(.void_lance, &wallet));
+    try p.unlockSpaceFrame(.ember_wyrm, &wallet);
+    try p.unlockSpaceFrame(.void_lance, &wallet);
+    try p.unlockSpaceFrame(.dreadclaw, &wallet);
+    try std.testing.expectEqual(SpaceFrame.dreadclaw, p.space_frame);
+    try p.selectSpaceFrame(.ember_wyrm);
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const restored = try fromDoc(try std.json.parseFromSliceLeaky(Doc, arena.allocator(), try std.json.Stringify.valueAlloc(arena.allocator(), try p.toDoc(arena.allocator()), .{}), .{}));
+    try std.testing.expectEqual(@as(u8, 0b1111), restored.space_frames);
+    try std.testing.expectEqual(SpaceFrame.ember_wyrm, restored.space_frame);
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .space_frames = 0b10000 }));
 }
 
 test "heroes join once, round-trip by name, and older saves keep the starters" {

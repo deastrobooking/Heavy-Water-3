@@ -34,6 +34,7 @@ pub const rest_height: f32 = tuning.rest_height;
 
 fighter: ?jet.Fighter = null,
 piloting: bool = false,
+frame: Progress.SpaceFrame = .kestrel,
 
 pub fn padPosition(seed: u64, spawn: Physics.Vec3) Physics.Vec3 {
     const pad = Garage.padPosition(seed, spawn, .courier);
@@ -43,13 +44,23 @@ pub fn padPosition(seed: u64, spawn: Physics.Vec3) Physics.Vec3 {
 }
 
 pub fn config(levels: [Progress.kestrel_upgrade_count]u8) jet.Config {
+    return configFor(.kestrel, levels);
+}
+
+pub fn configFor(frame: Progress.SpaceFrame, levels: [Progress.kestrel_upgrade_count]u8) jet.Config {
     const engine: f32 = @floatFromInt(levels[@intFromEnum(Progress.KestrelUpgrade.engine)]);
     const armor: f32 = @floatFromInt(levels[@intFromEnum(Progress.KestrelUpgrade.armor)]);
+    const base: struct { thrust: f32, wing_area: f32, hull: f32 } = switch (frame) {
+        .kestrel => .{ .thrust = 58_000.0, .wing_area = 3.2, .hull = 300.0 },
+        .ember_wyrm => .{ .thrust = 70_000.0, .wing_area = 2.8, .hull = 275.0 },
+        .void_lance => .{ .thrust = 60_000.0, .wing_area = 3.5, .hull = 350.0 },
+        .dreadclaw => .{ .thrust = 50_000.0, .wing_area = 4.4, .hull = 460.0 },
+    };
     return .{
-        .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), tuning.wing_area),
-        .thrust = 58_000 * (1 + engine * 0.12),
-        .afterburner = 155_000 * (1 + engine * 0.12),
-        .hull_max = 300 + armor * 75,
+        .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), base.wing_area),
+        .thrust = base.thrust * (1 + engine * 0.12),
+        .afterburner = base.thrust * 2.67 * (1 + engine * 0.12),
+        .hull_max = base.hull + armor * 75,
     };
 }
 
@@ -63,16 +74,30 @@ pub fn place(self: *Hangar, seed: u64, spawn: Physics.Vec3, at: ?Physics.Vec3, y
 }
 
 pub fn placeWithLevels(self: *Hangar, seed: u64, spawn: Physics.Vec3, at: ?Physics.Vec3, yaw: f32, levels: [Progress.kestrel_upgrade_count]u8) void {
+    self.placeWithFrame(seed, spawn, at, yaw, levels, .kestrel);
+}
+
+pub fn placeWithFrame(self: *Hangar, seed: u64, spawn: Physics.Vec3, at: ?Physics.Vec3, yaw: f32, levels: [Progress.kestrel_upgrade_count]u8, frame: Progress.SpaceFrame) void {
     const pad = padPosition(seed, spawn);
     const p = at orelse Physics.Vec3{ pad[0], pad[1] + rest_height, pad[2] };
-    self.fighter = jet.Fighter.init(massProps(), config(levels), m.Vec3.init(p[0], p[1], p[2]), if (at != null) yaw else std.math.pi);
+    self.frame = frame;
+    self.fighter = jet.Fighter.init(massProps(), configFor(frame, levels), m.Vec3.init(p[0], p[1], p[2]), if (at != null) yaw else std.math.pi);
     self.piloting = false;
+}
+
+pub fn equipFrame(self: *Hangar, frame: Progress.SpaceFrame, levels: [Progress.kestrel_upgrade_count]u8) void {
+    self.frame = frame;
+    const f = &(self.fighter orelse return);
+    const old_max = f.hull_max;
+    f.cfg = configFor(frame, levels);
+    f.hull_max = f.cfg.hull_max;
+    f.hull = @min(f.hull_max, f.hull + (f.hull_max - old_max));
 }
 
 pub fn applyLevels(self: *Hangar, levels: [Progress.kestrel_upgrade_count]u8) void {
     const f = &(self.fighter orelse return);
     const old_max = f.hull_max;
-    f.cfg = config(levels);
+    f.cfg = configFor(self.frame, levels);
     f.hull_max = f.cfg.hull_max;
     f.hull = @min(f.hull_max, f.hull + (f.hull_max - old_max));
 }

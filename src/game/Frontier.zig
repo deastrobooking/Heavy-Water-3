@@ -621,7 +621,7 @@ pub fn refresh(sb: *Sandbox) void {
     sb.skies.shots = @splat(null);
     sb.skies.guns = .{};
     sb.hangar = .{};
-    if (sb.progress.fighter) sb.hangar.placeWithLevels(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels);
+    if (sb.progress.fighter) sb.hangar.placeWithFrame(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels, sb.progress.space_frame);
     sb.skies.configureKestrel(sb.progress.kestrel_levels);
     sb.garage = .{};
     // A vehicle is a core traversal tool, not a late-game reward. Grant the starter aircar to
@@ -1755,7 +1755,7 @@ fn wreck(sb: *Sandbox, camera: *Camera) void {
     var events: [4]Combat.Event = undefined;
     var n: usize = 0;
     if (sb.combat.hurt(0, 40, &events, &n)) down(sb, 0, camera);
-    sb.hangar.placeWithLevels(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels);
+    sb.hangar.placeWithFrame(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels, sb.progress.space_frame);
     sb.say("the kestrel went down: a new one waits on its pad", .{});
 }
 
@@ -2025,8 +2025,14 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .ember => .{ 1, 0.48, 0.16, 1 },
             .moss => .{ 0.48, 0.82, 0.38, 1 },
         };
-        out[n] = .{ .mesh = c.kestrel, .transform = .{ .position = at }, .tint = paint, .rotation = rot };
-        out[n + 1] = .{ .mesh = c.kestrel_glow, .transform = .{ .position = at }, .tint = Material.emissive(paint, 0.25 + 0.75 * f.burn), .rotation = rot };
+        const frame_mesh, const frame_glow = switch (sb.hangar.frame) {
+            .kestrel => .{ c.kestrel, c.kestrel_glow },
+            .ember_wyrm => .{ c.scalari_ember_wyrm, c.scalari_ember_wyrm_glow },
+            .void_lance => .{ c.scalari_void_lance, c.scalari_void_lance_glow },
+            .dreadclaw => .{ c.scalari_dreadclaw, c.scalari_dreadclaw_glow },
+        };
+        out[n] = .{ .mesh = frame_mesh, .transform = .{ .position = at }, .tint = paint, .rotation = rot };
+        out[n + 1] = .{ .mesh = frame_glow, .transform = .{ .position = at }, .tint = Material.emissive(paint, 0.25 + 0.75 * f.burn), .rotation = rot };
         n += 2;
     };
     for (sb.skies.wasps) |slot| if (slot) |w| {
