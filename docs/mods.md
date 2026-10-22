@@ -42,6 +42,10 @@ Loading rejects the whole package, with the reason in the log, unless all of the
 
 Installation is also all or nothing. A second mod with the same name, or a blueprint name that is taken by a different design, leaves the world unchanged. A blueprint already present with an identical design, which happens when a save made with the mod is loaded first, is not a conflict.
 
+## Structure files
+
+A structure is a block footprint plus behaviour modules (turret, launcher, shield, drill, bay, store, field, power, workshop), stored as JSON in `saves/structures/<id>.json` (the game writes one for every structure a player saves, and loads every valid file there at start). Ids are lower case letters, digits, `_`, `.` and `-` (3 to 32 characters, starting with a letter); use your own prefix. Cells use `shape` 1 to 4 (cube, slab, ramp, stair), `rot` 0 to 3 and a `material` id from the block materials. Each module sets only the numbers its kind uses (turret: `range`, `damage`, `rate`, `power`; shield: `range` as the dome radius, `amount` as hit points, `rate` as recharge per second, `power`; and so on; limits are in `build/Structures.zig`). A file that breaks a rule is skipped with no change to the game. The cost is worked out from the blocks and the modules' strength, so every design pays for itself. The modules' behaviour arrives with the defense step; until then a structure is built, saved and taken apart like a prefab.
+
 ## Character content
 
 A mod adds options to the character creator by listing data files under `"character"` in `mod.json`. Everything is JSON, validated before anything is installed, and there is no code to run. `mods/emberwear/` is a complete example (two hairstyles, a face, a finned armor set, a palette and an ink cel style). Check your mod without starting the game:

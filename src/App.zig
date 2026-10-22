@@ -19,6 +19,7 @@ const Sandbox = @import("game/Sandbox.zig");
 const Save = @import("game/Save.zig");
 const Build = @import("game/Build.zig");
 const Tools = @import("game/Tools.zig");
+const Outpost = @import("game/Outpost.zig");
 const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
@@ -246,6 +247,8 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             } else std.log.warn("Ignoring stale or incompatible Captain component override; the file was preserved", .{});
         } else |err| std.log.warn("Ignoring invalid Captain component override ({s}); the file was preserved", .{@errorName(err)});
     }
+    // Structure designs from `saves/structures/*.json` join the starters.
+    Outpost.loadFiles(io, self.allocator, self.sandbox.outpost.library);
     ImportLibrary.migrateLegacy(io);
     self.refreshImports();
     self.loadSavedCharacterImport();
@@ -1439,6 +1442,11 @@ fn pollPads(self: *App) void {
             self.pads.commands[controller] = .{ .connected = self.pads.commands[controller].connected };
             self.runCommand(.settings_changed);
             self.report("{s} BOUND TO {s}", .{ PadBindings.actionName(action), PadBindings.buttonName(physical) });
+        // A structure the team just saved gets its shareable data file.
+        if (self.sandbox.outpost.export_index) |index| {
+            self.sandbox.outpost.export_index = null;
+            Outpost.writeFile(self.io, self.allocator, self.sandbox.outpost.library.get(index));
+        }
             break;
         };
     };

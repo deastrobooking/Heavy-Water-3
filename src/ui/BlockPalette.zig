@@ -56,6 +56,8 @@ test "the palette for four building players fits the canvas budget" {
     sb.tools = .{};
     sb.kits = @splat(.{});
     sb.block_clips = @splat(.{});
+    sb.outpost = try @import("../game/Outpost.zig").State.create(std.testing.allocator);
+    defer sb.outpost.destroy(std.testing.allocator);
     const before = canvas.len;
     for (0..4) |i| draw(&canvas, .{ .x = @floatFromInt(i * 320), .y = 0, .w = 320, .h = 360 }, &sb, i, .{});
     try std.testing.expect(canvas.len - before <= 4 * 30);

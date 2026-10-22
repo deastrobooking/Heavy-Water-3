@@ -22,6 +22,7 @@ const BlockWorld = @import("../build/BlockWorld.zig");
 const BlockTool = @import("BlockTool.zig");
 const Platformer = @import("Platformer.zig");
 const Farm = @import("Farm.zig");
+const Outpost = @import("Outpost.zig");
 const Blocks = @import("../build/Blocks.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
@@ -443,6 +444,8 @@ block_world: BlockWorld = undefined,
 platform: Platformer.State = .{},
 /// Crops growing on tilled soil (shared, saved).
 farm: Farm.State = .{},
+/// Structure designs (the starters and the team's captures) and every structure built from them.
+outpost: Outpost.State = undefined,
 /// Where each player is in the building tips (session only).
 build_tips: @import("BuildTips.zig").State = .{},
 /// Each player's copied block piece (session only).
@@ -475,6 +478,8 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     errdefer self.physics.deinit();
     self.block_world = try BlockWorld.init(allocator, world_flag);
     errdefer self.block_world.deinit(allocator, &self.physics);
+    self.outpost = try Outpost.State.create(allocator);
+    errdefer self.outpost.destroy(allocator);
     self.dialogue = try Dialogue.load(allocator, Dialogue.builtin);
     errdefer self.dialogue.deinit();
     try self.placeArbor(spawn[0] + arbor_offset[0], spawn[2] + arbor_offset[1]);
@@ -732,6 +737,7 @@ pub fn deinit(self: *Sandbox) void {
     _ = TerrainEdit.active.cmpxchgStrong(self.terrain_edit, null, .acq_rel, .acquire);
     self.terrain_edit.destroy();
     self.block_world.deinit(self.allocator, &self.physics);
+    self.outpost.destroy(self.allocator);
     self.dialogue.deinit();
     self.scripts.deinit();
     for (&self.rigs) |*slot| if (slot.*) |*r| r.deinit(self.allocator);
@@ -2633,6 +2639,8 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
             var list: std.ArrayList(Save.MemberState) = .empty;
             for (0..max_players) |p| if (self.known[p]) try list.append(arena, .{
                 .slot = @intCast(p),
+        .structures = (try Outpost.toDocs(&self.outpost, arena)).defs,
+        .placed = (try Outpost.toDocs(&self.outpost, arena)).placed,
                 .profile = self.profileOf(p).toDoc(),
                 .own = if (self.own_profiles[p]) |own| own.toDoc() else null,
                 .kit = try self.kits[p].toDoc(arena),
@@ -2701,6 +2709,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (doc.blocks, block_cells, block_filled, 0..) |section, *cells, *filled, i| {
         filled.* = Blocks.decodeSection(section.data, @import("../build/Materials.zig").count, cells) catch return error.InvalidSave;
         for (doc.blocks[0..i]) |other| if (other.x == section.x and other.y == section.y and other.z == section.z) return error.InvalidSave;
+    // Structures: valid designs, well-formed instances, within the caps.
+    if (!Outpost.validate(doc.structures, doc.placed)) return error.InvalidSave;
         if (@abs(section.x) > 1 << 20 or @abs(section.y) > 1 << 12 or @abs(section.z) > 1 << 20) return error.InvalidSave;
         const key = Blocks.chunkOf(section.x * Blocks.side, section.z * Blocks.side);
         for (block_chunks[0..block_chunk_count]) |k| {
@@ -2802,6 +2812,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     _ = @import("Challenges.zig").place(self);
     self.syncBlocks() catch {};
     self.profile = profile;
+    Outpost.restore(&self.outpost, doc.structures, doc.placed);
     self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
     self.body_yaw = doc.player.yaw;
@@ -5386,4 +5397,92 @@ test "P1's controller: the right trigger fires the energy gun and the right bump
     }
     try std.testing.expectEqual(@as(?@import("../combat/Weapon.zig").WeaponKind, .machine_gun), sb.combat.arsenals[0].active);
     try std.testing.expect(fired_after_saber > 0);
+}
+
+test "a structure is built for blocks, scrap and parts, taken apart for a refund, captured, and survives a save" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Structures = @import("../build/Structures.zig");
+    const Prefabs = @import("../build/Prefabs.zig");
+    const spot = [2]f32{ 190.5, -450.5 };
+    const ground: i32 = @intFromFloat(@ceil(Terrain.surface(sandbox.seed, spot[0], spot[1]).height));
+    sandbox.player.feet = .{ spot[0] + 40, @floatFromInt(ground), spot[1] };
+    const at: [3]i32 = .{ @intFromFloat(spot[0]), ground, @intFromFloat(spot[1]) };
+    const wallet = &sandbox.kits[0].wallet;
+    wallet.scrap = 1000;
+    wallet.parts = 100;
+
+    // The sentry turret: its blocks come from the stock, its modules from scrap and parts.
+    const def = sandbox.outpost.library.get(0);
+    const cost = def.cost();
+    const blocks_before = sandbox.kits[0].blocks;
+    try Outpost.place(&sandbox, 0, 0, 0, at);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.outpost.len);
+    try std.testing.expectEqual(1000 - cost.scrap, wallet.scrap);
+    try std.testing.expectEqual(100 - cost.parts, wallet.parts);
+    for (blocks_before, sandbox.kits[0].blocks, cost.blocks) |b, a, n| try std.testing.expectEqual(b - n, a);
+    const origin = sandbox.outpost.placed[0].origin;
+    try std.testing.expect(!sandbox.block_world.blocks.get(origin[0], origin[1], origin[2]).isEmpty());
+    try std.testing.expectEqual(@as(?usize, 0), Outpost.structureAt(&sandbox, origin));
+    try std.testing.expect(Outpost.structureAt(&sandbox, .{ origin[0] + 5, origin[1], origin[2] }) == null);
+
+    // Short of scrap: refused whole, nothing changes.
+    wallet.scrap = 1;
+    const revision = sandbox.block_world.blocks.revision;
+    try Outpost.place(&sandbox, 0, 0, 0, .{ at[0] + 6, at[1], at[2] });
+    try std.testing.expectEqual(revision, sandbox.block_world.blocks.revision);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.outpost.len);
+    try std.testing.expectEqual(@as(u32, 1), wallet.scrap);
+    wallet.scrap = 1000;
+
+    // It survives a save and a load.
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sandbox.outpost.len = 0;
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.outpost.len);
+    try std.testing.expectEqualStrings("hw.sentry_turret", sandbox.outpost.placed[0].id());
+    try std.testing.expectEqual(origin, sandbox.outpost.placed[0].origin);
+    try std.testing.expectEqual(@as(?usize, 0), Outpost.structureAt(&sandbox, origin));
+
+    // Taking it apart returns every block and half the scrap and parts.
+    const scrap_before = wallet.scrap;
+    const parts_before = wallet.parts;
+    try Outpost.demolish(&sandbox, 0, 0);
+    try std.testing.expectEqual(@as(usize, 0), sandbox.outpost.len);
+    try std.testing.expect(sandbox.block_world.blocks.get(origin[0], origin[1], origin[2]).isEmpty());
+    try std.testing.expectEqual(blocks_before, sandbox.kits[0].blocks);
+    try std.testing.expectEqual(scrap_before + cost.scrap / 2, wallet.scrap);
+    try std.testing.expectEqual(parts_before + cost.parts / 2, wallet.parts);
+
+    // A capture becomes a library structure with a module and a data file, and can be built.
+    const tower = Prefabs.starters(.castle)[0];
+    try BlockTool.stamp(&sandbox, 0, tower, 0, at);
+    const lo = BlockTool.stampOrigin(tower, 0, at);
+    var st: BlockTool.State = .{};
+    try BlockTool.captureBox(&sandbox, 0, &st, lo, .{ lo[0] + tower.size[0] - 1, lo[1] + tower.size[1] - 1, lo[2] + tower.size[2] - 1 });
+    const made = (try Outpost.capture(&sandbox, 0, .shield)).?;
+    try std.testing.expectEqual(@as(usize, Structures.starter_count), made);
+    try std.testing.expectEqual(@as(?usize, made), sandbox.outpost.export_index);
+    const saved = sandbox.outpost.library.get(made);
+    try std.testing.expectEqualStrings("user.shield_1", saved.id());
+    try std.testing.expect(saved.find(.shield) != null);
+    const text = try Structures.encode(std.testing.allocator, saved);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings(saved.id(), (try Structures.decode(std.testing.allocator, text)).id());
+    // Nothing on the clipboard: no capture, nothing added.
+    sandbox.block_clips[0] = .{};
+    try std.testing.expect((try Outpost.capture(&sandbox, 0, null)) == null);
+    try std.testing.expectEqual(@as(usize, Structures.starter_count + 1), sandbox.outpost.library.len);
+
+    // The team's design survives a save into a fresh library.
+    const bytes2 = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes2);
+    sandbox.outpost.library.initStarters();
+    try sandbox.restore(std.testing.allocator, bytes2, &camera);
+    try std.testing.expect(sandbox.outpost.library.find("user.shield_1") != null);
 }

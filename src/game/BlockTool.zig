@@ -16,6 +16,8 @@ const Terrain = @import("../procedural/Terrain.zig");
 const Kit = @import("Kit.zig");
 const Prefabs = @import("../build/Prefabs.zig");
 const Farm = @import("Farm.zig");
+const Outpost = @import("Outpost.zig");
+const Structures = @import("../build/Structures.zig");
 const BuildTips = @import("BuildTips.zig");
 
 pub const reach: f32 = 14;
@@ -35,7 +37,29 @@ pub const State = struct {
     /// First corner of a box operation, waiting for the second click.
     corner: ?[3]i32 = null,
     corner_mode: CornerMode = .fill,
+    /// What a clipboard capture is saved as: 0 a plain build, then each `Structures.Kind`.
+    module: u4 = 0,
 };
+
+/// The module a capture is saved with, or null for a plain build.
+pub fn moduleKind(st: State) ?Structures.Kind {
+    if (st.module == 0) return null;
+    return @enumFromInt(st.module - 1);
+}
+
+fn onClipboard(sb: *const Sandbox, slot: usize, st: State) bool {
+    const e = entry(sb, slot, st);
+    return e == .prefab and std.mem.eql(u8, e.prefab.name, "CLIPBOARD");
+}
+
+/// The footprint of a prefab or structure entry, for stamping and ghosts.
+fn footprint(sb: *const Sandbox, e: Entry) ?Prefabs.Prefab {
+    return switch (e) {
+        .prefab => |p| p,
+        .structure => |i| sb.outpost.library.get(i).prefab(),
+        else => null,
+    };
+}
 
 /// What a two-corner box does: fill with the block, clear it, re-skin it into the current style,
 /// or copy it to the player's clipboard.
@@ -56,7 +80,7 @@ pub const Command = struct {
 };
 
 /// The palette position: one of the four shapes, a starter prefab of the style, or the clipboard.
-pub const Entry = union(enum) { shape: Blocks.Shape, seed, prefab: Prefabs.Prefab };
+pub const Entry = union(enum) { shape: Blocks.Shape, seed, prefab: Prefabs.Prefab, structure: usize };
 
 /// The farm style also offers seeds, right after the shapes.
 fn seeds(st: State) usize {
@@ -64,7 +88,7 @@ fn seeds(st: State) usize {
 }
 
 pub fn entryCount(sb: *const Sandbox, slot: usize, st: State) usize {
-    return Blocks.placeable_shapes.len + seeds(st) + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0);
+    return Blocks.placeable_shapes.len + seeds(st) + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0) + sb.outpost.library.len;
 }
 
 pub fn entry(sb: *const Sandbox, slot: usize, st: State) Entry {
@@ -73,7 +97,10 @@ pub fn entry(sb: *const Sandbox, slot: usize, st: State) Entry {
     if (seeds(st) == 1 and i == Blocks.placeable_shapes.len) return .seed;
     const starters = Prefabs.starters(st.style);
     const p = i - Blocks.placeable_shapes.len - seeds(st);
-    return .{ .prefab = if (p < starters.len) starters[p] else sb.block_clips[slot].prefab() };
+    if (p < starters.len) return .{ .prefab = starters[p] };
+    const clip = @intFromBool(sb.block_clips[slot].len > 0);
+    if (p == starters.len and clip == 1) return .{ .prefab = sb.block_clips[slot].prefab() };
+    return .{ .structure = p - starters.len - clip };
 }
 
 pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
@@ -87,6 +114,7 @@ pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
         },
         .seed => "SEEDS",
         .prefab => |p| p.name,
+        .structure => |i| sb.outpost.library.get(i).name(),
     };
 }
 
@@ -146,7 +174,13 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         sb.sayTo(slot, "{s}", .{entryName(sb, slot, st.*)});
     }
     const palette = Materials.ofStyle(st.style);
-    if (cmd.material_step != 0) {
+    // With the clipboard held out and SHIFT down, [ ] choose what a capture is saved as.
+    const choosing_module = cmd.box and cmd.material_step != 0 and onClipboard(sb, slot, st.*);
+    if (choosing_module) {
+        const kinds = Structures.kind_count + 1;
+        st.module = @intCast(if (cmd.material_step > 0) (@as(usize, st.module) + 1) % kinds else (@as(usize, st.module) + kinds - 1) % kinds);
+        sb.sayTo(slot, "save as: {s}", .{if (moduleKind(st.*)) |k| @tagName(k) else "plain build"});
+    } else if (cmd.material_step != 0) {
         const n: u8 = @intCast(palette.len);
         st.material = if (cmd.material_step > 0) (st.material + 1) % n else (st.material + n - 1) % n;
         const m = cell(st.*).material;
@@ -182,6 +216,14 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         st.corner_mode = mode;
         return sb.sayTo(slot, "{s} corner set: mark the opposite corner", .{@tagName(mode)});
     };
+    // P on the clipboard saves it as a structure instead of picking a block.
+    if (cmd.pick and !cmd.box and onClipboard(sb, slot, st.*)) {
+        if (try Outpost.capture(sb, slot, moduleKind(st.*))) |index| {
+            const clip: usize = 1;
+            st.shape = @intCast(Blocks.placeable_shapes.len + seeds(st.*) + Prefabs.starters(st.style).len + clip + index);
+        }
+        return;
+    }
     if (cmd.pick) if (st.remove) |c| {
         const aimed = sb.block_world.blocks.get(c[0], c[1], c[2]);
         for (Blocks.placeable_shapes, 0..) |s, i| if (s == aimed.shape) {
@@ -197,6 +239,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         const c = st.place orelse return sb.sayTo(slot, "aim at the ground or a block within {d:.0} m", .{reach});
         switch (entry(sb, slot, st.*)) {
             .prefab => |p| return stamp(sb, slot, p, st.rot, c),
+            .structure => |i| return Outpost.place(sb, slot, i, st.rot, c),
             .seed => return Farm.plant(sb, slot, c),
             .shape => {},
         }
@@ -212,6 +255,8 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         const c = st.remove orelse return;
         // Aiming at a field's soil takes the crop growing on it first.
         if (Farm.harvest(sb, slot, .{ c[0], c[1] + 1, c[2] })) return;
+        // A block of a placed structure takes the whole structure apart.
+        if (Outpost.structureAt(sb, c)) |i| return Outpost.demolish(sb, slot, i);
         if (sb.block_world.blocks.get(c[0], c[1], c[2]).isAuthored()) return sb.sayTo(slot, "that block is part of the city", .{});
         const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
         try sb.block_world.blocks.set(c[0], c[1], c[2], .empty);
@@ -315,29 +360,45 @@ pub fn stampOrigin(prefab: Prefabs.Prefab, rot: u2, at: [3]i32) [3]i32 {
 /// Lay a prefab centred on `at`, turned `rot` times. Every cell must be free and the builder must
 /// hold every block before anything is placed.
 pub fn stamp(sb: *Sandbox, slot: usize, prefab: Prefabs.Prefab, rot: u2, at: [3]i32) !void {
+    _ = try stampPlaced(sb, slot, prefab, rot, at);
+}
+
+/// `stamp`, reporting whether the prefab was laid (false: refused, nothing changed).
+pub fn stampPlaced(sb: *Sandbox, slot: usize, prefab: Prefabs.Prefab, rot: u2, at: [3]i32) !bool {
     const origin = stampOrigin(prefab, rot, at);
     var rests = false;
     for (prefab.cells) |p| {
         const t = Prefabs.turned(p, prefab.size, rot);
         const c: [3]i32 = .{ origin[0] + t.x, origin[1] + t.y, origin[2] + t.z };
-        if (refusal(sb, c, false)) |why| return sb.sayTo(slot, "{s} blocked: {s}", .{ prefab.name, why });
+        if (refusal(sb, c, false)) |why| {
+            sb.sayTo(slot, "{s} blocked: {s}", .{ prefab.name, why });
+            return false;
+        }
         if (!rests and t.y == 0 and supported(sb, c)) rests = true;
     }
-    if (!rests) return sb.sayTo(slot, "{s} needs ground under it", .{prefab.name});
+    if (!rests) {
+        sb.sayTo(slot, "{s} needs ground under it", .{prefab.name});
+        return false;
+    }
     const need = Prefabs.cost(prefab);
     const kit = &sb.kits[slot];
-    for (need, kit.blocks, 0..) |n, held, m| if (n > held) return sb.sayTo(slot, "{s} needs {d} {s}, you hold {d}", .{ prefab.name, n, Materials.all[m].name, held });
+    for (need, kit.blocks, 0..) |n, held, m| if (n > held) {
+        sb.sayTo(slot, "{s} needs {d} {s}, you hold {d}", .{ prefab.name, n, Materials.all[m].name, held });
+        return false;
+    };
     for (prefab.cells) |p| {
         const t = Prefabs.turned(p, prefab.size, rot);
         sb.block_world.blocks.set(origin[0] + t.x, origin[1] + t.y, origin[2] + t.z, t.cell) catch {
             try sb.syncBlocks();
-            return sb.sayTo(slot, "block budget full", .{});
+            sb.sayTo(slot, "block budget full", .{});
+            return false;
         };
         kit.blocks[t.cell.material] -= 1;
     }
     try sb.syncBlocks();
     sb.sayTo(slot, "built {s}", .{prefab.name});
     BuildTips.advance(sb, slot, .prefab);
+    return true;
 }
 
 /// Re-skin every block in the box into `style`, role for role. The builder pays the new blocks and
@@ -391,7 +452,8 @@ pub fn captureBox(sb: *Sandbox, slot: usize, st: *State, a: [3]i32, b: [3]i32) !
     if (clip.len == 0) return sb.sayTo(slot, "nothing to copy", .{});
     for (0..3) |i| clip.size[i] = @intCast(bx.hi[i] - bx.lo[i] + 1);
     sb.block_clips[slot] = clip;
-    st.shape = @intCast(entryCount(sb, slot, st.*) - 1);
+    // The clipboard sits right after the style's starters (structures come after it).
+    st.shape = @intCast(Blocks.placeable_shapes.len + seeds(st.*) + Prefabs.starters(st.style).len);
     st.rot = 0;
     sb.sayTo(slot, "copied {d} blocks: click to paste", .{clip.len});
 }
@@ -438,6 +500,12 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools.blocks;
     const c = cell(st);
     if (st.corner != null) return std.fmt.bufPrint(buffer, "BOX {s}: MARK THE OPPOSITE CORNER THE SAME WAY", .{@tagName(st.corner_mode)}) catch buffer;
+    if (onClipboard(sb, 0, st)) return std.fmt.bufPrint(buffer, "CLIPBOARD  CLICK PASTE  P SAVE AS STRUCTURE: {s}  SHIFT+[ ] CHANGE", .{if (moduleKind(st)) |k| @tagName(k) else "plain build"}) catch buffer;
+    if (entry(sb, 0, st) == .structure) {
+        const def = sb.outpost.library.get(entry(sb, 0, st).structure);
+        const cost = def.cost();
+        return std.fmt.bufPrint(buffer, "{s}  {d} SCRAP {d} PARTS  CLICK BUILD  T TURN  RMB TAKES IT APART  TAB NEXT", .{ def.name(), cost.scrap, cost.parts }) catch buffer;
+    }
     return std.fmt.bufPrint(buffer, "{s} {s} {s} x{d}  CLICK PLACE  RMB REMOVE  TAB PIECE  SHIFT+TAB STYLE  [ ] MATERIAL  T TURN  P PICK  SHIFT: BOX FILL/CLEAR, SHIFT+T RESTYLE, SHIFT+P COPY", .{ Materials.styleName(st.style), entryName(sb, 0, st), Materials.all[c.material].name, sb.kits[0].blocks[c.material] }) catch buffer;
 }
 
@@ -456,8 +524,7 @@ pub fn ghost(sb: *const Sandbox, slot: usize, st: State, out: []World.Prop, star
         };
         return n + 1;
     }
-    if (entry(sb, slot, st) == .prefab) {
-        const prefab = entry(sb, slot, st).prefab;
+    if (footprint(sb, entry(sb, slot, st))) |prefab| {
         const size = Prefabs.turnedSize(prefab.size, st.rot);
         const o = stampOrigin(prefab, st.rot, c);
         const f: [3]f32 = .{ @floatFromInt(size[0]), @floatFromInt(size[1]), @floatFromInt(size[2]) };
