@@ -148,6 +148,8 @@ pub const Carrier = struct {
     alive: bool = true,
     /// The second Hive capital ship is an armored synthetic command carrier.
     robotic: bool = false,
+    /// Runtime kinematic landing deck, recreated from campaign flags after load.
+    deck_body: Physics.Body = .none,
     health: f32 = carrier_health,
     center: V,
     radius: f32,
@@ -312,6 +314,21 @@ pub fn init(seed: u64, spawn: V, nests: []const V) Skies {
     return self;
 }
 
+/// Gives each living carrier a moving, walkable dorsal deck.
+pub fn attachDecks(self: *Skies, physics: *Physics) !void {
+    for (&self.carriers) |*c| {
+        if (!c.alive or physics.valid(c.deck_body)) continue;
+        const at = c.position();
+        c.deck_body = try physics.createBody(.{
+            .half_extents = .{ 15, 0.45, 28 },
+            .position = .{ at[0], at[1] + 12.2, at[2] },
+            .velocity = c.velocity(),
+            .motion = .kinematic,
+            .user = 0x43415252,
+        });
+    }
+}
+
 fn push(out: []Event, n: *usize, e: Event) void {
     if (n.* < out.len) out[n.*] = e;
     n.* += 1;
@@ -379,17 +396,17 @@ fn segmentAboveHubTerrain(origin: V, travel: V) bool {
 
 /// One fixed step of the Hive's air forces and every airborne shot.
 /// `players` are chest positions of local players on foot (alive or not).
-pub fn step(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event) usize {
+pub fn step(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event) usize {
     return stepInner(self, physics, enemies, jet, players, dt, out, null, null);
 }
 
-pub fn stepProfiled(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event, io: std.Io) ProfiledStep {
+pub fn stepProfiled(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event, io: std.Io) ProfiledStep {
     var timing: StepProfile = .{};
     const count = stepInner(self, physics, enemies, jet, players, dt, out, io, &timing);
     return .{ .events = count, .timing = timing };
 }
 
-fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event, io: ?std.Io, profile: ?*StepProfile) usize {
+fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, players: []const Enemies.Target, dt: f32, out: []Event, io: ?std.Io, profile: ?*StepProfile) usize {
     var profile_timer = if (profile != null) mach.time.Timer.start(io.?) else undefined;
     var n: usize = 0;
     const random = self.rng.random();
@@ -404,6 +421,7 @@ fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet
             c.crash_time += dt;
             c.debris_timer -= dt;
             const at = c.position();
+            if (physics.valid(c.deck_body)) physics.setTransform(c.deck_body, .{ at[0], at[1] + 12.2, at[2] }, c.crash_velocity);
             if (c.debris_timer <= 0) {
                 c.debris_timer = 0.22;
                 push(out, &n, .{ .carrier_debris = R.add(at, .{ (random.float(f32) - 0.5) * 34, (random.float(f32) - 0.5) * 20, (random.float(f32) - 0.5) * 48 }) });
@@ -411,12 +429,15 @@ fn stepInner(self: *Skies, physics: *const Physics, enemies: *Enemies, jet: ?Jet
             const ground = Terrain.surface(self.seed, at[0], at[2]).height;
             if (at[1] <= ground + 12 or c.crash_time >= 12) {
                 c.alive = false;
+                if (physics.valid(c.deck_body)) physics.destroyBody(c.deck_body);
+                c.deck_body = .none;
                 push(out, &n, .{ .carrier_down = .{ .carrier = @intCast(ci), .position = at } });
             }
             continue;
         }
         c.angle += c.direction * carrier_speed / c.radius * dt;
         const pos = c.position();
+        if (physics.valid(c.deck_body)) physics.setTransform(c.deck_body, .{ pos[0], pos[1] + 12.2, pos[2] }, c.velocity());
         var near = false;
         if (jet) |j| near = near or dist(j.position, pos) < wake_distance;
         for (players) |p| near = near or (p.alive and dist(p.chest, pos) < wake_distance);
@@ -1186,6 +1207,24 @@ test "the synthetic command carrier launches armored robot fighters" {
     try std.testing.expect(found);
     try std.testing.expectEqual(@as(usize, 18), max_wasps);
     try std.testing.expectEqual(@as(usize, 8), wasps_per_carrier);
+}
+
+test "carrier dorsal decks are solid moving supports" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var enemies: Enemies = .{};
+    var sky = Skies.init(52, .{ 0, 0, 0 }, &.{});
+    try sky.attachDecks(&physics);
+    const body = sky.carriers[0].deck_body;
+    try std.testing.expect(physics.valid(body));
+    const before = physics.position(body).?;
+    const hit = physics.raycast(.{ before[0], before[1] + 2, before[2] }, .{ 0, -1, 0 }, 4, .none);
+    try std.testing.expect(hit != null);
+    try std.testing.expectEqual(@as(u32, 0x43415252), hit.?.user);
+    var events: [16]Event = undefined;
+    _ = sky.step(&physics, &enemies, null, &.{}, 1, &events);
+    const after = physics.position(body).?;
+    try std.testing.expect(dist(before, after) > 1);
 }
 
 test "a wasp in front of a carrier bay takes the shot" {

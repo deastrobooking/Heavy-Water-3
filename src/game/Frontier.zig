@@ -90,6 +90,7 @@ pub fn init(sb: *Sandbox) void {
     var nest_sites: [Enemies.max_nests]V = undefined;
     for (sb.enemies.nests[0..surface], 0..) |nest, i| nest_sites[i] = nest.position;
     sb.skies = Skies.init(sb.seed, Sandbox.spawn, nest_sites[0..surface]);
+    sb.skies.attachDecks(&sb.physics) catch |err| std.log.warn("could not create carrier landing decks: {s}", .{@errorName(err)});
     for (&sb.skies.market_plazas, 0..) |*plaza, i| plaza.* = sb.catalog.district.nodes[Market.stall_plazas[i]].position;
 
     var plazas: [District.node_count]Collectibles.Plaza = undefined;
@@ -610,7 +611,12 @@ pub fn refresh(sb: *Sandbox) void {
         c.bay_health = @splat(Skies.tuning.carrier_bay_health);
         c.crashing = false;
         c.crash_time = 0;
+        if (!c.alive and sb.physics.valid(c.deck_body)) {
+            sb.physics.destroyBody(c.deck_body);
+            c.deck_body = .none;
+        }
     }
+    sb.skies.attachDecks(&sb.physics) catch |err| std.log.warn("could not restore carrier landing decks: {s}", .{@errorName(err)});
     sb.skies.wasps = @splat(null);
     sb.skies.shots = @splat(null);
     sb.skies.guns = .{};
@@ -2058,9 +2064,18 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             n += 1;
         }
     };
-    for (sb.skies.carriers) |carrier| if (carrier.alive and room(out, n, 2)) {
+    for (sb.skies.carriers) |carrier| if (carrier.alive and room(out, n, 6)) {
         const q = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, carrier.yaw()));
         const at = carrier.position();
+        const deck = carrier.point(m.Vec3.init(0, 12.75, -5));
+        const left = carrier.point(m.Vec3.init(-5.2, 12.84, -5));
+        const right = carrier.point(m.Vec3.init(5.2, 12.84, -5));
+        const cross = carrier.point(m.Vec3.init(0, 12.84, -5));
+        out[n] = .{ .mesh = c.block, .transform = .{ .position = deck }, .tint = .{ 0.08, 0.16, 0.2, 1 }, .size = .{ 17, 0.12, 20 }, .rotation = q };
+        out[n + 1] = .{ .mesh = c.block, .transform = .{ .position = left }, .tint = Material.emissive(.{ 0.2, 0.9, 0.85, 1 }, 0.7), .size = .{ 0.45, 0.05, 15 }, .rotation = q };
+        out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = right }, .tint = Material.emissive(.{ 0.2, 0.9, 0.85, 1 }, 0.7), .size = .{ 0.45, 0.05, 15 }, .rotation = q };
+        out[n + 3] = .{ .mesh = c.block, .transform = .{ .position = cross }, .tint = Material.emissive(.{ 0.2, 0.9, 0.85, 1 }, 0.7), .size = .{ 10.5, 0.05, 0.45 }, .rotation = q };
+        n += 4;
         out[n] = .{ .mesh = c.carrier, .transform = .{ .position = at }, .tint = if (carrier.flash > 0) .{ 1.4, 1.2, 1.2, 1 } else if (carrier.robotic) .{ 0.42, 0.55, 0.72, 1 } else .{ 1, 1, 1, 1 }, .rotation = q };
         const glow = if (carrier.crashing) 1.2 else switch (carrier.stage()) {
             .turrets => @as(f32, 0.35),
