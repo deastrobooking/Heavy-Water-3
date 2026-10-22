@@ -14,6 +14,10 @@ pub const dirty_capacity = 32;
 pub const Shape = enum(u4) { empty = 0, cube, slab, ramp, stair, _ };
 pub const placeable_shapes = [_]Shape{ .cube, .slab, .ramp, .stair };
 
+/// `Cell.flags` bit for blocks that are part of the city (generated challenges): not saved, and
+/// the tools will not remove, restyle or refund them.
+pub const authored: u4 = 1;
+
 pub const Cell = packed struct(u16) {
     shape: Shape = .empty,
     /// Quarter turns about the vertical axis.
@@ -24,6 +28,10 @@ pub const Cell = packed struct(u16) {
     pub const empty: Cell = .{};
     pub fn isEmpty(self: Cell) bool {
         return self.shape == .empty;
+    }
+
+    pub fn isAuthored(self: Cell) bool {
+        return self.flags & authored != 0;
     }
 };
 

@@ -45,7 +45,8 @@ pub fn positions(layout: *const District.Layout, seed: u64, out: *[CityContent.d
     const node3 = layout.nodes[3].position;
     const market = District.marketPosition(layout, 3);
     const deck_direction = R.normalize(.{ market[0] - node3[0], 0, market[2] - node3[2] });
-    out[2] = .{ node3[0] + deck_direction[0] * 25, market[1] + 1.3, node3[2] + deck_direction[2] * 25 };
+    // Inside the plaza's 20 m deck, past the market bay at 15 m (it was 25 m, floating off the edge).
+    out[2] = .{ node3[0] + deck_direction[0] * 18.5, market[1] + 1.3, node3[2] + deck_direction[2] * 18.5 };
 
     const rootmap = layout.nodes[5].position;
     out[3] = .{ rootmap[0] + 9, rootmap[1] + 1.25, rootmap[2] - 6 };

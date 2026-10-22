@@ -72,6 +72,7 @@ test {
     _ = @import("game/Platformer.zig");
     _ = @import("game/Farm.zig");
     _ = @import("game/BuildTips.zig");
+    _ = @import("game/Challenges.zig");
     _ = @import("ui/BlockPalette.zig");
     _ = @import("procedural/Heightmap.zig");
     _ = @import("procedural/Landscape.zig");

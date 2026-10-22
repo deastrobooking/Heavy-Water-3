@@ -5,8 +5,8 @@
 //! discovery methods, the reward spread). Progress lives in shared story flags (`Progress`);
 //! personal rewards go to each player's `Kit`, never to the shared state.
 //!
-//! Detroit's content is a DRAFT proposed in the plan and awaiting owner approval: names, allies and
-//! rewards below are placeholders, and `draft` stays true until they are signed off.
+//! Detroit's content was approved by the owner on 2026-10-22 (`draft` is false). A new city starts
+//! with `draft` true until its names, allies, boss and rewards are signed off.
 const std = @import("std");
 const Progress = @import("Progress.zig");
 
@@ -73,7 +73,7 @@ pub const CityContent = struct {
 pub const detroit: CityContent = .{
     .id = "detroit",
     .name = "Detroit Arbor Reach",
-    .draft = true,
+    .draft = false,
     .liberated_flag = "detroit_free",
     .missions = .{
         .{
@@ -248,9 +248,9 @@ pub fn updateLiberation(city: *const CityContent, progress: *Progress, frontier_
 
 // ---- Tests -----------------------------------------------------------------------------------
 
-test "Detroit's draft content meets the budget and the rules" {
+test "Detroit's approved content meets the budget and the rules" {
     try validate(detroit);
-    try std.testing.expect(detroit.draft);
+    try std.testing.expect(!detroit.draft);
     try std.testing.expectEqual(@as(usize, 3), detroit.missions.len);
     try std.testing.expectEqual(@as(usize, 10), detroit.discoveries.len);
 }

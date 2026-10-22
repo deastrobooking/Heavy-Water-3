@@ -127,16 +127,26 @@ fn collisionPolygons(shape: Blocks.Shape) []const Polygon {
 
 pub const Purpose = enum { draw, collide };
 
-/// Cells left out of the static mesh: movers (drawn and collided as moving bodies), gates while
-/// open, and the given cells (crumbled blocks). Hidden cells also count as empty to neighbours.
+/// Cells left out of the static mesh: movers (drawn and collided as moving bodies), gates near a
+/// pressed plate, and the given cells (crumbled blocks). Hidden cells count as empty to neighbours.
 pub const Hide = struct {
     cells: []const [3]i32 = &.{},
-    gates_open: bool = false,
+    /// Centres of plates holding their gates open.
+    plates: []const [3]f32 = &.{},
+
+    /// How far a plate's reach extends: gates within this many metres open with it.
+    pub const gate_reach: f32 = 16;
 
     pub fn hides(self: Hide, cell: Blocks.Cell, x: i32, y: i32, z: i32) bool {
         if (cell.isEmpty()) return false;
         if (cell.material == Materials.ofRole(.platformer, .color)) return true;
-        if (self.gates_open and cell.material == Materials.ofRole(.platformer, .metal)) return true;
+        if (cell.material == Materials.ofRole(.platformer, .metal)) {
+            const c: [3]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5, @as(f32, @floatFromInt(z)) + 0.5 };
+            for (self.plates) |p| {
+                const d: [3]f32 = .{ c[0] - p[0], c[1] - p[1], c[2] - p[2] };
+                if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= gate_reach * gate_reach) return true;
+            }
+        }
         for (self.cells) |c| if (c[0] == x and c[1] == y and c[2] == z) return true;
         return false;
     }

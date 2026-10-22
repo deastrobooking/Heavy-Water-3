@@ -9,7 +9,8 @@ const Physics = @import("../physics/Physics.zig");
 const BlockWorld = @This();
 
 /// Chunk columns that may hold blocks at once (each costs one collider and one catalog mesh).
-pub const max_chunks = 16;
+/// Detroit's discovery challenges take up to eight of these.
+pub const max_chunks = 24;
 
 pub const Slot = struct {
     active: bool = false,
@@ -24,18 +25,26 @@ blocks: *Blocks,
 slots: [max_chunks]Slot = @splat(.{}),
 /// Physics user value for block colliders (occludes picking, never a removable target).
 user: u32,
-/// Cells currently left out of meshes and colliders (crumbled blocks), and whether gates are open.
+/// Cells currently left out of meshes and colliders (crumbled blocks), and the plates holding
+/// their nearby gates open.
 hidden: [max_hidden][3]i32 = undefined,
 hidden_len: usize = 0,
-gates_open: bool = false,
+plates: [max_plates][3]f32 = undefined,
+plate_len: usize = 0,
 
 pub const max_hidden = 64;
+pub const max_plates = 8;
 
 pub fn hide(self: *const BlockWorld) Mesher.Hide {
-    return .{ .cells = self.hidden[0..self.hidden_len], .gates_open = self.gates_open };
+    return .{ .cells = self.hidden[0..self.hidden_len], .plates = self.plates[0..self.plate_len] };
 }
 
 /// Rebuild every chunk on the next `sync` (gates opened or closed).
+/// Chunks wait to be rebuilt (after an edit, or a rebuild that failed).
+pub fn pending(self: *const BlockWorld) bool {
+    return self.blocks.dirty_len > 0 or self.blocks.dirty_overflow;
+}
+
 pub fn rebuildAll(self: *BlockWorld) void {
     self.blocks.dirty_overflow = true;
 }
@@ -84,6 +93,8 @@ pub fn hasRoom(self: *const BlockWorld, key: ChunkKey) bool {
 pub fn sync(self: *BlockWorld, allocator: std.mem.Allocator, physics: *Physics) !void {
     var keys: [Blocks.dirty_capacity]ChunkKey = undefined;
     const dirty = self.blocks.takeDirty(&keys);
+    // A failed rebuild (out of memory, collider pool full) is retried in full next time.
+    errdefer self.blocks.dirty_overflow = true;
     if (dirty.all) {
         // Rebuild everything: drop every slot, then mesh each chunk that holds blocks.
         for (&self.slots) |*slot| if (slot.active) try self.rebuild(allocator, physics, slot.key);
@@ -122,9 +133,28 @@ fn rebuild(self: *BlockWorld, allocator: std.mem.Allocator, physics: *Physics, k
     const positions = try allocator.alloc(Physics.Vec3, shape.vertices.items.len);
     defer allocator.free(positions);
     for (shape.vertices.items, positions) |v, *p| p.* = .{ v.position[0] + o[0], v.position[1], v.position[2] + o[2] };
-    const collider = try physics.createMesh(allocator, positions, shape.indices.items, self.user);
+    // Every block may be hidden (open gates, movers): then the chunk has nothing to collide with.
+    const collider: Physics.MeshCollider = if (shape.indices.items.len == 0) .none else try physics.createMesh(allocator, positions, shape.indices.items, self.user);
     if (!slot.collider.eql(.none)) physics.destroyMesh(slot.collider);
     slot.* = .{ .active = true, .key = key, .collider = collider, .mesh = slot.mesh, .revision = slot.revision + 1 };
+}
+
+test "a chunk whose every block is hidden keeps its slot with no collider" {
+    const a = std.testing.allocator;
+    var physics: Physics = .init(.{ .context = null, .sample = flat });
+    defer physics.deinit();
+    var world = try init(a, 7);
+    defer world.deinit(a, &physics);
+    const Materials = @import("Materials.zig");
+    try world.blocks.set(2, 0, 2, .{ .shape = .cube, .material = Materials.ofRole(.platformer, .metal) });
+    try world.sync(a, &physics);
+    try std.testing.expect(physics.castRay(.{ 2.5, 5, 2.5 }, .{ 0, -1, 0 }, 10, .none) != null);
+    world.plates[0] = .{ 2.5, 0.5, 6.5 };
+    world.plate_len = 1;
+    world.rebuildAll();
+    try world.sync(a, &physics);
+    try std.testing.expect(world.slotOf(.{ .x = 0, .z = 0 }) != null);
+    try std.testing.expect(physics.castRay(.{ 2.5, 5, 2.5 }, .{ 0, -1, 0 }, 10, .none) == null);
 }
 
 test "placing blocks builds a walkable collider and clearing them frees the chunk" {

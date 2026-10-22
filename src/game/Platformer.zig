@@ -1,7 +1,7 @@
 //! What the platformer blocks do. The kind of a block is its material in the platformer style:
 //! springs launch, boost strips fling you along their facing, crumbling blocks fall away a moment
 //! after you land and come back, hazards hurt, checkpoints become your recovery point, pressure
-//! plates open every gate while someone stands on one, and movers slide back and forth carrying you.
+//! plates open the gates within 16 m and hold them open 8 s after you step off, and movers slide back and forth carrying you.
 const std = @import("std");
 const Sandbox = @import("Sandbox.zig");
 const Camera = @import("../world/Camera.zig");
@@ -20,8 +20,9 @@ pub const crumble_delay: f32 = 0.6;
 pub const crumble_return: f32 = 4;
 pub const hazard_damage: f32 = 20;
 pub const hazard_interval: f32 = 0.6;
-/// A plate keeps the gates open this long after the last player steps off.
-pub const plate_hold: f32 = 1.2;
+/// A plate keeps the gates within `Mesher.Hide.gate_reach` of it open this long after the last
+/// player steps off: long enough to run from a course's last plate to the gate it opens.
+pub const plate_hold: f32 = 8;
 pub const mover_travel: f32 = 4;
 pub const mover_speed: f32 = 1.6;
 pub const max_movers = 16;
@@ -35,6 +36,8 @@ pub fn kindOf(cell: Blocks.Cell) Kind {
 }
 
 const Crumble = struct { cell: [3]i32, time: f32 = 0, gone: bool = false };
+const Plate = struct { cell: [3]i32, time: f32 };
+const BlockWorld = @import("../build/BlockWorld.zig");
 const Mover = struct { start: [3]f32, dir: [3]f32, body: Physics.Body, sign: f32 = 1, color: [3]f32 };
 
 pub const State = struct {
@@ -43,7 +46,8 @@ pub const State = struct {
     boost_cool: [Sandbox.max_players]f32 = @splat(0),
     crumbles: [max_crumbles]Crumble = undefined,
     crumble_len: usize = 0,
-    plate_time: f32 = 0,
+    plates: [BlockWorld.max_plates]Plate = undefined,
+    plate_len: usize = 0,
     movers: [max_movers]Mover = undefined,
     mover_len: usize = 0,
 };
@@ -66,7 +70,7 @@ fn under(sb: *const Sandbox, feet: [3]f32) ?struct { cell: Blocks.Cell, at: [3]i
 pub fn step(sb: *Sandbox, camera: *Camera, dt: f32) !void {
     const st = &sb.platform;
     var changed = false;
-    var pressed = false;
+    var plates_changed = false;
     for (0..Sandbox.max_players) |slot| {
         const p: *Player = if (slot == 0) &sb.player else if (sb.guests[slot - 1].active) &sb.guests[slot - 1].player else continue;
         st.hazard_cool[slot] = @max(0, st.hazard_cool[slot] - dt);
@@ -110,7 +114,18 @@ pub fn step(sb: *Sandbox, camera: *Camera, dt: f32) !void {
                     sb.sayTo(slot, "checkpoint", .{});
                 }
             },
-            .plate => pressed = true,
+            .plate => {
+                for (st.plates[0..st.plate_len]) |*held| {
+                    if (std.meta.eql(held.cell, o.at)) {
+                        held.time = plate_hold;
+                        break;
+                    }
+                } else if (st.plate_len < BlockWorld.max_plates) {
+                    st.plates[st.plate_len] = .{ .cell = o.at, .time = plate_hold };
+                    st.plate_len += 1;
+                    plates_changed = true;
+                }
+            },
             else => {},
         }
     }
@@ -133,10 +148,21 @@ pub fn step(sb: *Sandbox, camera: *Camera, dt: f32) !void {
         }
         i += 1;
     }
-    st.plate_time = if (pressed) plate_hold else @max(0, st.plate_time - dt);
-    const open = st.plate_time > 0;
-    if (open != sb.block_world.gates_open) {
-        sb.block_world.gates_open = open;
+    // Plates count down once nobody stands on them; the gates near each close when it runs out.
+    var p: usize = 0;
+    while (p < st.plate_len) {
+        st.plates[p].time -= dt;
+        if (st.plates[p].time <= 0) {
+            st.plates[p] = st.plates[st.plate_len - 1];
+            st.plate_len -= 1;
+            plates_changed = true;
+            continue;
+        }
+        p += 1;
+    }
+    if (plates_changed) {
+        for (st.plates[0..st.plate_len], 0..) |held, k| sb.block_world.plates[k] = .{ @as(f32, @floatFromInt(held.cell[0])) + 0.5, @as(f32, @floatFromInt(held.cell[1])) + 0.5, @as(f32, @floatFromInt(held.cell[2])) + 0.5 };
+        sb.block_world.plate_len = st.plate_len;
         sb.block_world.rebuildAll();
         changed = true;
     }
@@ -149,6 +175,22 @@ pub fn step(sb: *Sandbox, camera: *Camera, dt: f32) !void {
         if (along <= 0) m.sign = 1;
         sb.physics.setVelocity(m.body, .{ m.dir[0] * mover_speed * m.sign, m.dir[1] * mover_speed * m.sign, m.dir[2] * mover_speed * m.sign });
     }
+}
+
+/// Hold a plate pressed as if someone had just stepped off it (its gates open for `plate_hold`).
+pub fn press(sb: *Sandbox, cell: [3]i32) !void {
+    const st = &sb.platform;
+    for (st.plates[0..st.plate_len]) |*held| if (std.meta.eql(held.cell, cell)) {
+        held.time = plate_hold;
+        return;
+    };
+    if (st.plate_len == BlockWorld.max_plates) return;
+    st.plates[st.plate_len] = .{ .cell = cell, .time = plate_hold };
+    st.plate_len += 1;
+    for (st.plates[0..st.plate_len], 0..) |held, k| sb.block_world.plates[k] = .{ @as(f32, @floatFromInt(held.cell[0])) + 0.5, @as(f32, @floatFromInt(held.cell[1])) + 0.5, @as(f32, @floatFromInt(held.cell[2])) + 0.5 };
+    sb.block_world.plate_len = st.plate_len;
+    sb.block_world.rebuildAll();
+    try sb.syncBlocks();
 }
 
 /// Back on your feet at your checkpoint, healed; without one, the usual recovery.
@@ -200,7 +242,7 @@ pub fn reset(sb: *Sandbox) void {
     const mover_len = sb.platform.mover_len;
     sb.platform = .{ .movers = movers, .mover_len = mover_len };
     sb.block_world.hidden_len = 0;
-    sb.block_world.gates_open = false;
+    sb.block_world.plate_len = 0;
     sb.block_world.rebuildAll();
 }
 

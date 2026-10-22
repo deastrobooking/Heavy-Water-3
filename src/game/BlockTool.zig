@@ -212,6 +212,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         const c = st.remove orelse return;
         // Aiming at a field's soil takes the crop growing on it first.
         if (Farm.harvest(sb, slot, .{ c[0], c[1] + 1, c[2] })) return;
+        if (sb.block_world.blocks.get(c[0], c[1], c[2]).isAuthored()) return sb.sayTo(slot, "that block is part of the city", .{});
         const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
         try sb.block_world.blocks.set(c[0], c[1], c[2], .empty);
         kit.blocks[old.material] +|= 1;
@@ -350,7 +351,7 @@ pub fn restyleBox(sb: *Sandbox, slot: usize, a: [3]i32, b: [3]i32, style: Materi
     var it = bx.iterate();
     while (it.next()) |c| {
         const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
-        if (old.isEmpty()) continue;
+        if (old.isEmpty() or old.isAuthored()) continue;
         const new = Materials.restyle(old.material, style);
         if (new == old.material) continue;
         need[new] += 1;
@@ -363,7 +364,7 @@ pub fn restyleBox(sb: *Sandbox, slot: usize, a: [3]i32, b: [3]i32, style: Materi
     it = bx.iterate();
     while (it.next()) |c| {
         var cell_now = sb.block_world.blocks.get(c[0], c[1], c[2]);
-        if (cell_now.isEmpty()) continue;
+        if (cell_now.isEmpty() or cell_now.isAuthored()) continue;
         cell_now.material = Materials.restyle(cell_now.material, style);
         try sb.block_world.blocks.set(c[0], c[1], c[2], cell_now);
     }
@@ -382,7 +383,9 @@ pub fn captureBox(sb: *Sandbox, slot: usize, st: *State, a: [3]i32, b: [3]i32) !
         const found = sb.block_world.blocks.get(c[0], c[1], c[2]);
         if (found.isEmpty()) continue;
         if (clip.len == Prefabs.max_cells) return sb.sayTo(slot, "copy at most {d} blocks", .{Prefabs.max_cells});
-        clip.cells[clip.len] = .{ .x = @intCast(c[0] - bx.lo[0]), .y = @intCast(c[1] - bx.lo[1]), .z = @intCast(c[2] - bx.lo[2]), .cell = found };
+        var copied = found;
+        copied.flags &= ~Blocks.authored; // a pasted copy belongs to its builder
+        clip.cells[clip.len] = .{ .x = @intCast(c[0] - bx.lo[0]), .y = @intCast(c[1] - bx.lo[1]), .z = @intCast(c[2] - bx.lo[2]), .cell = copied };
         clip.len += 1;
     }
     if (clip.len == 0) return sb.sayTo(slot, "nothing to copy", .{});
@@ -405,7 +408,7 @@ pub fn clearBox(sb: *Sandbox, slot: usize, a: [3]i32, b: [3]i32) !void {
             var x = bx.lo[0];
             while (x <= bx.hi[0]) : (x += 1) {
                 const old = sb.block_world.blocks.get(x, y, z);
-                if (old.isEmpty()) continue;
+                if (old.isEmpty() or old.isAuthored()) continue;
                 try sb.block_world.blocks.set(x, y, z, .empty);
                 sb.kits[slot].blocks[old.material] +|= 1;
                 removed += 1;

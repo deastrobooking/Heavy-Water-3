@@ -799,8 +799,11 @@ pub fn pick(sb: *const Sandbox, eye: V, dir: V, reach: f32, best: f32, player_sl
     for (sb.city_discovery_positions, 0..) |point, index| {
         if (!cityDiscoveryAvailable(sb, player_slot, index)) continue;
         if (Physics.rayBox(eye, dir, point, .{ 1.0, 1.05, 1.0 })) |hit| if (hit.distance < nearest) {
-            nearest = hit.distance;
-            result = .{ .city_discovery = @intCast(index) };
+            // A closed challenge cage (or any wall) between the eye and the keepsake hides it.
+            if (sb.physics.castRay(eye, dir, @max(0, hit.distance - 0.05), .none) == null) {
+                nearest = hit.distance;
+                result = .{ .city_discovery = @intCast(index) };
+            }
         };
     }
     return result;

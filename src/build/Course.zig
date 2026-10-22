@@ -1,7 +1,7 @@
 //! Can a player get from one block to another? A conservative check for built courses: from a
 //! block you stand on you can reach another within a 4.5 m jump that rises at most 3 m (a spring
 //! lifts you 11 m), and you can always drop. It ignores timing, so crumbling blocks count as
-//! solid and gates count as closed. Allocation-free; refuses searches larger than its capacity.
+//! solid, gates count as closed, and a mover is a block you can ride its full run. Allocation-free; refuses searches larger than its capacity.
 const std = @import("std");
 const Blocks = @import("Blocks.zig");
 const Materials = @import("Materials.zig");
@@ -11,6 +11,8 @@ pub const jump_rise = 3;
 pub const spring_rise = 11;
 pub const jump_reach: f32 = 4.5;
 pub const max_drop = 24;
+/// How far a mover carries a rider (`Platformer.mover_travel`).
+pub const mover_run: f32 = 4;
 
 pub const Error = error{CourseTooLarge};
 
@@ -24,7 +26,7 @@ fn kind(cell: Blocks.Cell) ?Materials.Role {
 pub fn standable(blocks: *const Blocks, c: [3]i32) bool {
     const cell = blocks.get(c[0], c[1], c[2]);
     if (cell.isEmpty()) return false;
-    if (kind(cell)) |k| if (k == .wood or k == .color) return false; // hazards and movers
+    if (kind(cell)) |k| if (k == .wood) return false; // hazards
     return blocks.get(c[0], c[1] + 1, c[2]).isEmpty() and blocks.get(c[0], c[1] + 2, c[2]).isEmpty();
 }
 
@@ -37,15 +39,19 @@ pub fn reachable(blocks: *const Blocks, start: [3]i32, goal: [3]i32) Error!bool 
     while (head < len) : (head += 1) {
         const a = nodes[head];
         if (std.meta.eql(a, goal)) return true;
-        const spring = if (kind(blocks.get(a[0], a[1], a[2]))) |k| k == .main else false;
+        const here = kind(blocks.get(a[0], a[1], a[2]));
+        const spring = if (here) |k| k == .main else false;
+        // A mover carries you up to its run before you jump off.
+        const reach = jump_reach + if (here != null and here.? == .color) mover_run else 0;
+        const span: i32 = @intFromFloat(@ceil(reach));
         const rise: i32 = if (spring) spring_rise else jump_rise;
         var dy: i32 = -max_drop;
         while (dy <= rise) : (dy += 1) {
-            var dz: i32 = -4;
-            while (dz <= 4) : (dz += 1) {
-                var dx: i32 = -4;
-                while (dx <= 4) : (dx += 1) {
-                    if (@sqrt(@as(f32, @floatFromInt(dx * dx + dz * dz))) > jump_reach) continue;
+            var dz: i32 = -span;
+            while (dz <= span) : (dz += 1) {
+                var dx: i32 = -span;
+                while (dx <= span) : (dx += 1) {
+                    if (@sqrt(@as(f32, @floatFromInt(dx * dx + dz * dz))) > reach) continue;
                     const b: [3]i32 = .{ a[0] + dx, a[1] + dy, a[2] + dz };
                     if (!standable(blocks, b)) continue;
                     for (nodes[0..len]) |seen| {

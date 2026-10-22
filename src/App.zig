@@ -1996,16 +1996,27 @@ fn showcase(self: *App) void {
         target = R3.add(arena, .{ 0, 3, 0 });
         eye = R3.add(arena, .{ 24, 17, -44 });
     } else if (v == 98) {
-        const CityDiscoveries = @import("game/CityDiscoveries.zig");
-        var points: [@import("game/CityContent.zig").discovery_count][3]f32 = undefined;
-        CityDiscoveries.positions(layout, self.sandbox.seed, &points);
-        const point = points[1];
+        // Where the keepsake is now; its challenge may have moved it off a route.
+        const point = self.sandbox.city_discovery_positions[1];
         self.sandbox.player.mode = .fly;
         self.sandbox.view = .first;
         self.sandbox.player.feet = .{ point[0] + 8, point[1] - 2, point[2] + 10 };
         self.sandbox.player.velocity = .{ 0, 0, 0 };
         self.sandbox.target = .{ .city_discovery = 1 };
         target = point;
+        const player_eye = self.sandbox.player.eye();
+        eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
+    } else if (v == 100) {
+        // A Detroit discovery challenge: the spring ledge, its plate and the gate cage.
+        const built = self.sandbox.challenges[2] orelse self.sandbox.challenges[1].?;
+        const cage: [3]f32 = .{ @floatFromInt(built.cage[0]), @floatFromInt(built.cage[1]), @floatFromInt(built.cage[2]) };
+        const plate: [3]f32 = .{ @floatFromInt(built.plate[0]), @floatFromInt(built.plate[1]), @floatFromInt(built.plate[2]) };
+        target = .{ (cage[0] + plate[0]) / 2, cage[1] + 3, (cage[2] + plate[2]) / 2 };
+        const across: [3]f32 = .{ plate[2] - cage[2], 0, cage[0] - plate[0] };
+        self.sandbox.player.mode = .fly;
+        self.sandbox.view = .first;
+        self.sandbox.player.feet = .{ target[0] + across[0] * 1.6 + 2, target[1] + 4, target[2] + across[2] * 1.6 + 2 };
+        self.sandbox.player.velocity = .{ 0, 0, 0 };
         const player_eye = self.sandbox.player.eye();
         eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
     } else if (v == 99) {
@@ -3125,7 +3136,8 @@ fn smokeCityDiscoveries(self: *App) void {
     const SmokeAim = struct {
         fn place(player: *Player, aim: *Camera_, point: [3]f32) void {
             player.mode = .fly;
-            player.feet = .{ point[0], point[1] - 2, point[2] - 4 };
+            // Close enough to stand inside an opened challenge cage (its walls are 2 m out).
+            player.feet = .{ point[0], point[1] - 2, point[2] - 1.2 };
             player.velocity = .{ 0, 0, 0 };
             const eye = player.eye();
             const dx = point[0] - eye.x();
@@ -3140,8 +3152,13 @@ fn smokeCityDiscoveries(self: *App) void {
             place(&guest_player.player, &guest_player.camera, point);
         }
     };
-    var points: [CityContent.discovery_count][3]f32 = undefined;
-    CityDiscoveries.positions(&sb.catalog.district, sb.seed, &points);
+    // Where the keepsakes are now (a challenge may have moved one off a route), with every
+    // challenge cage held open as if its course had just been run.
+    const points = sb.city_discovery_positions;
+    _ = CityDiscoveries;
+    for (sb.challenges) |maybe| if (maybe) |built| {
+        @import("game/Platformer.zig").press(sb, built.plate) catch |err| return self.smokeFail("SMOKE DISCOVERIES OPEN CAGES {s}", .{@errorName(err)});
+    };
     for (0..Sandbox.max_players - 1) |i| sb.joinGuest(i);
     sb.tools.tool = .hands;
     sb.view = .first;

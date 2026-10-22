@@ -420,6 +420,8 @@ bile_relay_step: u8 = 0,
 bile_sequence: [BileCase.relay_count]u8 = @splat(0),
 /// Seed-derived Detroit pickup anchors, computed once rather than during aiming or rendering.
 city_discovery_positions: [CityDiscoveries.count]Physics.Vec3 = undefined,
+/// The approach challenge laid around each discovery (null for the landmark climbs).
+challenges: [CityDiscoveries.count]?@import("Challenges.zig").Built = @splat(null),
 /// Runtime-only Titan phase; an unfinished encounter restarts from phase one after loading.
 city_titan_phase: u8 = 0,
 modifications: Modifications = .{},
@@ -510,6 +512,9 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.market = .init(seed, 0);
     self.resetPlayer(camera);
     Frontier.init(self);
+    // Detroit's discovery challenges are city blocks, laid once the city's colliders exist.
+    _ = @import("Challenges.zig").place(self);
+    try self.syncBlocks();
 }
 
 /// Installs a validated mod package: its scripts into the host and its blueprints into the
@@ -1287,6 +1292,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (timing) |profile| profile.metrics.record(.city_life, stage_timer.lap() * 1000);
     if (timing != null) stage_timer.reset();
     Frontier.step(self, camera, input, actions, frozen, dt, timing);
+    if (self.block_world.pending()) self.syncBlocks() catch |err| self.say("blocks not rebuilt: {s}", .{@errorName(err)});
     Platformer.step(self, camera, dt) catch |err| self.say("blocks failed: {s}", .{@errorName(err)});
     Farm.step(self, dt);
     if (timing) |profile| profile.metrics.record(.frontier, stage_timer.lap() * 1000);
@@ -2478,11 +2484,21 @@ fn cropDocs(self: *const Sandbox, arena: std.mem.Allocator) ![]const Farm.Doc {
 fn blockSections(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.BlockSection {
     const blocks = self.block_world.blocks;
     const sections = try arena.alloc(Save.BlockSection, blocks.count);
-    for (sections, 0..) |*s, i| {
+    var kept: usize = 0;
+    for (0..blocks.count) |i| {
         const section = blocks.sectionAt(i);
-        s.* = .{ .x = section.key.x, .y = section.key.y, .z = section.key.z, .data = try Blocks.encodeSection(arena, section.cells) };
+        // City blocks (discovery challenges) are rebuilt from the seed, never saved.
+        var cells = section.cells.*;
+        var any = false;
+        for (&cells) |*cell| {
+            if (cell.isAuthored()) cell.* = .empty;
+            if (!cell.isEmpty()) any = true;
+        }
+        if (!any) continue;
+        sections[kept] = .{ .x = section.key.x, .y = section.key.y, .z = section.key.z, .data = try Blocks.encodeSection(arena, &cells) };
+        kept += 1;
     }
-    return sections;
+    return sections[0..kept];
 }
 
 fn terrainTiles(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.TerrainTile {
@@ -2705,13 +2721,18 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (terrain, 0..) |tile, i| self.terrain_edit.loadTile(.{ .x = doc.terrain[i].x, .z = doc.terrain[i].z }, &tile) catch unreachable; // checked above
     self.block_world.blocks.clear();
     Platformer.reset(self);
+    // Drop the old blocks' colliders now, so the challenges are laid against the bare city. Block
+    // meshes and colliders are derived from the grid: a failed rebuild here leaves the load
+    // complete and is retried on the next step.
+    self.syncBlocks() catch {};
     self.farm = .{};
     for (doc.crops) |crop| {
         self.farm.crops[self.farm.len] = .{ .cell = .{ crop.x, crop.y, crop.z }, .growth = crop.growth };
         self.farm.len += 1;
     }
     for (doc.blocks, block_cells, block_filled) |section, *cells, filled| self.block_world.blocks.loadSection(.{ .x = section.x, .y = section.y, .z = section.z }, cells, filled) catch unreachable; // checked above
-    try self.syncBlocks();
+    _ = @import("Challenges.zig").place(self);
+    self.syncBlocks() catch {};
     self.profile = profile;
     self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
@@ -3214,6 +3235,7 @@ test "platformer blocks launch, crumble and return, hurt, hold checkpoints, open
         }
     }.of;
     const blocks = sandbox.block_world.blocks;
+    const city_movers = sandbox.platform.mover_len; // the discovery challenges' own
     try blocks.set(x, y, z, mat(.main)); // spring
     try blocks.set(x + 4, y, z, mat(.accent)); // crumble
     try blocks.set(x + 8, y, z, mat(.wood)); // hazard
@@ -3222,7 +3244,7 @@ test "platformer blocks launch, crumble and return, hurt, hold checkpoints, open
     try blocks.set(x + 20, y, z, mat(.metal)); // gate
     try blocks.set(x + 24, y, z, mat(.color)); // mover, sliding toward +z
     try sandbox.syncBlocks();
-    try std.testing.expectEqual(@as(usize, 1), sandbox.platform.mover_len);
+    try std.testing.expectEqual(city_movers + 1, sandbox.platform.mover_len);
     const top: f32 = @floatFromInt(y + 1);
     const at = struct {
         fn feet(cx: i32, cy: f32, cz: i32) [3]f32 {
@@ -3263,20 +3285,21 @@ test "platformer blocks launch, crumble and return, hurt, hold checkpoints, open
     try std.testing.expect(sandbox.physics.castRay(gate_probe, .{ 0, -1, 0 }, 3.5, .none) != null);
     sandbox.player = .{ .feet = at(x + 16, top, z), .grounded = true };
     try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
-    try std.testing.expect(sandbox.block_world.gates_open);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.block_world.plate_len);
     try std.testing.expect(sandbox.physics.castRay(gate_probe, .{ 0, -1, 0 }, 3.5, .none) == null);
     sandbox.player.feet = at(x + 30, top + 40, z);
-    for (0..90) |_| try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
-    try std.testing.expect(!sandbox.block_world.gates_open);
+    for (0..@as(usize, @intFromFloat(Platformer.plate_hold * 60)) + 30) |_| try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expectEqual(@as(usize, 0), sandbox.block_world.plate_len);
     try std.testing.expect(sandbox.physics.castRay(gate_probe, .{ 0, -1, 0 }, 3.5, .none) != null);
 
     // Mover: its body slides along +z under physics.
-    const start = sandbox.physics.position(sandbox.platform.movers[0].body).?;
+    const ours = sandbox.platform.mover_len - 1;
+    const start = sandbox.physics.position(sandbox.platform.movers[ours].body).?;
     for (0..60) |_| {
         try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
         sandbox.physics.step(1.0 / 60.0);
     }
-    const moved = sandbox.physics.position(sandbox.platform.movers[0].body).?;
+    const moved = sandbox.physics.position(sandbox.platform.movers[ours].body).?;
     try std.testing.expect(moved[2] - start[2] > 1);
 }
 
@@ -3355,6 +3378,59 @@ test "building tips follow each player's progress and skipping ahead does not mo
     try std.testing.expectEqual(Tips.Step.done, sandbox.build_tips.step[0]);
     Tips.advance(&sandbox, 0, .done);
     try std.testing.expectEqual(Tips.Step.done, sandbox.build_tips.step[0]);
+}
+
+test "Detroit's discovery challenges are laid, finishable, cage their keepsake until the plate is pressed, and are never saved" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Challenges = @import("Challenges.zig");
+    var laid: usize = 0;
+    var first: ?usize = null;
+    for (sandbox.challenges, 0..) |maybe, i| if (maybe) |built| {
+        laid += 1;
+        if (first == null) first = i;
+        if (!Challenges.finishable(&sandbox, built)) {
+            std.debug.print("challenge {d} ({s}) is not finishable\n", .{ i, @tagName(built.archetype) });
+            return error.TestUnexpectedResult;
+        }
+    };
+    if (laid < 8) for (sandbox.challenges, 0..) |maybe, k| {
+        if (maybe == null and Challenges.archetypeOf(@import("CityContent.zig").detroit.discoveries[k].method) != null) std.debug.print("challenge {d} not laid at {any}\n", .{ k, sandbox.city_discovery_positions[k] });
+    };
+    try std.testing.expectEqual(@as(usize, 8), laid);
+
+    // From outside the cage the keepsake cannot be taken.
+    const i = first.?;
+    const built = sandbox.challenges[i].?;
+    const point = sandbox.city_discovery_positions[i];
+    const outside: [3]f32 = .{ point[0] + 3.5, point[1], point[2] + 0.2 };
+    const toward = R.normalize(R.sub(point, outside));
+    const blocked = Frontier.pick(&sandbox, outside, toward, 8, 8, 0);
+    try std.testing.expect(blocked == null or blocked.? != .city_discovery);
+    // Standing on the plate opens the cage, and then it can.
+    sandbox.player = .{ .feet = .{ @as(f32, @floatFromInt(built.plate[0])) + 0.5, @floatFromInt(built.plate[1] + 1), @as(f32, @floatFromInt(built.plate[2])) + 0.5 }, .grounded = true };
+    try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.block_world.plate_len);
+    const open = Frontier.pick(&sandbox, outside, toward, 8, 8, 0);
+    try std.testing.expect(open != null and open.? == .city_discovery);
+
+    // The city's blocks resist the tools and stay out of the save.
+    var st: BlockTool.State = .{};
+    const gate = .{ built.cage[0] + 2, built.cage[1] + 1, built.cage[2] };
+    try BlockTool.clearBox(&sandbox, 0, gate, gate);
+    try std.testing.expect(!sandbox.block_world.blocks.get(gate[0], gate[1], gate[2]).isEmpty());
+    _ = &st;
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"blocks\": []") != null);
+    sandbox.block_world.blocks.clear();
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expect(sandbox.block_world.blocks.get(gate[0], gate[1], gate[2]).isAuthored());
+    try std.testing.expect(Challenges.finishable(&sandbox, sandbox.challenges[i].?));
 }
 
 /// Points the camera at a world position.
