@@ -793,7 +793,13 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
             const octant: i32 = @intFromFloat(@floor((bearing + std.math.pi / 8.0) / (std.math.pi / 4.0)));
             const direction: usize = @intCast(@mod(octant, 8));
             const cardinal = [_][]const u8{ "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
-            const label: []const u8 = switch (menu.map_target) { .none => "", .nest => "HIVE NEST", .cave => "CAVE", .wildkin => "WILDKIN", .wildlife => "CAPTURABLE WILDLIFE" };
+            const label: []const u8 = switch (menu.map_target) {
+                .none => "",
+                .nest => "HIVE NEST",
+                .cave => "CAVE",
+                .wildkin => "WILDKIN",
+                .wildlife => "CAPTURABLE WILDLIFE",
+            };
             const w: f32 = @min(v.w - 40, 310);
             const box: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + 54, .w = w, .h = 30 };
             c.rect(box, .{ 0.02, 0.035, 0.05, 0.72 });
@@ -920,8 +926,8 @@ fn prompt(c: *Canvas, v: Rect, text: []const u8, tint: Color) void {
     c.centered(cx, r.y + 9, text, 1.1, ink);
 }
 
-/// A guest's split view: vitals, the aimed prompt, and a compact stall panel while trading
-/// (paid from the guest's own wallet).
+/// A guest's split view: vitals, the aimed prompt, and a compact shop panel while trading or
+/// fabricating from that guest's own Kit.
 fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const g = &sb.guests[guest.index];
     const v = guest.view;
@@ -930,6 +936,7 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     petStatus(c, v, sb, guest.index + 1);
     specials(c, v, sb, guest.index + 1, g.profile, .{ "UP", "DN", "R3+UP" });
     if (sb.kits[guest.index + 1].weapons != 0) weaponLine(c, v, sb, guest.index + 1);
+    if (g.shop) |shop| return drawGuestFabricator(c, sb, shop, guest.index + 1, v, tint);
     const stall = g.trading orelse return prompt(c, v, guest.prompt, tint);
     const w = @min(v.w - 40, 460);
     const h = 84 + @as(f32, Sandbox.trade_rows) * 26;
@@ -952,6 +959,43 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
         y += 26;
     }
     c.text(r.x + 14, r.y + r.h - 22, "D-PAD CHOOSE  X TRADE  B CLOSE", 0.9, dim);
+}
+
+fn drawGuestFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, owner: usize, v: Rect, tint: Color) void {
+    var indices: [Fabricator.recipes.len]u8 = undefined;
+    const rows = Fabricator.onTab(@enumFromInt(shop.tab), &indices);
+    const kit = &sb.kits[owner];
+    const w = @min(v.w - 20, 320);
+    const h = @min(v.h - 20, 220);
+    const r: Rect = .{ .x = v.x + v.w - w - 10, .y = v.y + 10, .w = w, .h = h };
+    c.rect(r, panel_fill);
+    c.rect(.{ .x = r.x, .y = r.y, .w = r.w, .h = 2 }, tint);
+    var title: [32]u8 = undefined;
+    c.text(r.x + 10, r.y + 10, std.fmt.bufPrint(&title, "P{d} FABRICATOR", .{owner + 1}) catch "FABRICATOR", 0.95, tint);
+    c.print(r.x + 10, r.y + 28, 0.7, dim, "SCRAP {d}  PARTS {d}", .{ kit.wallet.scrap, kit.wallet.parts });
+    var tab_name: [20]u8 = undefined;
+    c.print(r.x + 10, r.y + 45, 0.72, ink, "TAB {d}/{d}  {s}", .{ shop.tab + 1, Fabricator.tab_count, pretty(&tab_name, @tagName(@as(Fabricator.Tab, @enumFromInt(shop.tab)))) });
+
+    const selected_row: usize = shop.row;
+    const first = if (selected_row > 2) @min(selected_row - 2, rows.len -| 4) else 0;
+    const end = @min(rows.len, first + 4);
+    var y = r.y + 63;
+    for (rows[first..end], first..) |index, row_index| {
+        const selected = row_index == shop.row;
+        const recipe = Fabricator.recipes[index];
+        if (selected) c.rect(.{ .x = r.x + 6, .y = y - 3, .w = r.w - 12, .h = 19 }, alpha(tint, 0.14));
+        var name: [28]u8 = undefined;
+        c.text(r.x + 10, y, Fabricator.name(recipe.output, &name), 0.72, if (selected) tint else ink);
+        if (selected) if (Fabricator.status(&sb.progress, kit, recipe.output)) |state|
+            c.text(r.x + r.w - Canvas.textWidth(state, 0.62) - 10, y, state, 0.62, good)
+        else
+            c.text(r.x + r.w - Canvas.textWidth("SELECTED", 0.62) - 10, y, "SELECTED", 0.62, dim);
+        y += 21;
+    }
+    const selected_index = rows[shop.row];
+    const cost = Fabricator.recipes[selected_index].cost;
+    c.print(r.x + 10, r.y + r.h - 43, 0.66, gold, "COST  L{d} R{d} A{d} S{d} P{d}", .{ cost.lumen, cost.rotor, cost.alloy, cost.scrap, cost.parts });
+    c.text(r.x + 10, r.y + r.h - 27, "UP/DN SELECT  LEFT/RIGHT TAB  X BUILD  B CLOSE", 0.62, dim);
 }
 
 fn kits(w: Market.Wallet) u32 {
@@ -1014,7 +1058,11 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
 fn armorSwatch(p: Profile, slot: u8) Color {
     const Armor = @import("../character/armor.zig");
     const def = Armor.find(&Armor.builtin_sets, @tagName(p.armor)) orelse &Armor.builtin_sets[1];
-    const custom = switch (slot) { 0 => p.armor_metal_color, 1 => p.armor_secondary_color, else => p.armor_trim_color };
+    const custom = switch (slot) {
+        0 => p.armor_metal_color,
+        1 => p.armor_secondary_color,
+        else => p.armor_trim_color,
+    };
     const rgb = custom orelse switch (slot) {
         0 => .{ def.metal.r, def.metal.g, def.metal.b },
         1 => .{ def.secondary.r, def.secondary.g, def.secondary.b },
@@ -1158,7 +1206,7 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
     const r: Rect = .{ .x = v.x + v.w - w - 12, .y = v.y + (v.h - h) / 2, .w = w, .h = h };
     panel(c, r, "IMPORTED CHARACTER LIBRARY");
     const rig_label = if (cr.imported_rig_status_len > 0) cr.imported_rig_status[0..cr.imported_rig_status_len] else "NO EXTERNAL RIG  |  BUNDLED CAPTAIN COMPONENTS";
-    c.print(r.x + 18, r.y + 36, 0.76, dim, "LIVE PREVIEW LEFT  |  {d} COMPONENTS  |  {s}", .{doc.parts.len, rig_label});
+    c.print(r.x + 18, r.y + 36, 0.76, dim, "LIVE PREVIEW LEFT  |  {d} COMPONENTS  |  {s}", .{ doc.parts.len, rig_label });
     button(c, .{ .x = r.x + r.w - 150, .y = r.y + 26, .w = 132, .h = 28 }, "IMPORT GLB", hitId(.imported_import_glb, 0), false);
     button(c, .{ .x = r.x + r.w - 300, .y = r.y + 26, .w = 142, .h = 28 }, "VERTEX TOOLS", hitId(.mesh_tool, @intFromEnum(@import("../game/MeshTools.zig").Control.open)), false);
 
@@ -1217,7 +1265,11 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
         const channel_y = palette_row.y + 42 + @as(f32, @floatFromInt(channel)) * 27;
         c.text(info_x + 2, channel_y + 8, channel_names[channel], 0.85, dim);
         button(c, .{ .x = info_x + 26, .y = channel_y, .w = 34, .h = 24 }, "-", hitId(.imported_color, channel * 2), false);
-        const channel_value = switch (channel) { 0 => palette_color[0], 1 => palette_color[1], else => palette_color[2] };
+        const channel_value = switch (channel) {
+            0 => palette_color[0],
+            1 => palette_color[1],
+            else => palette_color[2],
+        };
         c.print(info_x + 72, channel_y + 8, 0.8, ink, "{d:.2}", .{channel_value});
         button(c, .{ .x = info_x + 126, .y = channel_y, .w = 34, .h = 24 }, "+", hitId(.imported_color, channel * 2 + 1), false);
     }
@@ -1241,7 +1293,7 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
     }
     const hint = if (cr.imported_status == .saved) "SAVED  |  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE  Z UNDO / SHIFT+Z REDO" else if (cr.imported_status == .unsaved) "UNSAVED  |  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE  Z UNDO / SHIFT+Z REDO" else "UP/DOWN SELECT  LEFT/RIGHT SURFACE  P PALETTE  C PAINT  H HIDE  Z UNDO / SHIFT+Z REDO";
     c.text(r.x + 18, r.y + h - 48, hint, 0.72, if (cr.imported_status == .unsaved) gold else dim);
-    c.print(info_x, r.y + h - 75, 0.72, dim, "HISTORY {d}/{d}", .{cr.imported_history.cursor, cr.imported_history.len});
+    c.print(info_x, r.y + h - 75, 0.72, dim, "HISTORY {d}/{d}", .{ cr.imported_history.cursor, cr.imported_history.len });
     button(c, .{ .x = r.x + r.w - 414, .y = r.y + h - 42, .w = 68, .h = 28 }, "UNDO", hitId(.imported_undo, 0), cr.imported_history.cursor > 0);
     button(c, .{ .x = r.x + r.w - 338, .y = r.y + h - 42, .w = 68, .h = 28 }, "REDO", hitId(.imported_redo, 0), cr.imported_history.cursor < cr.imported_history.len);
     button(c, .{ .x = r.x + r.w - 258, .y = r.y + h - 42, .w = 88, .h = 28 }, "BACK", hitId(.imported_back, 0), false);
@@ -1705,6 +1757,18 @@ test "every screen lays out inside the window and records hits" {
     c.reset(1280, 720);
     draw(&c, &m, &sb, split);
     try expectInside(&c);
+    sb.guests[0].shop = .{ .kind = .fabricate, .tab = @intFromEnum(Fabricator.Tab.weapons) };
+    for ([_][2]f32{ .{ 1280, 720 }, .{ 640, 480 } }) |size| {
+        split.view = .{ .x = 0, .y = 0, .w = size[0] * 0.5, .h = size[1] * 0.5 };
+        for (&guests, 0..) |*g, i| {
+            const guest_rect = @import("../render/Layout.zig").viewRect(i + 1, 4);
+            g.view = .{ .x = guest_rect.x * size[0], .y = guest_rect.y * size[1], .w = guest_rect.w * size[0], .h = guest_rect.h * size[1] };
+        }
+        c.reset(size[0], size[1]);
+        draw(&c, &m, &sb, split);
+        try expectInside(&c);
+    }
+    sb.guests[0].shop = null;
     const id = hitId(.choice, 3);
     try std.testing.expectEqual(Area.choice, hitArea(id));
     try std.testing.expectEqual(@as(u8, 3), hitRow(id));
@@ -1904,7 +1968,13 @@ fn drawWorldMap(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
         rowBack(c, row, menu.row == i);
         const on = menu.enabled(i);
         if (i == Menu.frame_row) {
-            const label: []const u8 = switch (menu.map_target) { .none => "TRACK TARGET: OFF", .nest => "TRACK TARGET: HIVE NESTS", .cave => "TRACK TARGET: CAVES", .wildkin => "TRACK TARGET: WILDKIN", .wildlife => "TRACK TARGET: CAPTURABLE WILDLIFE" };
+            const label: []const u8 = switch (menu.map_target) {
+                .none => "TRACK TARGET: OFF",
+                .nest => "TRACK TARGET: HIVE NESTS",
+                .cave => "TRACK TARGET: CAVES",
+                .wildkin => "TRACK TARGET: WILDKIN",
+                .wildlife => "TRACK TARGET: CAPTURABLE WILDLIFE",
+            };
             c.text(row.x + 12, row.y + 6, label, 1, if (menu.row == i) accent else ink);
         } else c.text(row.x + 12, row.y + 6, item.label, 1, if (!on) dim else if (menu.row == i) accent else ink);
         if (on) c.hit(row, hitId(.menu, i));

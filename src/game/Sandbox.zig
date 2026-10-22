@@ -161,6 +161,7 @@ fn preferFrontierTarget(current: Target, candidate: ?Target) Target {
     return switch (found) {
         .evidence, .foundry_terminal, .windsor_evidence, .bile_trace, .bile_relay, .bile_notes => found,
         .city_discovery => if (current == .none or current == .relic) found else current,
+        .fabricator => if (current == .none or current == .relic) found else current,
         .hero, .wild_pet, .pet => if (current == .none) found else current,
         else => current,
     };
@@ -288,6 +289,12 @@ pub const Guest = struct {
     /// Trade-panel edges from the pad (D-pad up/down; B closes; X confirms via `interact`).
     trade_up: bool = false,
     trade_down: bool = false,
+    /// Fabricator panel scoped to this guest's split view and personal Kit.
+    shop: ?Shop = null,
+    shop_up: bool = false,
+    shop_down: bool = false,
+    shop_left: bool = false,
+    shop_right: bool = false,
     /// Right trigger held (fire the party's selected weapon) and a weapon-switch edge (D-pad).
     fire: bool = false,
     /// Right bumper held: quick-draw saber attack.
@@ -1175,6 +1182,10 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         g.toggle_view = false;
         g.trade_up = false;
         g.trade_down = false;
+        g.shop_up = false;
+        g.shop_down = false;
+        g.shop_left = false;
+        g.shop_right = false;
     }
     if (g.toggle_view) g.view = if (g.view == .first) .third else .first;
     // At a stall the pad drives the trade panel and the body stands still.
@@ -1185,6 +1196,13 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
         };
         const d = R.sub(self.stallPosition(stall), g.player.feet);
         if (@sqrt(d[0] * d[0] + d[2] * d[2]) > reach + 4) g.trading = null;
+        g.player.stepIn(&self.physics, &g.camera, .{}, self.surroundings(g.player.feet), dt);
+        if (g.view == .third) self.chase(g.player.eye(), &g.camera);
+        return;
+    }
+    if (g.shop != null) {
+        const key: ?ShopKey = if (g.input.dodge) .close else if (g.interact) .confirm else if (g.shop_up) .up else if (g.shop_down) .down else if (g.shop_left) .left else if (g.shop_right) .right else null;
+        if (key) |k| self.guestShopKey(slot, k);
         g.player.stepIn(&self.physics, &g.camera, .{}, self.surroundings(g.player.feet), dt);
         if (g.view == .third) self.chase(g.player.eye(), &g.camera);
         return;
@@ -1200,6 +1218,7 @@ fn stepGuest(self: *Sandbox, g: *Guest, slot: usize, dt: f32) void {
     const gf = g.camera.forward();
     g.target = preferFrontierTarget(g.target, Frontier.pick(self, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, reach + 2, reach + 2, slot));
     if (g.interact) switch (g.target) {
+        .fabricator => g.shop = .{ .kind = .fabricate },
         .hero => |i| Frontier.recruit(self, i),
         .wild_pet => |sp| Frontier.freePet(self, slot, sp),
         .pet => |owner| Frontier.petPet(self, slot, owner),
@@ -1872,42 +1891,7 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
             .fabricate => {
                 var buffer: [Fabricator.recipes.len]u8 = undefined;
                 const index = Fabricator.onTab(@enumFromInt(shop.tab), &buffer)[shop.row];
-                const made = Fabricator.make(&self.progress, &self.kits[0], index) catch |err| return self.say("cannot fabricate: {s}", .{reason(err)});
-                var name_buffer: [24]u8 = undefined;
-                const name = Fabricator.name(made, &name_buffer);
-                switch (made) {
-                    .vehicle => |d| {
-                        self.garage.park(self.seed, spawn, self.catalog, d);
-                        self.say("{s} is on its garage pad", .{name});
-                    },
-                    .fighter => {
-                        self.hangar.place(self.seed, spawn, null, 0);
-                        self.say("the Kestrel stands on its pad beyond the garage", .{});
-                    },
-                    .robot_companion => self.say("field droid built: your robot helper deploys with your pet", .{}),
-                    .suit => |c| {
-                        self.profile.clothing = c;
-                        self.say("fabricated and wearing the {s}", .{name});
-                    },
-                    .armor => |a| {
-                        self.profile.armor = a;
-                        self.say("fabricated and wearing {s} armor", .{name});
-                    },
-                    .weapon => |w| {
-                        self.combat.arsenals[0].active = w;
-                        self.say("{s} ready: tool 5 to wield", .{name});
-                    },
-                    .weapon_upgrade => |u| self.say("{s} installed: weapon tier {d}", .{ name, u.tier }),
-                    .kestrel_upgrade => |upgrade| {
-                        self.hangar.applyLevels(self.progress.kestrel_levels);
-                        self.skies.configureKestrel(self.progress.kestrel_levels);
-                        self.say("Kestrel {s}: level {d}", .{ @tagName(upgrade), self.progress.kestrelLevel(upgrade) });
-                    },
-                    .kestrel_paint => |paint| {
-                        self.say("Kestrel paint set to {s}", .{@tagName(paint)});
-                    },
-                }
-                self.progress.setFlag("fabricated");
+                self.fabricateFor(0, index);
             },
             .wardrobe => {
                 const c: Profile.Clothing = @enumFromInt(shop.row);
@@ -1917,6 +1901,64 @@ pub fn shopKey(self: *Sandbox, key: ShopKey) void {
             },
         },
     }
+}
+
+/// The guest fabricator uses the same recipes as P1 but charges and equips the chosen ranger.
+fn guestShopKey(self: *Sandbox, slot: usize, key: ShopKey) void {
+    const guest = &self.guests[slot - 1];
+    const shop = if (guest.shop) |*s| s else return;
+    var buffer: [Fabricator.recipes.len]u8 = undefined;
+    const rows = Fabricator.onTab(@enumFromInt(shop.tab), &buffer);
+    switch (key) {
+        .up => shop.row = (shop.row + @as(u8, @intCast(rows.len)) - 1) % @as(u8, @intCast(rows.len)),
+        .down => shop.row = (shop.row + 1) % @as(u8, @intCast(rows.len)),
+        .left, .right => {
+            const tabs: u8 = Fabricator.tab_count;
+            shop.tab = if (key == .left) (shop.tab + tabs - 1) % tabs else (shop.tab + 1) % tabs;
+            shop.row = 0;
+        },
+        .close => guest.shop = null,
+        .confirm => self.fabricateFor(slot, rows[shop.row]),
+    }
+}
+
+fn fabricateFor(self: *Sandbox, owner: usize, index: usize) void {
+    const made = Fabricator.make(&self.progress, &self.kits[owner], index) catch |err| return self.say("P{d}: cannot fabricate: {s}", .{ owner + 1, reason(err) });
+    var name_buffer: [24]u8 = undefined;
+    const name = Fabricator.name(made, &name_buffer);
+    switch (made) {
+        .vehicle => |d| {
+            self.garage.park(self.seed, spawn, self.catalog, d);
+            self.say("{s} is on its garage pad", .{name});
+        },
+        .fighter => {
+            self.hangar.place(self.seed, spawn, null, 0);
+            self.say("the Kestrel stands on its pad beyond the garage", .{});
+        },
+        .robot_companion => self.say("field droid built: your robot helper deploys with your pet", .{}),
+        .suit => |c| {
+            if (owner == 0) self.profile.clothing = c else self.guests[owner - 1].profile.clothing = c;
+            self.say("P{d}: fabricated and wearing the {s}", .{ owner + 1, name });
+        },
+        .armor => |a| {
+            if (owner == 0) self.profile.armor = a else self.guests[owner - 1].profile.armor = a;
+            self.say("P{d}: fabricated and wearing {s} armor", .{ owner + 1, name });
+        },
+        .weapon => |w| {
+            self.combat.arsenals[owner].active = w;
+            self.say("P{d}: {s} ready: tool 5 to wield", .{ owner + 1, name });
+        },
+        .weapon_upgrade => |u| self.say("P{d}: {s} installed: weapon tier {d}", .{ owner + 1, name, u.tier }),
+        .kestrel_upgrade => |upgrade| {
+            self.hangar.applyLevels(self.progress.kestrel_levels);
+            self.skies.configureKestrel(self.progress.kestrel_levels);
+            self.say("P{d}: Kestrel {s}: level {d}", .{ owner + 1, @tagName(upgrade), self.progress.kestrelLevel(upgrade) });
+        },
+        .kestrel_paint => |paint| {
+            self.say("P{d}: Kestrel paint set to {s}", .{ owner + 1, @tagName(paint) });
+        },
+    }
+    self.progress.setFlag("fabricated");
 }
 
 fn stepLife(self: *Sandbox, dt: f32) void {
@@ -4421,6 +4463,58 @@ test "a guest trades at a stall from their own wallet while standing still, and 
     g.input = .{ .forward = 1 };
     try run(&sb, &camera, .{}, .{}, 30);
     try std.testing.expect(R.length(R.sub(g.player.feet, feet)) > 1);
+}
+
+test "a guest fabricates through the kiosk with their own kit while P1 stays independent" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+    sb.joinGuest(0);
+    const g = &sb.guests[0];
+    const kiosk = Frontier.kioskPosition(&sb);
+    g.player = .{ .feet = R.add(kiosk, .{ 0, 0, 4 }) };
+    g.view = .first;
+    g.camera.position = g.player.eye();
+    aimAt(&g.camera, R.add(kiosk, .{ 0, 1.2, 0 }));
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(g.target == .fabricator);
+
+    g.interact = true;
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(g.shop != null and g.shop.?.kind == .fabricate);
+    sb.kits[1].inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] = 8;
+    sb.kits[1].inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] = 6;
+    const p1_weapons = sb.kits[0].weapons;
+    const p1_lumen = sb.kits[0].count(.lumen_shard);
+    const p1_start = sb.player.feet;
+    try run(&sb, &camera, .{ .forward = 1 }, .{}, 30);
+    try std.testing.expect(R.length(R.sub(sb.player.feet, p1_start)) > 1);
+
+    for (0..3) |_| {
+        g.shop_right = true;
+        try run(&sb, &camera, .{}, .{}, 1);
+    }
+    try std.testing.expectEqual(@as(u8, @intFromEnum(Fabricator.Tab.weapons)), g.shop.?.tab);
+    for (0..2) |_| {
+        g.shop_down = true;
+        try run(&sb, &camera, .{}, .{}, 1);
+    }
+    try std.testing.expectEqual(@as(u8, 2), g.shop.?.row);
+    g.interact = true;
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(sb.kits[1].ownsWeapon(.energy_bow));
+    try std.testing.expect(!sb.kits[0].ownsWeapon(.energy_bow));
+    try std.testing.expectEqual(p1_weapons, sb.kits[0].weapons);
+    try std.testing.expectEqual(p1_lumen, sb.kits[0].count(.lumen_shard));
+    try std.testing.expect(sb.combat.arsenals[1].active == .energy_bow);
+    try std.testing.expectEqual(@as(u32, 0), sb.kits[1].count(.lumen_shard));
+    try std.testing.expectEqual(@as(u32, 0), sb.kits[1].count(.hive_alloy));
+    g.input.dodge = true;
+    try run(&sb, &camera, .{}, .{}, 1);
+    try std.testing.expect(g.shop == null);
 }
 
 /// Walks P1 along the shrine walkway (x = 0) and then across to `local` in shrine `k`. While

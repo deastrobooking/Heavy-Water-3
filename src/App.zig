@@ -1559,6 +1559,15 @@ fn routePads(self: *App) void {
         }
         g.interact = g.interact or cmd.interact;
         g.toggle_view = g.toggle_view or cmd.view;
+        if (g.shop != null) {
+            g.shop_up = g.shop_up or cmd.up;
+            g.shop_down = g.shop_down or cmd.down;
+            g.shop_left = g.shop_left or cmd.left;
+            g.shop_right = g.shop_right or cmd.right;
+            g.fire = false;
+            g.alt = false;
+            continue;
+        }
         if (build.toggle) {
             g.building = if (g.building == null) .{} else null;
             if (g.building != null) @import("game/BuildTips.zig").intro(&self.sandbox, p) else self.sandbox.sayTo(p, "stopped building", .{});
@@ -2773,12 +2782,37 @@ fn exerciseSmoke(self: *App) void {
             self.sandbox.leaveGuest(2);
             const flow = self.sandbox.sap_stats[1];
             std.log.info("Smoke sap: tree 1 demand={d:.0} W supply={d:.0} W satisfaction={d:.0}%", .{ flow.demand, flow.supplied, flow.satisfaction * 100 });
+            const guest = &self.sandbox.guests[0];
+            const kiosk = @import("game/Frontier.zig").kioskPosition(&self.sandbox);
+            guest.player = .{ .feet = R3.add(kiosk, .{ 0, 0, 4 }) };
+            guest.view = .first;
+            const eye = guest.player.eye();
+            guest.camera.position = eye;
+            const target = R3.add(kiosk, .{ 0, 1.2, 0 });
+            const dx = target[0] - eye.x();
+            const dy = target[1] - eye.y();
+            const dz = target[2] - eye.z();
+            guest.camera.yaw = std.math.atan2(dx, dz);
+            guest.camera.pitch = std.math.atan2(dy, @sqrt(dx * dx + dz * dz));
+            // P2 presses interact, stepped here: a guest without a connected pad has its press
+            // cleared every frame before the fixed step, so a press left for later is lost.
+            guest.interact = true;
+            self.sandbox.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P2 KIOSK {s}", .{@errorName(err)});
             const origin = self.sandbox.treeOrigin(2);
             camera.position = mach.math.vec3(origin[0], origin[1] + 100, origin[2] - 1000);
             camera.yaw = 0;
             camera.pitch = 0.12;
         },
         8 => {
+            const guest = &self.sandbox.guests[0];
+            if (guest.shop == null or guest.target != .fabricator) return self.smokeFail("SMOKE P2 DID NOT OPEN FABRICATOR (target {s})", .{@tagName(guest.target)});
+            guest.shop.?.tab = @intFromEnum(@import("game/Fabricator.zig").Tab.weapons);
+            guest.shop.?.row = 2;
+            guest.input = .{};
+            self.sandbox.kits[1].inventory[@intFromEnum(@import("game/Collectibles.zig").Kind.lumen_shard)] = 8;
+            self.sandbox.kits[1].inventory[@intFromEnum(@import("game/Collectibles.zig").Kind.hive_alloy)] = 6;
+            guest.interact = true;
+            self.sandbox.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE P2 FABRICATE {s}", .{@errorName(err)});
             const nodes = self.sandbox.catalog.district.nodes;
             Build.selectTool(&self.sandbox, .bridge);
             self.sandbox.tools.bridge_from = 0;
@@ -2790,6 +2824,8 @@ fn exerciseSmoke(self: *App) void {
             camera.pitch = std.math.atan2(point[1] - camera.position.y(), @sqrt(dx * dx + dz * dz));
         },
         9 => {
+            if (!self.sandbox.kits[1].ownsWeapon(.energy_bow) or self.sandbox.kits[1].count(.lumen_shard) != 0 or self.sandbox.kits[1].count(.hive_alloy) != 0) return self.smokeFail("SMOKE P2 FABRICATION DID NOT USE THEIR KIT", .{});
+            std.log.info("Smoke co-op fabricator: P2 built an energy bow from P2's own Kit", .{});
             std.log.info("Smoke co-op: P2 at {d:.1} {d:.1} {d:.1}, motion {s}", .{ self.sandbox.guests[0].player.feet[0], self.sandbox.guests[0].player.feet[1], self.sandbox.guests[0].player.feet[2], @tagName(self.sandbox.guests[0].player.motion) });
             self.sandbox.leaveGuest(0);
             _ = self.sandbox.addBridge(.{ .a = 0, .b = 3 }) catch |err| return self.smokeFail("SMOKE BRIDGE {s}", .{@errorName(err)});
