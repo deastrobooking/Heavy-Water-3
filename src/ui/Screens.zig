@@ -45,7 +45,7 @@ const shade: Color = .{ 0, 0.01, 0.02, 0.55 };
 const row_height: f32 = 26;
 
 /// What a hit is: the control kind in the high byte and its row in the low byte.
-pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe, music_previous, music_toggle, music_next, build_tab };
+pub const Area = enum(u8) { fab_tab = 64, menu = 1, setting_left, setting_right, creator_field, creator_left, creator_right, creator_tab, creator_done, creator_imported, enemy_forge, enemy_part, enemy_left, enemy_right, enemy_palette_left, enemy_palette_right, enemy_style_left, enemy_style_right, imported_import_glb, imported_filter, imported_part, imported_surface_left, imported_surface_right, imported_palette_left, imported_palette_right, imported_color, imported_paint, imported_toggle, imported_undo, imported_redo, imported_back, imported_save, mesh_tool, trade_row, trade_close, shop_row, shop_close, choice, talk_continue, platform_editor, planet_globe, music_previous, music_toggle, music_next, build_tab, imported_library_prev, imported_library_next, imported_library_delete };
 pub fn hitId(area: Area, row: usize) u16 {
     // The row is one byte; lists longer than that pass `row & 0xff` and resolve it on click.
     std.debug.assert(row < 256);
@@ -1236,7 +1236,21 @@ fn drawImportedComponents(c: *Canvas, cr: *const Creator, v: Rect) void {
         button(c, tab, name, hitId(.imported_filter, i), cr.imported_filter == i);
     }
 
-    const list = Rect{ .x = r.x + 18, .y = r.y + 94, .w = @min(@as(f32, 380), (r.w - 60) * 0.45), .h = h - 160 };
+    // The uploaded meshes: step through them (choosing one puts it on the character) or delete.
+    const lib = &cr.imports;
+    const mesh_row: Rect = .{ .x = r.x + 18, .y = r.y + 90, .w = r.w - 36, .h = 28 };
+    c.rect(mesh_row, alpha(panel_fill, 0.6));
+    c.text(mesh_row.x + 8, mesh_row.y + 10, "MESH", 0.8, alpha(accent, 0.8));
+    button(c, .{ .x = mesh_row.x + 52, .y = mesh_row.y + 2, .w = 30, .h = 24 }, "<", hitId(.imported_library_prev, 0), false);
+    button(c, .{ .x = mesh_row.x + 86, .y = mesh_row.y + 2, .w = 30, .h = 24 }, ">", hitId(.imported_library_next, 0), false);
+    if (lib.activeName()) |name| {
+        var upper: [40]u8 = undefined;
+        c.print(mesh_row.x + 126, mesh_row.y + 10, 0.82, gold, "{s}  ({d} OF {d})", .{ pretty(&upper, name), lib.active.? + 1, lib.count });
+        button(c, .{ .x = mesh_row.x + mesh_row.w - 150, .y = mesh_row.y + 2, .w = 146, .h = 24 }, if (cr.import_delete_armed) "CONFIRM DELETE" else "DELETE MESH", hitId(.imported_library_delete, 0), cr.import_delete_armed);
+    } else c.text(mesh_row.x + 126, mesh_row.y + 10, if (lib.count == 0) "NO UPLOADS YET: IMPORT GLB ADDS ONE" else "NONE IN USE: CHOOSE ONE WITH < >", 0.8, dim);
+    if (cr.import_message_len > 0) c.text(r.x + 18, r.y + h - 70, cr.import_message[0..cr.import_message_len], 0.74, if (cr.import_message_ok) good else bad);
+
+    const list = Rect{ .x = r.x + 18, .y = r.y + 126, .w = @min(@as(f32, 380), (r.w - 60) * 0.45), .h = h - 206 };
     c.rect(list, alpha(panel_fill, 0.5));
     const row_step: f32 = 25;
     const rows: usize = @min(18, @as(usize, @intFromFloat(@max(list.h / row_step, 1))));

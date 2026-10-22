@@ -226,7 +226,7 @@ void hw_gamepads(HWPad *out) {
 // from its simulation thread, so each panel runs synchronously on the main queue.
 static int save_json_on_main(const char *json, size_t length, const char *suggested_name);
 static int open_json_on_main(char *buffer, size_t capacity, size_t *length);
-static int open_glb_on_main(char *buffer, size_t capacity, size_t *length);
+static int open_glb_on_main(char *buffer, size_t capacity, size_t *length, char *name, size_t name_capacity);
 
 int hw_choose_save_json(const char *json, size_t length, const char *suggested_name) {
     if ([NSThread isMainThread]) return save_json_on_main(json, length, suggested_name);
@@ -242,10 +242,10 @@ int hw_choose_open_json(char *buffer, size_t capacity, size_t *length) {
     return result;
 }
 
-int hw_choose_open_glb(char *buffer, size_t capacity, size_t *length) {
-    if ([NSThread isMainThread]) return open_glb_on_main(buffer, capacity, length);
+int hw_choose_open_glb(char *buffer, size_t capacity, size_t *length, char *name, size_t name_capacity) {
+    if ([NSThread isMainThread]) return open_glb_on_main(buffer, capacity, length, name, name_capacity);
     __block int result = 0;
-    dispatch_sync(dispatch_get_main_queue(), ^{ result = open_glb_on_main(buffer, capacity, length); });
+    dispatch_sync(dispatch_get_main_queue(), ^{ result = open_glb_on_main(buffer, capacity, length, name, name_capacity); });
     return result;
 }
 
@@ -276,12 +276,18 @@ static int open_json_on_main(char *buffer, size_t capacity, size_t *length) {
     }
 }
 
-static int open_glb_on_main(char *buffer, size_t capacity, size_t *length) {
+static int open_glb_on_main(char *buffer, size_t capacity, size_t *length, char *name, size_t name_capacity) {
     @autoreleasepool {
         NSOpenPanel *panel = [NSOpenPanel openPanel];
         panel.canChooseFiles = YES; panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;
         panel.allowedFileTypes = @[ @"glb" ];
         if ([panel runModal] != NSModalResponseOK || !panel.URL) return 0;
+        // The file's name, so the import can be listed under it.
+        if (name && name_capacity > 0) {
+            const char *file = panel.URL.lastPathComponent.UTF8String ?: "import.glb";
+            strncpy(name, file, name_capacity - 1);
+            name[name_capacity - 1] = 0;
+        }
         NSData *data = [NSData dataWithContentsOfURL:panel.URL];
         if (!data || data.length > capacity) return -1;
         memcpy(buffer, data.bytes, data.length);

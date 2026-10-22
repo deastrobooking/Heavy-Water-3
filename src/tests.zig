@@ -76,6 +76,7 @@ test {
     _ = @import("ui/BlockPalette.zig");
     _ = @import("ui/Guide.zig");
     _ = @import("character/AutoRig.zig");
+    _ = @import("game/ImportLibrary.zig");
     _ = @import("procedural/Heightmap.zig");
     _ = @import("procedural/Landscape.zig");
     _ = @import("procedural/TestArbor.zig");

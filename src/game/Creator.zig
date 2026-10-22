@@ -56,10 +56,24 @@ imported_palette_variant: u8 = 0,
 imported_status: enum { ready, unsaved, saved } = .ready,
 imported_rig_status: [imported_rig_status_capacity]u8 = @splat(0),
 imported_rig_status_len: usize = 0,
+/// Every uploaded mesh and the one in use (kept by `App`), the last import's outcome as shown
+/// in the panel, and whether DELETE has been pressed once (a second press deletes).
+imports: @import("ImportLibrary.zig").Library = .{},
+import_message: [96]u8 = @splat(0),
+import_message_len: u8 = 0,
+import_message_ok: bool = true,
+import_delete_armed: bool = false,
+
 /// In-game villain assembly panel; its chosen kit skins transformer-scale Scalari frames.
 enemy_design_open: bool = false,
 enemy_design: EnemyDesign.Design = .{},
 enemy_part: EnemyDesign.Part = .frame,
+
+pub fn setImportMessage(self: *Creator, ok: bool, comptime fmt: []const u8, args: anytype) void {
+    const text = std.fmt.bufPrint(&self.import_message, fmt, args) catch self.import_message[0..];
+    self.import_message_len = @intCast(text.len);
+    self.import_message_ok = ok;
+}
 
 pub fn begin(self: *Creator, current: Profile) void {
     self.* = .{
@@ -82,6 +96,10 @@ pub fn begin(self: *Creator, current: Profile) void {
         .imported_status = self.imported_status,
         .imported_rig_status = self.imported_rig_status,
         .imported_rig_status_len = self.imported_rig_status_len,
+        .imports = self.imports,
+        .import_message = self.import_message,
+        .import_message_len = self.import_message_len,
+        .import_message_ok = self.import_message_ok,
         .enemy_design = self.enemy_design,
         .enemy_part = self.enemy_part,
     };

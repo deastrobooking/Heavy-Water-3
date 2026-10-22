@@ -26,13 +26,14 @@ const PadBindings = @import("engine/PadBindings.zig");
 const PadPreset = @import("game/PadPreset.zig");
 extern "c" fn hw_choose_save_json(json: [*]const u8, length: usize, suggested_name: [*:0]const u8) c_int;
 extern "c" fn hw_choose_open_json(buffer: [*]u8, capacity: usize, length: *usize) c_int;
-extern "c" fn hw_choose_open_glb(buffer: [*]u8, capacity: usize, length: *usize) c_int;
+extern "c" fn hw_choose_open_glb(buffer: [*]u8, capacity: usize, length: *usize, name: [*]u8, name_capacity: usize) c_int;
 const HotReload = @import("asset/HotReload.zig");
 const Registry = @import("asset/Registry.zig");
 const Guid = @import("asset/Guid.zig");
 const Loader = @import("asset/Loader.zig");
 const Profile = @import("game/Profile.zig");
 const MeshModifiers = @import("asset/Modifiers.zig");
+const ImportLibrary = @import("game/ImportLibrary.zig");
 const MeshModel = @import("asset/Model.zig");
 const MeshTools = @import("game/MeshTools.zig");
 const EditedMesh = @import("game/EditedMesh.zig");
@@ -168,6 +169,8 @@ fire_held: bool = false,
 alt_held: bool = false,
 mesh_library_arena: std.heap.ArenaAllocator = undefined,
 mesh_library: MeshModifiers.Document = undefined,
+/// Where the uploaded mesh in use keeps its source, components and edits (null: none in use).
+active_import: ?ImportLibrary.Paths = null,
 mesh_library_bake: ?*MeshModifiers.Bake = null,
 mesh_library_preview_dirty: bool = false,
 /// Vertex tools on the imported mesh. Pointer events queue here and apply in `publish`, where the
@@ -240,6 +243,8 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             } else std.log.warn("Ignoring stale or incompatible Captain component override; the file was preserved", .{});
         } else |err| std.log.warn("Ignoring invalid Captain component override ({s}); the file was preserved", .{@errorName(err)});
     }
+    ImportLibrary.migrateLegacy(io);
+    self.refreshImports();
     self.loadSavedCharacterImport();
     self.sandbox.creator.imported_doc = &self.mesh_library;
     if (options.smoke_frames > 0) self.mesh_library_preview_dirty = true;
@@ -322,7 +327,7 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
             self.sandbox.profile.gemstone = if (options.character_showcase == 44) .ruby else .sapphire;
         }
         if (options.character_showcase == 46) self.sandbox.profile.body_style = .captain_test;
-        if (options.character_showcase >= 47 and options.character_showcase <= 50) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), false) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
+        if (options.character_showcase >= 47 and options.character_showcase <= 50) self.importCharacterGlb(@embedFile("asset/rigged_character.glb"), null) catch |err| std.log.warn("showcase rig import failed: {s}", .{@errorName(err)});
         if (options.character_showcase == 5) {
             self.sandbox.profile.class = .synthetic;
             self.sandbox.profile.presentation = .feminine;
@@ -347,6 +352,11 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         };
         self.sandbox.creator.begin(self.sandbox.profile);
         if (options.character_showcase == 46 and options.capture_frame > 0) self.sandbox.creator.openImported();
+        // 55: the Parts panel on the upload library, as a player sees it after importing.
+        if (options.character_showcase == 55) {
+            self.sandbox.creator.openImported();
+            self.sandbox.creator.setImportMessage(true, "ADDED {s}  |  {s}", .{ self.sandbox.creator.imports.activeName() orelse "NOTHING", self.imported_rig_status[0..self.imported_rig_status_len] });
+        }
         if (options.character_showcase == 48 or options.character_showcase == 49 or options.character_showcase == 50) {
             self.sandbox.creator.openImported();
             self.sandbox.creator.vertex_tools = true;
@@ -1001,6 +1011,8 @@ fn pointAt(self: *App, click: bool) void {
             sb.creator.imported_open = false;
         },
         .imported_save => if (click) self.saveMeshLibrary(),
+        .imported_library_prev, .imported_library_next => if (click) self.stepImport(if (Screens.hitArea(hit) == .imported_library_prev) -1 else 1),
+        .imported_library_delete => if (click) self.deleteActiveImport(),
         .mesh_tool => if (click) self.meshToolControl(@enumFromInt(row)),
         .platform_editor => if (click) Build.platformEditorAction(sb, @enumFromInt(row)),
         .fab_tab => if (sb.shop) |*shop| if (click) {
@@ -4378,7 +4390,8 @@ fn saveMeshLibrary(self: *App) void {
         return;
     };
     defer self.allocator.free(json);
-    const path = if (self.sandbox.profile.body_style == .imported_glb and self.imported_rig_status_len != 0) "saves/imported-character.modifiers.json" else "saves/captain.modifiers.json";
+    const active = if (self.active_import) |*paths| paths else null;
+    const path = if (self.sandbox.profile.body_style == .imported_glb and self.imported_rig_status_len != 0 and active != null) active.?.modifiersPath() else "saves/captain.modifiers.json";
     Save.writeFile(self.io, path, json) catch |err| {
         self.report("LIBRARY SAVE FAILED {s}", .{@errorName(err)});
         return;
@@ -4394,7 +4407,8 @@ fn saveMeshLibrary(self: *App) void {
 }
 
 fn editedMeshPath(self: *const App) []const u8 {
-    return if (self.sandbox.profile.body_style == .imported_glb and self.imported_rig_status_len != 0) EditedMesh.imported_path else EditedMesh.captain_path;
+    if (self.sandbox.profile.body_style == .imported_glb and self.imported_rig_status_len != 0) if (self.active_import) |*paths| return paths.editedPath();
+    return EditedMesh.captain_path;
 }
 
 /// Writes the edited mesh (sculpt, paint, pens, topology, skin) beside the part sidecar.
@@ -4452,25 +4466,47 @@ fn discardEditedMesh(self: *App) void {
 /// Import a binary GLB into the Character Designer. Its skin is kept and retargeted live onto the
 /// game's humanoid skeleton by bone name (`Gltf.humanoidJoint`, `character/Retarget.zig`); the
 /// source GLB and the editable component sidecar are saved for repeat edits.
-fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
+/// The uploaded meshes on disk, and the paths of the one in use.
+fn refreshImports(self: *App) void {
+    self.sandbox.creator.imports = ImportLibrary.scan(self.io);
+    self.active_import = if (self.sandbox.creator.imports.activeName()) |name| ImportLibrary.Paths.of(name) else null;
+}
+
+/// Import a GLB as the character body. A rig whose bones carry humanoid names is kept and
+/// retargeted; any other mesh (no skin, or unknown bone names) is auto-rigged onto the game's
+/// skeleton, which works for a standing T- or A-pose figure. With `upload` (a file the player
+/// chose) it joins the import library as the mesh in use, named after the file.
+fn importCharacterGlb(self: *App, source: []const u8, upload: ?[]const u8) !void {
     var scratch: std.heap.ArenaAllocator = .init(self.allocator);
     defer scratch.deinit();
     const Gltf = @import("asset/Gltf.zig");
+    const AutoRig = @import("character/AutoRig.zig");
     const trace = try Gltf.inspect(scratch.allocator(), source);
-    // A rig whose bones match the game's humanoid by name is kept and retargeted. Automatic
-    // rigging of bone-less meshes (`character/AutoRig.zig`) is not wired in yet: its first pass
-    // crumpled a T-posed test model, so those files get a clear refusal instead.
-    if (trace.skin_count == 0) return error.NoSkeleton;
-    const mapped_count = Gltf.mappedGameplayJointCount(trace);
-    if (mapped_count == 0) return error.NoCompatibleGameplayJoints;
-    var model = try Gltf.compileRigged(self.allocator, source, .{});
+    const mapped_rig = if (trace.skin_count == 0) 0 else Gltf.mappedGameplayJointCount(trace);
+    // A skin with unknown bone names is baked in its bind pose first, then auto-rigged.
+    var model = if (mapped_rig > 0)
+        try Gltf.compileRigged(self.allocator, source, .{})
+    else if (trace.skin_count > 0)
+        try Gltf.compileBindPosePreview(self.allocator, source, .{})
+    else
+        try Gltf.compile(self.allocator, source, .{});
     errdefer model.deinit(self.allocator);
+    var auto_rig: ?AutoRig.Fit = null;
+    if (mapped_rig == 0) auto_rig = try AutoRig.apply(self.allocator, &model);
+    const mapped_count: usize = if (mapped_rig > 0) mapped_rig else AutoRig.joint_count - 1;
     const source_hash = @import("asset/Meta.zig").hashSource(source);
     const generated = try MeshModifiers.generate(self.mesh_library_arena.allocator(), model, &source_hash);
-    if (persist) {
-        try Save.writeFile(self.io, "saves/imported-character.glb", source);
+    if (upload) |file_name| {
+        if (self.sandbox.creator.imports.count == ImportLibrary.capacity) return error.ImportLibraryFull;
+        var base: [ImportLibrary.name_len]u8 = undefined;
+        var unique: [ImportLibrary.name_len]u8 = undefined;
+        const name = ImportLibrary.unique(&self.sandbox.creator.imports, &unique, ImportLibrary.slug(&base, file_name));
+        const paths = ImportLibrary.Paths.of(name);
+        try Save.writeFile(self.io, paths.sourcePath(), source);
         const json = try std.json.Stringify.valueAlloc(scratch.allocator(), generated, .{ .whitespace = .indent_2 });
-        try Save.writeFile(self.io, "saves/imported-character.modifiers.json", json);
+        try Save.writeFile(self.io, paths.modifiersPath(), json);
+        ImportLibrary.writeActive(self.io, name);
+        self.refreshImports();
     }
     self.destroyMeshLibraryBake();
     if (self.queued_character_model) |old| old.deinit(self.allocator);
@@ -4483,21 +4519,24 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     self.sandbox.creator.draft.body_style = .imported_glb;
     self.sandbox.creator.imported_selected = 0;
     self.sandbox.creator.imported_status = .ready;
-    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "LIVE RETARGET {d}/21 JOINTS", .{mapped_count}) catch unreachable;
+    const how: []const u8 = if (auto_rig) |f| (if (f.t_pose) "AUTO-RIGGED (T-POSE)" else "AUTO-RIGGED") else "LIVE RETARGET";
+    const app_status = std.fmt.bufPrint(&self.imported_rig_status, "{s} {d}/21 JOINTS", .{ how, mapped_count }) catch unreachable;
     self.imported_rig_status_len = app_status.len;
-    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "LIVE RETARGET {d}/21 JOINTS", .{mapped_count}) catch unreachable;
+    const creator_status = std.fmt.bufPrint(&self.sandbox.creator.imported_rig_status, "{s} {d}/21 JOINTS", .{ how, mapped_count }) catch unreachable;
     self.sandbox.creator.imported_rig_status_len = creator_status.len;
-    if (persist) self.sandbox.creator.imported_open = true;
+    if (upload != null) self.sandbox.creator.imported_open = true;
 }
 
+/// Put the library's mesh in use on the character, with its saved component edits.
 fn loadSavedCharacterImport(self: *App) void {
-    const source = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.glb", self.allocator, .limited(max_glb_bytes)) catch return;
+    const paths = self.active_import orelse return;
+    const source = std.Io.Dir.cwd().readFileAlloc(self.io, paths.sourcePath(), self.allocator, .limited(max_glb_bytes)) catch return;
     defer self.allocator.free(source);
-    const modifiers = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20)) catch {
-        self.importCharacterGlb(source, false) catch |err| std.log.warn("saved character import rejected: {s}", .{@errorName(err)});
+    const modifiers = std.Io.Dir.cwd().readFileAlloc(self.io, paths.modifiersPath(), self.mesh_library_arena.allocator(), .limited(1 << 20)) catch {
+        self.importCharacterGlb(source, null) catch |err| std.log.warn("saved character import rejected: {s}", .{@errorName(err)});
         return;
     };
-    self.importCharacterGlb(source, false) catch |err| {
+    self.importCharacterGlb(source, null) catch |err| {
         std.log.warn("saved character import rejected: {s}", .{@errorName(err)});
         return;
     };
@@ -4513,15 +4552,67 @@ fn loadSavedCharacterImport(self: *App) void {
 const max_glb_bytes = 192 << 20;
 
 fn chooseAndImportCharacter(self: *App) void {
-    if (@import("builtin").os.tag != .macos) return self.report("GLB PICKER IS AVAILABLE ON MACOS", .{});
-    const bytes = self.allocator.alloc(u8, max_glb_bytes) catch return self.report("NOT ENOUGH MEMORY TO OPEN GLB", .{});
+    const creator = &self.sandbox.creator;
+    creator.import_delete_armed = false;
+    if (@import("builtin").os.tag != .macos) return creator.setImportMessage(false, "GLB PICKER IS AVAILABLE ON MACOS", .{});
+    const bytes = self.allocator.alloc(u8, max_glb_bytes) catch return creator.setImportMessage(false, "NOT ENOUGH MEMORY TO OPEN A GLB", .{});
     defer self.allocator.free(bytes);
     var length: usize = 0;
-    const result = hw_choose_open_glb(bytes.ptr, bytes.len, &length);
+    var name_buffer: [256]u8 = @splat(0);
+    const result = hw_choose_open_glb(bytes.ptr, bytes.len, &length, &name_buffer, name_buffer.len);
     if (result == 0) return;
-    if (result < 0) return self.report("GLB IS LARGER THAN {d} MB OR COULD NOT BE READ", .{max_glb_bytes >> 20});
-    self.importCharacterGlb(bytes[0..length], true) catch |err| return self.report("GLB IMPORT FAILED: {s}", .{importProblem(err)});
-    self.report("CHARACTER IMPORTED — {s}", .{self.imported_rig_status[0..self.imported_rig_status_len]});
+    const file_name = std.mem.sliceTo(&name_buffer, 0);
+    // Results go in the panel itself: the HUD status line is hidden while the designer is open.
+    if (result < 0) return creator.setImportMessage(false, "{s}: LARGER THAN {d} MB OR UNREADABLE", .{ file_name[0..@min(file_name.len, 40)], max_glb_bytes >> 20 });
+    self.importCharacterGlb(bytes[0..length], file_name) catch |err| {
+        std.log.warn("GLB import of {s} failed: {s}", .{ file_name, @errorName(err) });
+        return creator.setImportMessage(false, "{s}: {s}", .{ file_name[0..@min(file_name.len, 28)], importProblem(err) });
+    };
+    creator.setImportMessage(true, "ADDED {s}  |  {s}", .{ creator.imports.activeName() orelse "", self.imported_rig_status[0..self.imported_rig_status_len] });
+}
+
+/// Step through the uploaded meshes; the one chosen goes on the character.
+fn stepImport(self: *App, dir: i32) void {
+    const creator = &self.sandbox.creator;
+    creator.import_delete_armed = false;
+    const lib = &creator.imports;
+    if (lib.count == 0) return creator.setImportMessage(false, "NO UPLOADED MESHES: IMPORT GLB ADDS ONE", .{});
+    const now: i32 = if (lib.active) |a| a else -1;
+    const next: u8 = @intCast(@mod(now + dir, @as(i32, lib.count)));
+    var name: [ImportLibrary.name_len]u8 = undefined;
+    const chosen = lib.entries[next].slice();
+    @memcpy(name[0..chosen.len], chosen);
+    ImportLibrary.writeActive(self.io, name[0..chosen.len]);
+    self.refreshImports();
+    self.loadSavedCharacterImport();
+    creator.setImportMessage(true, "USING {s}  |  {s}", .{ name[0..chosen.len], self.imported_rig_status[0..self.imported_rig_status_len] });
+}
+
+/// Delete the mesh in use (a second press confirms). The next one takes its place, or the
+/// character goes back to the built-in body.
+fn deleteActiveImport(self: *App) void {
+    const creator = &self.sandbox.creator;
+    const name_now = creator.imports.activeName() orelse return;
+    var name: [ImportLibrary.name_len]u8 = undefined;
+    @memcpy(name[0..name_now.len], name_now);
+    const gone = name[0..name_now.len];
+    if (!creator.import_delete_armed) {
+        creator.import_delete_armed = true;
+        return creator.setImportMessage(false, "PRESS CONFIRM DELETE TO REMOVE {s} AND ITS EDITS", .{gone});
+    }
+    creator.import_delete_armed = false;
+    ImportLibrary.remove(self.io, gone);
+    ImportLibrary.writeActive(self.io, null);
+    self.refreshImports();
+    if (creator.imports.count > 0) {
+        self.stepImport(1);
+    } else {
+        self.sandbox.profile.body_style = .procedural;
+        creator.draft.body_style = .procedural;
+        self.imported_rig_status_len = 0;
+        creator.imported_rig_status_len = 0;
+    }
+    creator.setImportMessage(true, "DELETED {s}", .{gone});
 }
 
 /// What went wrong with an import, in words a player can act on.
@@ -4529,6 +4620,8 @@ fn importProblem(err: anyerror) []const u8 {
     return switch (err) {
         error.TooLarge => "MORE THAN A MILLION VERTICES; DECIMATE IT FIRST",
         error.NoTriangles => "NO TRIANGLES FOUND",
+        error.ImportLibraryFull => "THE LIBRARY HOLDS 16 MESHES; DELETE ONE FIRST",
+        error.FlatMesh, error.EmptyMesh => "THE MESH HAS NO HEIGHT TO RIG",
         error.NoSkeleton, error.CharacterNeedsSkin => "NO SKELETON: RIG IT AS A HUMANOID (FOR EXAMPLE IN MIXAMO) AND EXPORT A GLB",
         error.NoCompatibleGameplayJoints => "ITS BONES HAVE NO HUMANOID NAMES THE GAME KNOWS (HIPS, SPINE, ARM, LEG...)",
         error.UnsupportedGltfVersion => "ONLY GLTF 2.0 FILES ARE SUPPORTED",
