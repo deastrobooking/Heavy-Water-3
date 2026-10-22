@@ -103,6 +103,7 @@ test {
     _ = @import("game/Sandbox.zig");
     _ = @import("game/Build.zig");
     _ = @import("game/Tools.zig");
+    _ = @import("game/Loot.zig");
     _ = @import("game/Profile.zig");
     _ = @import("game/Avatar.zig");
     _ = @import("game/Player.zig");

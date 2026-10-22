@@ -21,6 +21,7 @@ const Shrine = @import("../procedural/Shrine.zig");
 const WildsMeshes = @import("../vehicle/WildsMeshes.zig");
 const Collectibles = @import("Collectibles.zig");
 const Enemies = @import("Enemies.zig");
+const Loot = @import("Loot.zig");
 const EnemyDesign = @import("EnemyDesign.zig");
 const Corruption = @import("Corruption.zig");
 const Combat = @import("Combat.zig");
@@ -1181,24 +1182,8 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 .trooper => 65,
                 .sentinel, .bulwark => 100,
             };
-            const scrap_reward: u32 = if (!scalari or city_titan) 0 else switch (u.kind) {
-                .scalari_scout => 3,
-                .scalari_stinger => 6,
-                .scalari_titan => 40,
-                .scalari_miner => 2,
-                .scalari_hybrid => 8,
-                else => 0,
-            };
-            const parts_reward: u32 = if (!scalari or city_titan) 0 else switch (u.kind) {
-                .scalari_scout => 1,
-                .scalari_stinger => 2,
-                .scalari_titan => 8,
-                .scalari_miner => 2,
-                .scalari_hybrid => 2,
-                else => 0,
-            };
-            const alloy_reward: u32 = if (scalari) 0 else if (u.kind == .sentinel or u.kind == .bulwark) 3 else 1;
-            const lumen_reward: u32 = if (!scalari and random.float(f32) < 0.35) 1 else 0;
+            // What the unit drops comes from one table (`Loot.zig`); the Foundry titan's reward is its case's.
+            const loot: Loot.Reward = if (city_titan) .{} else Loot.roll(u.kind, random);
             var winner: ?usize = null;
             var winner_distance = std.math.inf(f32);
             for (0..Sandbox.max_players) |p| if (sb.present(p)) {

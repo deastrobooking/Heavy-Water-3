@@ -1,3 +1,8 @@
+## Loot table (automation plan BS2) — 2026-10-22
+
+- **Changed:** `game/Loot.zig` is the one table of what each enemy kind drops, rolled with the world's enemy random source and paid to the killer's own wallet and kit. Robots pay more: a scout 6 to 10 scrap and 1 to 2 parts, a stinger 10 to 16 and 2 to 3, a hybrid 14 to 22 and 2 to 3, a titan 80 to 120 and 10 to 11 (these were 3, 6, 8 and 40 scrap before). Hive insects, which dropped no scrap, now drop 2 to 14 scrap and sometimes a part, plus the alloy and lumen they always dropped. The kill message now lists everything dropped. Rewards of kill-based events (captures, arena waves, the Foundry titan's case) are unchanged.
+- **Checked:** a test that every kind's roll stays in its range, robots out-pay insects, only insects drop alloy and lumen, and a stinger-sized purchase of 60 scrap takes at most six kills; default and 0.17 `build check`; the full suite (614/614). The numbers are first guesses for "easy to get" and are not tuned by play. Not checked: kills in play with the new message, and the Metal smoke.
+
 ## Tool registry (automation plan BS1) — 2026-10-22
 
 - **Changed:** `game/Tools.zig` is a table of the seven tools (hands, build, wire, bridge, weapon, terrain, blocks): name, key action, update, hint and select hook. `Build.update`, `Build.hint`, `Build.selectTool`, the number-key and pad-toggle routing in `App.zig` and `Sandbox.zig` now go through it. The build and wire updates moved into `Build.updateBuild` and `Build.updateWire` unchanged, and the weapon, build and wire HUD hints into `Build`. No behaviour was meant to change.
