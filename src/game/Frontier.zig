@@ -1198,14 +1198,14 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                 if (!city_titan) {
                     const kit = &sb.kits[player_index];
                     const leveled = kit.awardCombatXP(xp);
-                    kit.wallet.scrap +|= scrap_reward;
-                    kit.wallet.parts +|= parts_reward;
-                    kit.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] +|= alloy_reward;
-                    kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= lumen_reward;
+                    kit.wallet.scrap +|= loot.scrap;
+                    kit.wallet.parts +|= loot.parts;
+                    kit.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] +|= loot.alloy;
+                    kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= loot.lumen;
                     if (scalari) {
-                        sb.say("P{d}: +{d} combat XP, +{d} scrap, +{d} parts", .{ player_index + 1, xp, scrap_reward, parts_reward });
+                        sb.say("P{d}: +{d} combat XP, +{d} scrap, +{d} parts", .{ player_index + 1, xp, loot.scrap, loot.parts });
                     } else {
-                        sb.say("P{d}: +{d} combat XP, +{d} Hive alloy, +{d} lumen (auto-collected)", .{ player_index + 1, xp, alloy_reward, lumen_reward });
+                        sb.say("P{d}: +{d} combat XP, +{d} scrap, +{d} parts, +{d} Hive alloy, +{d} lumen", .{ player_index + 1, xp, loot.scrap, loot.parts, loot.alloy, loot.lumen });
                     }
                     if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ player_index + 1, kit.combatLevel() });
                 }

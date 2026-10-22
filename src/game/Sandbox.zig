@@ -2634,13 +2634,13 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .terrain = try self.terrainTiles(arena),
         .blocks = try self.blockSections(arena),
         .crops = try self.cropDocs(arena),
+        .structures = (try Outpost.toDocs(&self.outpost, arena)).defs,
+        .placed = (try Outpost.toDocs(&self.outpost, arena)).placed,
         .machines = machines[0..machine_count],
         .members = members: {
             var list: std.ArrayList(Save.MemberState) = .empty;
             for (0..max_players) |p| if (self.known[p]) try list.append(arena, .{
                 .slot = @intCast(p),
-        .structures = (try Outpost.toDocs(&self.outpost, arena)).defs,
-        .placed = (try Outpost.toDocs(&self.outpost, arena)).placed,
                 .profile = self.profileOf(p).toDoc(),
                 .own = if (self.own_profiles[p]) |own| own.toDoc() else null,
                 .kit = try self.kits[p].toDoc(arena),
