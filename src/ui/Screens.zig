@@ -134,6 +134,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
         return drawTitle(c, menu, hud);
     }
     for (hud.guests) |g| drawGuest(c, sb, g);
+    @import("BlockPalette.zig").drawAll(c, sb, hud.view, hud.guests);
     for (hud.marks) |mark| switch (mark.kind) {
         .nose => {
             c.frame(.{ .x = mark.x - 7, .y = mark.y - 7, .w = 14, .h = 14 }, 2, alpha(accent, 0.9));

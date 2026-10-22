@@ -10,6 +10,7 @@ const World = @import("world/World.zig");
 const ChunkKey = @import("world/ChunkKey.zig");
 const TerrainEdit = @import("world/TerrainEdit.zig");
 const BlockWorld = @import("build/BlockWorld.zig");
+const BlockTool = @import("game/BlockTool.zig");
 const BlockMesh = struct { handle: @import("asset/Catalog.zig").MeshHandle = .none, revision: u64 = 0, drawn: bool = false, origin: [3]f32 = @splat(0) };
 const Renderer = @import("render/Renderer.zig");
 const Overlay = @import("render/Overlay.zig");
@@ -90,6 +91,8 @@ smoke_rover_start: ?[3]f32 = null,
 smoke_terrain_dirty: u32 = 0,
 /// The catalog mesh drawing each block chunk, and the chunk revision it was built from.
 block_meshes: [BlockWorld.max_chunks]BlockMesh = @splat(.{}),
+/// Each pad's fire and alternate buttons last step, to turn them into block-tool clicks.
+pad_buttons_before: [4][2]bool = @splat(.{ false, false }),
 smoke_mound: ?struct { x: f32, z: f32, height: f32 } = null,
 status: Overlay.Line = .{},
 status_until: u64 = 0,
@@ -1489,6 +1492,8 @@ fn pollPads(self: *App) void {
 /// Hands each pad's latest command to its player for the coming fixed step.
 fn routePads(self: *App) void {
     const navigating = self.uiActive();
+    // Shift is the keyboard's box modifier for the block tool.
+    self.actions.box_modifier = self.actions.box_modifier or self.engine.input.fast;
     for (self.pads.commands, 0..) |cmd, c| {
         const p = @as(usize, self.menu.controller_players[c]);
         if (!cmd.connected) continue;
@@ -1504,8 +1509,26 @@ fn routePads(self: *App) void {
             }
             continue;
         }
+        const before = self.pad_buttons_before[c];
+        self.pad_buttons_before[c] = .{ cmd.fire, cmd.alt };
+        const build = BlockTool.fromPad(.{ .fire = cmd.fire, .alt = cmd.alt, .up = cmd.up, .down = cmd.down, .left = cmd.left, .right = cmd.right, .modifier = cmd.input.fast }, before);
         if (p == 0) {
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
+            if (build.toggle) self.actions.select_tool = if (self.sandbox.tools.tool == .blocks) 1 else 7;
+            if (self.sandbox.tools.tool == .blocks and !build.toggle) {
+                // Building on a pad: the triggers and D-pad drive the block tool, not weapons.
+                self.actions.interact = self.actions.interact or build.cmd.place;
+                self.actions.secondary = self.actions.secondary or build.cmd.remove;
+                self.actions.next_item = self.actions.next_item or build.cmd.next_shape;
+                self.actions.channel_up = self.actions.channel_up or build.cmd.material_step > 0;
+                self.actions.channel_down = self.actions.channel_down or build.cmd.material_step < 0;
+                self.actions.rotate = self.actions.rotate or build.cmd.rotate;
+                self.actions.capture = self.actions.capture or build.cmd.pick;
+                self.actions.box_modifier = self.actions.box_modifier or build.cmd.box;
+                self.actions.toggle_view = self.actions.toggle_view or cmd.view;
+                continue;
+            }
+            if (build.toggle) continue;
             // P1 shares the same direct energy/saber path as the guests.
             if (self.sandbox.hangar.piloting) {
                 self.sandbox.trigger.fire = self.sandbox.trigger.fire or cmd.fire;
@@ -1536,6 +1559,24 @@ fn routePads(self: *App) void {
         }
         g.interact = g.interact or cmd.interact;
         g.toggle_view = g.toggle_view or cmd.view;
+        if (build.toggle) {
+            g.building = if (g.building == null) .{} else null;
+            self.sandbox.sayTo(p, "{s}", .{if (g.building != null) "building: RT place, RB remove, D-pad shape and material" else "stopped building"});
+            continue;
+        }
+        if (g.building != null) {
+            const merged = &g.build_cmd;
+            merged.place = merged.place or build.cmd.place;
+            merged.remove = merged.remove or build.cmd.remove;
+            merged.next_shape = merged.next_shape or build.cmd.next_shape;
+            if (build.cmd.material_step != 0) merged.material_step = build.cmd.material_step;
+            merged.rotate = merged.rotate or build.cmd.rotate;
+            merged.pick = merged.pick or build.cmd.pick;
+            merged.box = build.cmd.box;
+            g.fire = false;
+            g.alt = false;
+            continue;
+        }
         g.trade_up = g.trade_up or cmd.up;
         g.trade_down = g.trade_down or cmd.down;
         g.fire = cmd.fire;
@@ -2687,6 +2728,9 @@ fn exerciseSmoke(self: *App) void {
             self.sandbox.enterVehicle(2, camera);
         },
         6 => {
+            // P2 starts building (the pad chord itself is covered by the `padBuild` test; a scripted
+            // held button does not survive the next pad poll).
+            self.sandbox.guests[0].building = .{};
             if (self.sandbox.seated != null) self.sandbox.exitVehicle(camera);
             self.sandbox.player.setMode(.fly, camera.*);
             self.sandbox.view = .first;
@@ -3634,6 +3678,27 @@ fn smokeBlocks(self: *App, camera: *@import("world/Camera.zig")) void {
     sb.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE BLOCKS LOAD {s}", .{@errorName(err)});
     if (blocks.get(cx, ground + 3, cz).shape != .cube) return self.smokeFail("SMOKE BLOCKS DID NOT SURVIVE THE SAVE", .{});
     std.log.info("Smoke blocks: castle wall of {d} blocks plus stair, ramp and slab; solid, saved and restored", .{placed});
+}
+
+/// P2 is building; fill a box from P2's own kit (P2 keeps building, so
+/// later frames show P2's palette).
+fn smokeGuestBuild(self: *App) void {
+    const sb = &self.sandbox;
+    const guest = &sb.guests[0];
+    var st = guest.building orelse return self.smokeFail("SMOKE P2 IS NOT BUILDING", .{});
+    const Terrain = @import("procedural/Terrain.zig");
+    // Well clear of the guest, so the box never blocks what the guest aims at next.
+    const x: i32 = @intFromFloat(@floor(guest.player.feet[0] + 14));
+    const z: i32 = @intFromFloat(@floor(guest.player.feet[2] + 14));
+    const y: i32 = @intFromFloat(@floor(Terrain.surface(sb.seed, @floatFromInt(x), @floatFromInt(z)).height));
+    st.material = 2;
+    const mine = sb.kits[1].blocks[2];
+    const p1 = sb.kits[0].blocks[2];
+    BlockTool.fillBox(sb, 1, st, .{ x, y, z }, .{ x + 2, y + 1, z }) catch |err| return self.smokeFail("SMOKE P2 BOX {s}", .{@errorName(err)});
+    const spent = mine - sb.kits[1].blocks[2];
+    if (spent == 0 or sb.kits[0].blocks[2] != p1) return self.smokeFail("SMOKE P2 BOX DID NOT USE P2'S KIT (spent {d}, P1 {d} to {d})", .{ spent, p1, sb.kits[0].blocks[2] });
+    guest.building = null;
+    std.log.info("Smoke co-op build: P2 filled {d} sandstone blocks from P2's own kit", .{spent});
 }
 
 /// Raise a mound with the brush, undo it, redo it, and remember it for the save check at stage 9.

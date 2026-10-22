@@ -19,6 +19,7 @@ const Scene3D = @import("../engine/Scene3D.zig");
 const Modifications = @import("../world/Modifications.zig");
 const TerrainEdit = @import("../world/TerrainEdit.zig");
 const BlockWorld = @import("../build/BlockWorld.zig");
+const BlockTool = @import("BlockTool.zig");
 const Blocks = @import("../build/Blocks.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
@@ -202,6 +203,8 @@ pub const Actions = packed struct {
     toggle_view: bool = false,
     /// Open the character creator.
     open_creator: bool = false,
+    /// Held modifier (Shift, or a pad's sprint button): block clicks mark box corners.
+    box_modifier: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges, 5 weapon, 6 terrain, 7 blocks.
     select_tool: u3 = 0,
     /// Climb out of the Kestrel (its primary button fires).
@@ -290,6 +293,10 @@ pub const Guest = struct {
     next_weapon: bool = false,
     /// Class special press edges (D-pad up and down; up with the right bumper held is the third).
     special: [3]bool = @splat(false),
+    /// Building blocks (toggled from the pad); null while the guest is not building.
+    building: ?BlockTool.State = null,
+    /// This step's block requests from the pad; consumed each step.
+    build_cmd: BlockTool.Command = .{},
 };
 /// Where guests appear relative to P1's facing: left, right, and behind.
 const guest_offsets = [_]Physics.Vec3{ .{ -1.6, 0, -0.6 }, .{ 1.6, 0, -0.6 }, .{ 0, 0, -2 } };
@@ -779,6 +786,14 @@ pub fn say(self: *Sandbox, comptime fmt: []const u8, args: anytype) void {
     self.notice_until = self.tick + 3 * 60;
 }
 
+/// A notice for one player: guests' messages carry their player number.
+pub fn sayTo(self: *Sandbox, slot: usize, comptime fmt: []const u8, args: anytype) void {
+    if (slot == 0) return self.say(fmt, args);
+    var buffer: [96]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, fmt, args) catch buffer[0..];
+    self.say("P{d}: {s}", .{ slot + 1, text });
+}
+
 pub fn noticeText(self: *const Sandbox) []const u8 {
     return if (self.tick < self.notice_until) self.notice[0..self.notice_len] else "";
 }
@@ -1248,7 +1263,10 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (self.seated == null and self.garage.piloting == null and !self.hangar.piloting) self.player.stepIn(&self.physics, camera, input, self.surroundings(self.player.feet), dt);
     if (!frozen) self.body_yaw = camera.yaw;
     stride(self.player, &self.walk_phase, &self.walk_amount, dt);
-    for (&self.guests, 1..) |*g, slot| if (g.active) self.stepGuest(g, slot, dt);
+    for (&self.guests, 1..) |*g, slot| if (g.active) {
+        self.stepGuest(g, slot, dt);
+        self.stepGuestBuild(g, slot) catch |err| self.sayTo(slot, "building failed: {s}", .{@errorName(err)});
+    };
     if (timing) |profile| profile.metrics.record(.players, stage_timer.lap() * 1000);
     if (timing != null) stage_timer.reset();
     self.stepMachines(dt);
@@ -2423,6 +2441,16 @@ fn publishVehicle(self: *const Sandbox, placed: *const Placed, vehicle: Vehicle,
     return n;
 }
 
+/// A guest in building mode aims from their eyes and acts on their pad requests.
+fn stepGuestBuild(self: *Sandbox, g: *Guest, slot: usize) !void {
+    defer g.build_cmd = .{};
+    if (g.building) |*st| {
+        const eye = g.player.eye();
+        const f = g.camera.forward();
+        try BlockTool.step(self, slot, st, .{ eye.x(), eye.y(), eye.z() }, .{ f.x(), f.y(), f.z() }, g.build_cmd);
+    }
+}
+
 /// Rebuild the meshes and colliders of the chunks whose blocks changed.
 pub fn syncBlocks(self: *Sandbox) !void {
     try self.block_world.sync(self.allocator, &self.physics);
@@ -3019,6 +3047,61 @@ test "the block tool places a castle block on the ground, the block is solid, an
     defer std.testing.allocator.free(broken);
     try std.testing.expectError(error.InvalidSave, sandbox.restore(std.testing.allocator, broken, &camera));
     try std.testing.expectEqual(Blocks.Shape.cube, sandbox.block_world.blocks.get(target[0], target[1], target[2]).shape);
+}
+
+test "two players build from their own kits, box fills are paid in full or refused, and removal refunds the remover" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const spot = [2]f32{ 170.5, -440.5 };
+    const ground = Terrain.surface(sandbox.seed, spot[0], spot[1]).height;
+    const eye: [3]f32 = .{ spot[0], ground + 5, spot[1] - 4 };
+    const target: [3]f32 = .{ spot[0], ground, spot[1] };
+    const d: [3]f32 = .{ target[0] - eye[0], target[1] - eye[1], target[2] - eye[2] };
+    const len = @sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const forward: [3]f32 = .{ d[0] / len, d[1] / len, d[2] / len };
+    sandbox.player.feet = .{ spot[0] + 30, ground, spot[1] };
+    sandbox.joinGuest(0);
+    sandbox.guests[0].player.feet = .{ spot[0] - 30, ground, spot[1] };
+
+    // P1 places one stone block; only P1's kit pays.
+    var p1: BlockTool.State = .{};
+    try BlockTool.step(&sandbox, 0, &p1, eye, forward, .{ .place = true });
+    try std.testing.expectEqual(Kit.starter_blocks - 1, sandbox.kits[0].blocks[0]);
+    try std.testing.expectEqual(Kit.starter_blocks, sandbox.kits[1].blocks[0]);
+
+    // P2, building from a pad, picks timber and fills a 3 x 1 x 2 box beside it.
+    sandbox.guests[0].building = .{ .material = 3 };
+    sandbox.guests[0].build_cmd = .{};
+    try sandbox.stepGuestBuild(&sandbox.guests[0], 1);
+    const base = sandbox.guests[0].building.?.place.?;
+    const corner: [3]i32 = .{ base[0] + 2, base[1], base[2] + 1 };
+    try BlockTool.fillBox(&sandbox, 1, sandbox.guests[0].building.?, base, corner);
+    try std.testing.expectEqual(Kit.starter_blocks - 6, sandbox.kits[1].blocks[3]);
+    try std.testing.expectEqual(Kit.starter_blocks, sandbox.kits[0].blocks[3]);
+    try std.testing.expectEqual(@as(u6, 3), sandbox.block_world.blocks.get(corner[0], corner[1], corner[2]).material);
+
+    // A fill P2 cannot pay for changes nothing.
+    sandbox.kits[1].blocks[3] = 2;
+    const revision = sandbox.block_world.blocks.revision;
+    try BlockTool.fillBox(&sandbox, 1, sandbox.guests[0].building.?, .{ base[0], base[1] + 1, base[2] }, .{ base[0] + 2, base[1] + 1, base[2] + 1 });
+    try std.testing.expectEqual(revision, sandbox.block_world.blocks.revision);
+    try std.testing.expectEqual(@as(u32, 2), sandbox.kits[1].blocks[3]);
+
+    // P1 clears P2's box: the six timber blocks return to P1, who removed them.
+    try BlockTool.clearBox(&sandbox, 0, base, corner);
+    try std.testing.expectEqual(Kit.starter_blocks + 6, sandbox.kits[0].blocks[3]);
+    try std.testing.expect(sandbox.block_world.blocks.get(corner[0], corner[1], corner[2]).isEmpty());
+
+    // Block stock survives a save in each player's kit.
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sandbox.kits[0].blocks = @splat(0);
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(Kit.starter_blocks + 6, sandbox.kits[0].blocks[3]);
 }
 
 /// Points the camera at a world position.

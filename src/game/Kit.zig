@@ -12,6 +12,7 @@ const Profile = @import("Profile.zig");
 const Player = @import("Player.zig");
 const Collectibles = @import("Collectibles.zig");
 const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
+const Materials = @import("../build/Materials.zig");
 const Kit = @This();
 
 pub const Upgrade = enum { fuel_tank, jet_efficiency, sprint_servos, stamina_weave, grapple_reel, salvage_kit };
@@ -36,6 +37,9 @@ const base_scrap = [upgrade_count]u32{ 40, 50, 30, 30, 45, 35 };
 pub const starter_weapons: u16 = (1 << @intFromEnum(WeaponKind.blaster)) | (1 << @intFromEnum(WeaponKind.machine_gun)) | (1 << @intFromEnum(WeaponKind.beam_saber));
 pub const free_suits: u8 = bit(.undersuit) | bit(.field_jacket);
 pub const free_armors: u16 = armorBit(.none) | armorBit(.scout);
+/// Blocks of each material every ranger starts with; placing spends them, removing returns them.
+pub const starter_blocks: u32 = 64;
+pub const max_blocks: u32 = 1_000_000;
 pub const health_per_cell: f32 = 20;
 
 wallet: Market.Wallet = .{},
@@ -60,6 +64,8 @@ robot_built: bool = false,
 robot_xp: u32 = 0,
 /// Detroit's personal discoveries already claimed by this ranger.
 city_discoveries: u16 = 0,
+/// Building blocks held, by `Materials.all` index.
+blocks: [Materials.count]u32 = @splat(starter_blocks),
 
 pub fn bit(c: Profile.Clothing) u8 {
     return @as(u8, 1) << @intCast(@intFromEnum(c));
@@ -239,7 +245,11 @@ pub const Doc = struct {
     robot_built: bool = false,
     robot_xp: u32 = 0,
     city_discoveries: u16 = 0,
+    /// Blocks held by material id (format 29). Absent in older saves: the starter stock.
+    blocks: ?[]const BlockStack = null,
 };
+
+pub const BlockStack = struct { id: []const u8, count: u32 };
 
 pub const PetDoc = struct { name: []const u8, xp: u32 = 0 };
 
@@ -250,6 +260,8 @@ pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
     inline for (enum_compat.fields(Profile.Armor)) |f| if (self.ownsArmor(@enumFromInt(f.value))) try armors.append(arena, @enumFromInt(f.value));
     var weapons: std.ArrayList(WeaponKind) = .empty;
     inline for (enum_compat.fields(WeaponKind)) |f| if (self.ownsWeapon(@enumFromInt(f.value))) try weapons.append(arena, @enumFromInt(f.value));
+    const blocks = try arena.alloc(BlockStack, Materials.count);
+    for (blocks, Materials.all, self.blocks) |*stack, m, n| stack.* = .{ .id = m.id, .count = n };
     var pets: std.ArrayList(PetDoc) = .empty;
     for (std.enums.values(Pets.Species)) |sp| if (self.hasPet(sp)) try pets.append(arena, .{ .name = Pets.info(sp).name, .xp = self.pet_xp[@intFromEnum(sp)] });
     return .{
@@ -266,6 +278,7 @@ pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
         .robot_built = self.robot_built,
         .robot_xp = self.robot_xp,
         .city_discoveries = self.city_discoveries,
+        .blocks = blocks,
     };
 }
 
@@ -302,6 +315,19 @@ pub fn fromDoc(doc: Doc) error{InvalidKit}!Kit {
         const sp = petNamed(name) orelse return error.InvalidKit;
         if (!result.hasPet(sp)) return error.InvalidKit;
         result.pet_active = sp;
+    }
+    if (doc.blocks) |stacks| {
+        // A listed save names every material it holds; anything it does not list is zero.
+        result.blocks = @splat(0);
+        var seen: [Materials.count]bool = @splat(false);
+        for (stacks) |stack| {
+            const m = for (Materials.all, 0..) |material, i| {
+                if (std.mem.eql(u8, material.id, stack.id)) break i;
+            } else return error.InvalidKit;
+            if (seen[m] or stack.count > max_blocks) return error.InvalidKit;
+            seen[m] = true;
+            result.blocks[m] = stack.count;
+        }
     }
     return result;
 }
@@ -383,4 +409,18 @@ test "a new kit owns level one rapid shot and saber but not missiles; pets cycle
     try std.testing.expect(p.freePet(.hound));
     try std.testing.expectEqual(Pets.Species.hound, p.pet_active.?);
     try std.testing.expectEqual(Pets.Species.falcon, p.nextPet().?);
+}
+
+test "block stock round-trips by material id, old kits get the starter stock, bad stacks are refused" {
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    var k: Kit = .{};
+    k.blocks[0] = 3;
+    k.blocks[7] = 0;
+    const back = try fromDoc(try k.toDoc(arena_state.allocator()));
+    try std.testing.expectEqual(k.blocks, back.blocks);
+    const old = try fromDoc(.{});
+    try std.testing.expectEqual(starter_blocks, old.blocks[4]);
+    try std.testing.expectError(error.InvalidKit, fromDoc(.{ .blocks = &.{.{ .id = "castle.marble", .count = 1 }} }));
+    try std.testing.expectError(error.InvalidKit, fromDoc(.{ .blocks = &.{ .{ .id = "castle.stone", .count = 1 }, .{ .id = "castle.stone", .count = 2 } } }));
 }

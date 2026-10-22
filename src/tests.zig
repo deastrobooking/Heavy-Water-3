@@ -67,6 +67,7 @@ test {
     _ = @import("build/Materials.zig");
     _ = @import("build/Mesher.zig");
     _ = @import("build/BlockWorld.zig");
+    _ = @import("ui/BlockPalette.zig");
     _ = @import("procedural/Heightmap.zig");
     _ = @import("procedural/Landscape.zig");
     _ = @import("procedural/TestArbor.zig");

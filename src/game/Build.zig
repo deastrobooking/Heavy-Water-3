@@ -233,7 +233,7 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
     switch (st.tool) {
         .hands, .weapon => {},
         .terrain => try TerrainTool.update(sb, camera, actions),
-        .blocks => try BlockTool.update(sb, camera, primary, actions),
+        .blocks => try BlockTool.update(sb, camera, primary, actions, actions.box_modifier),
         .bridge => {
             if (actions.next_item) @import("BridgeTool.zig").cycleStyle(sb);
             try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary);
@@ -677,12 +677,13 @@ fn fromTo(a: Vec3, b: Vec3) R.Quat {
 
 /// Placement preview (build) or every wire as a thin colored bar (wire).
 pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
-    var n = start;
     const st = sb.tools;
-    const block = sb.catalog.content.block;
-    if (st.tool == .bridge) return @import("BridgeTool.zig").publish(sb, out, start);
-    if (st.tool == .terrain) return TerrainTool.publish(sb, out, start);
     if (st.tool == .blocks) return BlockTool.publish(sb, out, start);
+    // Guests may be building while P1 holds another tool.
+    var n = BlockTool.publishGuests(sb, out, start);
+    const block = sb.catalog.content.block;
+    if (st.tool == .bridge) return @import("BridgeTool.zig").publish(sb, out, n);
+    if (st.tool == .terrain) return TerrainTool.publish(sb, out, n);
     if (st.tool == .build) if (st.preview) |p| {
         const tint: [4]f32 = if (p.valid) .{ 0.35, 1.0, 0.45, 1 } else .{ 1.0, 0.3, 0.25, 1 };
         if (blueprintOf(sb, p.entry)) |bp| {

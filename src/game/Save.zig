@@ -33,10 +33,11 @@ const District = @import("../procedural/District.zig");
 /// v25 adds the selectable Captain test-mesh body style to saved player profiles; v26 stores
 /// each ranger's Detroit discoveries independently in their kit;
 /// v27 adds the sculpted-terrain tiles (absent means untouched ground); v28 adds player-built
-/// block sections (absent means none).
+/// block sections (absent means none); v29 adds each ranger's block stock to their kit (absent
+/// means the starter stock).
 /// Format 13 is the oldest supported save; its four-player kits default combat XP to zero.
 /// Older saves are rejected deliberately. Bumping the current format does not move this floor.
-pub const format_version: u32 = 28;
+pub const format_version: u32 = 29;
 pub const min_supported_format: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
