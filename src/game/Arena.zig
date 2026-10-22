@@ -13,9 +13,11 @@ const V = Physics.Vec3;
 const Arena = @This();
 
 /// Half the floor's side, the wall height, and how high the bowl floats over the ground.
-pub const half: f32 = 28;
+pub const half: f32 = 36;
 pub const wall_height: f32 = 3;
 pub const altitude: f32 = 150;
+pub const ready_duration: f32 = 3;
+pub const ready_fade: f32 = 0.8;
 /// Seconds between a cleared wave and the next.
 pub const intermission: f32 = 6;
 pub const max_players = 4;
@@ -64,11 +66,17 @@ waiting: f32 = 0,
 returns: [max_players]?V = @splat(null),
 colliders: [5]Physics.MeshCollider = @splat(.none),
 
-/// The bowl's floor centre for a world: floating over the meadow beside the spawn.
+/// The bowl's floor centre above the place where the party starts it.
 pub fn site(seed: u64, origin: V) V {
-    const x = origin[0] - 140;
-    const z = origin[2] - 120;
+    const x = origin[0];
+    const z = origin[2];
     return .{ x, Terrain.surface(seed, x, z).height + altitude, z };
+}
+
+/// The opening countdown fades out just before wave one starts.
+pub fn readyOpacity(self: *const Arena) f32 {
+    if (!self.active or self.wave != 0 or self.waiting <= 0) return 0;
+    return std.math.clamp(self.waiting / ready_fade, 0, 1);
 }
 
 /// A spot on the floor for player `p`, around the centre.
@@ -93,7 +101,7 @@ pub fn open(self: *Arena, allocator: std.mem.Allocator, physics: *Physics, at: V
     }
     self.active = true;
     self.wave = 0;
-    self.waiting = 3;
+    self.waiting = ready_duration;
 }
 
 /// Removes the floor and walls and ends the run (bots of the arena are the caller's to clear).
@@ -173,6 +181,16 @@ test "waves grow with the wave and the party, pay out, and the bowl opens and cl
     defer physics.deinit();
     var arena: Arena = .{};
     try arena.open(std.testing.allocator, &physics, .{ 0, 150, 0 }, 0);
+    try std.testing.expectEqual(@as(f32, 1), arena.readyOpacity());
+    arena.waiting = ready_fade / 2;
+    try std.testing.expectEqual(@as(f32, 0.5), arena.readyOpacity());
+    arena.waiting = 0;
+    try std.testing.expectEqual(@as(f32, 0), arena.readyOpacity());
+    arena.waiting = intermission;
+    arena.wave = 1;
+    try std.testing.expectEqual(@as(f32, 0), arena.readyOpacity());
+    arena.waiting = ready_duration;
+    arena.wave = 0;
     // The floor holds a body up there.
     const stand = physics.moveCharacter(.{}, .{ 3, 150.2, 3 }, .{ 0, -0.5, 0 }, false);
     try std.testing.expect(stand.grounded and @abs(stand.feet[1] - 150) < 0.01);

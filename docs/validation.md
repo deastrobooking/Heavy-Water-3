@@ -1919,5 +1919,10 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 
 - **Added:** three sequentially unlockable Scalari fighter frames in the Aircraft fabricator, distinct thrust/lift/hull profiles, owned/equipped progress, and save format 31 defaults for existing Kestrel saves. The current Hangar restores the selected frame and renders its matching hull/glow meshes. The space-combat plan now specifies LOCAL PLANET and SPACE ROUTES GUI layers, with travel gated on playable destinations.
 - **Checked:** default `build check` passed before an unrelated in-progress mesh-tool edit appeared in `App.zig` and `Screens.zig`; the full headless suite passed **608/608**; the 300-frame ReleaseSafe smoke passed with Metal API Validation enabled. A later showcase build was blocked by that concurrent edit's three unhandled `Screens.Area` values in the `App.zig` hit-area switch. The attempted showcase 83 is not evidence for these fighter frames; no frame-specific capture or hands-on flight review was completed. Zig 0.17 and ReleaseFast install gates were not run.
+
+## Drop-in Starbowl and GET READY — 2026-10-22
+
+- **Added:** the Starbowl platform is now 72 m square and opens above the party's current location, so pause-menu drop-ins use the current landscape as their backdrop. The three-second wave-one countdown now shows a pulsing GET READY banner that fades out in the final 0.8 seconds. The compact Dogfight square remains a separate planned space venue.
+- **Checked:** default `build check` passes; the focused wave/countdown filter passes **4/4**; the 300-frame ReleaseSafe smoke passes with Metal API Validation enabled and confirms arena entry, wave start, clear and rewards. No GET READY capture or hands-on readability review was run. Venue-specific city/biome presets and the Dogfight square runtime remain future work.
 - **Still open:** the robot capital ship currently shares the carrier mesh with metallic/blue lighting; its bespoke robot silhouette remains art work. Hands-on deck landings, dismounts, travel combat pacing and balance are unverified.
 

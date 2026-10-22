@@ -811,6 +811,17 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
     if (panels) return;
     // The Starbowl's wave banner, top centre.
     if (sb.arena.active) {
+        const ready = sb.arena.readyOpacity();
+        if (ready > 0) {
+            const pulse = 1.75 + 0.08 * @sin(menu.seconds * 7);
+            const banner: Rect = .{ .x = v.x + v.w * 0.34, .y = v.y + 18, .w = v.w * 0.32, .h = 54 };
+            c.rect(banner, alpha(.{ 0.02, 0.035, 0.05, 0.78 }, ready));
+            c.frame(banner, 2, alpha(gold, ready));
+            c.centered(v.x + v.w / 2, banner.y + 9, "GET READY", pulse, alpha(gold, ready));
+            var countdown: [24]u8 = undefined;
+            c.centered(v.x + v.w / 2, banner.y + 34, std.fmt.bufPrint(&countdown, "WAVE 1 IN {d:.1}", .{sb.arena.waiting}) catch "WAVE 1", 0.85, alpha(ink, ready));
+            return;
+        }
         var line: [64]u8 = undefined;
         const bots = sb.enemies.unitCount(@import("../game/Enemies.zig").arena_nest);
         const text = if (sb.arena.waiting > 0)

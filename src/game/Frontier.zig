@@ -137,7 +137,9 @@ pub fn enterArena(sb: *Sandbox, camera: *Camera) void {
     if (sb.garage.piloting != null) _ = sb.garage.leave(&sb.physics);
     if (sb.hangar.piloting) leaveJet(sb, camera);
     if (sb.seated != null) sb.exitVehicle(camera);
-    const at = Arena.site(sb.seed, Sandbox.spawn);
+    // Start the drop-in arena over the current landscape so a pause-menu launch keeps the
+    // surrounding biome or city in view. The Starbowl itself stays a safe, bounded platform.
+    const at = Arena.site(sb.seed, sb.player.feet);
     sb.arena.open(sb.allocator, &sb.physics, at, Sandbox.world_flag) catch |err| return sb.say("the arena would not open: {s}", .{@errorName(err)});
     _ = sb.enemies.addArenaNest(at);
     sb.arena.returns[0] = sb.player.feet;
