@@ -2527,7 +2527,8 @@ fn publishWindsorEvidence(sb: *const Sandbox, out: []World.Prop, start: usize, t
 }
 
 /// The two Windsor crossing barriers lift as soon as Ines publishes the recorded evidence.
-/// Like the Foundry yard gate, these clear visual passage and do not alter bridge collision.
+/// Unlike the Foundry yard gate (solid while shut), these are visual only: closing a bridge deck
+/// would also stop city traffic and pedestrians, which is an open design question.
 fn publishWindsorGates(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
     if (!sb.progress.hasFlag(WindsorCase.started_flag) and !sb.progress.hasFlag(WindsorCase.exposed_flag)) return start;
     var n = start;
