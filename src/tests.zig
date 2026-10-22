@@ -106,6 +106,7 @@ test {
     _ = @import("game/Loot.zig");
     _ = @import("build/Structures.zig");
     _ = @import("game/Outpost.zig");
+    _ = @import("game/Defense.zig");
     _ = @import("game/Profile.zig");
     _ = @import("game/Avatar.zig");
     _ = @import("game/Player.zig");

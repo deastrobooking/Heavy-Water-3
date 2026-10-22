@@ -147,6 +147,11 @@ pub const Def = struct {
         return null;
     }
 
+    /// Hit points: a frame, plus what its blocks add. Bigger builds take more to break.
+    pub fn maxHealth(self: *const Def) f32 {
+        return 100 + 15 * @as(f32, @floatFromInt(self.cell_len));
+    }
+
     /// Blocks of the footprint plus the modules' scrap and parts.
     pub fn cost(self: *const Def) Cost {
         var c: Cost = .{ .blocks = Prefabs.cost(self.prefab()) };
@@ -268,7 +273,7 @@ fn module(def: *Def, m: Module) void {
     def.module_len += 1;
 }
 
-pub const starter_count = 4;
+pub const starter_count = 5;
 
 /// The built-in defensive structures. Exact materials, so they look the same in any style.
 pub fn starter(index: usize) Def {
@@ -309,6 +314,13 @@ pub fn starter(index: usize) Def {
             for (0..2) |x| blockAt(&d, @intCast(x), 1, 1, .ramp, 0, "castle.dark_stone");
             for (0..2) |x| blockAt(&d, @intCast(x), 2, 0, .cube, 0, "castle.banner");
             module(&d, .{ .kind = .launcher, .range = 90, .damage = 120, .rate = 0.4, .amount = 8, .power = 80 });
+            return d;
+        },
+        4 => {
+            var d = begin("hw.solar_array", "SOLAR ARRAY", .{ 3, 2, 3 });
+            blockAt(&d, 1, 0, 1, .cube, 0, "castle.dark_stone");
+            for (0..3) |x| for (0..3) |z| blockAt(&d, @intCast(x), 1, @intCast(z), .slab, 0, "eco.solar");
+            module(&d, .{ .kind = .power, .power = 400 });
             return d;
         },
         else => unreachable,

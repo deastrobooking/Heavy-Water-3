@@ -2701,6 +2701,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
         if (!std.math.isFinite(crop.growth) or crop.growth < 0 or crop.growth > 1) return error.InvalidSave;
         for (doc.crops[0..i]) |other| if (other.x == crop.x and other.y == crop.y and other.z == crop.z) return error.InvalidSave;
     }
+    // Structures: valid designs, well-formed instances, within the caps.
+    if (!Outpost.validate(doc.structures, doc.placed)) return error.InvalidSave;
     // Blocks too: every section decodes, none repeats, and the chunks they fill fit.
     const block_cells = try terrain_arena.allocator().alloc([Blocks.section_cells]Blocks.Cell, doc.blocks.len);
     const block_filled = try terrain_arena.allocator().alloc(usize, doc.blocks.len);
@@ -2709,8 +2711,6 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (doc.blocks, block_cells, block_filled, 0..) |section, *cells, *filled, i| {
         filled.* = Blocks.decodeSection(section.data, @import("../build/Materials.zig").count, cells) catch return error.InvalidSave;
         for (doc.blocks[0..i]) |other| if (other.x == section.x and other.y == section.y and other.z == section.z) return error.InvalidSave;
-    // Structures: valid designs, well-formed instances, within the caps.
-    if (!Outpost.validate(doc.structures, doc.placed)) return error.InvalidSave;
         if (@abs(section.x) > 1 << 20 or @abs(section.y) > 1 << 12 or @abs(section.z) > 1 << 20) return error.InvalidSave;
         const key = Blocks.chunkOf(section.x * Blocks.side, section.z * Blocks.side);
         for (block_chunks[0..block_chunk_count]) |k| {
@@ -2804,6 +2804,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     // complete and is retried on the next step.
     self.syncBlocks() catch {};
     self.farm = .{};
+    Outpost.restore(&self.outpost, doc.structures, doc.placed);
     for (doc.crops) |crop| {
         self.farm.crops[self.farm.len] = .{ .cell = .{ crop.x, crop.y, crop.z }, .growth = crop.growth };
         self.farm.len += 1;
@@ -2812,7 +2813,6 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     _ = @import("Challenges.zig").place(self);
     self.syncBlocks() catch {};
     self.profile = profile;
-    Outpost.restore(&self.outpost, doc.structures, doc.placed);
     self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
     self.body_yaw = doc.player.yaw;
@@ -5485,4 +5485,164 @@ test "a structure is built for blocks, scrap and parts, taken apart for a refund
     sandbox.outpost.library.initStarters();
     try sandbox.restore(std.testing.allocator, bytes2, &camera);
     try std.testing.expect(sandbox.outpost.library.find("user.shield_1") != null);
+}
+
+test "turrets and launchers shoot, shields absorb, structures can be hurt and wrecked, and a raid arrives" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Defense = @import("Defense.zig");
+    const spot = [2]f32{ 190.5, -450.5 };
+    const wallet = &sandbox.kits[0].wallet;
+    wallet.scrap = 5000;
+    wallet.parts = 500;
+    const ground = struct {
+        fn cell(sb: *const Sandbox, x: f32, z: f32) [3]i32 {
+            return .{ @intFromFloat(x), @as(i32, @intFromFloat(@ceil(Terrain.surface(sb.seed, x, z).height))), @intFromFloat(z) };
+        }
+    }.cell;
+    const home = ground(&sandbox, spot[0], spot[1]);
+    sandbox.player.feet = .{ spot[0] + 20, @floatFromInt(home[1]), spot[1] };
+
+    // A sentry turret (needs no power) kills a drone that wanders into range.
+    try Outpost.place(&sandbox, 0, 0, 0, home);
+    try std.testing.expectEqual(@as(usize, 1), sandbox.outpost.len);
+    try std.testing.expectEqual(@as(f32, 1), Defense.powerSatisfaction(&sandbox));
+    const nest = sandbox.enemies.addArenaNest(.{ spot[0], @floatFromInt(home[1]), spot[1] });
+    const drone_at: [3]f32 = .{ spot[0] + 9, @as(f32, @floatFromInt(home[1])) + 6, spot[1] };
+    try std.testing.expect(sandbox.enemies.spawnAt(.drone, nest, drone_at, 1));
+    var events: [16]Enemies.Event = undefined;
+    var downed = false;
+    for (0..600) |_| {
+        const n = Defense.step(&sandbox, 1.0 / 60.0, &events);
+        for (events[0..@min(n, events.len)]) |e| if (e == .unit_down) {
+            downed = true;
+        };
+        if (downed) break;
+    }
+    try std.testing.expect(downed);
+
+    // Hurt it: the structure loses exactly the damage, then is wrecked and its builder is paid back.
+    const max = sandbox.outpost.library.get(0).maxHealth();
+    Defense.hurt(&sandbox, 0, 30);
+    try std.testing.expectEqual(max - 30, sandbox.outpost.placed[0].health);
+    const scrap_before = wallet.scrap;
+    const cost = sandbox.outpost.library.get(0).cost();
+    const origin = sandbox.outpost.placed[0].origin;
+    Defense.hurt(&sandbox, 0, 1e6);
+    try std.testing.expectEqual(@as(usize, 0), sandbox.outpost.len);
+    try std.testing.expect(sandbox.block_world.blocks.get(origin[0], origin[1], origin[2]).isEmpty());
+    try std.testing.expectEqual(scrap_before + cost.scrap * Defense.wreck_refund_percent / 100, wallet.scrap);
+
+    // Solar array plus a shield generator: the dome soaks a bolt and pays its damage; unpowered, it does not.
+    const sun = ground(&sandbox, spot[0] + 12, spot[1] + 12);
+    const dome_at = ground(&sandbox, spot[0], spot[1]);
+    try Outpost.place(&sandbox, 0, 4, 0, sun);
+    try Outpost.place(&sandbox, 0, 2, 0, dome_at);
+    try std.testing.expectEqual(@as(usize, 2), sandbox.outpost.len);
+    try std.testing.expectEqual(@as(f32, 1), Defense.powerSatisfaction(&sandbox));
+    const shield_full = sandbox.outpost.placed[1].shield;
+    try std.testing.expect(shield_full > 0);
+    const bolt_at: [3]f32 = .{ @as(f32, @floatFromInt(dome_at[0])) + 6, @as(f32, @floatFromInt(dome_at[1])) + 4, @as(f32, @floatFromInt(dome_at[2])) };
+    sandbox.enemies.bolts[0] = .{ .position = bolt_at, .velocity = @splat(0), .damage = 100, .life = 2 };
+    Defense.absorbBolts(&sandbox);
+    try std.testing.expect(sandbox.enemies.bolts[0] == null);
+    try std.testing.expectEqual(shield_full - 100, sandbox.outpost.placed[1].shield);
+    // It recharges only after a quiet spell.
+    for (0..30) |_| _ = Defense.step(&sandbox, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(shield_full - 100, sandbox.outpost.placed[1].shield);
+    for (0..300) |_| _ = Defense.step(&sandbox, 1.0 / 60.0, &events);
+    try std.testing.expect(sandbox.outpost.placed[1].shield > shield_full - 100);
+    // Take the solar array away: demand with no supply, no dome.
+    try Outpost.demolish(&sandbox, 0, 0);
+    try std.testing.expectEqual(@as(f32, 0), Defense.powerSatisfaction(&sandbox));
+    sandbox.enemies.bolts[0] = .{ .position = bolt_at, .velocity = @splat(0), .damage = 100, .life = 2 };
+    Defense.absorbBolts(&sandbox);
+    try std.testing.expect(sandbox.enemies.bolts[0] != null);
+    sandbox.enemies.bolts[0] = null;
+    // A bolt inside the generator's own blocks hurts it (the dome is down).
+    const shield_hp = sandbox.outpost.placed[0].health;
+    sandbox.enemies.bolts[0] = .{ .position = .{ @as(f32, @floatFromInt(dome_at[0])) + 1.5, @as(f32, @floatFromInt(dome_at[1])) + 1.5, @as(f32, @floatFromInt(dome_at[2])) + 1.5 }, .velocity = @splat(0), .damage = 40, .life = 2 };
+    Defense.absorbBolts(&sandbox);
+    try std.testing.expect(sandbox.enemies.bolts[0] == null);
+    try std.testing.expectEqual(shield_hp - 40, sandbox.outpost.placed[0].health);
+
+    // The Hive sees structures near a player, after the players, and a hit maps back to the structure.
+    var who: [max_players + Outpost.max_placed]Enemies.Target = undefined;
+    const seen = Defense.fillTargets(&sandbox, &who, max_players);
+    try std.testing.expectEqual(@as(usize, max_players + 1), seen);
+    try std.testing.expectEqual(@as(?usize, 0), Defense.structureOf(&sandbox, max_players, max_players));
+    try std.testing.expect(Defense.structureOf(&sandbox, 0, max_players) == null);
+    try std.testing.expect(Defense.structureOf(&sandbox, max_players + 1, max_players) == null);
+    sandbox.player.feet = .{ spot[0] + 900, 0, spot[1] };
+    try std.testing.expectEqual(@as(usize, max_players), Defense.fillTargets(&sandbox, &who, max_players));
+    sandbox.player.feet = .{ spot[0] + 20, @floatFromInt(home[1]), spot[1] };
+
+    // Health survives a save as a fraction; a raid brings units around the outpost.
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    const fraction = sandbox.outpost.placed[0].health / sandbox.outpost.library.get(2).maxHealth();
+    sandbox.outpost.len = 0;
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectApproxEqAbs(fraction, sandbox.outpost.placed[0].health / sandbox.outpost.library.get(2).maxHealth(), 1e-4);
+    const before = sandbox.enemies.unitCount(null);
+    const arrived = Defense.raid(&sandbox);
+    try std.testing.expect(arrived >= 2);
+    try std.testing.expectEqual(before + arrived, sandbox.enemies.unitCount(null));
+}
+
+test "a powered missile launcher spends a missile on a far target, and refills slowly" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Defense = @import("Defense.zig");
+    const spot = [2]f32{ 190.5, -450.5 };
+    sandbox.kits[0].wallet.scrap = 5000;
+    sandbox.kits[0].wallet.parts = 500;
+    const ground = struct {
+        fn cell(sb: *const Sandbox, x: f32, z: f32) [3]i32 {
+            return .{ @intFromFloat(x), @as(i32, @intFromFloat(@ceil(Terrain.surface(sb.seed, x, z).height))), @intFromFloat(z) };
+        }
+    }.cell;
+    const home = ground(&sandbox, spot[0], spot[1]);
+    sandbox.player.feet = .{ spot[0] + 20, @floatFromInt(home[1]), spot[1] };
+    try Outpost.place(&sandbox, 0, 3, 0, home);
+    // No supply yet: the launcher draws 80 W and has none, so it does not fire.
+    try std.testing.expectEqual(@as(f32, 0), Defense.powerSatisfaction(&sandbox));
+    const nest = sandbox.enemies.addArenaNest(.{ spot[0], @floatFromInt(home[1]), spot[1] });
+    const far_at: [3]f32 = .{ spot[0] + 40, @as(f32, @floatFromInt(home[1])) + 8, spot[1] };
+    try std.testing.expect(sandbox.enemies.spawnAt(.sentinel, nest, far_at, 1));
+    const full = sandbox.outpost.placed[0].ammo;
+    var events: [16]Enemies.Event = undefined;
+    for (0..120) |_| _ = Defense.step(&sandbox, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(full, sandbox.outpost.placed[0].ammo);
+    // Add a solar array: now it fires, and a missile is gone.
+    try Outpost.place(&sandbox, 0, 4, 0, ground(&sandbox, spot[0] + 8, spot[1] - 12));
+    try std.testing.expectEqual(@as(f32, 1), Defense.powerSatisfaction(&sandbox));
+    var fired = false;
+    for (0..600) |_| {
+        _ = Defense.step(&sandbox, 1.0 / 60.0, &events);
+        if (sandbox.outpost.placed[0].ammo < full) {
+            fired = true;
+            break;
+        }
+    }
+    try std.testing.expect(fired);
+    // The sentinel took the blast (hurt or down).
+    var hurt = true;
+    for (sandbox.enemies.units) |slot| if (slot) |u| if (u.kind == .sentinel) {
+        hurt = u.health < Enemies.stats(.sentinel).health;
+    };
+    try std.testing.expect(hurt);
+    // With no target the rack refills, slowly.
+    for (&sandbox.enemies.units) |*slot| slot.* = null;
+    const low = sandbox.outpost.placed[0].ammo;
+    for (0..60 * 30) |_| _ = Defense.step(&sandbox, 1.0 / 60.0, &events);
+    try std.testing.expect(sandbox.outpost.placed[0].ammo > low and sandbox.outpost.placed[0].ammo <= full);
 }

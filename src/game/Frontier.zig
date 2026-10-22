@@ -22,6 +22,8 @@ const WildsMeshes = @import("../vehicle/WildsMeshes.zig");
 const Collectibles = @import("Collectibles.zig");
 const Enemies = @import("Enemies.zig");
 const Loot = @import("Loot.zig");
+const Defense = @import("Defense.zig");
+const Outpost = @import("Outpost.zig");
 const EnemyDesign = @import("EnemyDesign.zig");
 const Corruption = @import("Corruption.zig");
 const Combat = @import("Combat.zig");
@@ -1102,7 +1104,7 @@ fn foundryCasePosition(sb: *const Sandbox, index: usize) V {
 }
 
 /// Chest positions the Hive aims at: P1 (or P1's car) and active guests.
-fn targets(sb: *const Sandbox, out: *[Sandbox.max_players]Enemies.Target) []const Enemies.Target {
+fn targets(sb: *Sandbox, out: *[Sandbox.max_players + Outpost.max_placed]Enemies.Target) []const Enemies.Target {
     var p1: Enemies.Target = .{ .chest = R.add(sb.player.feet, .{ 0, 1.3, 0 }), .velocity = sb.player.velocity, .guard = sb.combat.arsenals[0].guard(), .facing = facingOf(sb.body_yaw) };
     if (sb.garage.piloting) |i| {
         const car = sb.garage.cars[i].?.flyer.body;
@@ -1116,7 +1118,8 @@ fn targets(sb: *const Sandbox, out: *[Sandbox.max_players]Enemies.Target) []cons
         out[n] = .{ .chest = R.add(g.player.feet, .{ 0, 1.3, 0 }), .velocity = g.player.velocity, .alive = g.active and !sb.specials.hidden(n), .guard = sb.combat.arsenals[n].guard(), .facing = facingOf(g.body_yaw) };
         n += 1;
     }
-    return out[0..n];
+    // Structures near a player are targets too, after the players.
+    return out[0..Defense.fillTargets(sb, out, n)];
 }
 
 fn facingOf(yaw: f32) V {
@@ -1157,6 +1160,8 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
             sb.cue(.boom, at);
         },
         .player_hit => |hit| {
+            // A hit on a placed structure (a target past the players) goes to the structure.
+            if (Defense.structureOf(sb, hit.player, Sandbox.max_players)) |s| return Defense.hurt(sb, s, hit.damage);
             var events: [4]Combat.Event = undefined;
             var n: usize = 0;
             sb.cue(.hurt, if (hit.player == 0) null else R.add(sb.guests[hit.player - 1].player.feet, .{ 0, 1, 0 }));
@@ -1352,10 +1357,15 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
     if (timing != null) phase_timer.reset();
     ensureCityTitanEncounter(sb);
     ensureFoundryDockEncounter(sb);
-    var who: [Sandbox.max_players]Enemies.Target = undefined;
+    var who: [Sandbox.max_players + Outpost.max_placed]Enemies.Target = undefined;
     var events: [32]Enemies.Event = undefined;
+    // Placed structures: shields and walls meet the Hive's bolts, guns and launchers fire back.
+    Defense.absorbBolts(sb);
     const count = sb.enemies.step(&sb.physics, targets(sb, &who), dt, &events);
     for (events[0..@min(count, events.len)]) |e| hive(sb, e, camera);
+    var defense: [16]Enemies.Event = undefined;
+    const fired = Defense.step(sb, dt, &defense);
+    for (defense[0..@min(fired, defense.len)]) |e| hive(sb, e, camera);
     if (timing) |profile| profile.metrics.record(.hive_ai, phase_timer.lap() * 1000);
 
     // Arsenals: P1 with the weapon tool on foot, guests with the right trigger.

@@ -403,7 +403,7 @@ fn effectSlot(combat: *const Combat) usize {
     return oldest;
 }
 
-fn effect(combat: *Combat, e: Combat.Effect) void {
+pub fn effect(combat: *Combat, e: Combat.Effect) void {
     combat.effects[effectSlot(combat)] = e;
 }
 

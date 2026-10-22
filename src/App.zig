@@ -2775,6 +2775,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeBlocks(camera);
             self.smokePrefabs(camera);
             self.smokeFarm(camera);
+            self.smokeOutpost(camera);
             self.smokeBuildBenchmark(camera);
         },
         5 => {
@@ -3807,6 +3808,8 @@ fn smokePrefabs(self: *App, camera: *@import("world/Camera.zig")) void {
     var laid: usize = 0;
     for (0..Materials.style_count) |s| {
         const style: Materials.Style = @enumFromInt(s);
+        // A style may have no ready-made pieces (glass is blocks only).
+        if (Prefabs.starters(style).len == 0) continue;
         const prefab = Prefabs.starters(style)[0];
         const along = (@as(f32, @floatFromInt(s)) - 2) * 9;
         const x = camera.position.x() + f.x() * 22 - f.z() * along;
@@ -3849,6 +3852,51 @@ fn smokeFarm(self: *App, camera: *@import("world/Camera.zig")) void {
     const hay = sb.kits[0].blocks[Farm.hay()];
     if (!Farm.harvest(sb, 0, .{ x0 + 4, y + 1, z0 }) or sb.kits[0].blocks[Farm.hay()] != hay + Farm.harvest_yield) return self.smokeFail("SMOKE FARM HARVEST DID NOT PAY P1", .{});
     std.log.info("Smoke farm: five seeds planted on tilled soil, four left growing in stages, a ripe one harvested for {d} hay", .{Farm.harvest_yield});
+}
+
+/// An outpost (solar array, heavy turret, shield generator) is raided by the Hive and fights back
+/// through the real game step; the structures are taken apart afterwards. Fails only on an error
+/// or when nothing happens at all (no unit hurt and no structure hit).
+fn smokeOutpost(self: *App, camera: *@import("world/Camera.zig")) void {
+    const sb = &self.sandbox;
+    const Outpost_ = @import("game/Outpost.zig");
+    const Enemies_ = @import("game/Enemies.zig");
+    const Defense = @import("game/Defense.zig");
+    const Terrain = @import("procedural/Terrain.zig");
+    sb.kits[0].wallet.scrap += 2000;
+    sb.kits[0].wallet.parts += 200;
+    const f = camera.forward();
+    const cx = camera.position.x() + f.x() * 30;
+    const cz = camera.position.z() + f.z() * 30;
+    const layout = [_]struct { index: usize, dx: f32 }{ .{ .index = 4, .dx = -7 }, .{ .index = 1, .dx = 0 }, .{ .index = 2, .dx = 7 } };
+    for (layout) |part| {
+        const x: i32 = @intFromFloat(@floor(cx + part.dx));
+        const z: i32 = @intFromFloat(@floor(cz));
+        const y: i32 = @intFromFloat(@ceil(Terrain.surface(sb.seed, @floatFromInt(x), @floatFromInt(z)).height));
+        Outpost_.place(sb, 0, part.index, 0, .{ x, y, z }) catch |err| return self.smokeFail("SMOKE OUTPOST PLACE {s}", .{@errorName(err)});
+    }
+    if (sb.outpost.len != 3) return self.smokeFail("SMOKE OUTPOST BUILT {d} OF 3: {s}", .{ sb.outpost.len, sb.noticeText() });
+    const arrived = Defense.raid(sb);
+    var hurt_units: usize = 0;
+    var steps: usize = 0;
+    while (steps < 1800) : (steps += 1) {
+        sb.step(camera, .{}, .{}, Time.fixed_dt) catch |err| return self.smokeFail("SMOKE OUTPOST STEP {s}", .{@errorName(err)});
+    }
+    for (sb.enemies.units) |slot| if (slot) |u| {
+        if (u.health < Enemies_.stats(u.kind).health) hurt_units += 1;
+    };
+    const left = sb.enemies.unitCount(Enemies_.arena_nest);
+    var damaged: usize = 0;
+    for (sb.outpost.slice()) |inst| {
+        const def = sb.outpost.library.get(sb.outpost.library.find(inst.id()).?);
+        if (inst.health < def.maxHealth() or inst.shield < (if (def.find(.shield)) |m| m.amount else 0)) damaged += 1;
+    }
+    if (arrived == 0) return self.smokeFail("SMOKE OUTPOST RAID DID NOT ARRIVE", .{});
+    if (left == arrived and hurt_units == 0 and damaged == 0) return self.smokeFail("SMOKE OUTPOST: NOTHING HAPPENED IN 30 S", .{});
+    std.log.info("Smoke outpost: a raid of {d} Hive units met 3 structures; after 30 s {d} raiders remain ({d} hurt), {d} structures damaged, {d} standing", .{ arrived, left, hurt_units, damaged, sb.outpost.len });
+    while (sb.outpost.len > 0) Outpost_.demolish(sb, 0, 0) catch break;
+    for (&sb.enemies.units) |*slot| slot.* = null;
+    sb.enemies.bolts = @splat(null);
 }
 
 /// Measure the costs players feel: meshing a dense chunk of blocks (one edit re-meshes its whole

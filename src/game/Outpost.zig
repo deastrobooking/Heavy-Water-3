@@ -13,6 +13,9 @@ const BlockTool = @import("BlockTool.zig");
 const Sandbox = @import("Sandbox.zig");
 
 pub const max_placed = 64;
+/// Seconds of a player's company at an outpost before the first raid, and between raids.
+pub const raid_first: f32 = 150;
+pub const raid_every: f32 = 240;
 
 pub const Instance = struct {
     id_buf: [Structures.max_id]u8 = @splat(0),
@@ -22,13 +25,22 @@ pub const Instance = struct {
     rot: u2 = 0,
     /// The player slot that built it.
     owner: u8 = 0,
+    // Runtime state, not part of the design: hit points, the gun's cooldown, the shield's hit
+    // points and quiet time since its last hit, missiles held, and the hit flash.
+    health: f32 = 0,
+    cooldown: f32 = 0,
+    shield: f32 = 0,
+    shield_quiet: f32 = 0,
+    ammo: f32 = 0,
+    flash: f32 = 0,
 
     pub fn id(self: *const Instance) []const u8 {
         return self.id_buf[0..self.id_len];
     }
 };
 
-pub const PlacedDoc = struct { id: []const u8, x: i32, y: i32, z: i32, rot: u8 = 0, owner: u8 = 0 };
+/// `health` is a fraction of the design's maximum; negative (absent in older saves) means whole.
+pub const PlacedDoc = struct { id: []const u8, x: i32, y: i32, z: i32, rot: u8 = 0, owner: u8 = 0, health: f32 = -1 };
 
 pub const State = struct {
     library: *Structures.Library,
@@ -36,6 +48,12 @@ pub const State = struct {
     len: usize = 0,
     /// A capture waiting for App to write it to `saves/structures/` (App owns the file access).
     export_index: ?usize = null,
+    /// The structures the Hive can see this step (near a player): their index among `placed`.
+    target_map: [max_placed]u8 = undefined,
+    target_len: usize = 0,
+    /// Seconds until the next raid on a defended outpost, and whether it was announced.
+    raid_timer: f32 = raid_first,
+    raid_warned: bool = false,
 
     pub fn create(allocator: std.mem.Allocator) !State {
         const library = try allocator.create(Structures.Library);
@@ -80,8 +98,19 @@ pub fn place(sb: *Sandbox, slot: usize, index: usize, rot: u2, at: [3]i32) !void
     wallet.parts -= cost.parts;
     var inst: Instance = .{ .origin = origin, .rot = rot, .owner = @intCast(slot), .id_len = def.id_len };
     inst.id_buf = def.id_buf;
+    initRuntime(&inst, def, 1);
     out.placed[out.len] = inst;
     out.len += 1;
+}
+
+/// Whole hit points (or `fraction` of them), a full shield and a full rack of missiles.
+pub fn initRuntime(inst: *Instance, def: *const Structures.Def, fraction: f32) void {
+    inst.health = def.maxHealth() * std.math.clamp(fraction, 0.01, 1);
+    inst.shield = if (def.find(.shield)) |m| m.amount else 0;
+    inst.ammo = if (def.find(.launcher)) |m| m.amount else 0;
+    inst.cooldown = 0;
+    inst.shield_quiet = 0;
+    inst.flash = 0;
 }
 
 fn cellOf(inst: *const Instance, def: *const Structures.Def, p: Prefabs.Placed) Prefabs.Placed {
@@ -101,6 +130,27 @@ pub fn structureAt(sb: *const Sandbox, c: [3]i32) ?usize {
         }
     }
     return null;
+}
+
+/// Clear structure `i`'s blocks and forget it, with no refund (a wreck: `Defense` pays that).
+pub fn removeCells(sb: *Sandbox, i: usize) !void {
+    const out = &sb.outpost;
+    const inst = out.placed[i];
+    if (out.library.find(inst.id())) |found| {
+        const def = out.library.get(found);
+        for (def.cellSlice()) |p| {
+            const t = cellOf(&inst, def, p);
+            const x = inst.origin[0] + t.x;
+            const y = inst.origin[1] + t.y;
+            const z = inst.origin[2] + t.z;
+            const old = sb.block_world.blocks.get(x, y, z);
+            if (!old.isEmpty() and !old.isAuthored()) try sb.block_world.blocks.set(x, y, z, .empty);
+        }
+    }
+    var k = i;
+    while (k + 1 < out.len) : (k += 1) out.placed[k] = out.placed[k + 1];
+    out.len -= 1;
+    try sb.syncBlocks();
 }
 
 /// Take structure `i` apart: its blocks go back to the remover, and half its scrap and parts.
@@ -185,7 +235,10 @@ pub fn toDocs(self: *const State, arena: std.mem.Allocator) !SaveDocs {
     const defs = try arena.alloc(Structures.Doc, lib.len - Structures.starter_count);
     for (defs, lib.defs[Structures.starter_count..lib.len]) |*d, *def| d.* = try Structures.toDoc(def, arena);
     const placed = try arena.alloc(PlacedDoc, self.len);
-    for (placed, self.slice()) |*d, *inst| d.* = .{ .id = inst.id(), .x = inst.origin[0], .y = inst.origin[1], .z = inst.origin[2], .rot = inst.rot, .owner = inst.owner };
+    for (placed, self.slice()) |*d, *inst| {
+        const max = if (self.library.find(inst.id())) |f| self.library.get(f).maxHealth() else 0;
+        d.* = .{ .id = inst.id(), .x = inst.origin[0], .y = inst.origin[1], .z = inst.origin[2], .rot = inst.rot, .owner = inst.owner, .health = if (max > 0) inst.health / max else -1 };
+    }
     return .{ .defs = defs, .placed = placed };
 }
 
@@ -201,6 +254,7 @@ pub fn validate(defs: []const Structures.Doc, placed: []const PlacedDoc) bool {
     }
     for (placed) |p| {
         if (!Structures.validId(p.id) or p.rot > 3 or p.owner >= Sandbox.max_players) return false;
+        if (!std.math.isFinite(p.health) or p.health > 1) return false;
         if (@abs(p.x) > 1 << 20 or @abs(p.y) > 1 << 12 or @abs(p.z) > 1 << 20) return false;
     }
     return true;
@@ -215,6 +269,7 @@ pub fn restore(self: *State, defs: []const Structures.Doc, placed: []const Place
     for (placed) |p| {
         var inst: Instance = .{ .origin = .{ p.x, p.y, p.z }, .rot = @intCast(p.rot), .owner = p.owner, .id_len = @intCast(p.id.len) };
         @memcpy(inst.id_buf[0..p.id.len], p.id);
+        if (self.library.find(p.id)) |f| initRuntime(&inst, self.library.get(f), if (p.health < 0) 1 else p.health) else inst.health = 100;
         self.placed[self.len] = inst;
         self.len += 1;
     }
