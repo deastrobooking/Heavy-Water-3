@@ -14,8 +14,9 @@ const World = @import("../world/World.zig");
 const Sandbox = @import("Sandbox.zig");
 const Vec3 = Physics.Vec3;
 
-pub const Tool = enum { hands, build, wire, bridge, weapon, terrain };
+pub const Tool = enum { hands, build, wire, bridge, weapon, terrain, blocks };
 const TerrainTool = @import("TerrainTool.zig");
+const BlockTool = @import("BlockTool.zig");
 pub const Palette = enum { structures, kits, blueprints };
 /// Palette: crates, prefab machines, then loose devices that join the workshop circuit.
 pub const Item = enum { crate, powered_door, elevator, rover, generator, button, latch, logic_or, lamp, transmitter, receiver, sap_tap, sap_beacon, root_sender, root_listener, platform };
@@ -48,6 +49,7 @@ pub const State = struct {
     /// Height relative to the surface the placement ray hits, in metres.
     platform_offset: f32 = 0,
     terrain: TerrainTool.State = .{},
+    blocks: BlockTool.State = .{},
 };
 
 fn makePlatformBlueprint(vertical: bool) Blueprint {
@@ -231,6 +233,7 @@ pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Acti
     switch (st.tool) {
         .hands, .weapon => {},
         .terrain => try TerrainTool.update(sb, camera, actions),
+        .blocks => try BlockTool.update(sb, camera, primary, actions),
         .bridge => {
             if (actions.next_item) @import("BridgeTool.zig").cycleStyle(sb);
             try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary);
@@ -641,6 +644,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     return switch (st.tool) {
         .hands => "",
         .terrain => TerrainTool.hint(sb, buffer),
+        .blocks => BlockTool.hint(sb, buffer),
         .weapon => if (sb.combat.arsenals[0].active) |w| switch (w) {
             .beam_saber => "BEAM SABER  CLICK COMBO  HOLD AFTER CUT FOR WAVE  RMB GUARD / PARRY",
             .blaster => "BUSTER  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
@@ -678,6 +682,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     const block = sb.catalog.content.block;
     if (st.tool == .bridge) return @import("BridgeTool.zig").publish(sb, out, start);
     if (st.tool == .terrain) return TerrainTool.publish(sb, out, start);
+    if (st.tool == .blocks) return BlockTool.publish(sb, out, start);
     if (st.tool == .build) if (st.preview) |p| {
         const tint: [4]f32 = if (p.valid) .{ 0.35, 1.0, 0.45, 1 } else .{ 1.0, 0.3, 0.25, 1 };
         if (blueprintOf(sb, p.entry)) |bp| {

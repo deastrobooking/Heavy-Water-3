@@ -63,6 +63,10 @@ test {
     _ = @import("procedural/CityHeightmaps.zig");
     _ = @import("world/TerrainEdit.zig");
     _ = @import("procedural/TerrainBrush.zig");
+    _ = @import("build/Blocks.zig");
+    _ = @import("build/Materials.zig");
+    _ = @import("build/Mesher.zig");
+    _ = @import("build/BlockWorld.zig");
     _ = @import("procedural/Heightmap.zig");
     _ = @import("procedural/Landscape.zig");
     _ = @import("procedural/TestArbor.zig");

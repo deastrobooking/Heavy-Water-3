@@ -40,7 +40,8 @@ The campaign expansion spans the Arbor Frontier, Hive/Scalari Homeworld, Gaia an
 | F | Hold a ledge, then mantle |
 | V | Toggle walking and free-flight modes |
 | F2 / F4 | Change camera view / customize your ranger |
-| 1 / 2 / 3 / 4 / 5 / 6 | Hands / build / wire / bridge / weapon / terrain tools |
+| 1 / 2 / 3 / 4 / 5 / 6 / 7 | Hands / build / wire / bridge / weapon / terrain / block tools |
+| Block tool (7) | Click places the chosen block in the 1 m grid beside the surface you aim at (14 m reach); right click removes the aimed block. Tab cycles cube, slab, ramp and stair; [ and ] cycle the castle materials (stone, dark stone, sandstone, timber, slate, moss stone, iron, banner red); T turns the block. A block needs the ground or another block beside it. Stairs collide as a walkable ramp |
 | Terrain tool (6) | Hold left click to sculpt the ground under the crosshair (60 m reach). Tab cycles raise, lower, level and smooth; [ and ] resize the brush (2 to 24 m); right click undoes the last stroke and T redoes it. Sculpting is refused within 60 m of a cave mouth |
 | Weapon tool | Left click or trackpad click fires; hold to charge or draw. The first click also captures mouse look and fires immediately. Right button is the alternate; Tab switches weapons. Saber: click cuts (click again mid-cut to chain the combo), the third quick cut fires a weaker crescent, and hold after a cut to charge the stronger wave. Dash + attack cuts through; attack while rising, falling/stomping, or neutral in air gives an up, down, or spin slash. Attack + dodge throws the returning blade. Right button guards. Sniper: right button scopes. Heavy rifle: hold right to charge. Bazooka: right detonates the orb |
 | Z / C / H | Class specials. Ranger: arc grenade, sentry turret, overshield. Synthetic: phase dash, kinetic slam, lumen lance |

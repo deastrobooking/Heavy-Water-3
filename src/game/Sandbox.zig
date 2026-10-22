@@ -18,6 +18,8 @@ const World = @import("../world/World.zig");
 const Scene3D = @import("../engine/Scene3D.zig");
 const Modifications = @import("../world/Modifications.zig");
 const TerrainEdit = @import("../world/TerrainEdit.zig");
+const BlockWorld = @import("../build/BlockWorld.zig");
+const Blocks = @import("../build/Blocks.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
 const Machine = @import("../machine/Machine.zig");
@@ -200,7 +202,7 @@ pub const Actions = packed struct {
     toggle_view: bool = false,
     /// Open the character creator.
     open_creator: bool = false,
-    /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges, 5 weapon, 6 terrain.
+    /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges, 5 weapon, 6 terrain, 7 blocks.
     select_tool: u3 = 0,
     /// Climb out of the Kestrel (its primary button fires).
     leave_jet: bool = false,
@@ -414,6 +416,8 @@ city_titan_phase: u8 = 0,
 modifications: Modifications = .{},
 /// Player terrain sculpting, heap allocated and published to the terrain sampler.
 terrain_edit: *TerrainEdit = undefined,
+/// Player-built blocks with their per-chunk meshes and colliders.
+block_world: BlockWorld = undefined,
 nearby_center: ?Key = null,
 nearby: [9]NearbyChunk = undefined,
 tick: u64 = 0,
@@ -440,6 +444,8 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.caves = Caves.layout(seed);
     self.physics = .init(.{ .context = &self.caves, .sample = groundSample, .hollow = groundHollow });
     errdefer self.physics.deinit();
+    self.block_world = try BlockWorld.init(allocator, world_flag);
+    errdefer self.block_world.deinit(allocator, &self.physics);
     self.dialogue = try Dialogue.load(allocator, Dialogue.builtin);
     errdefer self.dialogue.deinit();
     try self.placeArbor(spawn[0] + arbor_offset[0], spawn[2] + arbor_offset[1]);
@@ -693,6 +699,7 @@ pub fn deinit(self: *Sandbox) void {
     // Stop the sampler reading the overlay before it is freed (the streamer workers stop first).
     _ = TerrainEdit.active.cmpxchgStrong(self.terrain_edit, null, .acq_rel, .acquire);
     self.terrain_edit.destroy();
+    self.block_world.deinit(self.allocator, &self.physics);
     self.dialogue.deinit();
     self.scripts.deinit();
     for (&self.rigs) |*slot| if (slot.*) |*r| r.deinit(self.allocator);
@@ -1383,7 +1390,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                 else => {},
             };
         },
-        .build, .wire, .bridge, .terrain => try Build.update(self, aim, primary, actions),
+        .build, .wire, .bridge, .terrain, .blocks => try Build.update(self, aim, primary, actions),
         // The arsenal fires from `Frontier.step`, from the held triggers.
         .weapon => {},
     }
@@ -2416,6 +2423,21 @@ fn publishVehicle(self: *const Sandbox, placed: *const Placed, vehicle: Vehicle,
     return n;
 }
 
+/// Rebuild the meshes and colliders of the chunks whose blocks changed.
+pub fn syncBlocks(self: *Sandbox) !void {
+    try self.block_world.sync(self.allocator, &self.physics);
+}
+
+fn blockSections(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.BlockSection {
+    const blocks = self.block_world.blocks;
+    const sections = try arena.alloc(Save.BlockSection, blocks.count);
+    for (sections, 0..) |*s, i| {
+        const section = blocks.sectionAt(i);
+        s.* = .{ .x = section.key.x, .y = section.key.y, .z = section.key.z, .data = try Blocks.encodeSection(arena, section.cells) };
+    }
+    return sections;
+}
+
 fn terrainTiles(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.TerrainTile {
     const edit = self.terrain_edit;
     const n = edit.count.load(.acquire);
@@ -2473,6 +2495,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
         .terrain = try self.terrainTiles(arena),
+        .blocks = try self.blockSections(arena),
         .machines = machines[0..machine_count],
         .members = members: {
             var list: std.ArrayList(Save.MemberState) = .empty;
@@ -2531,6 +2554,24 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
         TerrainEdit.decodeTile(tile.data, cells) catch return error.InvalidSave;
         for (doc.terrain[0..i]) |other| if (other.x == tile.x and other.z == tile.z) return error.InvalidSave;
         if (@abs(tile.x) > Key.limit or @abs(tile.z) > Key.limit) return error.InvalidSave;
+    }
+    // Blocks too: every section decodes, none repeats, and the chunks they fill fit.
+    const block_cells = try terrain_arena.allocator().alloc([Blocks.section_cells]Blocks.Cell, doc.blocks.len);
+    const block_filled = try terrain_arena.allocator().alloc(usize, doc.blocks.len);
+    var block_chunks: [BlockWorld.max_chunks]Key = undefined;
+    var block_chunk_count: usize = 0;
+    for (doc.blocks, block_cells, block_filled, 0..) |section, *cells, *filled, i| {
+        filled.* = Blocks.decodeSection(section.data, @import("../build/Materials.zig").count, cells) catch return error.InvalidSave;
+        for (doc.blocks[0..i]) |other| if (other.x == section.x and other.y == section.y and other.z == section.z) return error.InvalidSave;
+        if (@abs(section.x) > 1 << 20 or @abs(section.y) > 1 << 12 or @abs(section.z) > 1 << 20) return error.InvalidSave;
+        const key = Blocks.chunkOf(section.x * Blocks.side, section.z * Blocks.side);
+        for (block_chunks[0..block_chunk_count]) |k| {
+            if (k.x == key.x and k.z == key.z) break;
+        } else {
+            if (block_chunk_count == BlockWorld.max_chunks) return error.InvalidSave;
+            block_chunks[block_chunk_count] = key;
+            block_chunk_count += 1;
+        }
     }
     // Every player's character and kit; a format 12 save's one wallet and personal progression
     // become P1's kit.
@@ -2608,6 +2649,9 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (doc.collected) |ref| _ = try self.modifications.remove(ref);
     self.terrain_edit.clear();
     for (terrain, 0..) |tile, i| self.terrain_edit.loadTile(.{ .x = doc.terrain[i].x, .z = doc.terrain[i].z }, &tile) catch unreachable; // checked above
+    self.block_world.blocks.clear();
+    for (doc.blocks, block_cells, block_filled) |section, *cells, filled| self.block_world.blocks.loadSection(.{ .x = section.x, .y = section.y, .z = section.z }, cells, filled) catch unreachable; // checked above
+    try self.syncBlocks();
     self.profile = profile;
     self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
@@ -2924,6 +2968,57 @@ test "sculpting with the terrain tool reshapes the ground players stand on and s
     defer std.testing.allocator.free(broken);
     try std.testing.expectError(error.InvalidSave, sandbox.restore(std.testing.allocator, broken, &camera));
     try std.testing.expectApproxEqAbs(raised, Terrain.surface(sandbox.seed, spot[0], spot[1]).height, 1e-4);
+}
+
+test "the block tool places a castle block on the ground, the block is solid, and it survives a save" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    sandbox.player.mode = .fly;
+    const spot = [2]f32{ 160.5, -430.5 };
+    const ground = Terrain.surface(sandbox.seed, spot[0], spot[1]).height;
+    sandbox.player.feet = .{ spot[0], ground + 4, spot[1] - 6 };
+    camera.position = sandbox.player.eye();
+    aimAt(&camera, .{ spot[0], ground, spot[1] });
+    try run(&sandbox, &camera, .{}, .{ .select_tool = 7 }, 1);
+    try std.testing.expectEqual(Build.Tool.blocks, sandbox.tools.tool);
+    try run(&sandbox, &camera, .{}, .{}, 1);
+    const target = sandbox.tools.blocks.place.?;
+    try std.testing.expect(sandbox.tools.blocks.valid);
+    try run(&sandbox, &camera, .{}, .{ .interact = true }, 1);
+    try std.testing.expectEqual(Blocks.Shape.cube, sandbox.block_world.blocks.get(target[0], target[1], target[2]).shape);
+    // Solid: a ray from above stops on the block's top.
+    const top: f32 = @floatFromInt(target[1] + 1);
+    const hit = sandbox.physics.castRay(.{ @as(f32, @floatFromInt(target[0])) + 0.5, top + 5, @as(f32, @floatFromInt(target[2])) + 0.5 }, .{ 0, -1, 0 }, 10, .none).?;
+    try std.testing.expectApproxEqAbs(top, hit.point[1], 1e-3);
+    // The crosshair now sits on the block: right click removes it, click puts it back.
+    try run(&sandbox, &camera, .{}, .{}, 1);
+    try std.testing.expect(sandbox.tools.blocks.remove != null);
+
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    try sandbox.block_world.blocks.set(target[0], target[1], target[2], .empty);
+    try sandbox.syncBlocks();
+    try std.testing.expect(sandbox.block_world.slotOf(Blocks.chunkOf(target[0], target[2])) == null);
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(Blocks.Shape.cube, sandbox.block_world.blocks.get(target[0], target[1], target[2]).shape);
+    try std.testing.expect(sandbox.physics.castRay(.{ @as(f32, @floatFromInt(target[0])) + 0.5, top + 5, @as(f32, @floatFromInt(target[2])) + 0.5 }, .{ 0, -1, 0 }, 10, .none) != null);
+
+    // A save naming an unknown material is refused and the blocks stay.
+    var cells: [Blocks.section_cells]Blocks.Cell = @splat(Blocks.Cell.empty);
+    cells[0] = .{ .shape = .cube, .material = 63 };
+    const bad_text = try Blocks.encodeSection(std.testing.allocator, &cells);
+    defer std.testing.allocator.free(bad_text);
+    const start = std.mem.indexOf(u8, bytes, "\"blocks\"").?;
+    const data_at = std.mem.indexOfPos(u8, bytes, start, "\"data\": \"").? + "\"data\": \"".len;
+    const data_end = std.mem.indexOfScalarPos(u8, bytes, data_at, '"').?;
+    const broken = try std.mem.concat(std.testing.allocator, u8, &.{ bytes[0..data_at], bad_text, bytes[data_end..] });
+    defer std.testing.allocator.free(broken);
+    try std.testing.expectError(error.InvalidSave, sandbox.restore(std.testing.allocator, broken, &camera));
+    try std.testing.expectEqual(Blocks.Shape.cube, sandbox.block_world.blocks.get(target[0], target[1], target[2]).shape);
 }
 
 /// Points the camera at a world position.

@@ -9,6 +9,8 @@ const Sky = @import("engine/Sky.zig");
 const World = @import("world/World.zig");
 const ChunkKey = @import("world/ChunkKey.zig");
 const TerrainEdit = @import("world/TerrainEdit.zig");
+const BlockWorld = @import("build/BlockWorld.zig");
+const BlockMesh = struct { handle: @import("asset/Catalog.zig").MeshHandle = .none, revision: u64 = 0, drawn: bool = false, origin: [3]f32 = @splat(0) };
 const Renderer = @import("render/Renderer.zig");
 const Overlay = @import("render/Overlay.zig");
 const TestWorld = @import("game/TestWorld.zig");
@@ -86,6 +88,8 @@ smoke_stage: u64 = 0,
 smoke_rover_start: ?[3]f32 = null,
 /// Chunk rebuild requests the renderer received from sculpting, and the mound the smoke raised.
 smoke_terrain_dirty: u32 = 0,
+/// The catalog mesh drawing each block chunk, and the chunk revision it was built from.
+block_meshes: [BlockWorld.max_chunks]BlockMesh = @splat(.{}),
 smoke_mound: ?struct { x: f32, z: f32, height: f32 } = null,
 status: Overlay.Line = .{},
 status_until: u64 = 0,
@@ -1233,6 +1237,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .tool_bridge => self.actions.select_tool = 4,
             .tool_weapon => self.actions.select_tool = 5,
             .tool_terrain => self.actions.select_tool = 6,
+            .tool_blocks => self.actions.select_tool = 7,
             .next_item => self.actions.next_item = true,
             .rotate => self.actions.rotate = true,
             .capture_prefab => self.actions.capture = true,
@@ -2668,9 +2673,13 @@ fn exerciseSmoke(self: *App) void {
             // Build a powered lamp circuit directly through the tool APIs, then drive.
             self.smokeBuild();
             self.smokeSculpt(camera);
+            self.smokeBlocks(camera);
         },
         5 => {
             if (self.smoke_terrain_dirty == 0) return self.smokeFail("SMOKE SCULPT NEVER REACHED THE RENDERER", .{});
+            var drawn: usize = 0;
+            for (self.block_meshes) |m| drawn += @intFromBool(m.drawn);
+            if (drawn == 0) return self.smokeFail("SMOKE BLOCKS NEVER REACHED THE RENDERER", .{});
             if (self.sandbox.workshop) |w| std.log.info("Smoke lamp: lit={d:.0}", .{self.sandbox.machines[w].machine.outputs[3][2]});
             if (self.smoke_rover_start == null) self.smoke_rover_start = self.sandbox.physics.rigidPose(self.sandbox.machines[2].vehicle.?.rigid).?.position;
             // Press the door button, then take the rover for the rest of the run.
@@ -3550,6 +3559,83 @@ fn smokeSap(self: *App) void {
     }
 }
 
+/// Copy changed block-chunk meshes into the catalog (inside the render mutex) and draw each one.
+fn publishBlocks(self: *App, renderer: *Renderer) void {
+    const Mesher = @import("build/Mesher.zig");
+    const Model = @import("asset/Model.zig");
+    for (&self.sandbox.block_world.slots, &self.block_meshes) |*slot, *mirror| {
+        if (slot.revision != mirror.revision) {
+            mirror.revision = slot.revision;
+            mirror.drawn = false;
+            if (slot.active and slot.mesh.indices.items.len > 0) blk: {
+                const vertices = self.allocator.dupe(@import("render/Mesh.zig").Vertex, slot.mesh.vertices.items) catch break :blk;
+                const indices = self.allocator.dupe(u32, slot.mesh.indices.items) catch {
+                    self.allocator.free(vertices);
+                    break :blk;
+                };
+                const model = Model.fromMesh(self.allocator, .{ .vertices = vertices, .indices = indices }, Model.Material.named("blocks", .{ 1, 1, 1, 1 })) catch break :blk;
+                if (mirror.handle.eql(.none)) {
+                    const handle = self.catalog.reserve() catch |err| {
+                        model.deinit(self.allocator);
+                        std.log.err("block mesh: {s}", .{@errorName(err)});
+                        break :blk;
+                    };
+                    self.catalog.install(self.allocator, handle, model) catch |err| {
+                        std.log.err("block mesh: {s}", .{@errorName(err)});
+                        break :blk;
+                    };
+                    mirror.handle = handle;
+                } else self.catalog.replaceHandle(self.allocator, &mirror.handle, model) catch |err| {
+                    std.log.err("block mesh: {s}", .{@errorName(err)});
+                    break :blk;
+                };
+                mirror.origin = Mesher.origin(slot.key);
+                mirror.drawn = true;
+            }
+        }
+        if (!mirror.drawn or renderer.prop_count == renderer.props.len) continue;
+        renderer.props[renderer.prop_count] = .{ .mesh = mirror.handle, .transform = .{ .position = mirror.origin }, .tint = .{ 1, 1, 1, 1 } };
+        renderer.prop_count += 1;
+    }
+}
+
+/// Build a short castle wall with crenellations, a stair and a ramp in front of the camera, check
+/// it is solid, and round-trip it through a save.
+fn smokeBlocks(self: *App, camera: *@import("world/Camera.zig")) void {
+    const sb = &self.sandbox;
+    const Terrain = @import("procedural/Terrain.zig");
+    const f = camera.forward();
+    const cx: i32 = @intFromFloat(@floor(camera.position.x() + f.x() * 12));
+    const cz: i32 = @intFromFloat(@floor(camera.position.z() + f.z() * 12));
+    const ground: i32 = @intFromFloat(@floor(Terrain.surface(sb.seed, @floatFromInt(cx), @floatFromInt(cz)).height));
+    const blocks = sb.block_world.blocks;
+    var placed: usize = 0;
+    for (0..8) |i| for (0..4) |h| {
+        const x = cx - 4 + @as(i32, @intCast(i));
+        const material: u6 = if (h == 0) 1 else 0;
+        blocks.set(x, ground + @as(i32, @intCast(h)), cz, .{ .shape = .cube, .material = material }) catch |err| return self.smokeFail("SMOKE BLOCKS {s}", .{@errorName(err)});
+        placed += 1;
+        if (h == 3 and i % 2 == 0) {
+            blocks.set(x, ground + 4, cz, .{ .shape = .cube, .material = 0 }) catch |err| return self.smokeFail("SMOKE BLOCKS {s}", .{@errorName(err)});
+            placed += 1;
+        }
+    };
+    blocks.set(cx - 6, ground, cz, .{ .shape = .stair, .rot = 1, .material = 2 }) catch |err| return self.smokeFail("SMOKE BLOCKS {s}", .{@errorName(err)});
+    blocks.set(cx + 5, ground, cz, .{ .shape = .ramp, .rot = 3, .material = 3 }) catch |err| return self.smokeFail("SMOKE BLOCKS {s}", .{@errorName(err)});
+    blocks.set(cx, ground, cz - 2, .{ .shape = .slab, .material = 7 }) catch |err| return self.smokeFail("SMOKE BLOCKS {s}", .{@errorName(err)});
+    sb.syncBlocks() catch |err| return self.smokeFail("SMOKE BLOCKS SYNC {s}", .{@errorName(err)});
+    const top: f32 = @floatFromInt(ground + 5); // the crenellation over the wall's middle
+    const hit = sb.physics.castRay(.{ @as(f32, @floatFromInt(cx)) + 0.5, top + 10, @as(f32, @floatFromInt(cz)) + 0.5 }, .{ 0, -1, 0 }, 20, .none) orelse return self.smokeFail("SMOKE BLOCKS NOT SOLID", .{});
+    if (@abs(hit.point[1] - top) > 0.01) return self.smokeFail("SMOKE BLOCKS WALL TOP AT {d:.2}, EXPECTED {d:.2}", .{ hit.point[1], top });
+    const bytes = sb.save(self.allocator, camera.*) catch |err| return self.smokeFail("SMOKE BLOCKS SAVE {s}", .{@errorName(err)});
+    defer self.allocator.free(bytes);
+    blocks.clear();
+    sb.syncBlocks() catch |err| return self.smokeFail("SMOKE BLOCKS CLEAR {s}", .{@errorName(err)});
+    sb.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE BLOCKS LOAD {s}", .{@errorName(err)});
+    if (blocks.get(cx, ground + 3, cz).shape != .cube) return self.smokeFail("SMOKE BLOCKS DID NOT SURVIVE THE SAVE", .{});
+    std.log.info("Smoke blocks: castle wall of {d} blocks plus stair, ramp and slab; solid, saved and restored", .{placed});
+}
+
 /// Raise a mound with the brush, undo it, redo it, and remember it for the save check at stage 9.
 fn smokeSculpt(self: *App, camera: *@import("world/Camera.zig")) void {
     const sb = &self.sandbox;
@@ -3804,6 +3890,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         if (dirty.all) renderer.invalidateTerrain(null) else for (dirty.keys) |key| renderer.invalidateTerrain(key);
         if (dirty.all or dirty.keys.len > 0) self.smoke_terrain_dirty += 1;
     }
+    self.publishBlocks(renderer);
     if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76)) renderer.prop_count = 0;
     renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74 or options.showcase == 75;
     renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else if (options.showcase == 75) 12 else null;
