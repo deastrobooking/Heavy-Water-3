@@ -1913,6 +1913,6 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 ## Hive air and travel encounter pass — 2026-10-22
 
 - **Added:** the second Hive carrier is now a metallic synthetic command ship and launches tougher robot fighters; insect Brood carriers launch up to eight flyers each at 4.5-second intervals. Surface and cave nests wake within 210 m, support 15 active units each, and reinforce every 5.5 seconds after a shorter initial delay.
-- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` pass. A focused regression and the Metal smoke/capture have not yet been run.
+- **Checked:** default `python3 tools/zig.py build check` passes; the full default headless suite passes **605/605**, including the robot-carrier launch regression. The 300-frame ReleaseSafe Metal smoke passes with API Validation enabled and no Metal errors. Showcase 35 captured frame 120 at 2560×1600 under API Validation and was visually reviewed; it shows the existing Brood carrier approach. `git diff --check` passes. A robot-carrier-specific capture has not been added.
 - **Still open:** carriers are destructible through the existing staged weak-point assault, but their collision is not a landing surface and players cannot board them on foot yet. The robot capital ship currently shares the carrier mesh with metallic/blue lighting; its bespoke robot silhouette remains art work. Hands-on travel combat pacing and balance are unverified.
 
