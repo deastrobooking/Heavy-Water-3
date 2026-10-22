@@ -1642,7 +1642,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82 or v == 91) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82 or v == 91 or v == 101 or v == 102) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -2447,6 +2447,17 @@ fn guiShowcase(self: *App, v: u32) void {
         31 => {
             sb.kits[0].inventory = .{ 14, 3, 9, 2 };
             sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 0 };
+        },
+        101 => {
+            // HOW TO PLAY, on the blocks page.
+            self.menu.open(.pause);
+            self.menu.open(.guide);
+            self.menu.guide_page = 3;
+            self.menu.row = 3;
+        },
+        102 => {
+            self.menu.open(.pause);
+            self.menu.open(.controls);
         },
         28 => {
             self.menu.open(.pause);

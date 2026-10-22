@@ -308,6 +308,7 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
         .controls => drawControls(c, menu),
         .pad_controls => drawPadControls(c, menu),
         .quest_log => if (sb) |s| drawQuestLog(c, menu, s),
+        .guide => drawGuide(c, menu),
         .heroes => if (sb) |s| drawHeroes(c, menu, s),
         .arena => drawArena(c, menu, sb),
         else => {},
@@ -595,6 +596,30 @@ fn drawQuestLog(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     button(c, back, "BACK", hitId(.menu, 0), menu.row == 0);
 }
 
+/// HOW TO PLAY: page tabs across the top, the page's lines, and BACK.
+fn drawGuide(c: *Canvas, menu: *const Menu) void {
+    const Guide = @import("Guide.zig");
+    const r = menuRect(c, @min(720, c.width - 24), 420);
+    panel(c, r, "HOW TO PLAY");
+    const tab_w = (r.w - 24) / @as(f32, @floatFromInt(Guide.page_count));
+    for (Guide.pages, 0..) |page, i| {
+        const tab: Rect = .{ .x = r.x + 12 + @as(f32, @floatFromInt(i)) * tab_w, .y = r.y + 46, .w = tab_w - 4, .h = 24 };
+        const showing = menu.guide_page == i;
+        rowBack(c, tab, showing or menu.row == i);
+        c.hit(tab, hitId(.menu, i));
+        const scale: f32 = 0.72;
+        c.text(tab.x + (tab.w - Canvas.textWidth(page.title, scale)) / 2, tab.y + 8, page.title, scale, if (showing) accent else dim);
+    }
+    const page = Guide.pages[menu.guide_page];
+    for (page.lines, 0..) |line, i| {
+        const indented = line.len > 2 and line[0] == ' ';
+        c.text(r.x + 24, r.y + 88 + @as(f32, @floatFromInt(i)) * 24, line, 0.82, if (indented) dim else ink);
+    }
+    c.text(r.x + 24, r.y + r.h - 34, "LEFT / RIGHT TURN THE PAGE   KEYS SHOWN ARE THE DEFAULTS (SEE CONTROLS)", 0.72, dim);
+    const back: Rect = .{ .x = r.x + r.w - 124, .y = r.y + r.h - 42, .w = 104, .h = 28 };
+    button(c, back, "BACK", hitId(.menu, Menu.guide_back), menu.row == Menu.guide_back);
+}
+
 fn drawSettings(c: *Canvas, menu: *const Menu) void {
     const r = menuRect(c, 600, 100 + @as(f32, @floatFromInt(Menu.settings_rows)) * 34);
     panel(c, r, "SETTINGS");
@@ -624,7 +649,8 @@ fn drawSettings(c: *Canvas, menu: *const Menu) void {
 
 fn drawControls(c: *Canvas, menu: *const Menu) void {
     const rows: f32 = @floatFromInt(Menu.controls_column);
-    const r = menuRect(c, 780, 170 + rows * 21);
+    // The key rows, then five lines of notes and the buttons below them.
+    const r = menuRect(c, 780, 60 + rows * 21 + 150);
     panel(c, r, "CONTROLS");
     const keyboard_tab: Rect = .{ .x = r.x + r.w - 250, .y = r.y + 12, .w = 104, .h = 25 };
     const gamepad_tab: Rect = .{ .x = r.x + r.w - 138, .y = r.y + 12, .w = 120, .h = 25 };
@@ -652,10 +678,11 @@ fn drawControls(c: *Canvas, menu: *const Menu) void {
         std.fmt.bufPrint(&note, "{s} TOOK THE OLD KEY", .{Bindings.label(a)}) catch ""
     else
         "ENTER REBIND  LEFT RIGHT COLUMN  SAVED WHEN YOU LEAVE";
-    c.text(r.x + 24, r.y + r.h - 124, message, 0.84, if (menu.swapped != null and !menu.capturing) gold else dim);
-    c.text(r.x + 24, r.y + r.h - 102, "FLIGHT: V TOGGLE  SHIFT ACCELERATE  ALT BRAKE  SPACE UP  E/Q CLIMB / DESCEND", 0.8, dim);
-    c.text(r.x + 24, r.y + r.h - 80, "KESTREL: MOUSE AIM  SHIFT BOOST  ALT BRAKE  CTRL ROLL  CLICK GUNS  HOLD/RELEASE RMB MISSILE  F EXIT", 0.76, dim);
-    c.text(r.x + 24, r.y + r.h - 58, "COMBAT: CLICK ATTACK  RMB WEAPON FIRE / SABER GUARD  X DIVE KICK  Z/C/H SPECIALS", 0.76, dim);
+    c.text(r.x + 24, r.y + r.h - 146, message, 0.84, if (menu.swapped != null and !menu.capturing) gold else dim);
+    c.text(r.x + 24, r.y + r.h - 126, "FLIGHT: V TOGGLE  SHIFT ACCELERATE  ALT BRAKE  SPACE UP  E/Q CLIMB / DESCEND", 0.8, dim);
+    c.text(r.x + 24, r.y + r.h - 106, "KESTREL: MOUSE AIM  SHIFT BOOST  ALT BRAKE  CTRL ROLL  CLICK GUNS  HOLD/RELEASE RMB MISSILE  F EXIT", 0.76, dim);
+    c.text(r.x + 24, r.y + r.h - 86, "COMBAT: CLICK ATTACK  RMB WEAPON FIRE / SABER GUARD  X DIVE KICK  Z/C/H SPECIALS", 0.76, dim);
+    c.text(r.x + 24, r.y + r.h - 66, "BLOCKS: SHIFT+CLICK CORNERS FILL  SHIFT+TAB STYLE  SHIFT+T RESTYLE  SHIFT+P COPY  MORE IN HOW TO PLAY", 0.76, dim);
     const gamepad: Rect = .{ .x = r.x + 18, .y = r.y + r.h - 40, .w = 170, .h = 26 };
     button(c, gamepad, "GAMEPAD SETUP", hitId(.menu, Menu.controls_gamepad), menu.row == Menu.controls_gamepad);
     const reset: Rect = .{ .x = r.x + r.w - 290, .y = r.y + r.h - 40, .w = 150, .h = 26 };
@@ -672,7 +699,6 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
     button(c, keyboard_tab, "KEYBOARD", hitId(.menu, Menu.pad_keyboard_tab), false);
     rowBack(c, gamepad_tab, true);
     c.text(gamepad_tab.x + 22, gamepad_tab.y + 8, "GAMEPAD", 0.9, accent);
-    c.text(r.x + 24, r.y + 34, "STANDARD AND GENERIC HID GAMEPADS CAN BE REMAPPED; SETTINGS SAVE AUTOMATICALLY", 0.92, dim);
     const mapping = menu.settings.pad_mapping;
     for (0..PadBindings.action_count) |i| {
         const column: f32 = @floatFromInt(i / Menu.pad_controls_column);
@@ -717,7 +743,10 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
     c.hit(slot_row, hitId(.menu, Menu.pad_preset_slot));
     const preset_name = std.mem.sliceTo(&menu.pad_preset_label, 0);
     c.print(slot_row.x + 9, slot_row.y + 7, 0.85, if (menu.row == Menu.pad_preset_slot) accent else ink, "PRESET SLOT {d}  {s}", .{ menu.pad_preset_slot_index + 1, if (preset_name.len == 0) "(EMPTY OR CUSTOM)" else preset_name });
+    // Below the presets, clear of the panel title it used to run into.
+    c.text(r.x + 24, slot_row.y + 40, "STANDARD AND GENERIC HID GAMEPADS CAN BE REMAPPED; SETTINGS SAVE AUTOMATICALLY", 0.86, dim);
 
+    c.text(r.x + 24, r.y + r.h - 138, "BUILD: HOLD LT + D-PAD LEFT TO START OR STOP; RT PLACE  RB REMOVE  D-PAD PIECE / MATERIAL / TURN", 0.78, dim);
     c.text(r.x + 24, r.y + r.h - 118, "MOVE / AIM: LEFT STICK / RIGHT STICK  LT BOOSTS  B DODGES ON FOOT / BRAKES IN FLIGHT", 0.82, dim);
     c.text(r.x + 24, r.y + r.h - 98, "FLIGHT: Y CYCLES / EXITS SUIT  A ASCENDS  D-PAD UP / DOWN CLIMBS / DESCENDS  X EXITS KESTREL", 0.78, dim);
     c.text(r.x + 24, r.y + r.h - 78, "COMBAT: RT FIRES  RB SABER / GUARD; IN KESTREL RT FIRES, RB LOCKS / RELEASES MISSILES", 0.78, dim);
@@ -1563,13 +1592,22 @@ test "every screen lays out inside the window and records hits" {
     var c: Canvas = .{};
     var m: Menu = .{};
     const Case = struct { screen: Menu.Screen, base: Menu.Screen };
-    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .pad_controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .world_map, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
+    for ([_]Case{ .{ .screen = .title, .base = .title }, .{ .screen = .settings, .base = .title }, .{ .screen = .none, .base = .none }, .{ .screen = .pause, .base = .pause }, .{ .screen = .settings, .base = .pause }, .{ .screen = .controls, .base = .pause }, .{ .screen = .pad_controls, .base = .pause }, .{ .screen = .quest_log, .base = .pause }, .{ .screen = .guide, .base = .pause }, .{ .screen = .world_map, .base = .pause }, .{ .screen = .confirm_quit, .base = .pause } }) |case| {
         m.open(case.base);
         m.screen = case.screen;
         c.reset(1280, 720);
         draw(&c, &m, &sb, hud);
         try expectInside(&c);
         if (case.screen != .none) try std.testing.expect(c.hit_len > 0);
+    }
+    // Every HOW TO PLAY page stays inside the panel's window.
+    m.open(.pause);
+    m.open(.guide);
+    for (0..@import("Guide.zig").page_count) |page| {
+        m.guide_page = @intCast(page);
+        c.reset(1280, 720);
+        draw(&c, &m, &sb, hud);
+        try expectInside(&c);
     }
     m.open(.pause);
     m.open(.world_map);

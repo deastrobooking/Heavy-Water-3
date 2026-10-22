@@ -12,7 +12,7 @@ comptime {
     if (Sandbox.travel_count > 32) @compileError("world-map travel unlock mask supports at most 32 destinations");
 }
 
-pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit };
+pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit, guide };
 pub const Key = enum { up, down, left, right, confirm, back };
 pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
 pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
@@ -21,6 +21,7 @@ pub const Item = struct { label: []const u8, command: Command = .none, opens: Sc
 pub const title_items = [_]Item{
     .{ .label = "CONTINUE", .command = .continue_game },
     .{ .label = "NEW GAME", .command = .new_game },
+    .{ .label = "HOW TO PLAY", .opens = .guide },
     .{ .label = "HERO ARENA", .opens = .arena },
     .{ .label = "SETTINGS", .opens = .settings },
     .{ .label = "CONTROLS", .opens = .controls },
@@ -35,6 +36,7 @@ pub const pause_items = [_]Item{
     .{ .label = "HERO ARENA", .opens = .arena },
     .{ .label = "CUSTOMIZE RANGER", .command = .character },
     .{ .label = "QUEST LOG", .opens = .quest_log },
+    .{ .label = "HOW TO PLAY", .opens = .guide },
     .{ .label = "SAVE GAME", .command = .save },
     .{ .label = "LOAD GAME", .command = .load },
     .{ .label = "SETTINGS", .opens = .settings },
@@ -78,6 +80,9 @@ pub const build_slots = 16;
 pub const build_tabs = 3;
 pub const build_columns = 4;
 pub const quest_items = [_]Item{.{ .label = "BACK" }};
+/// HOW TO PLAY rows: one per page (choosing a row shows that page), then BACK.
+pub const guide_back = @import("Guide.zig").page_count;
+pub const guide_rows = guide_back + 1;
 pub const arena_items = [_]Item{
     .{ .label = "START THE ARENA", .command = .start_arena },
     .{ .label = "LEAVE THE ARENA", .command = .leave_arena },
@@ -134,6 +139,8 @@ parent_count: usize = 0,
 /// The screen "back" returns to from settings, controls and quit (title or pause).
 base: Screen = .none,
 row: u8 = 0,
+/// The HOW TO PLAY page on show.
+guide_page: u8 = 0,
 /// A save file exists, so CONTINUE and LOAD are offered.
 has_save: bool = false,
 settings: Settings = .{},
@@ -170,6 +177,7 @@ pub fn open(self: *Menu, screen: Screen) void {
     }
     self.screen = screen;
     self.row = 0;
+    if (screen == .guide) self.guide_page = 0;
     if (screen == .build) {
         self.build_tab = 0;
         self.build_tabs_focus = true;
@@ -202,6 +210,7 @@ pub fn rows(self: *const Menu) u8 {
         .pad_controls => pad_controls_rows,
         .build => build_slots,
         .quest_log => 1,
+        .guide => guide_rows,
         .heroes => heroes_rows,
         .none => 0,
         else => @intCast(self.items().len),
@@ -248,6 +257,18 @@ pub fn select(self: *Menu, row: u8) void {
     }
 }
 
+/// HOW TO PLAY: left and right (or up and down) turn pages, BACK or the BACK row leaves.
+fn guideKey(self: *Menu, k: Key) Command {
+    switch (k) {
+        .left, .up => self.row = if (self.row == 0) guide_back else self.row - 1,
+        .right, .down => self.row = if (self.row >= guide_back) 0 else self.row + 1,
+        .back => return self.back(),
+        .confirm => if (self.row == guide_back) return self.back(),
+    }
+    if (self.row < guide_back) self.guide_page = self.row;
+    return .none;
+}
+
 pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .none) return .none;
     if (self.screen == .build) return self.buildKey(k);
@@ -267,6 +288,7 @@ pub fn key(self: *Menu, k: Key) Command {
         return .none;
     }
     if (self.screen == .quest_log and k == .confirm) return self.back();
+    if (self.screen == .guide) return self.guideKey(k);
     if (self.screen == .heroes) return self.heroesKey(k);
     if (self.screen == .party and k == .confirm and self.row < 4) {
         self.hero_player = self.row;
@@ -530,21 +552,28 @@ fn back(self: *Menu) Command {
     return .none;
 }
 
+/// The row of the item with this label, so tests survive menus gaining items.
+fn rowOf(list: []const Item, label: []const u8) u8 {
+    for (list, 0..) |item, i| if (std.mem.eql(u8, item.label, label)) return @intCast(i);
+    unreachable;
+}
+
 test "title skips continue without a save, and sub-screens return to their entry" {
     var m: Menu = .{};
     m.open(.title);
     try std.testing.expectEqual(@as(u8, 1), m.row);
     _ = m.key(.up);
     // Wraps past the disabled CONTINUE to the last title option.
-    try std.testing.expectEqual(@as(u8, 7), m.row);
-    m.row = 3;
+    try std.testing.expectEqual(@as(u8, title_items.len - 1), m.row);
+    const settings = rowOf(&title_items, "SETTINGS");
+    m.row = settings;
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.settings, m.screen);
     try std.testing.expectEqual(Command.settings_changed, m.key(.right));
     try std.testing.expectEqual(@as(u8, 90), m.settings.master_volume);
     _ = m.key(.back);
     try std.testing.expectEqual(Screen.title, m.screen);
-    try std.testing.expectEqual(@as(u8, 3), m.row);
+    try std.testing.expectEqual(settings, m.row);
     m.row = 1;
     try std.testing.expectEqual(Command.new_game, m.key(.confirm));
 
@@ -669,20 +698,49 @@ test "pause resumes on back, confirms quit, and cancels back to pause" {
     var m: Menu = .{};
     m.open(.pause);
     try std.testing.expectEqual(Command.@"resume", m.key(.back));
-    m.row = 10;
+    const quit = rowOf(&pause_items, "QUIT GAME");
+    m.row = quit;
     _ = m.key(.confirm);
     try std.testing.expectEqual(Screen.confirm_quit, m.screen);
     m.select(1);
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 10), m.row);
+    try std.testing.expectEqual(quit, m.row);
     _ = m.key(.confirm);
     try std.testing.expectEqual(Command.quit, m.key(.confirm));
     // LOAD is skipped without a save.
     m.open(.pause);
-    m.row = 6;
+    m.row = rowOf(&pause_items, "SAVE GAME");
     _ = m.key(.down);
-    try std.testing.expectEqual(@as(u8, 8), m.row);
+    try std.testing.expectEqual(rowOf(&pause_items, "LOAD GAME") + 1, m.row);
+}
+
+test "how to play opens from the title and pause menus, turns pages and returns to its row" {
+    var m: Menu = .{};
+    m.open(.pause);
+    const entry = rowOf(&pause_items, "HOW TO PLAY");
+    m.row = entry;
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(Screen.guide, m.screen);
+    try std.testing.expectEqual(@as(u8, 0), m.guide_page);
+    _ = m.key(.right);
+    _ = m.key(.right);
+    try std.testing.expectEqual(@as(u8, 2), m.guide_page);
+    // Turning left from the first page lands on BACK, which keeps the page on show.
+    m.row = 0;
+    m.guide_page = 0;
+    _ = m.key(.left);
+    try std.testing.expectEqual(@as(u8, guide_back), m.row);
+    try std.testing.expectEqual(@as(u8, 0), m.guide_page);
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(Screen.pause, m.screen);
+    try std.testing.expectEqual(entry, m.row);
+    m.open(.title);
+    m.row = rowOf(&title_items, "HOW TO PLAY");
+    _ = m.key(.confirm);
+    try std.testing.expectEqual(Screen.guide, m.screen);
+    try std.testing.expectEqual(Command.none, m.key(.back));
+    try std.testing.expectEqual(Screen.title, m.screen);
 }
 
 /// Exchange assignments rather than allowing two controllers to own one slot.
