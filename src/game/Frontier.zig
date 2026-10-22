@@ -2032,6 +2032,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .ember_wyrm => .{ c.scalari_ember_wyrm, c.scalari_ember_wyrm_glow },
             .void_lance => .{ c.scalari_void_lance, c.scalari_void_lance_glow },
             .dreadclaw => .{ c.scalari_dreadclaw, c.scalari_dreadclaw_glow },
+            .starwing => .{ c.player_starwing, c.player_starwing_glow },
+            .bulwark => .{ c.player_bulwark, c.player_bulwark_glow },
         };
         out[n] = .{ .mesh = frame_mesh, .transform = .{ .position = at }, .tint = paint, .rotation = rot };
         out[n + 1] = .{ .mesh = frame_glow, .transform = .{ .position = at }, .tint = Material.emissive(paint, 0.25 + 0.75 * f.burn), .rotation = rot };
@@ -2045,24 +2047,27 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .dragonfly => .{ 0.45, 1.1, 1.5, 1 },
             .beetle_bomber => .{ 1.45, 0.78, 0.35, 1 },
             .robot_fighter => .{ 0.48, 0.63, 0.78, 1 },
+            .robot_lancer => .{ 0.7, 0.84, 1.0, 1 },
         };
         const tint = wing_tint;
         const hull = switch (w.kind) {
             .wasp => c.wasp,
             .dragonfly => c.dragonfly,
             .beetle_bomber => c.beetle_bomber,
-            .robot_fighter => c.dragonfly,
+            .robot_fighter => c.robot_fighter,
+            .robot_lancer => c.robot_lancer,
         };
         const lights = switch (w.kind) {
             .wasp => c.wasp_glow,
             .dragonfly => c.dragonfly_glow,
             .beetle_bomber => c.beetle_bomber_glow,
-            .robot_fighter => c.dragonfly_glow,
+            .robot_fighter => c.robot_fighter_glow,
+            .robot_lancer => c.robot_lancer_glow,
         };
         out[n] = .{ .mesh = hull, .transform = .{ .position = w.position }, .tint = tint, .rotation = quat(q) };
-        out[n + 1] = .{ .mesh = lights, .transform = .{ .position = w.position }, .tint = Material.emissive(if (w.kind == .dragonfly) .{ 0.2, 0.75, 1, 1 } else if (w.kind == .beetle_bomber) .{ 1, 0.32, 0.08, 1 } else if (w.kind == .robot_fighter) .{ 0.18, 0.62, 1, 1 } else .{ 1, 1, 1, 1 }, if (w.state == .attack) 1 else 0.6), .rotation = quat(q) };
+        out[n + 1] = .{ .mesh = lights, .transform = .{ .position = w.position }, .tint = Material.emissive(if (w.kind == .dragonfly) .{ 0.2, 0.75, 1, 1 } else if (w.kind == .beetle_bomber) .{ 1, 0.32, 0.08, 1 } else if (w.kind == .robot_fighter or w.kind == .robot_lancer) .{ 0.18, 0.62, 1, 1 } else .{ 1, 1, 1, 1 }, if (w.state == .attack) 1 else 0.6), .rotation = quat(q) };
         n += 2;
-        for (ShipMeshes.wasp_wings, 0..) |root, k| {
+        if (w.kind != .robot_fighter and w.kind != .robot_lancer) for (ShipMeshes.wasp_wings, 0..) |root, k| {
             const side: f32 = if (root.x > 0) 1 else -1;
             // Fore and hind pairs beat out of phase; a mirrored wing points along -X.
             const beat = @sin(w.flap + @as(f32, @floatFromInt(k / 2)) * 1.4) * 0.7;
@@ -2070,7 +2075,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             const p = q.rotate(root);
             out[n] = .{ .mesh = c.wasp_wing, .transform = .{ .position = R.add(w.position, .{ p.x, p.y, p.z }) }, .tint = .{ 1, 1, 1, 1 }, .rotation = quat(q.mul(local)) };
             n += 1;
-        }
+        };
     };
     for (sb.skies.carriers) |carrier| if (carrier.alive and room(out, n, 6)) {
         const q = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, carrier.yaw()));

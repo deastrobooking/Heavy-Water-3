@@ -15,6 +15,7 @@ const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 const Fabricator = @import("../game/Fabricator.zig");
+const Hangar = @import("../game/Hangar.zig");
 const Build = @import("../game/Build.zig");
 const Collectibles = @import("../game/Collectibles.zig");
 const QuestLog = @import("../game/QuestLog.zig");
@@ -1037,8 +1038,8 @@ const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "IDENTITY", .first = .name },
     .{ .title = "CHARACTER MODEL", .first = .body_style },
     .{ .title = "BODY", .first = .height },
-    .{ .title = "HAIR", .first = .hair_style },
     .{ .title = "FACE", .first = .face_style },
+    .{ .title = "HAIR", .first = .hair_style },
     .{ .title = "GEAR", .first = .outfit },
     .{ .title = "ARMOR COLOR STUDIO  /  RGB", .first = .armor_metal_r },
     .{ .title = "BOOTS", .first = .boot_style },
@@ -1054,8 +1055,8 @@ fn swatch(field: Profile.Field, p: Profile) ?Color {
     return switch (field) {
         .skin => Profile.skin_tones[p.skin],
         .hair_color => Profile.hair_colors[p.hair_color],
-        .hair_highlight => if (p.hair_highlight == 0) null else Profile.hair_colors[p.hair_highlight - 1],
         .eye_color => if (p.eye_color == 0 or p.class == .synthetic) null else Profile.eye_colors[p.eye_color - 1],
+        .hair_highlight => if (p.hair_highlight == 0) null else Profile.hair_colors[p.hair_highlight - 1],
         .outfit => Profile.outfit_colors[p.outfit],
         .accent => Profile.accent_colors[p.accent],
         .gemstone => switch (p.gemstone) {
@@ -1512,7 +1513,6 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
         c.hit(tab, hitId(.fab_tab, t));
         tx += w + 8;
     }
-    inventoryLine(c, sb, r.x + r.w - 300, r.y + 50, 1);
     var y = r.y + 76;
     for (rows, 0..) |index, i| {
         const recipe = Fabricator.recipes[index];
@@ -1521,6 +1521,12 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
         c.hit(row, hitId(.shop_row, i));
         var buffer: [24]u8 = undefined;
         c.text(row.x + 14, row.y + 10, Fabricator.name(recipe.output, &buffer), 1.1, if (shop.row == i) accent else ink);
+        if (recipe.output == .kestrel_upgrade) {
+            const upgrade = recipe.output.kestrel_upgrade;
+            var level: [24]u8 = undefined;
+            const label = std.fmt.bufPrint(&level, "LV {d}/{d}", .{ sb.progress.kestrelLevel(upgrade), Progress.max_level }) catch "";
+            c.text(row.x + row.w - 340, row.y + 10, label, 0.9, dim);
+        }
         if (Fabricator.status(&sb.progress, &sb.kits[0], recipe.output)) |status| {
             const state_color = if (std.mem.eql(u8, status, "FABRICATE KESTREL FIRST")) bad else good;
             c.text(row.x + row.w - 250, row.y + 10, status, 1, state_color);
@@ -1557,8 +1563,37 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
         y += 34;
     }
     const selected = Fabricator.recipes[rows[@min(shop.row, rows.len - 1)]];
-    c.text(r.x + 18, r.y + r.h - 50, selected.about, 1, ink);
+    if (@as(Fabricator.Tab, @enumFromInt(shop.tab)) == .aircraft) {
+        c.text(r.x + 18, r.y + r.h - 72, selected.about, 0.9, ink);
+        aircraftDetail(c, sb, selected.output, r.x + 18, r.y + r.h - 52);
+    } else {
+        c.text(r.x + 18, r.y + r.h - 50, selected.about, 1, ink);
+    }
     c.text(r.x + 18, r.y + r.h - 28, if (@as(Fabricator.Tab, @enumFromInt(shop.tab)) == .aircraft) "LEFT RIGHT TAB  ENTER INSTALL / SELECT  ESC CLOSE" else "LEFT RIGHT TAB  ENTER FABRICATE  ESC CLOSE  FIND PICKUPS IN THE WORLD", 0.9, alpha(dim, 0.8));
+}
+
+fn aircraftDetail(c: *Canvas, sb: *const Sandbox, output: Fabricator.Output, x: f32, y: f32) void {
+    switch (output) {
+        .space_frame => |frame| {
+            const cfg = Hangar.configFor(frame, sb.progress.kestrel_levels);
+            c.print(x, y, 0.9, accent, "THRUST {d:.0}   HULL {d:.0}   WING ASPECT {d:.1}", .{ cfg.thrust, cfg.hull_max, cfg.aero.aspect });
+        },
+        .kestrel_upgrade => |upgrade| {
+            const level = sb.progress.kestrelLevel(upgrade);
+            const cfg = Hangar.configFor(.kestrel, sb.progress.kestrel_levels);
+            switch (upgrade) {
+                .armor => c.print(x, y, 0.9, accent, "CURRENT HULL {d:.0}   NEXT LEVEL +75 HULL", .{cfg.hull_max}),
+                .engine => c.print(x, y, 0.9, accent, "CURRENT THRUST {d:.0}   NEXT LEVEL +12% THRUST", .{cfg.thrust}),
+                .missile_rack => c.print(x, y, 0.9, accent, "UPGRADE LEVEL {d}/{d}   +2 MISSILES PER LEVEL", .{ level, Progress.max_level }),
+                .gun_cooling => c.print(x, y, 0.9, accent, "UPGRADE LEVEL {d}/{d}   FASTER COOLING, LONGER FIRING", .{ level, Progress.max_level }),
+            }
+        },
+        .kestrel_paint => |paint| {
+            const state = Fabricator.status(&sb.progress, &sb.kits[0], .{ .kestrel_paint = paint }) orelse "AVAILABLE TO UNLOCK";
+            c.text(x, y, state, 0.9, accent);
+        },
+        else => {},
+    }
 }
 
 fn drawPlatformEditor(c: *Canvas, sb: *const Sandbox) void {

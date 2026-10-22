@@ -112,7 +112,7 @@ pub const energy_net_radius: f32 = 7.5 * 1.15;
 pub const wake_distance: f32 = tuning.carrier_wake_distance;
 
 pub const WaspState = enum { patrol, attack, breakoff, evade };
-pub const WingKind = enum { wasp, dragonfly, beetle_bomber, robot_fighter };
+pub const WingKind = enum { wasp, dragonfly, beetle_bomber, robot_fighter, robot_lancer };
 pub const AssaultStage = enum { turrets, bays, core, crashing };
 pub const CarrierPart = union(enum) { turret: u8, bay: u8, core };
 pub const Wasp = struct {
@@ -446,7 +446,7 @@ fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, play
         if (c.launch <= 0 and self.waspCount(@intCast(ci)) < wasps_per_carrier) {
             c.launch = tuning.carrier_launch_interval;
             const bay = ShipMeshes.carrier_bays[random.uintLessThan(usize, 4)];
-            const kind: WingKind = if (c.robotic) .robot_fighter else switch (self.launch_serial % 5) {
+            const kind: WingKind = if (c.robotic) (if (self.launch_serial % 2 == 0) .robot_fighter else .robot_lancer) else switch (self.launch_serial % 5) {
                 2 => .dragonfly,
                 4 => .beetle_bomber,
                 else => .wasp,
@@ -460,7 +460,7 @@ fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, play
                     self.raid_hits = 0;
                     push(out, &n, .{ .raid_started = .{ .plaza = plaza, .position = self.market_plazas[plaza] } });
                 }
-                slot.* = .{ .kind = kind, .position = c.point(bay), .forward = R.normalize(R.add(c.velocity(), .{ 0, -8, 0 })), .carrier = @intCast(ci), .orbit = random.float(f32) * 6.28, .raid_target = self.market_plazas[if (kind == .beetle_bomber and self.raid_active) self.raid_plaza else plaza], .health = if (kind == .dragonfly) wasp_health * 0.55 else if (kind == .beetle_bomber) wasp_health * 2.2 else if (kind == .robot_fighter) wasp_health * 1.7 else wasp_health };
+                slot.* = .{ .kind = kind, .position = c.point(bay), .forward = R.normalize(R.add(c.velocity(), .{ 0, -8, 0 })), .carrier = @intCast(ci), .orbit = random.float(f32) * 6.28, .raid_target = self.market_plazas[if (kind == .beetle_bomber and self.raid_active) self.raid_plaza else plaza], .health = if (kind == .dragonfly) wasp_health * 0.55 else if (kind == .beetle_bomber) wasp_health * 2.2 else if (kind == .robot_fighter) wasp_health * 1.7 else if (kind == .robot_lancer) wasp_health * 1.25 else wasp_health };
                 break;
             };
         }
@@ -522,7 +522,7 @@ fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, play
         if (target_pos != null and w.state == .patrol) w.state = .attack;
 
         var desired: V = w.forward;
-        var speed: f32 = if (w.kind == .dragonfly) tuning.wasp_patrol_speed * 1.7 else if (w.kind == .beetle_bomber) tuning.wasp_patrol_speed * 0.7 else if (w.kind == .robot_fighter) tuning.wasp_patrol_speed * 1.25 else tuning.wasp_patrol_speed;
+        var speed: f32 = if (w.kind == .dragonfly) tuning.wasp_patrol_speed * 1.7 else if (w.kind == .beetle_bomber) tuning.wasp_patrol_speed * 0.7 else if (w.kind == .robot_fighter) tuning.wasp_patrol_speed * 1.25 else if (w.kind == .robot_lancer) tuning.wasp_patrol_speed * 1.5 else tuning.wasp_patrol_speed;
         switch (w.state) {
             .patrol => {
                 w.orbit += dt * 0.35;
@@ -534,7 +534,7 @@ fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, play
                 const d = dist(t, w.position);
                 const lead = R.add(t, R.scale(target_vel, d / tuning.wasp_attack_lead_speed * tuning.wasp_attack_lead_factor));
                 desired = R.sub(lead, w.position);
-                speed = if (w.kind == .dragonfly) tuning.wasp_attack_speed * 1.55 else if (w.kind == .beetle_bomber) tuning.wasp_attack_speed * (if (d < 110) @as(f32, 0.24) else 0.72) else if (w.kind == .robot_fighter) tuning.wasp_attack_speed * 1.2 else tuning.wasp_attack_speed;
+                speed = if (w.kind == .dragonfly) tuning.wasp_attack_speed * 1.55 else if (w.kind == .beetle_bomber) tuning.wasp_attack_speed * (if (d < 110) @as(f32, 0.24) else 0.72) else if (w.kind == .robot_fighter) tuning.wasp_attack_speed * 1.2 else if (w.kind == .robot_lancer) tuning.wasp_attack_speed * 1.42 else tuning.wasp_attack_speed;
                 if (w.kind == .beetle_bomber) {
                     w.bomb_timer -= dt;
                     if (d < 110 and w.bomb_timer <= 0) {
@@ -597,6 +597,7 @@ fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, play
             .dragonfly => 1.45,
             .beetle_bomber => 0.72,
             .robot_fighter => 1.15,
+            .robot_lancer => 1.42,
         };
         const base_turn: f32 = if (w.state == .attack) tuning.wasp_turn_attack else tuning.wasp_turn_other;
         const turn_rate = base_turn * turn_scale;
@@ -1199,7 +1200,7 @@ test "the synthetic command carrier launches armored robot fighters" {
     _ = sky.step(&physics, &enemies, jet, &.{}, 1.0 / 60.0, &events);
     var found = false;
     for (sky.wasps) |slot| if (slot) |w| {
-        if (w.kind == .robot_fighter) {
+        if (w.kind == .robot_fighter or w.kind == .robot_lancer) {
             found = true;
             try std.testing.expect(w.health > wasp_health);
         }

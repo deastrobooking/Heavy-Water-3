@@ -55,6 +55,8 @@ pub fn configFor(frame: Progress.SpaceFrame, levels: [Progress.kestrel_upgrade_c
         .ember_wyrm => .{ .thrust = 70_000.0, .wing_area = 2.8, .hull = 275.0 },
         .void_lance => .{ .thrust = 60_000.0, .wing_area = 3.5, .hull = 350.0 },
         .dreadclaw => .{ .thrust = 50_000.0, .wing_area = 4.4, .hull = 460.0 },
+        .starwing => .{ .thrust = 76_000.0, .wing_area = 3.1, .hull = 310.0 },
+        .bulwark => .{ .thrust = 46_000.0, .wing_area = 4.8, .hull = 540.0 },
     };
     return .{
         .aero = airfoil.WingAero.init(airfoil.Naca4.fromDigits("2408"), base.wing_area),

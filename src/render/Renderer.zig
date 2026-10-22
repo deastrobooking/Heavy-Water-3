@@ -566,11 +566,11 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     var light = Sky.at(sky_time);
     if (self.scene.space_review) light = .{
         .direction = .{ 0.35, 0.88, -0.31 },
-        .color = .{ 0.92, 0.96, 1.0 },
-        .ambient_sky = .{ 0.30, 0.36, 0.48 },
-        .ambient_ground = .{ 0.12, 0.16, 0.23 },
-        .horizon = .{ 0.006, 0.012, 0.032 },
-        .zenith = .{ 0.002, 0.005, 0.018 },
+        .color = .{ 1.15, 1.22, 1.35 },
+        .ambient_sky = .{ 0.52, 0.62, 0.82 },
+        .ambient_ground = .{ 0.22, 0.29, 0.42 },
+        .horizon = .{ 0.012, 0.027, 0.064 },
+        .zenith = .{ 0.004, 0.012, 0.036 },
         .night = 0,
     };
     self.clock = if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)

@@ -70,6 +70,8 @@ pub const recipes = [_]Recipe{
     .{ .tab = .aircraft, .output = .{ .space_frame = .ember_wyrm }, .cost = .{}, .about = "Fast, light space interceptor. Unlock after the Kestrel." },
     .{ .tab = .aircraft, .output = .{ .space_frame = .void_lance }, .cost = .{}, .about = "Balanced lance fighter with improved shields and turning. Requires Ember Wyrm." },
     .{ .tab = .aircraft, .output = .{ .space_frame = .dreadclaw }, .cost = .{}, .about = "Heavy gunship with the strongest frame shields. Requires Void Lance." },
+    .{ .tab = .aircraft, .output = .{ .space_frame = .starwing }, .cost = .{}, .about = "Allied high-speed interceptor with twin ion engines. Requires Dreadclaw." },
+    .{ .tab = .aircraft, .output = .{ .space_frame = .bulwark }, .cost = .{}, .about = "Broad armored strike fighter built to hold a line under fire. Requires Starwing." },
 };
 
 pub fn name(output: Output, buffer: []u8) []const u8 {
@@ -103,6 +105,8 @@ pub fn name(output: Output, buffer: []u8) []const u8 {
             .ember_wyrm => "EMBER WYRM FRAME",
             .void_lance => "VOID LANCE FRAME",
             .dreadclaw => "DREADCLAW FRAME",
+            .starwing => "STARWING FRAME",
+            .bulwark => "BULWARK FRAME",
         },
     };
     const n = @min(buffer.len, tag.len);
@@ -138,7 +142,7 @@ pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
 pub fn status(p: *const Progress, k: *const Kit, output: Output) ?[]const u8 {
     return switch (output) {
         .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
-        .space_frame => |frame| if (!p.fighter) "FABRICATE KESTREL FIRST" else if (p.ownsSpaceFrame(frame)) (if (p.space_frame == frame) "EQUIPPED" else "OWNED") else if ((frame == .void_lance and !p.ownsSpaceFrame(.ember_wyrm)) or (frame == .dreadclaw and !p.ownsSpaceFrame(.void_lance))) "PREVIOUS FRAME REQUIRED" else null,
+        .space_frame => |frame| if (!p.fighter) "FABRICATE KESTREL FIRST" else if (p.ownsSpaceFrame(frame)) (if (p.space_frame == frame) "EQUIPPED" else "OWNED") else if ((frame == .void_lance and !p.ownsSpaceFrame(.ember_wyrm)) or (frame == .dreadclaw and !p.ownsSpaceFrame(.void_lance)) or (frame == .starwing and !p.ownsSpaceFrame(.dreadclaw)) or (frame == .bulwark and !p.ownsSpaceFrame(.starwing))) "PREVIOUS FRAME REQUIRED" else null,
         .robot_companion => if (k.robot_built) "BUILT" else null,
         .weapon_upgrade => |u| if (!k.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (k.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (k.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
@@ -307,7 +311,7 @@ test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint
     var kit: Kit = .{ .wallet = .{ .scrap = 5000, .parts = 100 } };
     var rows: [recipes.len]u8 = undefined;
     const aircraft = onTab(.aircraft, &rows);
-    try std.testing.expectEqual(@as(usize, 11), aircraft.len);
+    try std.testing.expectEqual(@as(usize, 13), aircraft.len);
     try std.testing.expectError(error.NoFighter, make(&progress, &kit, aircraft[2]));
     progress.fighter = true;
     _ = try make(&progress, &kit, aircraft[2]); // engine level 1
@@ -323,7 +327,7 @@ test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint
 
 test "Aircraft fabricator unlocks space frames in order and equips owned frames" {
     var progress: Progress = .{ .fighter = true };
-    var kit: Kit = .{ .wallet = .{ .scrap = 1000, .parts = 40 } };
+    var kit: Kit = .{ .wallet = .{ .scrap = 3000, .parts = 70 } };
     var rows: [recipes.len]u8 = undefined;
     const aircraft = onTab(.aircraft, &rows);
     const frameRecipe = struct {
@@ -335,13 +339,18 @@ test "Aircraft fabricator unlocks space frames in order and equips owned frames"
     const ember = frameRecipe(aircraft, .ember_wyrm);
     const lance = frameRecipe(aircraft, .void_lance);
     const heavy = frameRecipe(aircraft, .dreadclaw);
+    const starwing = frameRecipe(aircraft, .starwing);
+    const bulwark = frameRecipe(aircraft, .bulwark);
     try std.testing.expectEqualStrings("PREVIOUS FRAME REQUIRED", status(&progress, &kit, recipes[lance].output).?);
     try std.testing.expectError(error.PreviousFrameRequired, make(&progress, &kit, lance));
     _ = try make(&progress, &kit, ember);
     _ = try make(&progress, &kit, lance);
     _ = try make(&progress, &kit, heavy);
     try std.testing.expectEqual(Progress.SpaceFrame.dreadclaw, progress.space_frame);
+    _ = try make(&progress, &kit, starwing);
+    _ = try make(&progress, &kit, bulwark);
+    try std.testing.expectEqual(Progress.SpaceFrame.bulwark, progress.space_frame);
     _ = try make(&progress, &kit, ember);
     try std.testing.expectEqual(Progress.SpaceFrame.ember_wyrm, progress.space_frame);
-    try std.testing.expectEqual(@as(u32, 300), kit.wallet.scrap);
+    try std.testing.expectEqual(@as(u32, 1080), kit.wallet.scrap);
 }

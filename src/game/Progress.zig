@@ -30,7 +30,7 @@ pub const flag_capacity = 24;
 pub const KestrelUpgrade = enum { armor, missile_rack, engine, gun_cooling };
 pub const kestrel_upgrade_count = enum_compat.fields(KestrelUpgrade).len;
 /// Playable space-capable frames. The atmospheric Kestrel remains the starter.
-pub const SpaceFrame = enum { kestrel, ember_wyrm, void_lance, dreadclaw };
+pub const SpaceFrame = enum { kestrel, ember_wyrm, void_lance, dreadclaw, starwing, bulwark };
 pub const space_frame_count = enum_compat.fields(SpaceFrame).len;
 pub const SpaceFrameError = Kit.Error || error{Prerequisite};
 pub const Paint = enum { ivory, azure, ember, moss };
@@ -116,6 +116,8 @@ pub fn spaceFrameCost(frame: SpaceFrame) Kit.Cost {
         .ember_wyrm => .{ .scrap = 100, .parts = 4 },
         .void_lance => .{ .scrap = 220, .parts = 8 },
         .dreadclaw => .{ .scrap = 380, .parts = 12 },
+        .starwing => .{ .scrap = 520, .parts = 16 },
+        .bulwark => .{ .scrap = 700, .parts = 20 },
     };
 }
 
@@ -126,6 +128,8 @@ pub fn unlockSpaceFrame(self: *Progress, frame: SpaceFrame, wallet: *Market.Wall
         .ember_wyrm => .kestrel,
         .void_lance => .ember_wyrm,
         .dreadclaw => .void_lance,
+        .starwing => .dreadclaw,
+        .bulwark => .starwing,
     };
     if (prerequisite) |needed| if (!self.ownsSpaceFrame(needed)) return error.Prerequisite;
     try Kit.pay(wallet, spaceFrameCost(frame));
@@ -296,19 +300,21 @@ test "Kestrel upgrades change owned loadout and paint selection persists" {
 
 test "space fighter frames unlock in order and persist equipped state" {
     var p: Progress = .{};
-    var wallet: Market.Wallet = .{ .scrap = 1000, .parts = 40 };
+    var wallet: Market.Wallet = .{ .scrap = 3000, .parts = 70 };
     try std.testing.expectError(error.Prerequisite, p.unlockSpaceFrame(.void_lance, &wallet));
     try p.unlockSpaceFrame(.ember_wyrm, &wallet);
     try p.unlockSpaceFrame(.void_lance, &wallet);
     try p.unlockSpaceFrame(.dreadclaw, &wallet);
-    try std.testing.expectEqual(SpaceFrame.dreadclaw, p.space_frame);
+    try p.unlockSpaceFrame(.starwing, &wallet);
+    try p.unlockSpaceFrame(.bulwark, &wallet);
+    try std.testing.expectEqual(SpaceFrame.bulwark, p.space_frame);
     try p.selectSpaceFrame(.ember_wyrm);
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const restored = try fromDoc(try std.json.parseFromSliceLeaky(Doc, arena.allocator(), try std.json.Stringify.valueAlloc(arena.allocator(), try p.toDoc(arena.allocator()), .{}), .{}));
-    try std.testing.expectEqual(@as(u8, 0b1111), restored.space_frames);
+    try std.testing.expectEqual(@as(u8, 0b111111), restored.space_frames);
     try std.testing.expectEqual(SpaceFrame.ember_wyrm, restored.space_frame);
-    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .space_frames = 0b10000 }));
+    try std.testing.expectError(error.InvalidProgress, fromDoc(.{ .space_frames = 0b1000000 }));
 }
 
 test "heroes join once, round-trip by name, and older saves keep the starters" {

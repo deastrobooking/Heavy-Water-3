@@ -44,6 +44,8 @@ const Menu = @import("ui/Menu.zig");
 const Canvas = @import("ui/Canvas.zig");
 const Screens = @import("ui/Screens.zig");
 const Settings = @import("game/Settings.zig");
+const Progress = @import("game/Progress.zig");
+const Fabricator = @import("game/Fabricator.zig");
 const Dialogue = @import("game/Dialogue.zig");
 const Audio = @import("audio/Audio.zig");
 const FrameStats = @import("engine/FrameStats.zig");
@@ -342,10 +344,10 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         if (tweak & 16 != 0) self.sandbox.profile.helmet = .sealed;
         if (tweak & 32 != 0) self.sandbox.profile.helmet = .visor;
         if (options.character_face > 0) self.sandbox.profile.face_style = @enumFromInt(@min(options.character_face - 1, enum_compat.fields(Profile.FaceStyle).len - 1));
-        if (options.character_hair_color > 0) self.sandbox.profile.hair_color = @min(options.character_hair_color - 1, Profile.hair_colors.len - 1);
-        self.sandbox.pose_override = switch (options.character_pose) {
         if (options.character_face_mark > 0) self.sandbox.profile.face_mark = @enumFromInt(@min(options.character_face_mark, enum_compat.fields(Profile.FaceMark).len - 1));
         if (options.character_eye_color > 0) self.sandbox.profile.eye_color = @min(options.character_eye_color, Profile.eye_colors.len);
+        if (options.character_hair_color > 0) self.sandbox.profile.hair_color = @min(options.character_hair_color - 1, Profile.hair_colors.len - 1);
+        self.sandbox.pose_override = switch (options.character_pose) {
             1 => .{ .action = .aim },
             2 => .{ .action = .swing, .arc = .overhead, .t = 0.35 },
             3 => .{ .action = .cast, .t = 0.5 },
@@ -2073,6 +2075,10 @@ fn showcase(self: *App) void {
         // Habitat and Mother art review: frame their full cylindrical silhouettes in space.
         target = .{ 0, 790, 0 };
         eye = .{ 760, 920, 520 };
+    } else if (v == 103) {
+        // Look across the flight lane so the perimeter gates and asteroid cover read together.
+        target = .{ 0, 0, 0 };
+        eye = .{ 220, 170, -290 };
     } else if (v == 67) {
         // Review the new Wilds architecture as a clean lineup over the seeded terrain.
         const Terrain = @import("procedural/Terrain.zig");
@@ -2470,7 +2476,10 @@ fn guiShowcase(self: *App, v: u32) void {
         },
         31 => {
             sb.kits[0].inventory = .{ 14, 3, 9, 2 };
-            sb.shop = .{ .kind = .fabricate, .tab = 0, .row = 0 };
+            sb.progress.fighter = true;
+            sb.progress.space_frames = (1 << Progress.space_frame_count) - 1;
+            sb.progress.space_frame = .ember_wyrm;
+            sb.shop = .{ .kind = .fabricate, .tab = @intFromEnum(Fabricator.Tab.aircraft), .row = 8 };
         },
         101 => {
             // HOW TO PLAY, on the blocks page.
@@ -3446,7 +3455,6 @@ fn smokeCombat(self: *App) void {
     const sb = &self.sandbox;
     const Combat = @import("game/Combat.zig");
     const Specials = @import("game/Specials.zig");
-    const Fabricator = @import("game/Fabricator.zig");
     sb.kits[0].inventory = .{ 30, 4, 30, 0 };
     sb.kits[0].wallet.scrap += 100;
     var list: [Fabricator.recipes.len]u8 = undefined;
@@ -4145,7 +4153,9 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.cel_debug = self.cel_debug;
     renderer.characters.content = self.sandbox.characters;
     renderer.culling = self.culling;
-    if (options.showcase == 83 or options.showcase == 84) {
+    if (options.showcase == 103) {
+        renderer.prop_count = 0;
+    } else if (options.showcase == 83 or options.showcase == 84) {
         const Terrain = @import("procedural/Terrain.zig");
         const origin = Sandbox.spawn;
         const ground = Terrain.surface(self.sandbox.seed, origin[0], origin[2]).height;
@@ -4178,7 +4188,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         origin[0] -= if (options.showcase == 74) 280 else 140;
         break :blk origin;
     } else floraReviewOrigin();
-    renderer.scene.space_review = options.showcase == 66;
+    renderer.scene.space_review = options.showcase == 66 or options.showcase == 103;
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
         const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
             .{ .mesh = self.sandbox.catalog.content.scalari_throne_serpent, .position = .{ -120, 480, 15 }, .scale = 1 },
@@ -4210,6 +4220,54 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             renderer.prop_count += 1;
         }
     }
+    if (options.showcase == 103 and renderer.prop_count + 32 <= renderer.props.len) {
+        const c = self.sandbox.catalog.content;
+        const ring = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, tint: [4]f32 }{
+            .{ .mesh = c.orbital_ring, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.orbital_ring_glow, .tint = .{ 1, 1, 1, 1.5 } },
+        };
+        for (ring) |part| {
+            renderer.props[renderer.prop_count] = .{ .mesh = part.mesh, .transform = .{ .position = .{ 0, 0, 0 } }, .tint = part.tint };
+            renderer.prop_count += 1;
+        }
+        const cover = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
+            .{ .mesh = c.boulders[0], .position = .{ -72, -7, -62 }, .scale = 19 },
+            .{ .mesh = c.boulders[1], .position = .{ 68, 11, -58 }, .scale = 15 },
+            .{ .mesh = c.boulders[2], .position = .{ -65, 14, 60 }, .scale = 17 },
+            .{ .mesh = c.boulders[0], .position = .{ 73, -11, 58 }, .scale = 21 },
+            .{ .mesh = c.boulders[1], .position = .{ 0, 32, -92 }, .scale = 13 },
+        };
+        for (cover) |rock| {
+            renderer.props[renderer.prop_count] = .{ .mesh = rock.mesh, .transform = .{ .position = rock.position, .scale = rock.scale }, .tint = .{ 0.58, 0.67, 0.76, 1 } };
+            renderer.prop_count += 1;
+        }
+        const ships = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32, tint: [4]f32 }{
+            .{ .mesh = c.orbital_planet, .position = .{ 0, -460, 820 }, .scale = 620, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.kestrel, .position = .{ -28, 15, 2 }, .scale = 3.2, .tint = .{ 0.8, 0.95, 1, 1 } },
+            .{ .mesh = c.robot_fighter, .position = .{ 38, -4, 16 }, .scale = 4.2, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.robot_fighter_glow, .position = .{ 38, -4, 16 }, .scale = 4.2, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.robot_lancer, .position = .{ -76, -6, -6 }, .scale = 4.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.robot_lancer_glow, .position = .{ -76, -6, -6 }, .scale = 4.0, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.player_starwing, .position = .{ -42, 9, 46 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.player_starwing_glow, .position = .{ -42, 9, 46 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1.4 } },
+            .{ .mesh = c.player_bulwark, .position = .{ 54, -7, 62 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.player_bulwark_glow, .position = .{ 54, -7, 62 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1.4 } },
+            .{ .mesh = c.carrier, .position = .{ 18, 38, -180 }, .scale = 0.72, .tint = .{ 0.9, 0.95, 1, 1 } },
+            .{ .mesh = c.carrier_glow, .position = .{ 18, 38, -180 }, .scale = 0.72, .tint = .{ 0.45, 0.8, 1, 1.5 } },
+            .{ .mesh = c.brood_crown, .position = .{ 210, 120, 330 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.brood_crown_glow, .position = .{ 210, 120, 330 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.robot_forge_ark, .position = .{ -245, 160, 360 }, .scale = 0.7, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.robot_forge_ark_glow, .position = .{ -245, 160, 360 }, .scale = 0.7, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.orbital_service_hub, .position = .{ 132, 34, -150 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.orbital_service_hub_glow, .position = .{ 132, 34, -150 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.scalari_ember_wyrm, .position = .{ -4, -22, 96 }, .scale = 4.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.scalari_ember_wyrm_glow, .position = .{ -4, -22, 96 }, .scale = 4.0, .tint = .{ 1, 0.55, 0.4, 1.4 } },
+        };
+        for (ships) |ship| {
+            renderer.props[renderer.prop_count] = .{ .mesh = ship.mesh, .transform = .{ .position = ship.position, .scale = ship.scale }, .tint = ship.tint };
+            renderer.prop_count += 1;
+        }
+    }
     if ((options.showcase == 67 or options.showcase == 76) and renderer.prop_count + 3 <= renderer.props.len) {
         const Terrain = @import("procedural/Terrain.zig");
         const c = &self.sandbox.catalog.content;
@@ -4231,8 +4289,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         self.published_revision = self.sandbox.modifications.revision;
     }
     const sandbox = &self.sandbox;
-    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and options.showcase != 97 and options.showcase != 98 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
-    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 94 or options.showcase == 97 or options.showcase == 98 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
+    renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and options.showcase != 97 and options.showcase != 98 and options.showcase != 103 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
+    renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 103 or options.showcase == 94 or options.showcase == 97 or options.showcase == 98 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
@@ -4381,7 +4439,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             }
         }
     }
-    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66 or options.showcase == 94 or options.showcase == 97) renderer.hud_lines = @splat(.{});
+    if (options.showcase == 62 or options.showcase == 63 or options.showcase == 66 or options.showcase == 103 or options.showcase == 94 or options.showcase == 97) renderer.hud_lines = @splat(.{});
     self.publishGui(renderer, minutes);
 }
 

@@ -102,6 +102,23 @@ pub const Content = struct {
     wasp_wing: MeshHandle,
     carrier: MeshHandle,
     carrier_glow: MeshHandle,
+    robot_fighter: MeshHandle,
+    robot_fighter_glow: MeshHandle,
+    robot_lancer: MeshHandle,
+    robot_lancer_glow: MeshHandle,
+    player_starwing: MeshHandle,
+    player_starwing_glow: MeshHandle,
+    player_bulwark: MeshHandle,
+    player_bulwark_glow: MeshHandle,
+    brood_crown: MeshHandle,
+    brood_crown_glow: MeshHandle,
+    robot_forge_ark: MeshHandle,
+    robot_forge_ark_glow: MeshHandle,
+    orbital_service_hub: MeshHandle,
+    orbital_service_hub_glow: MeshHandle,
+    orbital_ring: MeshHandle,
+    orbital_ring_glow: MeshHandle,
+    orbital_planet: MeshHandle,
     /// Scalari dragon-armor ships; each shell and emissive layer is an independent model.
     scalari_ember_wyrm: MeshHandle,
     scalari_ember_wyrm_glow: MeshHandle,
@@ -326,6 +343,25 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
             @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
         }
         self.content.wasp_wing = try self.register(allocator, try Model.fromMesh(allocator, try S.waspWing(allocator), .named("wasp wing", white)));
+        const Orbital = @import("../vehicle/OrbitalMeshes.zig");
+        inline for (.{
+            .{ "robot_fighter", Orbital.robotFighter },
+            .{ "robot_lancer", Orbital.robotLancer },
+            .{ "player_starwing", Orbital.playerStarwing },
+            .{ "player_bulwark", Orbital.playerBulwark },
+            .{ "brood_crown", Orbital.broodCrown },
+            .{ "robot_forge_ark", Orbital.robotForgeArk },
+            .{ "orbital_service_hub", Orbital.orbitalServiceHub },
+            .{ "orbital_ring", Orbital.interceptionRing },
+        }) |entry| {
+            const pair = try entry[1](allocator);
+            var glow_owned = true;
+            errdefer if (glow_owned) pair.glow.deinit(allocator);
+            @field(self.content, entry[0]) = try self.register(allocator, try Model.fromMesh(allocator, pair.shell, .named(entry[0], white)));
+            glow_owned = false;
+            @field(self.content, entry[0] ++ "_glow") = try self.register(allocator, try Model.fromMesh(allocator, pair.glow, .named(entry[0] ++ " glow", white)));
+        }
+        self.content.orbital_planet = try self.register(allocator, try Model.fromMesh(allocator, try Orbital.planetBackdrop(allocator), .named("orbital planet", white)));
         const Scalari = @import("../vehicle/ScalariMeshes.zig");
         inline for (.{
             .{ "scalari_ember_wyrm", Scalari.emberWyrm },
@@ -379,7 +415,15 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         .{ .name = "copper_fan", .handle = self.content.flora[11] },                                    .{ .name = "moon_cascade", .handle = self.content.flora[12] },
         .{ .name = "star_blossom", .handle = self.content.flora[13] },                                  .{ .name = "boulder_round", .handle = self.content.boulders[0] },
         .{ .name = "boulder_tall", .handle = self.content.boulders[1] },                                .{ .name = "boulder_slab", .handle = self.content.boulders[2] },
-        .{ .name = "hanging_vine", .handle = self.content.hanging_vine },
+        .{ .name = "hanging_vine", .handle = self.content.hanging_vine },                               .{ .name = "robot_fighter", .handle = self.content.robot_fighter },
+        .{ .name = "robot_fighter_glow", .handle = self.content.robot_fighter_glow },                   .{ .name = "robot_lancer", .handle = self.content.robot_lancer },
+        .{ .name = "robot_lancer_glow", .handle = self.content.robot_lancer_glow },                     .{ .name = "player_starwing", .handle = self.content.player_starwing },
+        .{ .name = "player_starwing_glow", .handle = self.content.player_starwing_glow },               .{ .name = "player_bulwark", .handle = self.content.player_bulwark },
+        .{ .name = "player_bulwark_glow", .handle = self.content.player_bulwark_glow },                 .{ .name = "brood_crown", .handle = self.content.brood_crown },
+        .{ .name = "brood_crown_glow", .handle = self.content.brood_crown_glow },                       .{ .name = "robot_forge_ark", .handle = self.content.robot_forge_ark },
+        .{ .name = "robot_forge_ark_glow", .handle = self.content.robot_forge_ark_glow },               .{ .name = "orbital_service_hub", .handle = self.content.orbital_service_hub },
+        .{ .name = "orbital_service_hub_glow", .handle = self.content.orbital_service_hub_glow },       .{ .name = "orbital_ring", .handle = self.content.orbital_ring },
+        .{ .name = "orbital_ring_glow", .handle = self.content.orbital_ring_glow },                     .{ .name = "orbital_planet", .handle = self.content.orbital_planet },
         .{ .name = "orb", .handle = self.content.orb },                                                 .{ .name = "spike", .handle = self.content.spike },
         .{ .name = "block", .handle = self.content.block },                                             .{ .name = "wheel", .handle = self.content.wheel },
         .{ .name = "saber_blade", .handle = self.content.saber_blade },                                 .{ .name = "saber_core", .handle = self.content.saber_core },
