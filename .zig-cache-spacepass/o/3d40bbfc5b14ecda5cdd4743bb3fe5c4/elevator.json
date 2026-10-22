@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "name": "elevator",
+  "parts": [
+    { "offset": [0, -0.5, 0], "size": [3.2, 1.2, 3.2], "color": [0.34, 0.35, 0.37, 1] },
+    { "offset": [3.1, 2.0, 0], "size": [3.0, 4.4, 3.0], "color": [0.5, 0.52, 0.55, 1] },
+    { "offset": [-2.0, 0.8, -1.9], "size": [0.3, 1.4, 0.3], "color": [0.3, 0.31, 0.33, 1] }
+  ],
+  "devices": [
+    { "id": "generator", "kind": "generator", "offset": [-2.4, 0.6, 1.4], "size": [0.9, 1.0, 0.9], "color": [0.85, 0.7, 0.2, 1], "watts": 250 },
+    { "id": "call_low", "kind": "button", "offset": [-2.0, 1.6, -1.9], "size": [0.3, 0.2, 0.3], "color": [0.9, 0.25, 0.2, 1] },
+    { "id": "call_high", "kind": "button", "offset": [3.9, 4.35, 1.1], "size": [0.3, 0.3, 0.3], "color": [0.9, 0.25, 0.2, 1] },
+    { "id": "either", "kind": "logic", "nodes": [
+      { "input": 0 }, { "input": 1 }, { "add": { "a": 0, "b": 1 } }, { "constant": 0.5 }, { "greater": { "a": 2, "b": 3 } }
+    ] },
+    { "id": "toggle", "kind": "latch" },
+    { "id": "platform", "kind": "actuator", "offset": [0, 0.2, 0], "size": [2.6, 0.2, 2.6], "color": [0.3, 0.5, 0.68, 1], "travel": [0, 3.9, 0], "speed": 1.2, "watts": 250 }
+  ],
+  "wires": [
+    ["generator.power", "platform.power"],
+    ["call_low.pressed", "either.a"],
+    ["call_high.pressed", "either.b"],
+    ["either.out", "toggle.toggle"],
+    ["toggle.state", "platform.target"]
+  ]
+}

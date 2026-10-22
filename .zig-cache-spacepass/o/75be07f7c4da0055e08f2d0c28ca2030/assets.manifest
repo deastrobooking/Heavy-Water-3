@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "assets": [
+    {
+      "guid": "6457362d7c4bb688b42f12d462f8dbc6",
+      "kind": "model",
+      "name": "crate",
+      "output": "crate.hwmesh",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/crate.gltf"
+    },
+    {
+      "guid": "180daf8ae5492a6f014462e501b0ce1b",
+      "kind": "blueprint",
+      "name": "powered_door",
+      "output": "blueprints/powered_door.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/powered_door.json"
+    },
+    {
+      "guid": "d2bbaadefcc804814a9f754d67f9b6f4",
+      "kind": "blueprint",
+      "name": "elevator",
+      "output": "blueprints/elevator.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/elevator.json"
+    },
+    {
+      "guid": "275f5eabb464b6f556da3dfa4c5be909",
+      "kind": "blueprint",
+      "name": "rover",
+      "output": "blueprints/rover.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/rover.json"
+    },
+    {
+      "guid": "c31a389bc097c745f09e3f6c8a74eb29",
+      "kind": "blueprint",
+      "name": "sap_beacon",
+      "output": "blueprints/sap_beacon.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/sap_beacon.json"
+    },
+    {
+      "guid": "500f35d2afd25f519f85085520ea7d5e",
+      "kind": "blueprint",
+      "name": "proximity_gate",
+      "output": "blueprints/proximity_gate.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/proximity_gate.json"
+    },
+    {
+      "guid": "1829d0ac9d650061d9685467b4b26f11",
+      "kind": "blueprint",
+      "name": "street_lamp",
+      "output": "blueprints/street_lamp.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/street_lamp.json"
+    },
+    {
+      "guid": "ef9a3c83d34f4a241a6ba18fdae4820d",
+      "kind": "blueprint",
+      "name": "signal_relay",
+      "output": "blueprints/signal_relay.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/signal_relay.json"
+    },
+    {
+      "guid": "4b04572020082de1ef2e9795aee720c7",
+      "kind": "blueprint",
+      "name": "rootsong_hearth",
+      "output": "blueprints/rootsong_hearth.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/rootsong_hearth.json"
+    },
+    {
+      "guid": "5380154b872a88643f52921103d4241f",
+      "kind": "blueprint",
+      "name": "rootsong_call",
+      "output": "blueprints/rootsong_call.json",
+      "source": "/Users/home/Desktop/Games/Heavy-Water-3/assets/source/blueprints/rootsong_call.json"
+    }
+  ]
+}

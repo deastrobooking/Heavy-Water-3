@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "name": "proximity_gate",
+  "parts": [
+    { "offset": [0, -0.5, 0], "size": [9.4, 1.2, 1.4], "color": [0.30, 0.36, 0.33, 1] },
+    { "offset": [-3.0, 1.6, 0], "size": [3.0, 3.0, 0.4], "color": [0.46, 0.56, 0.48, 1] },
+    { "offset": [3.0, 1.6, 0], "size": [3.0, 3.0, 0.4], "color": [0.46, 0.56, 0.48, 1] },
+    { "offset": [0, 2.85, 0], "size": [3.0, 0.5, 0.4], "color": [0.46, 0.56, 0.48, 1] }
+  ],
+  "devices": [
+    { "id": "generator", "kind": "generator", "offset": [-5.6, 0.6, -1.0], "size": [0.9, 1.0, 0.9], "color": [0.85, 0.7, 0.2, 1], "watts": 200 },
+    { "id": "front", "kind": "proximity", "offset": [0, 1.0, -1.7], "size": [3.0, 2.2, 2.4] },
+    { "id": "back", "kind": "proximity", "offset": [0, 1.0, 1.7], "size": [3.0, 2.2, 2.4] },
+    { "id": "either", "kind": "logic", "nodes": [
+      { "input": 0 }, { "input": 1 }, { "add": { "a": 0, "b": 1 } }, { "constant": 0.5 }, { "greater": { "a": 2, "b": 3 } }
+    ] },
+    { "id": "gate", "kind": "actuator", "offset": [0, 1.35, 0], "size": [3.0, 2.5, 0.2], "color": [0.35, 0.72, 0.52, 1], "travel": [2.9, 0, 0], "speed": 2.5, "watts": 150 }
+  ],
+  "wires": [
+    ["generator.power", "gate.power"],
+    ["front.present", "either.a"],
+    ["back.present", "either.b"],
+    ["either.out", "gate.target"]
+  ]
+}
