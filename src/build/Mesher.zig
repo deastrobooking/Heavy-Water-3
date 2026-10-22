@@ -127,6 +127,26 @@ fn collisionPolygons(shape: Blocks.Shape) []const Polygon {
 
 pub const Purpose = enum { draw, collide };
 
+/// Cells left out of the static mesh: movers (drawn and collided as moving bodies), gates while
+/// open, and the given cells (crumbled blocks). Hidden cells also count as empty to neighbours.
+pub const Hide = struct {
+    cells: []const [3]i32 = &.{},
+    gates_open: bool = false,
+
+    pub fn hides(self: Hide, cell: Blocks.Cell, x: i32, y: i32, z: i32) bool {
+        if (cell.isEmpty()) return false;
+        if (cell.material == Materials.ofRole(.platformer, .color)) return true;
+        if (self.gates_open and cell.material == Materials.ofRole(.platformer, .metal)) return true;
+        for (self.cells) |c| if (c[0] == x and c[1] == y and c[2] == z) return true;
+        return false;
+    }
+
+    fn get(self: Hide, blocks: *const Blocks, x: i32, y: i32, z: i32) Blocks.Cell {
+        const cell = blocks.get(x, y, z);
+        return if (self.hides(cell, x, y, z)) .empty else cell;
+    }
+};
+
 /// Whether the cell's face in world direction `dir` is solid over the whole face.
 pub fn fullFace(cell: Blocks.Cell, dir: Dir) bool {
     if (cell.isEmpty()) return false;
@@ -167,7 +187,7 @@ pub const Output = struct {
 };
 
 /// Mesh every block in the chunk column `key` into `out` (cleared first).
-pub fn meshChunk(allocator: std.mem.Allocator, blocks: *const Blocks, key: ChunkKey, purpose: Purpose, out: *Output) !void {
+pub fn meshChunk(allocator: std.mem.Allocator, blocks: *const Blocks, key: ChunkKey, purpose: Purpose, hide: Hide, out: *Output) !void {
     out.vertices.clearRetainingCapacity();
     out.indices.clearRetainingCapacity();
     const o = origin(key);
@@ -182,19 +202,20 @@ pub fn meshChunk(allocator: std.mem.Allocator, blocks: *const Blocks, key: Chunk
             const x = section.key.x * Blocks.side + lx;
             const y = section.key.y * Blocks.side + ly;
             const z = section.key.z * Blocks.side + lz;
-            try emitCell(allocator, blocks, cell, x, y, z, o, purpose, out);
+            if (hide.hides(cell, x, y, z)) continue;
+            try emitCell(allocator, blocks, cell, x, y, z, o, purpose, hide, out);
         }
     }
 }
 
-fn emitCell(allocator: std.mem.Allocator, blocks: *const Blocks, cell: Blocks.Cell, x: i32, y: i32, z: i32, o: V, purpose: Purpose, out: *Output) !void {
+fn emitCell(allocator: std.mem.Allocator, blocks: *const Blocks, cell: Blocks.Cell, x: i32, y: i32, z: i32, o: V, purpose: Purpose, hide: Hide, out: *Output) !void {
     const color = Materials.shade(cell.material, x, y, z);
     const base: V = .{ @as(f32, @floatFromInt(x)) - o[0], @floatFromInt(y), @as(f32, @floatFromInt(z)) - o[2] };
     for (if (purpose == .collide) collisionPolygons(cell.shape) else polygons(cell.shape)) |p| {
         if (p.plane) |plane| {
             const dir = plane.turned(cell.rot);
             const d = dir.vector();
-            if (fullFace(blocks.get(x + d[0], y + d[1], z + d[2]), dir.opposite())) continue;
+            if (fullFace(hide.get(blocks, x + d[0], y + d[1], z + d[2]), dir.opposite())) continue;
         }
         const normal = rotateVector(p.normal, cell.rot);
         const first: u32 = @intCast(out.vertices.items.len);
@@ -231,10 +252,10 @@ test "a lone cube has six faces and two touching cubes hide the shared pair" {
     var out: Output = .{};
     defer out.deinit(a);
     try b.set(0, 0, 0, .{ .shape = .cube });
-    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, &out);
+    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, .{}, &out);
     try std.testing.expectEqual(@as(usize, 12), out.indices.items.len / 3);
     try b.set(1, 0, 0, .{ .shape = .cube });
-    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, &out);
+    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, .{}, &out);
     try std.testing.expectEqual(@as(usize, 20), out.indices.items.len / 3);
 }
 
@@ -246,7 +267,7 @@ test "a slab does not hide the cube face above it, and turned ramps show their b
     defer out.deinit(a);
     try b.set(0, 1, 0, .{ .shape = .cube });
     try b.set(0, 0, 0, .{ .shape = .slab });
-    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, &out);
+    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, .{}, &out);
     // Cube keeps all 6 faces (the slab's top is not full); slab keeps its 6 too.
     try std.testing.expectEqual(@as(usize, 24), out.indices.items.len / 3);
     // A ramp turned once faces its full back toward +x.
@@ -263,7 +284,7 @@ test "every emitted triangle faces outward from its cell" {
     defer out.deinit(a);
     const shapes = Blocks.placeable_shapes;
     for (shapes, 0..) |shape, i| for (0..4) |r| try b.set(@intCast(i * 3), 0, @intCast(r * 3), .{ .shape = shape, .rot = @intCast(r) });
-    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, &out);
+    try meshChunk(a, b, .{ .x = 0, .z = 0 }, .draw, .{}, &out);
     var i: usize = 0;
     while (i < out.indices.items.len) : (i += 3) {
         const p0 = out.vertices.items[out.indices.items[i]];

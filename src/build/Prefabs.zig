@@ -66,6 +66,12 @@ const Builder = struct {
         b.len += 1;
     }
 
+    /// A plain stone block, for pieces whose own style has no plain material (the platformer).
+    fn stone(b: *Builder, x: u8, y: u8, z: u8) void {
+        b.put(x, y, z, .cube, 0, .main);
+        b.cells[b.len - 1].cell.material = Materials.ofRole(.castle, .main);
+    }
+
     fn cube(b: *Builder, x: u8, y: u8, z: u8, role: Materials.Role) void {
         b.put(x, y, z, .cube, 0, role);
     }
@@ -209,6 +215,40 @@ fn planter(b: *Builder) void {
     b.put(3, 1, 1, .slab, 0, .accent);
 }
 
+// Platformer roles: main spring, dark boost, accent crumble, wood hazard, roof checkpoint,
+// nature plate, metal gate, color mover.
+fn jumpCourse(b: *Builder) void {
+    for (0..3) |x| for (0..3) |z| b.stone(@intCast(x), 0, @intCast(z));
+    b.cube(1, 0, 1, .roof); // checkpoint at the start
+    b.stone(1, 0, 4);
+    b.cube(1, 1, 7, .accent); // crumbles under you
+    b.cube(1, 0, 10, .main); // spring up to the ledge
+    for (0..3) |x| for (12..15) |z| b.stone(@intCast(x), 6, @intCast(z));
+    b.cube(0, 7, 13, .wood); // hazard on the ledge
+    b.cube(2, 6, 14, .roof); // checkpoint at the goal
+}
+
+fn gateRoom(b: *Builder) void {
+    for (0..5) |x| for (0..7) |z| b.stone(@intCast(x), 0, @intCast(z));
+    b.cube(2, 0, 1, .nature); // pressure plate
+    for (0..5) |x| for (1..4) |y| b.cube(@intCast(x), @intCast(y), 4, .metal); // gate wall
+    b.cube(2, 0, 6, .roof);
+}
+
+fn moverBridge(b: *Builder) void {
+    for (0..3) |x| for (0..3) |z| {
+        b.stone(@intCast(x), 0, @intCast(z));
+        b.stone(@intCast(x), 0, @intCast(z + 8));
+    };
+    b.put(1, 0, 3, .cube, 0, .color); // a mover sliding toward the far pad
+}
+
+const platformer = [_]Prefab{
+    make("JUMP COURSE", .platformer, .{ 3, 8, 15 }, jumpCourse),
+    make("GATE ROOM", .platformer, .{ 5, 4, 7 }, gateRoom),
+    make("MOVER BRIDGE", .platformer, .{ 3, 1, 11 }, moverBridge),
+};
+
 const castle = [_]Prefab{
     make("TOWER", .castle, .{ 5, 7, 5 }, tower),
     make("WALL RUN", .castle, .{ 7, 5, 1 }, wallRun),
@@ -234,6 +274,7 @@ pub fn starters(style: Materials.Style) []const Prefab {
         .dungeon => &dungeon,
         .eco_city => &eco_city,
         .farm => &farm,
+        .platformer => &platformer,
     };
 }
 
@@ -252,7 +293,8 @@ test "every starter fits its declared size, uses its own style and has no repeat
             try std.testing.expect(p.cells.len > 0 and p.cells.len <= max_cells);
             for (p.cells, 0..) |c, i| {
                 try std.testing.expect(c.x < p.size[0] and c.y < p.size[1] and c.z < p.size[2]);
-                try std.testing.expectEqual(style, Materials.roleOf(c.cell.material).style);
+                const own = Materials.roleOf(c.cell.material).style;
+                try std.testing.expect(own == style or (style == .platformer and c.cell.material == Materials.ofRole(.castle, .main)));
                 for (p.cells[0..i]) |o| try std.testing.expect(!(o.x == c.x and o.y == c.y and o.z == c.z));
             }
         }

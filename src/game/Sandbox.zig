@@ -20,6 +20,7 @@ const Modifications = @import("../world/Modifications.zig");
 const TerrainEdit = @import("../world/TerrainEdit.zig");
 const BlockWorld = @import("../build/BlockWorld.zig");
 const BlockTool = @import("BlockTool.zig");
+const Platformer = @import("Platformer.zig");
 const Blocks = @import("../build/Blocks.zig");
 const Input = @import("../engine/Input.zig");
 const Blueprint = @import("../machine/Blueprint.zig");
@@ -425,6 +426,8 @@ modifications: Modifications = .{},
 terrain_edit: *TerrainEdit = undefined,
 /// Player-built blocks with their per-chunk meshes and colliders.
 block_world: BlockWorld = undefined,
+/// Platformer block state: checkpoints, crumbling blocks, plates and movers.
+platform: Platformer.State = .{},
 /// Each player's copied block piece (session only).
 block_clips: [max_players]@import("../build/Prefabs.zig").Clip = @splat(.{}),
 nearby_center: ?Key = null,
@@ -1279,6 +1282,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (timing) |profile| profile.metrics.record(.city_life, stage_timer.lap() * 1000);
     if (timing != null) stage_timer.reset();
     Frontier.step(self, camera, input, actions, frozen, dt, timing);
+    Platformer.step(self, camera, dt) catch |err| self.say("blocks failed: {s}", .{@errorName(err)});
     if (timing) |profile| profile.metrics.record(.frontier, stage_timer.lap() * 1000);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
@@ -2456,6 +2460,7 @@ fn stepGuestBuild(self: *Sandbox, g: *Guest, slot: usize) !void {
 /// Rebuild the meshes and colliders of the chunks whose blocks changed.
 pub fn syncBlocks(self: *Sandbox) !void {
     try self.block_world.sync(self.allocator, &self.physics);
+    try Platformer.refreshMovers(self);
 }
 
 fn blockSections(self: *const Sandbox, arena: std.mem.Allocator) ![]const Save.BlockSection {
@@ -2680,6 +2685,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.terrain_edit.clear();
     for (terrain, 0..) |tile, i| self.terrain_edit.loadTile(.{ .x = doc.terrain[i].x, .z = doc.terrain[i].z }, &tile) catch unreachable; // checked above
     self.block_world.blocks.clear();
+    Platformer.reset(self);
     for (doc.blocks, block_cells, block_filled) |section, *cells, filled| self.block_world.blocks.loadSection(.{ .x = section.x, .y = section.y, .z = section.z }, cells, filled) catch unreachable; // checked above
     try self.syncBlocks();
     self.profile = profile;
@@ -3164,6 +3170,90 @@ test "a starter prefab is laid from the builder's kit, restyled role for role, c
     try BlockTool.stamp(&sandbox, 1, sandbox.block_clips[1].prefab(), 0, .{ at[0] + 12, at[1], at[2] });
     try std.testing.expect(!std.meta.eql(p2_before, sandbox.kits[1].blocks));
     try std.testing.expectEqual(p1_after, sandbox.kits[0].blocks);
+}
+
+test "platformer blocks launch, crumble and return, hurt, hold checkpoints, open gates and move" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Materials = @import("../build/Materials.zig");
+    const spot = [2]f32{ 210.5, -470.5 };
+    const y: i32 = @as(i32, @intFromFloat(@ceil(Terrain.surface(sandbox.seed, spot[0], spot[1]).height))) + 2;
+    const x: i32 = @intFromFloat(spot[0]);
+    const z: i32 = @intFromFloat(spot[1]);
+    const mat = struct {
+        fn of(role: Materials.Role) Blocks.Cell {
+            return .{ .shape = .cube, .material = Materials.ofRole(.platformer, role) };
+        }
+    }.of;
+    const blocks = sandbox.block_world.blocks;
+    try blocks.set(x, y, z, mat(.main)); // spring
+    try blocks.set(x + 4, y, z, mat(.accent)); // crumble
+    try blocks.set(x + 8, y, z, mat(.wood)); // hazard
+    try blocks.set(x + 12, y, z, mat(.roof)); // checkpoint
+    try blocks.set(x + 16, y, z, mat(.nature)); // plate
+    try blocks.set(x + 20, y, z, mat(.metal)); // gate
+    try blocks.set(x + 24, y, z, mat(.color)); // mover, sliding toward +z
+    try sandbox.syncBlocks();
+    try std.testing.expectEqual(@as(usize, 1), sandbox.platform.mover_len);
+    const top: f32 = @floatFromInt(y + 1);
+    const at = struct {
+        fn feet(cx: i32, cy: f32, cz: i32) [3]f32 {
+            return .{ @as(f32, @floatFromInt(cx)) + 0.5, cy, @as(f32, @floatFromInt(cz)) + 0.5 };
+        }
+    }.feet;
+
+    // Spring: standing on it launches straight up.
+    sandbox.player = .{ .feet = at(x, top, z), .grounded = true };
+    try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expectEqual(Platformer.spring_speed, sandbox.player.velocity[1]);
+
+    // Crumble: gone a moment after a landing (no collider), back a few seconds later.
+    sandbox.player = .{ .feet = at(x + 4, top, z), .grounded = true };
+    for (0..45) |_| try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    const probe = .{ @as(f32, @floatFromInt(x + 4)) + 0.5, top + 3, @as(f32, @floatFromInt(z)) + 0.5 };
+    try std.testing.expect(sandbox.physics.castRay(probe, .{ 0, -1, 0 }, 3.5, .none) == null);
+    sandbox.player.feet = at(x + 30, top + 40, z);
+    for (0..260) |_| try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expect(sandbox.physics.castRay(probe, .{ 0, -1, 0 }, 3.5, .none) != null);
+
+    // Checkpoint, then a hazard: hurt, and a knockout puts you back at the checkpoint, healed.
+    sandbox.player = .{ .feet = at(x + 12, top, z), .grounded = true };
+    try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expect(sandbox.platform.checkpoints[0] != null);
+    sandbox.player = .{ .feet = at(x + 8, top, z), .grounded = true };
+    const health = sandbox.combat.vitals[0].health;
+    try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expect(sandbox.combat.vitals[0].health < health);
+    sandbox.combat.vitals[0].health = 1;
+    sandbox.platform.hazard_cool[0] = 0;
+    try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expectEqual(sandbox.platform.checkpoints[0].?, sandbox.player.feet);
+    try std.testing.expectEqual(sandbox.combat.vitals[0].max, sandbox.combat.vitals[0].health);
+
+    // Plate: the gate's collider is gone while someone stands on the plate, back after.
+    const gate_probe = .{ @as(f32, @floatFromInt(x + 20)) + 0.5, top + 3, @as(f32, @floatFromInt(z)) + 0.5 };
+    try std.testing.expect(sandbox.physics.castRay(gate_probe, .{ 0, -1, 0 }, 3.5, .none) != null);
+    sandbox.player = .{ .feet = at(x + 16, top, z), .grounded = true };
+    try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expect(sandbox.block_world.gates_open);
+    try std.testing.expect(sandbox.physics.castRay(gate_probe, .{ 0, -1, 0 }, 3.5, .none) == null);
+    sandbox.player.feet = at(x + 30, top + 40, z);
+    for (0..90) |_| try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+    try std.testing.expect(!sandbox.block_world.gates_open);
+    try std.testing.expect(sandbox.physics.castRay(gate_probe, .{ 0, -1, 0 }, 3.5, .none) != null);
+
+    // Mover: its body slides along +z under physics.
+    const start = sandbox.physics.position(sandbox.platform.movers[0].body).?;
+    for (0..60) |_| {
+        try Platformer.step(&sandbox, &camera, 1.0 / 60.0);
+        sandbox.physics.step(1.0 / 60.0);
+    }
+    const moved = sandbox.physics.position(sandbox.platform.movers[0].body).?;
+    try std.testing.expect(moved[2] - start[2] > 1);
 }
 
 /// Points the camera at a world position.

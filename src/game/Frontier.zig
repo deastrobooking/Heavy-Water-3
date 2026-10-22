@@ -1267,6 +1267,7 @@ fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
             return;
         }
     }
+    if (@import("Platformer.zig").recoverAtCheckpoint(sb, player, camera)) return;
     if (player == 0) {
         if (sb.garage.piloting != null) _ = sb.garage.leave(&sb.physics);
         sb.resetPlayer(camera);

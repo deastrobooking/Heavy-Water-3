@@ -108,6 +108,11 @@ pub fn set(self: *Blocks, x: i32, y: i32, z: i32, cell: Cell) Error!void {
     }
 }
 
+/// Mark the chunk of a cell for rebuilding without changing it (a crumble or gate shown or hidden).
+pub fn dirtyCell(self: *Blocks, x: i32, z: i32) void {
+    self.markDirty(x, z);
+}
+
 fn markDirty(self: *Blocks, x: i32, z: i32) void {
     // A cell on a chunk edge also changes which faces its neighbour across the edge shows.
     for ([_][2]i32{ .{ 0, 0 }, .{ -1, 0 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 1 } }) |o| {

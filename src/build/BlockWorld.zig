@@ -24,6 +24,37 @@ blocks: *Blocks,
 slots: [max_chunks]Slot = @splat(.{}),
 /// Physics user value for block colliders (occludes picking, never a removable target).
 user: u32,
+/// Cells currently left out of meshes and colliders (crumbled blocks), and whether gates are open.
+hidden: [max_hidden][3]i32 = undefined,
+hidden_len: usize = 0,
+gates_open: bool = false,
+
+pub const max_hidden = 64;
+
+pub fn hide(self: *const BlockWorld) Mesher.Hide {
+    return .{ .cells = self.hidden[0..self.hidden_len], .gates_open = self.gates_open };
+}
+
+/// Rebuild every chunk on the next `sync` (gates opened or closed).
+pub fn rebuildAll(self: *BlockWorld) void {
+    self.blocks.dirty_overflow = true;
+}
+
+/// Leave a cell out (a crumbled block) or put it back; its chunk is rebuilt on the next `sync`.
+pub fn setHidden(self: *BlockWorld, c: [3]i32, hidden: bool) void {
+    for (self.hidden[0..self.hidden_len], 0..) |h, i| if (h[0] == c[0] and h[1] == c[1] and h[2] == c[2]) {
+        if (!hidden) {
+            self.hidden[i] = self.hidden[self.hidden_len - 1];
+            self.hidden_len -= 1;
+            self.blocks.dirtyCell(c[0], c[2]);
+        }
+        return;
+    };
+    if (!hidden or self.hidden_len == max_hidden) return;
+    self.hidden[self.hidden_len] = c;
+    self.hidden_len += 1;
+    self.blocks.dirtyCell(c[0], c[2]);
+}
 
 pub fn init(allocator: std.mem.Allocator, user: u32) !BlockWorld {
     return .{ .blocks = try Blocks.create(allocator), .user = user };
@@ -82,11 +113,11 @@ fn rebuild(self: *BlockWorld, allocator: std.mem.Allocator, physics: *Physics, k
         if (!slot.active) break n;
     } else return error.BlockChunksFull;
     const slot = &self.slots[i];
-    try Mesher.meshChunk(allocator, self.blocks, key, .draw, &slot.mesh);
+    try Mesher.meshChunk(allocator, self.blocks, key, .draw, self.hide(), &slot.mesh);
     // The collider uses world positions and the walkable stair ramp.
     var shape: Mesher.Output = .{};
     defer shape.deinit(allocator);
-    try Mesher.meshChunk(allocator, self.blocks, key, .collide, &shape);
+    try Mesher.meshChunk(allocator, self.blocks, key, .collide, self.hide(), &shape);
     const o = Mesher.origin(key);
     const positions = try allocator.alloc(Physics.Vec3, shape.vertices.items.len);
     defer allocator.free(positions);

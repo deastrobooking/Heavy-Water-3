@@ -12,8 +12,10 @@ pub const Material = struct {
     variation: f32 = 0.08,
 };
 
-pub const Style = enum { castle, dungeon, eco_city, farm };
-pub const style_count = 4;
+/// `platformer` is the mechanisms: its eight "materials" are springs, boost strips, crumbling
+/// blocks, hazards, checkpoints, pressure plates, gates and movers (see `game/Platformer.zig`).
+pub const Style = enum { castle, dungeon, eco_city, farm, platformer };
+pub const style_count = 5;
 /// What each of a style's eight materials is for; restyling keeps the role.
 pub const Role = enum { main, dark, accent, wood, roof, nature, metal, color };
 
@@ -51,6 +53,14 @@ pub const all = [_]Material{
     .{ .id = "farm.soil", .name = "TILLED SOIL", .color = .{ 0.36, 0.25, 0.17 }, .variation = 0.1 },
     .{ .id = "farm.iron", .name = "TOOL IRON", .color = .{ 0.30, 0.31, 0.33 }, .variation = 0.02 },
     .{ .id = "farm.barn_red", .name = "BARN RED", .color = .{ 0.62, 0.18, 0.14 }, .variation = 0.04 },
+    .{ .id = "platform.spring", .name = "SPRING", .color = .{ 0.36, 0.92, 0.42 }, .variation = 0 },
+    .{ .id = "platform.boost", .name = "BOOST STRIP", .color = .{ 0.20, 0.86, 0.96 }, .variation = 0 },
+    .{ .id = "platform.crumble", .name = "CRUMBLE", .color = .{ 0.74, 0.60, 0.44 }, .variation = 0.14 },
+    .{ .id = "platform.hazard", .name = "HAZARD", .color = .{ 0.96, 0.30, 0.12 }, .variation = 0.04 },
+    .{ .id = "platform.checkpoint", .name = "CHECKPOINT", .color = .{ 1.00, 0.82, 0.24 }, .variation = 0 },
+    .{ .id = "platform.plate", .name = "PRESSURE PLATE", .color = .{ 0.50, 0.58, 0.78 }, .variation = 0 },
+    .{ .id = "platform.gate", .name = "GATE", .color = .{ 0.30, 0.30, 0.44 }, .variation = 0.02 },
+    .{ .id = "platform.mover", .name = "MOVER", .color = .{ 0.68, 0.40, 0.96 }, .variation = 0 },
 };
 pub const count = all.len;
 
@@ -61,6 +71,7 @@ pub fn ofStyle(style: Style) []const u6 {
         .dungeon => &[_]u6{ 8, 9, 10, 11, 12, 13, 14, 15 },
         .eco_city => &[_]u6{ 16, 17, 18, 19, 20, 21, 22, 23 },
         .farm => &[_]u6{ 24, 25, 26, 27, 28, 29, 30, 31 },
+        .platformer => &[_]u6{ 32, 33, 34, 35, 36, 37, 38, 39 },
     };
 }
 
@@ -70,6 +81,7 @@ pub fn styleName(style: Style) []const u8 {
         .dungeon => "DUNGEON",
         .eco_city => "ECO CITY",
         .farm => "FARM",
+        .platformer => "PLATFORMER",
     };
 }
 
@@ -78,8 +90,10 @@ pub fn roleOf(material: u6) struct { style: Style, role: usize } {
     return .{ .style = @enumFromInt(material / 8), .role = material % 8 };
 }
 
-/// The same role in another style: how restyling maps a material.
+/// The same role in another style: how restyling maps a material. Mechanisms are not a look, so
+/// they never restyle and nothing restyles into them.
 pub fn restyle(material: u6, to: Style) u6 {
+    if (to == .platformer or roleOf(material).style == .platformer) return material;
     return ofStyle(to)[roleOf(material).role];
 }
 

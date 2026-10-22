@@ -678,9 +678,10 @@ fn fromTo(a: Vec3, b: Vec3) R.Quat {
 /// Placement preview (build) or every wire as a thin colored bar (wire).
 pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     const st = sb.tools;
-    if (st.tool == .blocks) return BlockTool.publish(sb, out, start);
+    const moving = @import("Platformer.zig").publish(sb, out, start);
+    if (st.tool == .blocks) return BlockTool.publish(sb, out, moving);
     // Guests may be building while P1 holds another tool.
-    var n = BlockTool.publishGuests(sb, out, start);
+    var n = BlockTool.publishGuests(sb, out, moving);
     const block = sb.catalog.content.block;
     if (st.tool == .bridge) return @import("BridgeTool.zig").publish(sb, out, n);
     if (st.tool == .terrain) return TerrainTool.publish(sb, out, n);
