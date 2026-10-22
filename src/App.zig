@@ -4442,11 +4442,15 @@ fn discardEditedMesh(self: *App) void {
 fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
     var scratch: std.heap.ArenaAllocator = .init(self.allocator);
     defer scratch.deinit();
-    const trace = try @import("asset/Gltf.zig").inspect(scratch.allocator(), source);
-    if (trace.skin_count == 0) return error.CharacterNeedsSkin;
-    const mapped_count = @import("asset/Gltf.zig").mappedGameplayJointCount(trace);
+    const Gltf = @import("asset/Gltf.zig");
+    const trace = try Gltf.inspect(scratch.allocator(), source);
+    // A rig whose bones match the game's humanoid by name is kept and retargeted. Automatic
+    // rigging of bone-less meshes (`character/AutoRig.zig`) is not wired in yet: its first pass
+    // crumpled a T-posed test model, so those files get a clear refusal instead.
+    if (trace.skin_count == 0) return error.NoSkeleton;
+    const mapped_count = Gltf.mappedGameplayJointCount(trace);
     if (mapped_count == 0) return error.NoCompatibleGameplayJoints;
-    var model = try @import("asset/Gltf.zig").compileRigged(self.allocator, source, .{});
+    var model = try Gltf.compileRigged(self.allocator, source, .{});
     errdefer model.deinit(self.allocator);
     const source_hash = @import("asset/Meta.zig").hashSource(source);
     const generated = try MeshModifiers.generate(self.mesh_library_arena.allocator(), model, &source_hash);
@@ -4474,7 +4478,7 @@ fn importCharacterGlb(self: *App, source: []const u8, persist: bool) !void {
 }
 
 fn loadSavedCharacterImport(self: *App) void {
-    const source = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.glb", self.allocator, .limited(64 << 20)) catch return;
+    const source = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.glb", self.allocator, .limited(max_glb_bytes)) catch return;
     defer self.allocator.free(source);
     const modifiers = std.Io.Dir.cwd().readFileAlloc(self.io, "saves/imported-character.modifiers.json", self.mesh_library_arena.allocator(), .limited(1 << 20)) catch {
         self.importCharacterGlb(source, false) catch |err| std.log.warn("saved character import rejected: {s}", .{@errorName(err)});
@@ -4492,16 +4496,37 @@ fn loadSavedCharacterImport(self: *App) void {
     }
 }
 
+/// Largest GLB the importer reads (store models with 4K textures run past 64 MB).
+const max_glb_bytes = 192 << 20;
+
 fn chooseAndImportCharacter(self: *App) void {
     if (@import("builtin").os.tag != .macos) return self.report("GLB PICKER IS AVAILABLE ON MACOS", .{});
-    const bytes = self.allocator.alloc(u8, 64 << 20) catch return self.report("NOT ENOUGH MEMORY TO OPEN GLB", .{});
+    const bytes = self.allocator.alloc(u8, max_glb_bytes) catch return self.report("NOT ENOUGH MEMORY TO OPEN GLB", .{});
     defer self.allocator.free(bytes);
     var length: usize = 0;
     const result = hw_choose_open_glb(bytes.ptr, bytes.len, &length);
     if (result == 0) return;
-    if (result < 0) return self.report("GLB IS LARGER THAN 64 MB OR COULD NOT BE READ", .{});
-    self.importCharacterGlb(bytes[0..length], true) catch |err| return self.report("GLB IMPORT FAILED: {s}", .{@errorName(err)});
+    if (result < 0) return self.report("GLB IS LARGER THAN {d} MB OR COULD NOT BE READ", .{max_glb_bytes >> 20});
+    self.importCharacterGlb(bytes[0..length], true) catch |err| return self.report("GLB IMPORT FAILED: {s}", .{importProblem(err)});
     self.report("CHARACTER IMPORTED — {s}", .{self.imported_rig_status[0..self.imported_rig_status_len]});
+}
+
+/// What went wrong with an import, in words a player can act on.
+fn importProblem(err: anyerror) []const u8 {
+    return switch (err) {
+        error.TooLarge => "MORE THAN A MILLION VERTICES; DECIMATE IT FIRST",
+        error.NoTriangles => "NO TRIANGLES FOUND",
+        error.NoSkeleton, error.CharacterNeedsSkin => "NO SKELETON: RIG IT AS A HUMANOID (FOR EXAMPLE IN MIXAMO) AND EXPORT A GLB",
+        error.NoCompatibleGameplayJoints => "ITS BONES HAVE NO HUMANOID NAMES THE GAME KNOWS (HIPS, SPINE, ARM, LEG...)",
+        error.UnsupportedGltfVersion => "ONLY GLTF 2.0 FILES ARE SUPPORTED",
+        error.UnsupportedExtension => "IT NEEDS A GLTF EXTENSION THE GAME DOES NOT READ (FOR EXAMPLE DRACO COMPRESSION)",
+        error.MorphTargetsUnsupported => "MORPH TARGETS (BLEND SHAPES) ARE NOT SUPPORTED",
+        error.NonTrianglePrimitive => "ONLY TRIANGLE MESHES ARE SUPPORTED",
+        error.MultipleSkinsUnsupported => "MORE THAN ONE SKIN; JOIN THE MESHES INTO ONE SKIN",
+        error.TooManyJoints => "MORE THAN 128 BONES",
+        error.OutOfMemory => "OUT OF MEMORY",
+        else => @errorName(err),
+    };
 }
 
 fn installImportedCharacter(self: *App) void {

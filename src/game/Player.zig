@@ -21,7 +21,18 @@ pub const Motion = enum { idle, run, sprint, jump, long_jump, backflip, fall, ro
 pub const eye_height: f32 = 1.62;
 pub const walk_speed: f32 = 5.8;
 pub const sprint_speed: f32 = 10.8;
-pub const jump_speed: f32 = 9.4;
+/// Launch speed of a standing jump (about a 4 m peak under the -15 m/s² rise gravity).
+pub const jump_speed: f32 = 11;
+/// Extra launch, as a fraction, a jump gains at full sprint; it scales with ground speed, so a
+/// running jump climbs higher than a standing one and a sprinting jump higher still.
+pub const running_jump_bonus: f32 = 0.18;
+/// Launch multiplier of the sprint long jump (on top of the running bonus).
+pub const long_jump_lift: f32 = 1.0;
+
+/// Launch speed of a ground jump at `ground_speed` (m/s across the ground).
+pub fn runningJumpSpeed(ground_speed: f32) f32 {
+    return jump_speed * (1 + running_jump_bonus * std.math.clamp(ground_speed / sprint_speed, 0, 1));
+}
 pub const Water = struct { min: V, max: V };
 /// Suit tuning from purchased upgrades (see `Progress`); the defaults are the base suit.
 pub const Suit = struct {
@@ -204,7 +215,7 @@ fn jump(self: *Player, speed: f32) void {
     self.motion = .jump;
 }
 fn wallJump(self: *Player) void {
-    self.jump(9.2);
+    self.jump(jump_speed * 0.98);
     const push = R.scale(self.wall_normal, 8);
     self.velocity[0] = push[0];
     self.velocity[2] = push[2];
@@ -471,7 +482,9 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
         } else if (self.jump_buffer > 0 and self.coyote > 0) {
             const backflip = self.grounded and input.forward < -0.35 and !board;
             const long_jump = self.grounded and input.forward > 0.35 and strength > 0.35 and (input.fast or input.dodge or input.dodge_held) and !board;
-            self.jump(jump_speed * (if (backflip) @as(f32, 1.1) else if (long_jump) @as(f32, 1.12) else if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
+            // Running jumps carry more lift the faster you were going (see `runningJumpSpeed`).
+            const lift = if (self.grounded and !backflip) runningJumpSpeed(@sqrt(h[0] * h[0] + h[2] * h[2])) else jump_speed;
+            self.jump(lift * (if (backflip) @as(f32, 1.1) else if (long_jump) long_jump_lift else if (skating) @as(f32, 1.52) else if (board) @as(f32, 1.32) else 1));
             jumped_this_step = true;
             if (backflip) {
                 const flip_speed: f32 = if (input.dodge or input.dodge_held) 9 else 5;
@@ -828,6 +841,37 @@ test "walking into a wall is blocked; jumping into it climbs and mantles onto th
     }
     try std.testing.expect(climbed);
     try std.testing.expect(p.grounded and p.feet[1] > 2.95 and p.feet[2] > 1.75);
+}
+
+test "a running jump climbs higher than a standing one, and every jump beats the old 2.9 m peak" {
+    var standing_physics: Physics = .init(.{ .sample = flatGroundForJumps });
+    defer standing_physics.deinit();
+    var camera: Camera = .{};
+    const peak = struct {
+        fn of(physics: *Physics, cam: *Camera, run_up: usize) f32 {
+            var p: Player = .{ .feet = .{ 0, 0, 0 } };
+            for (0..run_up) |_| p.step(physics, cam, .{ .forward = 1, .fast = true }, 1.0 / 60.0);
+            p.step(physics, cam, .{ .forward = if (run_up > 0) 1 else 0, .fast = run_up > 0, .jump_pressed = true, .jump = true }, 1.0 / 60.0);
+            var top: f32 = p.feet[1];
+            for (0..180) |_| {
+                p.step(physics, cam, .{ .forward = if (run_up > 0) 1 else 0, .fast = run_up > 0, .jump = true }, 1.0 / 60.0);
+                top = @max(top, p.feet[1]);
+            }
+            return top;
+        }
+    }.of;
+    const standing = peak(&standing_physics, &camera, 0);
+    var running_physics: Physics = .init(.{ .sample = flatGroundForJumps });
+    defer running_physics.deinit();
+    const running = peak(&running_physics, &camera, 90);
+    try std.testing.expect(standing > 3.4);
+    try std.testing.expect(running > standing + 0.6);
+    try std.testing.expect(runningJumpSpeed(sprint_speed) > runningJumpSpeed(walk_speed));
+    try std.testing.expectEqual(jump_speed, runningJumpSpeed(0));
+}
+
+fn flatGroundForJumps(_: ?*const anyopaque, _: f32, _: f32) Physics.GroundSample {
+    return .{ .height = 0, .normal = .{ 0, 1, 0 } };
 }
 
 test "grapple zips toward a static anchor and releases on arrival; flight glides" {
