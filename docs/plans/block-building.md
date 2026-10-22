@@ -1,6 +1,6 @@
 # Block building and terrain sculpting
 
-**Status:** planned 2026-10-21, owner decisions below. BT0 to BT3 are done: terrain sculpting (player 1) and a castle block grid all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
+**Status:** planned 2026-10-21, owner decisions below. BT0 to BT4 are done: terrain sculpting (player 1) and a block grid in four styles, with starter prefabs, restyling and copy and paste, that all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
 
 **Owner decisions (2026-10-21):**
 - A chunked block grid (Minecraft/Lego feel), not free-placed props. The existing machine Build tool stays for mechanisms (doors, lifts, logic) that snap into the grid.
@@ -27,7 +27,7 @@
 | BT1 | Terrain edit layer, `Streamer.invalidate`, raise/lower/level/smooth with the terrain tool (key 6), undo and redo, save format 27 | done 2026-10-21, for player 1; claims, ramp and pit brushes, and guest input are still open |
 | BT2 | Block store, shapes, meshing and collider per chunk, place and remove, castle style | done 2026-10-21: cube, slab, ramp, stair; eight castle materials; meshing is on the main thread at edit time (not the worker); no undo beyond removing; blocks are free; player 1 only |
 | BT3 | Four-player build input, `Kit` block inventory, palette, fill and box tools | done 2026-10-21: pad chord for every player, 64 starter blocks per material, refunds to the remover, pick, box fill and clear up to 512 cells, palette strip per view. Open: earning blocks in the wilds, guests cannot sculpt terrain |
-| BT4 | Style table, dungeon, eco city and farm styles, style swap, block prefabs | planned |
+| BT4 | Style table, dungeon, eco city and farm styles, style swap, block prefabs | done 2026-10-21: role-based styles, ten starter prefabs, restyle a box, copy a box to a per-player clipboard and paste it. Open: the clipboard is not saved or shared as a file, prefabs have no doors, torches or other mechanisms yet (BT5 and BT6) |
 | BT5 | Platformer blocks and hazards, reachability validator | planned |
 | BT6 | Crops, spawner, chest, gate, strategy hooks | planned |
 | BT7 | Polish, benchmarks, hands-on checklist | planned |

@@ -2715,6 +2715,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeBuild();
             self.smokeSculpt(camera);
             self.smokeBlocks(camera);
+            self.smokePrefabs(camera);
         },
         5 => {
             if (self.smoke_terrain_dirty == 0) return self.smokeFail("SMOKE SCULPT NEVER REACHED THE RENDERER", .{});
@@ -2742,6 +2743,7 @@ fn exerciseSmoke(self: *App) void {
             self.show_metrics = true;
         },
         7 => {
+            self.smokeGuestBuild();
             // Two guests leave: the remaining pair splits top and bottom.
             self.sandbox.leaveGuest(1);
             self.sandbox.leaveGuest(2);
@@ -3678,6 +3680,35 @@ fn smokeBlocks(self: *App, camera: *@import("world/Camera.zig")) void {
     sb.restore(self.allocator, bytes, camera) catch |err| return self.smokeFail("SMOKE BLOCKS LOAD {s}", .{@errorName(err)});
     if (blocks.get(cx, ground + 3, cz).shape != .cube) return self.smokeFail("SMOKE BLOCKS DID NOT SURVIVE THE SAVE", .{});
     std.log.info("Smoke blocks: castle wall of {d} blocks plus stair, ramp and slab; solid, saved and restored", .{placed});
+}
+
+/// Lay the first starter prefab of each style in a row behind the castle wall, then restyle the
+/// last one, so every style's materials are drawn and the stamp and restyle paths run in the game.
+fn smokePrefabs(self: *App, camera: *@import("world/Camera.zig")) void {
+    const sb = &self.sandbox;
+    const Prefabs = @import("build/Prefabs.zig");
+    const Materials = @import("build/Materials.zig");
+    const Terrain = @import("procedural/Terrain.zig");
+    const f = camera.forward();
+    var laid: usize = 0;
+    for (0..Materials.style_count) |s| {
+        const style: Materials.Style = @enumFromInt(s);
+        const prefab = Prefabs.starters(style)[0];
+        const along = (@as(f32, @floatFromInt(s)) - 1.5) * 9;
+        const x = camera.position.x() + f.x() * 22 - f.z() * along;
+        const z = camera.position.z() + f.z() * 22 + f.x() * along;
+        const at: [3]i32 = .{ @intFromFloat(@floor(x)), @intFromFloat(@ceil(Terrain.surface(sb.seed, x, z).height)), @intFromFloat(@floor(z)) };
+        const before = sb.block_world.blocks.revision;
+        BlockTool.stamp(sb, 0, prefab, 0, at) catch |err| return self.smokeFail("SMOKE PREFAB {s} {s}", .{ prefab.name, @errorName(err) });
+        if (sb.block_world.blocks.revision == before) return self.smokeFail("SMOKE PREFAB {s} REFUSED: {s}", .{ prefab.name, sb.noticeText() });
+        laid += prefab.cells.len;
+        if (s == Materials.style_count - 1) {
+            const o = BlockTool.stampOrigin(prefab, 0, at);
+            const far: [3]i32 = .{ o[0] + prefab.size[0] - 1, o[1] + prefab.size[1] - 1, o[2] + prefab.size[2] - 1 };
+            BlockTool.restyleBox(sb, 0, o, far, .eco_city) catch |err| return self.smokeFail("SMOKE RESTYLE {s}", .{@errorName(err)});
+        }
+    }
+    std.log.info("Smoke prefabs: tower, cell, greenhouse and barn laid ({d} blocks); the barn restyled as eco city", .{laid});
 }
 
 /// P2 is building; fill a box from P2's own kit (P2 keeps building, so

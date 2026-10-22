@@ -1,5 +1,6 @@
-//! Block materials, grouped into styles. A style is data: the materials a builder picks from and
-//! their colours. The castle style comes first; dungeon, eco city and farm follow (BT4).
+//! Block materials, grouped into styles. A style is data: eight materials in shared roles, so a
+//! selection can be re-skinned from one style to another role by role (a castle's main stone
+//! becomes a dungeon's brick, an eco city's living wood, a farm's planks).
 const std = @import("std");
 
 pub const Material = struct {
@@ -11,7 +12,10 @@ pub const Material = struct {
     variation: f32 = 0.08,
 };
 
-pub const Style = enum { castle };
+pub const Style = enum { castle, dungeon, eco_city, farm };
+pub const style_count = 4;
+/// What each of a style's eight materials is for; restyling keeps the role.
+pub const Role = enum { main, dark, accent, wood, roof, nature, metal, color };
 
 /// Index in this table is what a cell stores. Append only.
 pub const all = [_]Material{
@@ -23,13 +27,64 @@ pub const all = [_]Material{
     .{ .id = "castle.moss", .name = "MOSS STONE", .color = .{ 0.43, 0.52, 0.36 } },
     .{ .id = "castle.iron", .name = "IRON", .color = .{ 0.24, 0.25, 0.27 }, .variation = 0.02 },
     .{ .id = "castle.banner", .name = "BANNER RED", .color = .{ 0.66, 0.14, 0.14 }, .variation = 0.02 },
+    .{ .id = "dungeon.brick", .name = "DUNGEON BRICK", .color = .{ 0.33, 0.29, 0.30 } },
+    .{ .id = "dungeon.blackstone", .name = "BLACKSTONE", .color = .{ 0.16, 0.15, 0.18 } },
+    .{ .id = "dungeon.bone", .name = "BONE", .color = .{ 0.82, 0.78, 0.66 }, .variation = 0.05 },
+    .{ .id = "dungeon.rotwood", .name = "ROTWOOD", .color = .{ 0.30, 0.24, 0.18 } },
+    .{ .id = "dungeon.vault", .name = "VAULT STONE", .color = .{ 0.24, 0.24, 0.30 } },
+    .{ .id = "dungeon.fungus", .name = "GLOW FUNGUS", .color = .{ 0.30, 0.62, 0.52 }, .variation = 0.12 },
+    .{ .id = "dungeon.grate", .name = "IRON GRATE", .color = .{ 0.20, 0.19, 0.18 }, .variation = 0.02 },
+    .{ .id = "dungeon.ember", .name = "EMBER", .color = .{ 0.95, 0.46, 0.14 }, .variation = 0.04 },
+    .{ .id = "eco.livewood", .name = "LIVING WOOD", .color = .{ 0.56, 0.42, 0.28 } },
+    .{ .id = "eco.bark", .name = "BARK", .color = .{ 0.34, 0.25, 0.18 } },
+    .{ .id = "eco.glass", .name = "GREEN GLASS", .color = .{ 0.62, 0.86, 0.84 }, .variation = 0.01 },
+    .{ .id = "eco.bamboo", .name = "BAMBOO", .color = .{ 0.74, 0.70, 0.40 } },
+    .{ .id = "eco.green_roof", .name = "GREEN ROOF", .color = .{ 0.38, 0.62, 0.30 }, .variation = 0.1 },
+    .{ .id = "eco.leaf", .name = "LEAF", .color = .{ 0.24, 0.52, 0.26 }, .variation = 0.12 },
+    .{ .id = "eco.solar", .name = "SOLAR LEAF", .color = .{ 0.16, 0.24, 0.44 }, .variation = 0.02 },
+    .{ .id = "eco.bloom", .name = "BLOOM", .color = .{ 0.92, 0.52, 0.70 }, .variation = 0.06 },
+    .{ .id = "farm.plank", .name = "PLANK", .color = .{ 0.66, 0.50, 0.32 } },
+    .{ .id = "farm.dark_plank", .name = "DARK PLANK", .color = .{ 0.42, 0.30, 0.20 } },
+    .{ .id = "farm.hay", .name = "HAY", .color = .{ 0.86, 0.74, 0.38 }, .variation = 0.1 },
+    .{ .id = "farm.post", .name = "FENCE POST", .color = .{ 0.52, 0.38, 0.24 } },
+    .{ .id = "farm.thatch", .name = "THATCH", .color = .{ 0.70, 0.58, 0.32 }, .variation = 0.1 },
+    .{ .id = "farm.soil", .name = "TILLED SOIL", .color = .{ 0.36, 0.25, 0.17 }, .variation = 0.1 },
+    .{ .id = "farm.iron", .name = "TOOL IRON", .color = .{ 0.30, 0.31, 0.33 }, .variation = 0.02 },
+    .{ .id = "farm.barn_red", .name = "BARN RED", .color = .{ 0.62, 0.18, 0.14 }, .variation = 0.04 },
 };
 pub const count = all.len;
 
+/// The eight materials of a style, in `Role` order.
 pub fn ofStyle(style: Style) []const u6 {
     return switch (style) {
         .castle => &[_]u6{ 0, 1, 2, 3, 4, 5, 6, 7 },
+        .dungeon => &[_]u6{ 8, 9, 10, 11, 12, 13, 14, 15 },
+        .eco_city => &[_]u6{ 16, 17, 18, 19, 20, 21, 22, 23 },
+        .farm => &[_]u6{ 24, 25, 26, 27, 28, 29, 30, 31 },
     };
+}
+
+pub fn styleName(style: Style) []const u8 {
+    return switch (style) {
+        .castle => "CASTLE",
+        .dungeon => "DUNGEON",
+        .eco_city => "ECO CITY",
+        .farm => "FARM",
+    };
+}
+
+/// The style and role a material belongs to.
+pub fn roleOf(material: u6) struct { style: Style, role: usize } {
+    return .{ .style = @enumFromInt(material / 8), .role = material % 8 };
+}
+
+/// The same role in another style: how restyling maps a material.
+pub fn restyle(material: u6, to: Style) u6 {
+    return ofStyle(to)[roleOf(material).role];
+}
+
+pub fn ofRole(style: Style, role: Role) u6 {
+    return ofStyle(style)[@intFromEnum(role)];
 }
 
 /// A small, stable per-cell shade change so walls read as laid blocks, not one flat sheet.
@@ -44,6 +99,11 @@ pub fn shade(material: u6, x: i32, y: i32, z: i32) [3]f32 {
 
 test "material ids are unique and every style names real materials" {
     for (all, 0..) |a, i| for (all[0..i]) |b| try std.testing.expect(!std.mem.eql(u8, a.id, b.id));
-    for (ofStyle(.castle)) |m| try std.testing.expect(m < count);
+    for (0..style_count) |s| for (ofStyle(@enumFromInt(s)), 0..) |m, role| {
+        try std.testing.expect(m < count);
+        try std.testing.expectEqual(@as(usize, s), @intFromEnum(roleOf(m).style));
+        try std.testing.expectEqual(role, roleOf(m).role);
+    };
+    try std.testing.expectEqual(ofRole(.farm, .roof), restyle(ofRole(.castle, .roof), .farm));
     try std.testing.expect(count <= 64); // a cell stores the material in six bits
 }

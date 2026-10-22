@@ -38,7 +38,8 @@ pub const starter_weapons: u16 = (1 << @intFromEnum(WeaponKind.blaster)) | (1 <<
 pub const free_suits: u8 = bit(.undersuit) | bit(.field_jacket);
 pub const free_armors: u16 = armorBit(.none) | armorBit(.scout);
 /// Blocks of each material every ranger starts with; placing spends them, removing returns them.
-pub const starter_blocks: u32 = 64;
+/// Generous until blocks can be earned in the wilds: enough for every starter prefab.
+pub const starter_blocks: u32 = 256;
 pub const max_blocks: u32 = 1_000_000;
 pub const health_per_cell: f32 = 20;
 
@@ -245,7 +246,8 @@ pub const Doc = struct {
     robot_built: bool = false,
     robot_xp: u32 = 0,
     city_discoveries: u16 = 0,
-    /// Blocks held by material id (format 29). Absent in older saves: the starter stock.
+    /// Blocks held by material id (format 29). Absent in older saves, and for materials added
+    /// after the save was written: the starter stock.
     blocks: ?[]const BlockStack = null,
 };
 
@@ -317,8 +319,8 @@ pub fn fromDoc(doc: Doc) error{InvalidKit}!Kit {
         result.pet_active = sp;
     }
     if (doc.blocks) |stacks| {
-        // A listed save names every material it holds; anything it does not list is zero.
-        result.blocks = @splat(0);
+        // A save lists every material that existed when it was written (empty ones as zero);
+        // materials added since then start at the starter stock.
         var seen: [Materials.count]bool = @splat(false);
         for (stacks) |stack| {
             const m = for (Materials.all, 0..) |material, i| {
@@ -421,6 +423,9 @@ test "block stock round-trips by material id, old kits get the starter stock, ba
     try std.testing.expectEqual(k.blocks, back.blocks);
     const old = try fromDoc(.{});
     try std.testing.expectEqual(starter_blocks, old.blocks[4]);
+    const partial = try fromDoc(.{ .blocks = &.{.{ .id = "castle.stone", .count = 0 }} });
+    try std.testing.expectEqual(@as(u32, 0), partial.blocks[0]);
+    try std.testing.expectEqual(starter_blocks, partial.blocks[8]); // a style added later
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .blocks = &.{.{ .id = "castle.marble", .count = 1 }} }));
     try std.testing.expectError(error.InvalidKit, fromDoc(.{ .blocks = &.{ .{ .id = "castle.stone", .count = 1 }, .{ .id = "castle.stone", .count = 2 } } }));
 }

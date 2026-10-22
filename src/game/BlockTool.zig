@@ -14,6 +14,7 @@ const Blocks = @import("../build/Blocks.zig");
 const Materials = @import("../build/Materials.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const Kit = @import("Kit.zig");
+const Prefabs = @import("../build/Prefabs.zig");
 
 pub const reach: f32 = 14;
 /// Largest box one fill may cover.
@@ -29,10 +30,14 @@ pub const State = struct {
     valid: bool = false,
     /// The block under the crosshair, which remove takes.
     remove: ?[3]i32 = null,
-    /// First corner of a box fill (or clear), waiting for the second click.
+    /// First corner of a box operation, waiting for the second click.
     corner: ?[3]i32 = null,
-    corner_clears: bool = false,
+    corner_mode: CornerMode = .fill,
 };
+
+/// What a two-corner box does: fill with the block, clear it, re-skin it into the current style,
+/// or copy it to the player's clipboard.
+pub const CornerMode = enum { fill, clear, restyle, capture };
 
 /// One step's requests, from the keyboard or a pad.
 pub const Command = struct {
@@ -43,13 +48,44 @@ pub const Command = struct {
     material_step: i2 = 0,
     rotate: bool = false,
     pick: bool = false,
-    /// Held: clicks mark box corners.
+    /// Held: clicks mark box corners (and Tab changes style instead of shape).
     box: bool = false,
+    next_style: bool = false,
 };
+
+/// The palette position: one of the four shapes, a starter prefab of the style, or the clipboard.
+pub const Entry = union(enum) { shape: Blocks.Shape, prefab: Prefabs.Prefab };
+
+pub fn entryCount(sb: *const Sandbox, slot: usize, st: State) usize {
+    return Blocks.placeable_shapes.len + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0);
+}
+
+pub fn entry(sb: *const Sandbox, slot: usize, st: State) Entry {
+    const i = st.shape % entryCount(sb, slot, st);
+    if (i < Blocks.placeable_shapes.len) return .{ .shape = Blocks.placeable_shapes[i] };
+    const starters = Prefabs.starters(st.style);
+    const p = i - Blocks.placeable_shapes.len;
+    return .{ .prefab = if (p < starters.len) starters[p] else sb.block_clips[slot].prefab() };
+}
+
+pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
+    return switch (entry(sb, slot, st)) {
+        .shape => |shape| switch (shape) {
+            .cube => "CUBE",
+            .slab => "SLAB",
+            .ramp => "RAMP",
+            .stair => "STAIR",
+            else => "",
+        },
+        .prefab => |p| p.name,
+    };
+}
 
 pub fn cell(st: State) Blocks.Cell {
     const palette = Materials.ofStyle(st.style);
-    return .{ .shape = Blocks.placeable_shapes[st.shape % Blocks.placeable_shapes.len], .rot = st.rot, .material = palette[st.material % palette.len] };
+    // Prefab entries sit after the shapes; a single block for them is a cube.
+    const shape = if (st.shape < Blocks.placeable_shapes.len) Blocks.placeable_shapes[st.shape] else .cube;
+    return .{ .shape = shape, .rot = st.rot, .material = palette[st.material % palette.len] };
 }
 
 fn floorCell(p: [3]f32) [3]i32 {
@@ -89,19 +125,23 @@ fn supported(sb: *const Sandbox, c: [3]i32) bool {
 
 /// Aim, then carry out `cmd` for player `slot` (0 is P1) from `eye` along `forward`.
 pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32, cmd: Command) !void {
-    const palette = Materials.ofStyle(st.style);
     const kit = &sb.kits[slot];
-    if (cmd.next_shape) {
-        st.shape = @intCast((st.shape + 1) % Blocks.placeable_shapes.len);
-        sb.sayTo(slot, "shape: {s}", .{@tagName(cell(st.*).shape)});
+    if (cmd.next_style) {
+        st.style = @enumFromInt((@as(usize, @intFromEnum(st.style)) + 1) % Materials.style_count);
+        if (st.shape >= entryCount(sb, slot, st.*)) st.shape = 0;
+        sb.sayTo(slot, "style: {s}", .{Materials.styleName(st.style)});
+    } else if (cmd.next_shape) {
+        st.shape = @intCast((st.shape + 1) % entryCount(sb, slot, st.*));
+        sb.sayTo(slot, "{s}", .{entryName(sb, slot, st.*)});
     }
+    const palette = Materials.ofStyle(st.style);
     if (cmd.material_step != 0) {
         const n: u8 = @intCast(palette.len);
         st.material = if (cmd.material_step > 0) (st.material + 1) % n else (st.material + n - 1) % n;
         const m = cell(st.*).material;
         sb.sayTo(slot, "material: {s} ({d} held)", .{ Materials.all[m].name, kit.blocks[m] });
     }
-    if (cmd.rotate) st.rot +%= 1;
+    if (cmd.rotate and !cmd.box) st.rot +%= 1;
 
     st.place = null;
     st.remove = null;
@@ -114,6 +154,23 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         st.place = outside;
         st.valid = refusal(sb, outside, true) == null and kit.blocks[cell(st.*).material] > 0;
     }
+    // Box operations: the modifier marks the first corner; the same operation again finishes it.
+    const op: ?CornerMode = if (cmd.place) .fill else if (cmd.remove) .clear else if (cmd.rotate and cmd.box) .restyle else if (cmd.pick and cmd.box) .capture else null;
+    if (op) |mode| if (cmd.box or (st.corner != null and st.corner_mode == mode)) {
+        const at = (if (mode == .fill) st.place else st.remove orelse st.place) orelse return sb.sayTo(slot, "aim at the ground or a block within {d:.0} m", .{reach});
+        if (st.corner) |a| if (st.corner_mode == mode) {
+            st.corner = null;
+            return switch (mode) {
+                .fill => fillBox(sb, slot, st.*, a, at),
+                .clear => clearBox(sb, slot, a, at),
+                .restyle => restyleBox(sb, slot, a, at, st.style),
+                .capture => captureBox(sb, slot, st, a, at),
+            };
+        };
+        st.corner = at;
+        st.corner_mode = mode;
+        return sb.sayTo(slot, "{s} corner set: mark the opposite corner", .{@tagName(mode)});
+    };
     if (cmd.pick) if (st.remove) |c| {
         const aimed = sb.block_world.blocks.get(c[0], c[1], c[2]);
         for (Blocks.placeable_shapes, 0..) |s, i| if (s == aimed.shape) {
@@ -127,15 +184,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
     };
     if (cmd.place) {
         const c = st.place orelse return sb.sayTo(slot, "aim at the ground or a block within {d:.0} m", .{reach});
-        if (cmd.box or (st.corner != null and !st.corner_clears)) {
-            if (st.corner) |a| {
-                st.corner = null;
-                return fillBox(sb, slot, st.*, a, c);
-            }
-            st.corner = c;
-            st.corner_clears = false;
-            return sb.sayTo(slot, "box corner set: click the opposite corner", .{});
-        }
+        if (entry(sb, slot, st.*) == .prefab) return stamp(sb, slot, entry(sb, slot, st.*).prefab, st.rot, c);
         if (refusal(sb, c, true)) |why| return sb.sayTo(slot, "blocked: {s}", .{why});
         const want = cell(st.*);
         if (kit.blocks[want.material] == 0) return sb.sayTo(slot, "no {s} blocks left", .{Materials.all[want.material].name});
@@ -145,15 +194,6 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
     }
     if (cmd.remove) {
         const c = st.remove orelse return;
-        if (cmd.box or (st.corner != null and st.corner_clears)) {
-            if (st.corner) |a| {
-                st.corner = null;
-                return clearBox(sb, slot, a, c);
-            }
-            st.corner = c;
-            st.corner_clears = true;
-            return sb.sayTo(slot, "clear corner set: aim at the opposite corner", .{});
-        }
         const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
         try sb.block_world.blocks.set(c[0], c[1], c[2], .empty);
         kit.blocks[old.material] +|= 1;
@@ -161,7 +201,34 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
     }
 }
 
-const Box = struct { lo: [3]i32, hi: [3]i32, cells: usize };
+const Box = struct {
+    lo: [3]i32,
+    hi: [3]i32,
+    cells: usize,
+
+    const Iterator = struct {
+        bx: Box,
+        at: ?[3]i32,
+        fn next(self: *Iterator) ?[3]i32 {
+            const c = self.at orelse return null;
+            var n = c;
+            n[0] += 1;
+            if (n[0] > self.bx.hi[0]) {
+                n[0] = self.bx.lo[0];
+                n[2] += 1;
+                if (n[2] > self.bx.hi[2]) {
+                    n[2] = self.bx.lo[2];
+                    n[1] += 1;
+                }
+            }
+            self.at = if (n[1] > self.bx.hi[1]) null else n;
+            return c;
+        }
+    };
+    fn iterate(self: Box) Iterator {
+        return .{ .bx = self, .at = self.lo };
+    }
+};
 fn box(a: [3]i32, b: [3]i32) Box {
     var result: Box = .{ .lo = undefined, .hi = undefined, .cells = 1 };
     for (0..3) |i| {
@@ -219,6 +286,93 @@ pub fn fillBox(sb: *Sandbox, slot: usize, st: State, a: [3]i32, b: [3]i32) !void
     sb.sayTo(slot, "filled {d} blocks", .{needed});
 }
 
+/// Where a prefab's turned footprint starts so that it is centred on `at`.
+pub fn stampOrigin(prefab: Prefabs.Prefab, rot: u2, at: [3]i32) [3]i32 {
+    const size = Prefabs.turnedSize(prefab.size, rot);
+    return .{ at[0] - @divFloor(@as(i32, size[0]), 2), at[1], at[2] - @divFloor(@as(i32, size[2]), 2) };
+}
+
+/// Lay a prefab centred on `at`, turned `rot` times. Every cell must be free and the builder must
+/// hold every block before anything is placed.
+pub fn stamp(sb: *Sandbox, slot: usize, prefab: Prefabs.Prefab, rot: u2, at: [3]i32) !void {
+    const origin = stampOrigin(prefab, rot, at);
+    var rests = false;
+    for (prefab.cells) |p| {
+        const t = Prefabs.turned(p, prefab.size, rot);
+        const c: [3]i32 = .{ origin[0] + t.x, origin[1] + t.y, origin[2] + t.z };
+        if (refusal(sb, c, false)) |why| return sb.sayTo(slot, "{s} blocked: {s}", .{ prefab.name, why });
+        if (!rests and t.y == 0 and supported(sb, c)) rests = true;
+    }
+    if (!rests) return sb.sayTo(slot, "{s} needs ground under it", .{prefab.name});
+    const need = Prefabs.cost(prefab);
+    const kit = &sb.kits[slot];
+    for (need, kit.blocks, 0..) |n, held, m| if (n > held) return sb.sayTo(slot, "{s} needs {d} {s}, you hold {d}", .{ prefab.name, n, Materials.all[m].name, held });
+    for (prefab.cells) |p| {
+        const t = Prefabs.turned(p, prefab.size, rot);
+        sb.block_world.blocks.set(origin[0] + t.x, origin[1] + t.y, origin[2] + t.z, t.cell) catch {
+            try sb.syncBlocks();
+            return sb.sayTo(slot, "block budget full", .{});
+        };
+        kit.blocks[t.cell.material] -= 1;
+    }
+    try sb.syncBlocks();
+    sb.sayTo(slot, "built {s}", .{prefab.name});
+}
+
+/// Re-skin every block in the box into `style`, role for role. The builder pays the new blocks and
+/// gets the old ones back; checked in full first.
+pub fn restyleBox(sb: *Sandbox, slot: usize, a: [3]i32, b: [3]i32, style: Materials.Style) !void {
+    const bx = box(a, b);
+    if (bx.cells > max_box_cells) return sb.sayTo(slot, "box too large: {d} cells, at most {d}", .{ bx.cells, max_box_cells });
+    var need: [Materials.count]u32 = @splat(0);
+    var back: [Materials.count]u32 = @splat(0);
+    var changed: u32 = 0;
+    var it = bx.iterate();
+    while (it.next()) |c| {
+        const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
+        if (old.isEmpty()) continue;
+        const new = Materials.restyle(old.material, style);
+        if (new == old.material) continue;
+        need[new] += 1;
+        back[old.material] += 1;
+        changed += 1;
+    }
+    if (changed == 0) return sb.sayTo(slot, "nothing to restyle", .{});
+    const kit = &sb.kits[slot];
+    for (need, back, kit.blocks, 0..) |n, r, held, m| if (n > held + r) return sb.sayTo(slot, "restyle needs {d} {s}, you hold {d}", .{ n, Materials.all[m].name, held });
+    it = bx.iterate();
+    while (it.next()) |c| {
+        var cell_now = sb.block_world.blocks.get(c[0], c[1], c[2]);
+        if (cell_now.isEmpty()) continue;
+        cell_now.material = Materials.restyle(cell_now.material, style);
+        try sb.block_world.blocks.set(c[0], c[1], c[2], cell_now);
+    }
+    for (&kit.blocks, need, back) |*held, n, r| held.* = held.* + r - n;
+    try sb.syncBlocks();
+    sb.sayTo(slot, "restyled {d} blocks as {s}", .{ changed, Materials.styleName(style) });
+}
+
+/// Copy the blocks in the box to the player's clipboard and select it.
+pub fn captureBox(sb: *Sandbox, slot: usize, st: *State, a: [3]i32, b: [3]i32) !void {
+    const bx = box(a, b);
+    for (0..3) |i| if (bx.hi[i] - bx.lo[i] + 1 > Prefabs.max_side) return sb.sayTo(slot, "copy at most {d} blocks on a side", .{Prefabs.max_side});
+    var clip: Prefabs.Clip = .{};
+    var it = bx.iterate();
+    while (it.next()) |c| {
+        const found = sb.block_world.blocks.get(c[0], c[1], c[2]);
+        if (found.isEmpty()) continue;
+        if (clip.len == Prefabs.max_cells) return sb.sayTo(slot, "copy at most {d} blocks", .{Prefabs.max_cells});
+        clip.cells[clip.len] = .{ .x = @intCast(c[0] - bx.lo[0]), .y = @intCast(c[1] - bx.lo[1]), .z = @intCast(c[2] - bx.lo[2]), .cell = found };
+        clip.len += 1;
+    }
+    if (clip.len == 0) return sb.sayTo(slot, "nothing to copy", .{});
+    for (0..3) |i| clip.size[i] = @intCast(bx.hi[i] - bx.lo[i] + 1);
+    sb.block_clips[slot] = clip;
+    st.shape = @intCast(entryCount(sb, slot, st.*) - 1);
+    st.rot = 0;
+    sb.sayTo(slot, "copied {d} blocks: click to paste", .{clip.len});
+}
+
 /// Remove every block in the box; each returns to the remover's kit.
 pub fn clearBox(sb: *Sandbox, slot: usize, a: [3]i32, b: [3]i32) !void {
     const bx = box(a, b);
@@ -248,27 +402,41 @@ pub fn update(sb: *Sandbox, aim: @import("../world/Camera.zig"), primary: bool, 
     try step(sb, 0, &sb.tools.blocks, .{ aim.position.x(), aim.position.y(), aim.position.z() }, .{ f.x(), f.y(), f.z() }, .{
         .place = primary,
         .remove = actions.secondary,
-        .next_shape = actions.next_item,
+        .next_shape = actions.next_item and !modifier,
         .material_step = if (actions.channel_up) 1 else if (actions.channel_down) -1 else 0,
         .rotate = actions.rotate,
         .pick = actions.capture,
         .box = modifier,
+        .next_style = actions.next_item and modifier,
     });
 }
 
 pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools.blocks;
     const c = cell(st);
-    if (st.corner != null) return std.fmt.bufPrint(buffer, "BOX: CLICK THE OPPOSITE CORNER TO {s}", .{if (st.corner_clears) "CLEAR" else "FILL"}) catch buffer;
-    return std.fmt.bufPrint(buffer, "BLOCK {s} {s} x{d}  CLICK PLACE  RMB REMOVE  SHIFT+CLICK BOX  TAB SHAPE  [ ] MATERIAL  T TURN  P PICK", .{ @tagName(c.shape), Materials.all[c.material].name, sb.kits[0].blocks[c.material] }) catch buffer;
+    if (st.corner != null) return std.fmt.bufPrint(buffer, "BOX {s}: MARK THE OPPOSITE CORNER THE SAME WAY", .{@tagName(st.corner_mode)}) catch buffer;
+    return std.fmt.bufPrint(buffer, "{s} {s} {s} x{d}  CLICK PLACE  RMB REMOVE  TAB PIECE  SHIFT+TAB STYLE  [ ] MATERIAL  T TURN  P PICK  SHIFT: BOX FILL/CLEAR, SHIFT+T RESTYLE, SHIFT+P COPY", .{ Materials.styleName(st.style), entryName(sb, 0, st), Materials.all[c.material].name, sb.kits[0].blocks[c.material] }) catch buffer;
 }
 
 /// The ghost of the next block: tinted by its material where it fits, red where it does not;
 /// with a box corner set, the corner shows as well.
-pub fn ghost(sb: *const Sandbox, st: State, out: []World.Prop, start: usize) usize {
+pub fn ghost(sb: *const Sandbox, slot: usize, st: State, out: []World.Prop, start: usize) usize {
     var n = start;
     const c = st.place orelse return n;
     if (n == out.len) return n;
+    if (entry(sb, slot, st) == .prefab) {
+        const prefab = entry(sb, slot, st).prefab;
+        const size = Prefabs.turnedSize(prefab.size, st.rot);
+        const o = stampOrigin(prefab, st.rot, c);
+        const f: [3]f32 = .{ @floatFromInt(size[0]), @floatFromInt(size[1]), @floatFromInt(size[2]) };
+        out[n] = .{
+            .mesh = sb.catalog.content.block,
+            .transform = .{ .position = .{ @as(f32, @floatFromInt(o[0])) + f[0] / 2, @as(f32, @floatFromInt(o[1])) + 0.05, @as(f32, @floatFromInt(o[2])) + f[2] / 2 } },
+            .tint = .{ 0.4, 0.85, 1.0, 1 },
+            .size = .{ f[0], 0.1, f[2] },
+        };
+        return n + 1;
+    }
     const shape = cell(st).shape;
     const height: f32 = if (shape == .slab) 0.5 else 1;
     const color = Materials.all[cell(st).material].color;
@@ -284,7 +452,12 @@ pub fn ghost(sb: *const Sandbox, st: State, out: []World.Prop, start: usize) usi
         out[n] = .{
             .mesh = sb.catalog.content.block,
             .transform = .{ .position = .{ @as(f32, @floatFromInt(a[0])) + 0.5, @as(f32, @floatFromInt(a[1])) + 0.5, @as(f32, @floatFromInt(a[2])) + 0.5 } },
-            .tint = if (st.corner_clears) .{ 1.0, 0.45, 0.2, 1 } else .{ 0.3, 0.8, 1.0, 1 },
+            .tint = switch (st.corner_mode) {
+                .fill => .{ 0.3, 0.8, 1.0, 1 },
+                .clear => .{ 1.0, 0.45, 0.2, 1 },
+                .restyle => .{ 0.85, 0.5, 1.0, 1 },
+                .capture => .{ 1.0, 0.9, 0.3, 1 },
+            },
             .size = .{ 1.08, 1.08, 1.08 },
         };
         n += 1;
@@ -293,14 +466,14 @@ pub fn ghost(sb: *const Sandbox, st: State, out: []World.Prop, start: usize) usi
 }
 
 pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
-    return publishGuests(sb, out, ghost(sb, sb.tools.blocks, out, start));
+    return publishGuests(sb, out, ghost(sb, 0, sb.tools.blocks, out, start));
 }
 
 /// Ghosts of the guests who are building.
 pub fn publishGuests(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     var n = start;
-    for (sb.guests) |g| if (g.active) if (g.building) |st| {
-        n = ghost(sb, st, out, n);
+    for (sb.guests, 1..) |g, slot| if (g.active) if (g.building) |st| {
+        n = ghost(sb, slot, st, out, n);
     };
     return n;
 }
@@ -321,7 +494,8 @@ pub fn fromPad(pad: Pad, before: [2]bool) PadRequest {
             .remove = pad.alt and !before[1],
             .next_shape = pad.up and !pad.modifier,
             .pick = pad.up and pad.modifier,
-            .material_step = if (pad.right) 1 else if (pad.left and !pad.modifier) -1 else 0,
+            .material_step = if (pad.right and !pad.modifier) 1 else if (pad.left and !pad.modifier) -1 else 0,
+            .next_style = pad.right and pad.modifier,
             .rotate = pad.down,
             .box = pad.modifier,
         },
@@ -337,6 +511,8 @@ test "the pad chord toggles building, and triggers become one click per press" {
     const pick = fromPad(.{ .up = true, .modifier = true }, .{ false, false });
     try std.testing.expect(pick.cmd.pick and pick.cmd.box and !pick.cmd.next_shape);
     try std.testing.expectEqual(@as(i2, -1), fromPad(.{ .left = true }, .{ false, false }).cmd.material_step);
+    const style = fromPad(.{ .right = true, .modifier = true }, .{ false, false });
+    try std.testing.expect(style.cmd.next_style and style.cmd.material_step == 0);
 }
 
 test "a box counts every cell between two corners in any order" {

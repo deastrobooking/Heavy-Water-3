@@ -18,8 +18,10 @@ pub fn draw(c: *Canvas, view: Canvas.Rect, sb: *const Sandbox, slot: usize, st: 
     const y = view.y + view.h - swatch - 150;
     c.rect(.{ .x = x0 - 10, .y = y - 24, .w = width + 20, .h = swatch + 44 }, .{ 0.03, 0.05, 0.08, 0.72 });
     var label: [64]u8 = undefined;
-    const mode = if (st.corner != null) (if (st.corner_clears) "  CLEAR BOX" else "  FILL BOX") else "";
-    const text = std.fmt.bufPrint(&label, "{s} {s}{s}", .{ shapeName(chosen.shape), Materials.all[chosen.material].name, mode }) catch "";
+    const text = if (st.corner) |_|
+        std.fmt.bufPrint(&label, "{s}  BOX {s}: MARK THE OTHER CORNER", .{ Materials.styleName(st.style), modeName(st.corner_mode) }) catch ""
+    else
+        std.fmt.bufPrint(&label, "{s}  {s}  {s}", .{ Materials.styleName(st.style), BlockTool.entryName(sb, slot, st), Materials.all[chosen.material].name }) catch "";
     c.text(x0, y - 18, text, 1, .{ 0.92, 0.95, 1, 1 });
     for (palette, 0..) |m, i| {
         const x = x0 + @as(f32, @floatFromInt(i)) * (swatch + gap);
@@ -32,13 +34,12 @@ pub fn draw(c: *Canvas, view: Canvas.Rect, sb: *const Sandbox, slot: usize, st: 
     }
 }
 
-fn shapeName(shape: anytype) []const u8 {
-    return switch (shape) {
-        .cube => "CUBE",
-        .slab => "SLAB",
-        .ramp => "RAMP",
-        .stair => "STAIR",
-        else => "",
+fn modeName(mode: BlockTool.CornerMode) []const u8 {
+    return switch (mode) {
+        .fill => "FILL",
+        .clear => "CLEAR",
+        .restyle => "RESTYLE",
+        .capture => "COPY",
     };
 }
 
@@ -54,6 +55,7 @@ test "the palette for four building players fits the canvas budget" {
     var sb: Sandbox = undefined;
     sb.tools = .{};
     sb.kits = @splat(.{});
+    sb.block_clips = @splat(.{});
     const before = canvas.len;
     for (0..4) |i| draw(&canvas, .{ .x = @floatFromInt(i * 320), .y = 0, .w = 320, .h = 360 }, &sb, i, .{});
     try std.testing.expect(canvas.len - before <= 4 * 30);

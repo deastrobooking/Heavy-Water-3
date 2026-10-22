@@ -425,6 +425,8 @@ modifications: Modifications = .{},
 terrain_edit: *TerrainEdit = undefined,
 /// Player-built blocks with their per-chunk meshes and colliders.
 block_world: BlockWorld = undefined,
+/// Each player's copied block piece (session only).
+block_clips: [max_players]@import("../build/Prefabs.zig").Clip = @splat(.{}),
 nearby_center: ?Key = null,
 nearby: [9]NearbyChunk = undefined,
 tick: u64 = 0,
@@ -3102,6 +3104,66 @@ test "two players build from their own kits, box fills are paid in full or refus
     sandbox.kits[0].blocks = @splat(0);
     try sandbox.restore(std.testing.allocator, bytes, &camera);
     try std.testing.expectEqual(Kit.starter_blocks + 6, sandbox.kits[0].blocks[3]);
+}
+
+test "a starter prefab is laid from the builder's kit, restyled role for role, copied and pasted" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Prefabs = @import("../build/Prefabs.zig");
+    const Materials = @import("../build/Materials.zig");
+    const spot = [2]f32{ 190.5, -450.5 };
+    const ground: i32 = @intFromFloat(@ceil(Terrain.surface(sandbox.seed, spot[0], spot[1]).height));
+    sandbox.player.feet = .{ spot[0] + 40, @floatFromInt(ground), spot[1] };
+    const at: [3]i32 = .{ @intFromFloat(spot[0]), ground, @intFromFloat(spot[1]) };
+
+    // A castle tower: every cell placed, every block paid from P1's kit.
+    const tower = Prefabs.starters(.castle)[0];
+    const need = Prefabs.cost(tower);
+    const before = sandbox.kits[0].blocks;
+    try BlockTool.stamp(&sandbox, 0, tower, 1, at);
+    const origin = BlockTool.stampOrigin(tower, 1, at);
+    var count: usize = 0;
+    for (tower.cells) |p| {
+        const t = Prefabs.turned(p, tower.size, 1);
+        const got = sandbox.block_world.blocks.get(origin[0] + t.x, origin[1] + t.y, origin[2] + t.z);
+        try std.testing.expectEqual(t.cell, got);
+        count += 1;
+    }
+    try std.testing.expectEqual(tower.cells.len, count);
+    for (before, sandbox.kits[0].blocks, need) |b, a, n| try std.testing.expectEqual(b - n, a);
+    // A second tower in the same place is refused whole.
+    const revision = sandbox.block_world.blocks.revision;
+    try BlockTool.stamp(&sandbox, 0, tower, 1, at);
+    try std.testing.expectEqual(revision, sandbox.block_world.blocks.revision);
+
+    // Restyle the tower as a farm: main stone becomes plank, and the kit swaps the blocks.
+    const size = Prefabs.turnedSize(tower.size, 1);
+    const far: [3]i32 = .{ origin[0] + size[0] - 1, origin[1] + size[1] - 1, origin[2] + size[2] - 1 };
+    const stone_before = sandbox.kits[0].blocks[Materials.ofRole(.castle, .main)];
+    const plank_before = sandbox.kits[0].blocks[Materials.ofRole(.farm, .main)];
+    try BlockTool.restyleBox(&sandbox, 0, origin, far, .farm);
+    const main_cells = need[Materials.ofRole(.castle, .main)];
+    try std.testing.expectEqual(stone_before + main_cells, sandbox.kits[0].blocks[Materials.ofRole(.castle, .main)]);
+    try std.testing.expectEqual(plank_before - main_cells, sandbox.kits[0].blocks[Materials.ofRole(.farm, .main)]);
+    const sample = Prefabs.turned(tower.cells[tower.cells.len - 1], tower.size, 1);
+    try std.testing.expectEqual(Materials.Style.farm, Materials.roleOf(sandbox.block_world.blocks.get(origin[0] + sample.x, origin[1] + sample.y, origin[2] + sample.z).material).style);
+
+    // P2 copies the restyled tower and pastes it beside, from P2's own kit.
+    sandbox.joinGuest(0);
+    sandbox.guests[0].player.feet = .{ spot[0] - 40, @floatFromInt(ground), spot[1] };
+    var st: BlockTool.State = .{};
+    try BlockTool.captureBox(&sandbox, 1, &st, origin, far);
+    try std.testing.expectEqual(tower.cells.len, sandbox.block_clips[1].len);
+    try std.testing.expect(BlockTool.entry(&sandbox, 1, st) == .prefab);
+    const p2_before = sandbox.kits[1].blocks;
+    const p1_after = sandbox.kits[0].blocks;
+    try BlockTool.stamp(&sandbox, 1, sandbox.block_clips[1].prefab(), 0, .{ at[0] + 12, at[1], at[2] });
+    try std.testing.expect(!std.meta.eql(p2_before, sandbox.kits[1].blocks));
+    try std.testing.expectEqual(p1_after, sandbox.kits[0].blocks);
 }
 
 /// Points the camera at a world position.
