@@ -1,3 +1,12 @@
+## Building polish and measurements (BT7) — 2026-10-21
+
+- **Added:** per-player building tips (`game/BuildTips.zig`): selecting blocks (P1) or starting to build from a pad (any player) shows the current tip; each tip advances only when the player does what it taught (place, box fill, change style, lay a prefab). A smoke stage measures block meshing and a terrain dab. The block-building plan gains the measurements and a ten-point hands-on checklist.
+- **Bug found by a test:** advancing a finished player's tips overflowed the step enum (a panic); it is guarded and the test covers it.
+- **Measured** (ReleaseSafe, Metal debug layer, smoke run): 3,584 blocks in one chunk mesh and collide in 26 ms (5,552 triangles, 542 KiB); one edit re-meshes that chunk in 17.5 ms (about one frame at 60 Hz); a radius-24 terrain dab costs 0.02 ms of CPU. GPU upload and frame time while editing were not measured.
+- **Checked:** default and 0.17 `build check`; the full suite passed 590/590; the Metal smoke ran the new stages; its only failure is the other session's intermittent `SMOKE P2 FABRICATION DID NOT USE THEIR KIT`.
+- **Committed tree alone** (clean checkout without the other session's uncommitted work): 589/589 tests and the full Metal smoke exit 0; the benchmark repeated at 27.5 ms, 17.4 ms and 0.03 ms.
+- **Not checked:** the hands-on checklist itself, which needs a person.
+
 ## Farming (BT6, part) — 2026-10-21
 
 - **Added:** crops (`game/Farm.zig`). In the farm style the block tool offers SEEDS; a seed on tilled soil costs one hay, grows through three stages over 180 s, and a ripe harvest gives the harvester four hay blocks (their own kit), so farming funds building. Crops are shared, saved (format 30, fixture checked in), refuse building on their cell, and die when their soil is dug out. Drawn with the scatter plant mesh, scaled by growth and gold when ripe.

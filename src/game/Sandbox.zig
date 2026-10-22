@@ -431,6 +431,8 @@ block_world: BlockWorld = undefined,
 platform: Platformer.State = .{},
 /// Crops growing on tilled soil (shared, saved).
 farm: Farm.State = .{},
+/// Where each player is in the building tips (session only).
+build_tips: @import("BuildTips.zig").State = .{},
 /// Each player's copied block piece (session only).
 block_clips: [max_players]@import("../build/Prefabs.zig").Clip = @splat(.{}),
 nearby_center: ?Key = null,
@@ -3329,6 +3331,30 @@ test "a seed planted on tilled soil grows, pays the harvester in hay, and surviv
     try std.testing.expectEqual(@as(usize, 0), sandbox.farm.len);
     try std.testing.expect(Farm.refusal(&sandbox, 0, .{ x + 1, y + 1, z }) == null);
     try std.testing.expect(Farm.refusal(&sandbox, 0, .{ x + 5, y + 1, z }) != null);
+}
+
+test "building tips follow each player's progress and skipping ahead does not move them" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const Tips = @import("BuildTips.zig");
+    Build.selectTool(&sandbox, .blocks);
+    try std.testing.expect(std.mem.indexOf(u8, sandbox.noticeText(), "BUILD:") != null);
+    // Changing style before placing anything does not skip the first lesson.
+    Tips.advance(&sandbox, 0, .style);
+    try std.testing.expectEqual(Tips.Step.place, sandbox.build_tips.step[0]);
+    Tips.advance(&sandbox, 0, .place);
+    try std.testing.expectEqual(Tips.Step.box, sandbox.build_tips.step[0]);
+    try std.testing.expect(std.mem.indexOf(u8, sandbox.noticeText(), "two corners") != null);
+    // P2 has their own place in the tips.
+    try std.testing.expectEqual(Tips.Step.place, sandbox.build_tips.step[1]);
+    for ([_]Tips.Step{ .box, .style, .prefab }) |s| Tips.advance(&sandbox, 0, s);
+    try std.testing.expectEqual(Tips.Step.done, sandbox.build_tips.step[0]);
+    Tips.advance(&sandbox, 0, .done);
+    try std.testing.expectEqual(Tips.Step.done, sandbox.build_tips.step[0]);
 }
 
 /// Points the camera at a world position.

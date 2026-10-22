@@ -226,6 +226,7 @@ pub fn selectTool(sb: *Sandbox, tool: Tool) void {
     sb.tools.bridge_hover = null;
     if (tool != .hands) sb.release();
     sb.say("{s} tool", .{@tagName(tool)});
+    if (tool == .blocks) @import("BuildTips.zig").intro(sb, 0);
 }
 
 pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Actions) !void {

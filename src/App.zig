@@ -1561,7 +1561,7 @@ fn routePads(self: *App) void {
         g.toggle_view = g.toggle_view or cmd.view;
         if (build.toggle) {
             g.building = if (g.building == null) .{} else null;
-            self.sandbox.sayTo(p, "{s}", .{if (g.building != null) "building: RT place, RB remove, D-pad shape and material" else "stopped building"});
+            if (g.building != null) @import("game/BuildTips.zig").intro(&self.sandbox, p) else self.sandbox.sayTo(p, "stopped building", .{});
             continue;
         }
         if (g.building != null) {
@@ -2717,6 +2717,7 @@ fn exerciseSmoke(self: *App) void {
             self.smokeBlocks(camera);
             self.smokePrefabs(camera);
             self.smokeFarm(camera);
+            self.smokeBuildBenchmark(camera);
         },
         5 => {
             if (self.smoke_terrain_dirty == 0) return self.smokeFail("SMOKE SCULPT NEVER REACHED THE RENDERER", .{});
@@ -3736,6 +3737,46 @@ fn smokeFarm(self: *App, camera: *@import("world/Camera.zig")) void {
     const hay = sb.kits[0].blocks[Farm.hay()];
     if (!Farm.harvest(sb, 0, .{ x0 + 4, y + 1, z0 }) or sb.kits[0].blocks[Farm.hay()] != hay + Farm.harvest_yield) return self.smokeFail("SMOKE FARM HARVEST DID NOT PAY P1", .{});
     std.log.info("Smoke farm: five seeds planted on tilled soil, four left growing in stages, a ripe one harvested for {d} hay", .{Farm.harvest_yield});
+}
+
+/// Measure the costs players feel: meshing a dense chunk of blocks (one edit re-meshes its whole
+/// chunk on the main thread) and one large terrain dab. The blocks are removed afterwards.
+fn smokeBuildBenchmark(self: *App, camera: *@import("world/Camera.zig")) void {
+    const sb = &self.sandbox;
+    const Terrain = @import("procedural/Terrain.zig");
+    const Blocks = @import("build/Blocks.zig");
+    const x0: i32 = @intFromFloat(@floor(camera.position.x() + 300));
+    const z0: i32 = @intFromFloat(@floor(camera.position.z() + 300));
+    const ground: i32 = @intFromFloat(@ceil(Terrain.surface(sb.seed, @floatFromInt(x0), @floatFromInt(z0)).height));
+    const y0 = ground + 2;
+    // A 32 x 32 x 4 slab with every other cell of the top layer missing, so faces are not all culled.
+    var cells: usize = 0;
+    for (0..32) |i| for (0..32) |k| for (0..4) |h| {
+        if (h == 3 and (i + k) % 2 == 0) continue;
+        sb.block_world.blocks.set(x0 + @as(i32, @intCast(i)), y0 + @as(i32, @intCast(h)), z0 + @as(i32, @intCast(k)), .{ .shape = .cube, .material = @intCast((i + k) % 8) }) catch |err| return self.smokeFail("SMOKE BENCH BLOCKS {s}", .{@errorName(err)});
+        cells += 1;
+    };
+    var timer = mach.time.Timer.start(self.io);
+    sb.syncBlocks() catch |err| return self.smokeFail("SMOKE BENCH SYNC {s}", .{@errorName(err)});
+    const full_ms = timer.lap() * 1000;
+    const slot = sb.block_world.slotOf(Blocks.chunkOf(x0, z0)) orelse return self.smokeFail("SMOKE BENCH NO CHUNK", .{});
+    const mesh = sb.block_world.slots[slot].mesh;
+    const bytes = mesh.vertices.items.len * @sizeOf(@import("render/Mesh.zig").Vertex) + mesh.indices.items.len * 4;
+    sb.block_world.blocks.set(x0, y0 + 3, z0 + 1, .empty) catch {};
+    _ = timer.lap();
+    sb.syncBlocks() catch |err| return self.smokeFail("SMOKE BENCH EDIT {s}", .{@errorName(err)});
+    const edit_ms = timer.lap() * 1000;
+    // One full-size terrain dab, then put the ground back.
+    sb.terrain_edit.beginStroke();
+    _ = timer.lap();
+    _ = @import("procedural/TerrainBrush.zig").apply(sb.terrain_edit, sb.seed, .{ .kind = .smooth, .x = @floatFromInt(x0 - 60), .z = @floatFromInt(z0 - 60), .radius = 24, .strength = 1 }) catch |err| return self.smokeFail("SMOKE BENCH DAB {s}", .{@errorName(err)});
+    const dab_ms = timer.lap() * 1000;
+    _ = sb.terrain_edit.undo();
+    for (0..32) |i| for (0..32) |k| for (0..4) |h| {
+        sb.block_world.blocks.set(x0 + @as(i32, @intCast(i)), y0 + @as(i32, @intCast(h)), z0 + @as(i32, @intCast(k)), .empty) catch {};
+    };
+    sb.syncBlocks() catch |err| return self.smokeFail("SMOKE BENCH CLEAR {s}", .{@errorName(err)});
+    std.log.info("Smoke build benchmark: {d} blocks meshed and collided in {d:.2} ms ({d} KiB mesh, {d} triangles); one edit re-meshes the chunk in {d:.2} ms; a radius-24 terrain dab takes {d:.2} ms", .{ cells, full_ms, bytes / 1024, mesh.indices.items.len / 3, edit_ms, dab_ms });
 }
 
 /// P2 is building; fill a box from P2's own kit (P2 keeps building, so

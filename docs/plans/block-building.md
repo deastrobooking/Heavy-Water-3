@@ -1,6 +1,6 @@
 # Block building and terrain sculpting
 
-**Status:** planned 2026-10-21, owner decisions below. BT0 to BT5 and the farming part of BT6 are done: terrain sculpting (player 1) and a block grid in four styles plus platformer mechanisms, with starter prefabs, restyling, copy and paste and a course reachability check, that all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
+**Status:** planned 2026-10-21, owner decisions below. BT0 to BT5, the farming part of BT6 and BT7 are done: terrain sculpting (player 1) and a block grid in four styles plus platformer mechanisms, with starter prefabs, restyling, copy and paste and a course reachability check, that all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
 
 **Owner decisions (2026-10-21):**
 - A chunked block grid (Minecraft/Lego feel), not free-placed props. The existing machine Build tool stays for mechanisms (doors, lifts, logic) that snap into the grid.
@@ -30,7 +30,31 @@
 | BT4 | Style table, dungeon, eco city and farm styles, style swap, block prefabs | done 2026-10-21: role-based styles, ten starter prefabs, restyle a box, copy a box to a per-player clipboard and paste it. Open: the clipboard is not saved or shared as a file, prefabs have no doors, torches or other mechanisms yet (BT5 and BT6) |
 | BT5 | Platformer blocks and hazards, reachability validator | done 2026-10-21: spring, boost strip, crumble, hazard, checkpoint, pressure plate and gate, mover; `Course.reachable`. Open: key doors and wiring blocks to the machine signal bus (plates open every gate for now), a kill plane, crumble and gate state are not saved (a load restores them) |
 | BT6 | Crops, spawner, chest, gate, strategy hooks | crops done 2026-10-21: seeds on tilled soil, three growth stages over three minutes, ripe harvest pays the harvester four hay, saved in format 30. Deferred, with reasons: a dungeon spawner and treasure chest only make sense in generated dungeons (a player-built chest that pays loot is an exploit), so they move to the Interiors dungeon work; castle gates are covered by plates and gates (BT5), a drawbridge that swings is not built; room roles and other strategy hooks wait for the settlement layer. Crops ignore seasons, weather and water for now |
-| BT7 | Polish, benchmarks, hands-on checklist | planned |
+| BT7 | Polish, benchmarks, hands-on checklist | done 2026-10-21: per-player building tips, the measurements and the checklist below |
+
+## Measurements (2026-10-21, ReleaseSafe, Metal debug layer on, Apple Silicon)
+
+From the smoke stage `smokeBuildBenchmark`:
+- A 32 x 32 x 4 block chunk (3,584 blocks, 5,552 triangles after hidden faces are dropped, 542 KiB of mesh) meshes and builds its collider in 26 ms.
+- One block edit re-meshes its whole chunk: 17.5 ms on that chunk, about one frame at 60 Hz. Small builds cost far less; a castle-sized chunk will hitch once per click.
+- One full-size (radius 24 m) terrain dab: 0.02 ms of CPU. The visible cost is the streamer regenerating each touched chunk on its worker, which the existing terrain benchmarks measure (chunk fill p50 and p99).
+- Not measured: GPU upload time of a re-meshed chunk, frame time while sculpting, Debug builds.
+
+Follow-ups the numbers point to: mesh block chunks on a worker (as terrain chunks are) or re-mesh only the touched 16 m section, and rebuild only the collider triangles that changed.
+
+## Hands-on checklist
+
+None of the building has been played by hand. Each line is something a person should try and confirm:
+1. Key 6, hold click on open ground: the ring follows the crosshair, the ground rises smoothly, the chunk does not blink while it rebuilds, you can walk on the mound. Tab through lower, level, smooth; [ and ] resize; right click undoes; T redoes.
+2. Near a cave mouth the ring turns red and sculpting is refused.
+3. Key 7: the tip appears; place, remove, turn and pick blocks; walk up a stair; jump on a ramp.
+4. Shift-click two corners to fill a box; right-click two corners to clear it; the palette counts change for you only.
+5. Shift+Tab through all five styles; lay each starter prefab; restyle a castle as a farm with Shift+T corners; copy with Shift+P corners and paste.
+6. Platformer: spring height, boost direction after turning it with T, a crumble block falling and returning, hazard damage and recovery at a checkpoint, a plate opening a gate, riding a mover.
+7. Farm: plant seeds on tilled soil, watch three stages, harvest gold crops for hay.
+8. With a second pad: LT + D-pad left starts building, every control above works, the palette is in that player's view and spends their own blocks.
+9. Save, quit, load: terrain, blocks, crops and each player's block stock come back.
+10. Build a large castle and note any hitch per click (expected around one frame on a full chunk).
 
 Risks: terrain edit thread safety (do BT1 alone first); `Physics.max_meshes` of 64; the Canvas cap of 640 commands for palette UI; the 8 MB module-state stack; the 4 MiB save cap.
 

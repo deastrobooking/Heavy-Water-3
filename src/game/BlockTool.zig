@@ -16,6 +16,7 @@ const Terrain = @import("../procedural/Terrain.zig");
 const Kit = @import("Kit.zig");
 const Prefabs = @import("../build/Prefabs.zig");
 const Farm = @import("Farm.zig");
+const BuildTips = @import("BuildTips.zig");
 
 pub const reach: f32 = 14;
 /// Largest box one fill may cover.
@@ -139,6 +140,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         st.style = @enumFromInt((@as(usize, @intFromEnum(st.style)) + 1) % Materials.style_count);
         if (st.shape >= entryCount(sb, slot, st.*)) st.shape = 0;
         sb.sayTo(slot, "style: {s}", .{Materials.styleName(st.style)});
+        BuildTips.advance(sb, slot, .style);
     } else if (cmd.next_shape) {
         st.shape = @intCast((st.shape + 1) % entryCount(sb, slot, st.*));
         sb.sayTo(slot, "{s}", .{entryName(sb, slot, st.*)});
@@ -204,6 +206,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         sb.block_world.blocks.set(c[0], c[1], c[2], want) catch return sb.sayTo(slot, "block budget full", .{});
         kit.blocks[want.material] -= 1;
         try sb.syncBlocks();
+        BuildTips.advance(sb, slot, .place);
     }
     if (cmd.remove) {
         const c = st.remove orelse return;
@@ -299,6 +302,7 @@ pub fn fillBox(sb: *Sandbox, slot: usize, st: State, a: [3]i32, b: [3]i32) !void
     }
     try sb.syncBlocks();
     sb.sayTo(slot, "filled {d} blocks", .{needed});
+    BuildTips.advance(sb, slot, .box);
 }
 
 /// Where a prefab's turned footprint starts so that it is centred on `at`.
@@ -332,6 +336,7 @@ pub fn stamp(sb: *Sandbox, slot: usize, prefab: Prefabs.Prefab, rot: u2, at: [3]
     }
     try sb.syncBlocks();
     sb.sayTo(slot, "built {s}", .{prefab.name});
+    BuildTips.advance(sb, slot, .prefab);
 }
 
 /// Re-skin every block in the box into `style`, role for role. The builder pays the new blocks and
