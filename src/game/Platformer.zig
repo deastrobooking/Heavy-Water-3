@@ -14,7 +14,9 @@ const Mesher = @import("../build/Mesher.zig");
 
 pub const Kind = enum { none, spring, boost, crumble, hazard, checkpoint, plate, gate, mover };
 
-pub const spring_speed: f32 = 15;
+/// Launch speed off a spring: about a 14 m rise, well above a 9 m running jump, so springs
+/// still open routes nothing else reaches (`Course.spring_rise` counts on 11 m).
+pub const spring_speed: f32 = 20.5;
 pub const boost_speed: f32 = 16;
 pub const crumble_delay: f32 = 0.6;
 pub const crumble_return: f32 = 4;
@@ -263,4 +265,25 @@ test "platformer kinds follow the platformer style's roles and nothing else" {
     try std.testing.expectEqual(Kind.mover, kindOf(.{ .shape = .cube, .material = Materials.ofRole(.platformer, .color) }));
     try std.testing.expectEqual(Kind.none, kindOf(.{ .shape = .cube, .material = Materials.ofRole(.castle, .main) }));
     try std.testing.expectEqual(Kind.none, kindOf(.empty));
+}
+
+test "a spring lifts higher than a running jump, and at least the rise courses count on" {
+    var physics: Physics = .init(.{ .sample = flat });
+    defer physics.deinit();
+    var camera: Camera = .{};
+    var p: Player = .{ .feet = .{ 0, 0, 0 } };
+    p.step(&physics, &camera, .{}, 1.0 / 60.0);
+    p.velocity[1] = spring_speed;
+    p.grounded = false;
+    var top: f32 = 0;
+    for (0..240) |_| {
+        p.step(&physics, &camera, .{}, 1.0 / 60.0);
+        top = @max(top, p.feet[1]);
+    }
+    try std.testing.expect(top >= @as(f32, @floatFromInt(@import("../build/Course.zig").spring_rise)) + 1);
+    try std.testing.expect(top > 9.5);
+}
+
+fn flat(_: ?*const anyopaque, _: f32, _: f32) Physics.GroundSample {
+    return .{ .height = 0, .normal = .{ 0, 1, 0 } };
 }

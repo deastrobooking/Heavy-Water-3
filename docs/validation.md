@@ -1,3 +1,10 @@
+## Discovery courses raised for the new jumps — 2026-10-22
+
+- **Changed:** with 9.2 m running jumps the 6 m plate pillars could be skipped from the ground. Every discovery course now ends on a plate 16 m up (`Challenges.plate_height`), out of reach of a running jump even from the 5 m cage roof. Courses are spiral towers: a low first block, four steps rising 3 m around the plate column (stone, or crumbling for the stair methods); the spring course puts the spring on a 5 m pillar beside the plate column; the ferry crosses between a spiral tower and the plate column at the top. Springs launch at 20.5 m/s (about 14 m, above any jump; the course checker still counts on 11 m). Pressure plates reach gates within 20 m (was 16) so a tall plate still opens its whole cage.
+- **Tests added:** a spring lifts at least 12 m and above a running jump; no plate is within a running jump of the floor or the cage roof. The existing test still lays all eight challenges on the real seed and checks each finishable.
+- **Checked:** default and 0.17 `build check`; the full suite passed 604/604; the Metal smoke exited 0; a capture of showcase 100 shows a crumble-stair tower beside its cage.
+- **Not checked:** climbing a tower by hand (crumble timing on the spiral, the spring onto the ledge, the ferry at 16 m), and that towers this tall read well on the plazas.
+
 ## Limitless specials, 15 ft and 30 ft jumps, a phased jump animation — 2026-10-22
 
 - **Specials:** grenades, turrets, shields and every other special no longer draw on an energy bar; each is limited only by its own recharge, so it can be used again as often as it recharges. The old energy cost is gone from the data; a character's former energy regeneration became a recharge rate (8 is real time: Rangers 10 recharge a quarter faster, Synthetics 7 slower, Wildkin keep their hero's value). The HUD drops the energy bar and shows each power's recharge.
@@ -1902,4 +1909,10 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Checked:** the Detroit Titan integration test now verifies the pre-liberation Hive mesh is replaced by the relay garden props after the boss reward sets `detroit_free`. The showcase-99 ReleaseSafe capture completed at 2560×1600 under Metal API Validation and was visually inspected; the reclaimed signal and plants are visible against the existing skyline. No Metal validation errors were reported.
 - **Gates:** default and Zig 0.17 `build check` pass; the Titan-focused filter passes **4/4** and the latest full default suite passes **551/551**. The 300-frame ReleaseSafe Metal smoke, showcases 97 and 99, the ReleaseFast install build and `git diff --check` pass. Zig 0.17 tests were not rerun.
 - **Still open:** this only marks the three stronghold sites. There is no citywide damage repair, civilian return behavior or change to the architecture, and the live Titan fight still needs hands-on sightline and controller review.
+
+## Hive air and travel encounter pass — 2026-10-22
+
+- **Added:** the second Hive carrier is now a metallic synthetic command ship and launches tougher robot fighters; insect Brood carriers launch up to eight flyers each at 4.5-second intervals. Surface and cave nests wake within 210 m, support 15 active units each, and reinforce every 5.5 seconds after a shorter initial delay.
+- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` pass. A focused regression and the Metal smoke/capture have not yet been run.
+- **Still open:** carriers are destructible through the existing staged weak-point assault, but their collision is not a landing surface and players cannot board them on foot yet. The robot capital ship currently shares the carrier mesh with metallic/blue lighting; its bespoke robot silhouette remains art work. Hands-on travel combat pacing and balance are unverified.
 

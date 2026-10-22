@@ -38,17 +38,23 @@ fn mech(role: Materials.Role, rot: u2) Blocks.Cell {
 }
 
 /// One cell of a layout, in the challenge's own frame: `along` steps away from the cage in the
-/// chosen direction, `up` from the ground layer.
+/// chosen direction, `side` across it, `up` from the ground layer.
 const Piece = struct { along: i32, side: i32 = 0, up: i32, cell: Blocks.Cell };
+/// A spot in the challenge's frame: along, side, up.
+const Spot = [3]i32;
 
-const max_pieces = 128;
+const max_pieces = 160;
 /// How far a course may be pushed out from the cage; its plate still reaches every gate.
 const max_shift = 5;
+/// The plate stands this high above the floor: out of reach of a running jump (about 9.2 m)
+/// even from the cage roof (5 m), so the course is the way up.
+pub const plate_height = 16;
+
 const Layout = struct {
     pieces: [max_pieces]Piece = undefined,
     len: usize = 0,
-    start: [2]i32 = .{ 0, 0 },
-    plate: [2]i32 = .{ 0, 0 },
+    start: Spot = .{ 0, 0, 0 },
+    plate: Spot = .{ 0, 0, 0 },
 
     /// Push the whole course this many cells farther from the cage (to clear a canopy).
     fn shifted(self: Layout, by: i32) Layout {
@@ -59,61 +65,63 @@ const Layout = struct {
         return out;
     }
 
-    fn add(self: *Layout, along: i32, up: i32, cell: Blocks.Cell) void {
-        self.pieces[self.len] = .{ .along = along, .up = up, .cell = cell };
+    fn add(self: *Layout, along: i32, side: i32, up: i32, cell: Blocks.Cell) void {
+        self.pieces[self.len] = .{ .along = along, .side = side, .up = up, .cell = cell };
         self.len += 1;
     }
 
-    fn pillar(self: *Layout, along: i32, height: i32, top: Blocks.Cell) void {
+    /// A column `height` cells tall with `top` as its last cell.
+    fn pillar(self: *Layout, along: i32, side: i32, height: i32, top: Blocks.Cell) void {
         var h: i32 = 0;
-        while (h < height - 1) : (h += 1) self.add(along, h, stone);
-        self.add(along, height - 1, top);
+        while (h < height - 1) : (h += 1) self.add(along, side, h, stone);
+        self.add(along, side, height - 1, top);
+    }
+
+    /// A spiral tower around (`along`, 0): a low first block, four steps rising 3 m around the
+    /// centre, and the centre column `plate_height` tall holding `cap`. Every step is within a
+    /// standing jump of the last; the top only from the fourth step.
+    fn tower(self: *Layout, along: i32, step: Blocks.Cell, cap: Blocks.Cell) void {
+        self.pillar(along + 3, 0, 2, stone);
+        const ring = [_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ -1, 0 }, .{ 0, -1 } };
+        for (ring, 0..) |o, k| self.pillar(along + o[0], o[1], 4 + 3 * @as(i32, @intCast(k)), step);
+        self.pillar(along, 0, plate_height, cap);
     }
 };
 
-/// A course running away from the cage along +along, compact enough for a 20 m plaza. Rot faces
-/// movers back toward the cage.
+/// A course running away from the cage along +along. Rot faces movers back toward the cage.
 fn layout(archetype: Archetype, mover_rot: u2) Layout {
     var l: Layout = .{};
+    const top = plate_height - 1;
     switch (archetype) {
         .stones => {
-            // Pillars rising toward the cage; the plate tops the last, too high to jump from the floor.
-            l.pillar(9, 2, stone);
-            l.pillar(7, 3, stone);
-            l.pillar(5, 4, stone);
-            l.pillar(3, 6, mech(.nature, 0));
-            l.start = .{ 9, 1 };
-            l.plate = .{ 3, 5 };
+            // A spiral of stone steps to the plate.
+            l.tower(5, stone, mech(.nature, 0));
+            l.start = .{ 8, 0, 1 };
+            l.plate = .{ 5, 0, top };
         },
         .crumble_stair => {
-            // The same climb, but every step crumbles under you: keep moving.
-            l.add(11, 0, stone);
-            l.pillar(9, 2, mech(.accent, 0));
-            l.pillar(7, 3, mech(.accent, 0));
-            l.pillar(5, 4, mech(.accent, 0));
-            l.pillar(3, 6, mech(.nature, 0));
-            l.start = .{ 11, 0 };
-            l.plate = .{ 3, 5 };
+            // The same spiral, but every step crumbles under you: keep moving.
+            l.tower(5, mech(.accent, 0), mech(.nature, 0));
+            l.start = .{ 8, 0, 1 };
+            l.plate = .{ 5, 0, top };
         },
         .spring_ledge => {
-            // A spring on the floor launches you onto a high ledge that holds the plate.
-            l.add(10, 0, stone);
-            l.add(8, 0, mech(.main, 0));
-            l.pillar(4, 9, mech(.nature, 0));
-            l.add(3, 8, stone);
-            l.add(5, 8, stone);
-            l.start = .{ 10, 0 };
-            l.plate = .{ 4, 8 };
+            // A step, a spring on a pillar, and the plate column with a ledge to land on.
+            l.add(11, 0, 0, stone);
+            l.pillar(10, 0, 2, stone);
+            l.pillar(8, 0, 5, mech(.main, 0));
+            l.pillar(5, 0, plate_height, mech(.nature, 0));
+            for ([_][2]i32{ .{ 5, 1 }, .{ 5, -1 }, .{ 4, 0 } }) |o| l.add(o[0], o[1], top, stone);
+            l.start = .{ 11, 0, 0 };
+            l.plate = .{ 5, 0, top };
         },
         .ferry => {
-            // Steps up a far tower, a mover across the gap, and the plate tower by the cage.
-            l.pillar(11, 2, stone);
-            l.pillar(10, 4, stone);
-            l.pillar(9, 6, stone);
-            l.add(8, 5, mech(.color, mover_rot));
-            l.pillar(3, 6, mech(.nature, 0));
-            l.start = .{ 11, 1 };
-            l.plate = .{ 3, 5 };
+            // Up a far spiral tower, a mover across the gap at the top, and the plate column.
+            l.tower(12, stone, stone);
+            l.add(10, 0, top, mech(.color, mover_rot));
+            l.pillar(5, 0, plate_height, mech(.nature, 0));
+            l.start = .{ 15, 0, 1 };
+            l.plate = .{ 5, 0, top };
         },
     }
     return l;
@@ -123,8 +131,13 @@ const directions = [_][2]i32{ .{ 0, 1 }, .{ 1, 0 }, .{ 0, -1 }, .{ -1, 0 } };
 /// The quarter turn that faces a mover along each direction's opposite (back toward the cage).
 const toward_cage = [_]u2{ 2, 3, 0, 1 };
 
-fn world(cage: [3]i32, d: [2]i32, along: i32, up: i32) [3]i32 {
-    return .{ cage[0] + d[0] * along, cage[1] + up, cage[2] + d[1] * along };
+fn world(cage: [3]i32, d: [2]i32, along: i32, side: i32, up: i32) [3]i32 {
+    // Across is the direction turned a quarter: (-dz, dx).
+    return .{ cage[0] + d[0] * along - d[1] * side, cage[1] + up, cage[2] + d[1] * along + d[0] * side };
+}
+
+fn at(cage: [3]i32, d: [2]i32, spot: Spot) [3]i32 {
+    return world(cage, d, spot[0], spot[1], spot[2]);
 }
 
 const Plan = struct { cage: [3]i32, roof: i32, d: [2]i32, l: Layout };
@@ -196,7 +209,7 @@ pub fn place(sb: *Sandbox) usize {
             }
         }
         for (l.pieces[0..l.len]) |p| {
-            const c = world(cage, d, p.along, p.up);
+            const c = world(cage, d, p.along, p.side, p.up);
             blocks.set(c[0], c[1], c[2], p.cell) catch {
                 ok = false;
             };
@@ -205,7 +218,7 @@ pub fn place(sb: *Sandbox) usize {
         // The keepsake sits in the middle of its cage.
         const ground = floorAt(sb, spot[0], floor_hint + 2.5, spot[1]) orelse floor_hint;
         sb.city_discovery_positions[index] = .{ @as(f32, @floatFromInt(cage[0])) + 0.5, ground + 1.25, @as(f32, @floatFromInt(cage[2])) + 0.5 };
-        sb.challenges[index] = .{ .archetype = archetype, .start = world(cage, d, l.start[0], l.start[1]), .plate = world(cage, d, l.plate[0], l.plate[1]), .cage = cage };
+        sb.challenges[index] = .{ .archetype = archetype, .start = at(cage, d, l.start), .plate = at(cage, d, l.plate), .cage = cage };
         laid += 1;
     }
     return laid;
@@ -225,17 +238,19 @@ fn cageClear(sb: *const Sandbox, cage: [3]i32, height: f32) bool {
 
 fn clear(sb: *const Sandbox, cage: [3]i32, d: [2]i32, l: Layout) bool {
     const base: f32 = @floatFromInt(cage[1]);
-    // The whole strip the course runs over, including a mover's path, to its tallest piece.
     var tallest: i32 = 0;
     var farthest: i32 = 0;
+    var nearest: i32 = std.math.maxInt(i32);
     for (l.pieces[0..l.len]) |p| {
         tallest = @max(tallest, p.up);
         farthest = @max(farthest, p.along);
+        nearest = @min(nearest, p.along);
     }
-    var nearest: i32 = farthest;
-    for (l.pieces[0..l.len]) |p| nearest = @min(nearest, p.along);
+    const height: f32 = @floatFromInt(tallest + 4);
+    // Every column the course stands in, and the centre strip a mover crosses, open to the top.
+    for (l.pieces[0..l.len]) |p| if (!columnClear(sb, world(cage, d, p.along, p.side, 0), base, height)) return false;
     var along: i32 = nearest;
-    while (along <= farthest) : (along += 1) if (!columnClear(sb, world(cage, d, along, 0), base, @floatFromInt(tallest + 4))) return false;
+    while (along <= farthest) : (along += 1) if (!columnClear(sb, world(cage, d, along, 0, 0), base, height)) return false;
     return true;
 }
 
@@ -308,6 +323,15 @@ pub fn finishable(sb: *const Sandbox, built: Built) bool {
     return Course.reachable(sb.block_world.blocks, built.start, built.plate) catch false;
 }
 
+test "no plate can be reached by a running jump from the floor or the cage roof" {
+    const Player = @import("Player.zig");
+    // Peak of a running jump (v^2 / 2g at the rise gravity, with the float near the top) is
+    // about 9.2 m; the plate's standing height minus the cage roof must beat it.
+    const running_peak: f32 = 9.3;
+    try std.testing.expect(@as(f32, plate_height) - 5 > running_peak);
+    try std.testing.expect(Player.runningJumpSpeed(Player.walk_speed) > Player.jump_speed);
+}
+
 test "every method maps to a challenge except the two landmark climbs" {
     var cages: usize = 0;
     for (CityContent.detroit.discoveries) |d| cages += @intFromBool(archetypeOf(d.method) != null);
@@ -319,7 +343,7 @@ test "each course fits its piece budget and keeps its plate within reach of the 
         const l = layout(a, 0).shifted(max_shift);
         try std.testing.expect(l.len > 0 and l.len <= max_pieces);
         // Every cage gate must lie within the plate's reach, or part of the cage stays shut.
-        const plate: [3]f32 = .{ 0.5, @as(f32, @floatFromInt(l.plate[1])) + 0.5, @as(f32, @floatFromInt(l.plate[0])) + 0.5 };
+        const plate: [3]f32 = .{ @as(f32, @floatFromInt(l.plate[1])) + 0.5, @as(f32, @floatFromInt(l.plate[2])) + 0.5, @as(f32, @floatFromInt(l.plate[0])) + 0.5 };
         var dy: f32 = 1;
         while (dy <= 4) : (dy += 1) for ([_]f32{ -2, 2 }) |dx| for ([_]f32{ -2, 2 }) |dz| {
             const g: [3]f32 = .{ dx + 0.5 - plate[0], dy + 0.5 - plate[1], dz + 0.5 - plate[2] };

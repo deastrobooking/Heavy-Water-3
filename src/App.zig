@@ -2016,15 +2016,15 @@ fn showcase(self: *App) void {
         const player_eye = self.sandbox.player.eye();
         eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };
     } else if (v == 100) {
-        // A Detroit discovery challenge: the spring ledge, its plate and the gate cage.
-        const built = self.sandbox.challenges[2] orelse self.sandbox.challenges[1].?;
+        // A Detroit discovery challenge: the spiral tower to the plate, and the gate cage.
+        const built = self.sandbox.challenges[1] orelse self.sandbox.challenges[2].?;
         const cage: [3]f32 = .{ @floatFromInt(built.cage[0]), @floatFromInt(built.cage[1]), @floatFromInt(built.cage[2]) };
         const plate: [3]f32 = .{ @floatFromInt(built.plate[0]), @floatFromInt(built.plate[1]), @floatFromInt(built.plate[2]) };
-        target = .{ (cage[0] + plate[0]) / 2, cage[1] + 3, (cage[2] + plate[2]) / 2 };
+        target = .{ (cage[0] + plate[0]) / 2, cage[1] + 7, (cage[2] + plate[2]) / 2 };
         const across: [3]f32 = .{ plate[2] - cage[2], 0, cage[0] - plate[0] };
         self.sandbox.player.mode = .fly;
         self.sandbox.view = .first;
-        self.sandbox.player.feet = .{ target[0] + across[0] * 1.6 + 2, target[1] + 4, target[2] + across[2] * 1.6 + 2 };
+        self.sandbox.player.feet = .{ target[0] + across[0] * 3 + 2, target[1] + 2, target[2] + across[2] * 3 + 2 };
         self.sandbox.player.velocity = .{ 0, 0, 0 };
         const player_eye = self.sandbox.player.eye();
         eye = .{ player_eye.x(), player_eye.y(), player_eye.z() };

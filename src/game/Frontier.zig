@@ -2030,20 +2030,23 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             .wasp => .{ 1, 1, 1, 1 },
             .dragonfly => .{ 0.45, 1.1, 1.5, 1 },
             .beetle_bomber => .{ 1.45, 0.78, 0.35, 1 },
+            .robot_fighter => .{ 0.48, 0.63, 0.78, 1 },
         };
         const tint = wing_tint;
         const hull = switch (w.kind) {
             .wasp => c.wasp,
             .dragonfly => c.dragonfly,
             .beetle_bomber => c.beetle_bomber,
+            .robot_fighter => c.dragonfly,
         };
         const lights = switch (w.kind) {
             .wasp => c.wasp_glow,
             .dragonfly => c.dragonfly_glow,
             .beetle_bomber => c.beetle_bomber_glow,
+            .robot_fighter => c.dragonfly_glow,
         };
         out[n] = .{ .mesh = hull, .transform = .{ .position = w.position }, .tint = tint, .rotation = quat(q) };
-        out[n + 1] = .{ .mesh = lights, .transform = .{ .position = w.position }, .tint = Material.emissive(if (w.kind == .dragonfly) .{ 0.2, 0.75, 1, 1 } else if (w.kind == .beetle_bomber) .{ 1, 0.32, 0.08, 1 } else .{ 1, 1, 1, 1 }, if (w.state == .attack) 1 else 0.6), .rotation = quat(q) };
+        out[n + 1] = .{ .mesh = lights, .transform = .{ .position = w.position }, .tint = Material.emissive(if (w.kind == .dragonfly) .{ 0.2, 0.75, 1, 1 } else if (w.kind == .beetle_bomber) .{ 1, 0.32, 0.08, 1 } else if (w.kind == .robot_fighter) .{ 0.18, 0.62, 1, 1 } else .{ 1, 1, 1, 1 }, if (w.state == .attack) 1 else 0.6), .rotation = quat(q) };
         n += 2;
         for (ShipMeshes.wasp_wings, 0..) |root, k| {
             const side: f32 = if (root.x > 0) 1 else -1;
@@ -2058,14 +2061,14 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     for (sb.skies.carriers) |carrier| if (carrier.alive and room(out, n, 2)) {
         const q = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, carrier.yaw()));
         const at = carrier.position();
-        out[n] = .{ .mesh = c.carrier, .transform = .{ .position = at }, .tint = if (carrier.flash > 0) .{ 1.4, 1.2, 1.2, 1 } else .{ 1, 1, 1, 1 }, .rotation = q };
+        out[n] = .{ .mesh = c.carrier, .transform = .{ .position = at }, .tint = if (carrier.flash > 0) .{ 1.4, 1.2, 1.2, 1 } else if (carrier.robotic) .{ 0.42, 0.55, 0.72, 1 } else .{ 1, 1, 1, 1 }, .rotation = q };
         const glow = if (carrier.crashing) 1.2 else switch (carrier.stage()) {
             .turrets => @as(f32, 0.35),
             .bays => 0.65,
             .core => 0.95,
             .crashing => 1.2,
         };
-        out[n + 1] = .{ .mesh = c.carrier_glow, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, glow + 0.2 * @sin(t * 1.3)), .rotation = q };
+        out[n + 1] = .{ .mesh = c.carrier_glow, .transform = .{ .position = at }, .tint = Material.emissive(if (carrier.robotic) .{ 0.12, 0.52, 1, 1 } else .{ 1, 1, 1, 1 }, glow + 0.2 * @sin(t * 1.3)), .rotation = q };
         n += 2;
         if (!carrier.crashing) switch (carrier.stage()) {
             .turrets => for (ShipMeshes.carrier_turrets, carrier.turret_health) |p, health| if (health > 0 and room(out, n, 1)) {
