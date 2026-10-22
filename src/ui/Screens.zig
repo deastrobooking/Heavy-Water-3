@@ -1036,9 +1036,9 @@ fn drawInspect(c: *Canvas, hud: Hud) void {
 const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "IDENTITY", .first = .name },
     .{ .title = "CHARACTER MODEL", .first = .body_style },
-    .{ .title = "FACE", .first = .face_style },
     .{ .title = "BODY", .first = .height },
     .{ .title = "HAIR", .first = .hair_style },
+    .{ .title = "FACE", .first = .face_style },
     .{ .title = "GEAR", .first = .outfit },
     .{ .title = "ARMOR COLOR STUDIO  /  RGB", .first = .armor_metal_r },
     .{ .title = "BOOTS", .first = .boot_style },
@@ -1046,15 +1046,16 @@ const sections = [_]struct { title: []const u8, first: Profile.Field }{
     .{ .title = "RENDER STYLE", .first = .cel_style },
 };
 
-pub const creator_tab_starts = [_]Profile.Field{ .name, .hair_style, .outfit, .armor_metal_r, .cel_style };
-pub const creator_tab_ends = [_]usize{ 11, 17, 25, 34, 35 };
-const creator_tab_labels = [_][]const u8{ "BASICS", "HAIR", "GEAR", "ARMOR RGB", "STYLE" };
+pub const creator_tab_starts = [_]Profile.Field{ .name, .face_style, .outfit, .armor_metal_r, .cel_style };
+pub const creator_tab_ends = [_]usize{ 10, 19, 27, 36, 37 };
+const creator_tab_labels = [_][]const u8{ "BASICS", "FACE/HAIR", "GEAR", "ARMOR RGB", "STYLE" };
 
 fn swatch(field: Profile.Field, p: Profile) ?Color {
     return switch (field) {
         .skin => Profile.skin_tones[p.skin],
         .hair_color => Profile.hair_colors[p.hair_color],
         .hair_highlight => if (p.hair_highlight == 0) null else Profile.hair_colors[p.hair_highlight - 1],
+        .eye_color => if (p.eye_color == 0 or p.class == .synthetic) null else Profile.eye_colors[p.eye_color - 1],
         .outfit => Profile.outfit_colors[p.outfit],
         .accent => Profile.accent_colors[p.accent],
         .gemstone => switch (p.gemstone) {

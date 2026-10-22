@@ -77,6 +77,8 @@ last_fade: f32 = 0,
 /// How many entries the content registry held when this was built; the owner rebuilds when a
 /// mod installs later, so a saved choice appears as soon as its mod does.
 content_count: usize = 0,
+/// Resting smile baked into the mouth (presentation default plus the face preset's).
+smile: f32 = 0.3,
 
 fn rgb(c: [4]f32, factor: f32) spec.Rgb {
     return .{ .r = c[0] * factor, .g = c[1] * factor, .b = c[2] * factor };
@@ -147,13 +149,25 @@ pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const Char
         .iris_color = if (synthetic) rgb(lumen, 1.35) else if (feminine) spec.Rgb.hex(0x4f91b4) else spec.Rgb.hex(0x667b82),
         .iris_dark = if (synthetic) rgb(lumen, 0.75) else spec.Rgb.hex(0x213946),
         .pupil_size = if (synthetic) 0.18 else if (feminine) 0.35 else 0.31,
-        .highlight_count = if (profile.face_style == .heroic or profile.face_style == .hero or profile.face_style == .alien) 2 else 1,
+        .highlight_count = std.math.clamp(preset.highlights, 1, 2),
         .brow_weight = preset.brow_weight,
         .brow_tilt = preset.brow_tilt,
         .brow_gap = preset.brow_gap,
         .nose_mark = preset.nose_mark,
         .mouth_width = preset.mouth_width,
+        .lid = preset.eye_lid,
+        .brow_arch = preset.brow_arch,
+        .mark = profile.face_mark,
+        .mark_color = rgb(lumen, 1.1),
     }, rgb(lumen, 1.2));
+    // A chosen iris colour wins over the presentation's and a Wildkin form's; synthetics keep lumen.
+    if (profile.eye_color > 0 and !synthetic) {
+        const iris = Profile.eye_colors[@min(profile.eye_color - 1, Profile.eye_colors.len - 1)];
+        eyes.iris_color = rgb(iris, 1);
+        eyes.iris_dark = rgb(iris, 0.36);
+    }
+    const rest_smile: f32 = if (wildkin) 0.55 else if (feminine) 0.38 else 0.12;
+    const smile = std.math.clamp(rest_smile + preset.smile, -1, 1);
     if (profile.face_style == .alien) {
         eyes.pupil_size = 0.18;
         eyes.iris_color = rgb(lumen, 1.4);
@@ -224,13 +238,13 @@ pub fn initContent(a: std.mem.Allocator, profile: Profile, content: ?*const Char
     errdefer a.free(vertices);
     const indices = try a.dupe(u32, ch.mesh.indices.items);
     errdefer a.free(indices);
-    var self: Ranger = .{ .character = ch, .instance = inst, .mesh = .{ .vertices = vertices, .indices = indices }, .profile = profile, .content_count = if (content) |registry| registry.count else 0 };
+    var self: Ranger = .{ .character = ch, .instance = inst, .mesh = .{ .vertices = vertices, .indices = indices }, .profile = profile, .content_count = if (content) |registry| registry.count else 0, .smile = smile };
     self.fade_from = try a.alloc(m.Transform, inst.pose.local.len);
     errdefer a.free(self.fade_from);
     for (self.mesh.vertices, self.character.mesh.vertices.items, self.character.color_index.items) |*v, source, color| {
         var c = self.character.palette.items[color];
         if (source.region == .face and source.uv.x >= 0 and source.uv.y >= 0) {
-            const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = if (wildkin) 0.55 else if (feminine) 0.38 else 0.12 }, 0.008);
+            const decal = toon.faceDecal(source.uv, self.character.spec.eyes, .{ .smile = smile }, 0.008);
             if (decal.alpha > 0) c = toon.mix(c, decal.color, decal.alpha);
         } else if (source.material == .hair) {
             const secondary_hair: ?spec.Rgb = if (profile.hair_highlight > 0)
@@ -319,7 +333,7 @@ pub fn skinnedVertices(self: *const Ranger, a: std.mem.Allocator) ![]SkinnedVert
         var face_color = baked.color;
         if (has_face_uv) {
             var face = skin;
-            const marks = toon.faceDecalWithoutEyes(source.uv, eyes, .{}, 0.008);
+            const marks = toon.faceDecalWithoutEyes(source.uv, eyes, .{ .smile = self.smile }, 0.008);
             if (marks.alpha > 0) face = toon.mix(face, marks.color, marks.alpha);
             face_color = .{ face.r, face.g, face.b };
         }
@@ -332,9 +346,10 @@ pub fn skinnedVertices(self: *const Ranger, a: std.mem.Allocator) ![]SkinnedVert
             .kind = .{ @intFromEnum(source.material), @intFromBool(has_face_uv), 0, 0 },
             .face_uv = .{ source.uv.x, source.uv.y },
             .eye_geometry = .{ eyes.spacing, eyes.height, eyes.size, eyes.aspect },
-            .eye_style = .{ eyes.tilt, eyes.pupil_size, @floatFromInt(eyes.highlight_count), 0 },
-            .eye_iris = .{ eyes.iris_color.r, eyes.iris_color.g, eyes.iris_color.b, 1 },
-            .eye_shadow = .{ eyes.iris_dark.r, eyes.iris_dark.g, eyes.iris_dark.b, 1 },
+            .eye_style = .{ eyes.tilt, eyes.pupil_size, @floatFromInt(eyes.highlight_count), eyes.lid },
+            // The w lanes carry the face mark and its packed paint colour (`toon.packMarkColor`).
+            .eye_iris = .{ eyes.iris_color.r, eyes.iris_color.g, eyes.iris_color.b, @floatFromInt(@intFromEnum(eyes.mark)) },
+            .eye_shadow = .{ eyes.iris_dark.r, eyes.iris_dark.g, eyes.iris_dark.b, toon.packMarkColor(eyes.mark_color) },
         };
     }
     return out;

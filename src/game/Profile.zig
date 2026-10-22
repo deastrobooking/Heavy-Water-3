@@ -21,6 +21,13 @@ pub const outfit_colors = [_][4]f32{
     .{ 0.22, 0.42, 0.28, 1 }, .{ 0.42, 0.29, 0.18, 1 }, .{ 0.25, 0.36, 0.52, 1 }, .{ 0.62, 0.18, 0.18, 1 },
     .{ 0.86, 0.83, 0.74, 1 }, .{ 0.20, 0.21, 0.23, 1 }, .{ 0.18, 0.55, 0.50, 1 }, .{ 0.44, 0.30, 0.58, 1 },
 };
+/// Iris colours a ranger can pick; 0 in `eye_color` keeps the default for the presentation.
+/// Synthetics keep lumen eyes in their accent whatever is chosen.
+pub const eye_colors = [_][4]f32{
+    .{ 0.42, 0.27, 0.16, 1 }, .{ 0.55, 0.45, 0.22, 1 }, .{ 0.85, 0.55, 0.14, 1 }, .{ 0.27, 0.58, 0.30, 1 },
+    .{ 0.16, 0.62, 0.62, 1 }, .{ 0.25, 0.52, 0.92, 1 }, .{ 0.50, 0.58, 0.64, 1 }, .{ 0.56, 0.36, 0.86, 1 },
+    .{ 0.86, 0.22, 0.26, 1 }, .{ 0.96, 0.80, 0.30, 1 },
+};
 /// Bioluminescent accent (visor and belt), echoing the Arbors' lumen.
 pub const accent_colors = [_][4]f32{
     .{ 0.30, 0.95, 1.00, 1 }, .{ 1.00, 0.72, 0.25, 1 }, .{ 1.00, 0.40, 0.85, 1 }, .{ 0.60, 1.00, 0.35, 1 }, .{ 0.95, 0.95, 1.00, 1 },
@@ -74,7 +81,9 @@ pub fn hairFactor(level: u8) f32 {
     return 0.7 + 0.15 * @as(f32, @floatFromInt(@min(level, hair_levels - 1)));
 }
 /// Order matches `character/spec.zig` `face_presets`; new tags go at the end so saved names keep their meaning.
-pub const FaceStyle = enum { classic, soft, angular, heroic, alien, hero };
+pub const FaceStyle = enum { classic, soft, angular, heroic, alien, hero, youthful, noble, rugged, fierce, gentle, stoic };
+/// Freckles, a scar, paint and the like over the skin; war paint and tech seams take the accent.
+pub const FaceMark = @import("../character/spec.zig").FaceMark;
 pub const BootStyle = enum { trail_runner, field_boot, armored_sabatons, magstep, thruster };
 pub const Presentation = enum { masculine, feminine };
 /// Rangers are human and fight with tech (arc grenades, sentry turrets, overshields).
@@ -93,7 +102,8 @@ pub const Armor = enum { none, scout, sentinel, rootweave, skyguard, gem_aegis, 
 pub const Gemstone = enum { lumen, ruby, sapphire, emerald, amethyst, citrine };
 pub const GemCut = enum { brilliant, star, teardrop };
 pub const Helmet = enum { open, visor, sealed, pilot, recon };
-pub const Field = enum { name, class, body_style, species, presentation, face_style, height, build, skin, coat, marking, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, armor_metal_r, armor_metal_g, armor_metal_b, armor_secondary_r, armor_secondary_g, armor_secondary_b, armor_trim_r, armor_trim_g, armor_trim_b, cel_style };
+/// Creator rows in display order (tabs in `ui/Screens.zig` are ranges of it); not saved.
+pub const Field = enum { name, class, body_style, species, presentation, height, build, skin, coat, marking, face_style, face_mark, eye_color, hair_style, hair_spike, hair_volume, hair_length, hair_color, hair_highlight, outfit, clothing, armor, helmet, boot_style, accent, gemstone, gem_cut, armor_metal_r, armor_metal_g, armor_metal_b, armor_secondary_r, armor_secondary_g, armor_secondary_b, armor_trim_r, armor_trim_g, armor_trim_b, cel_style };
 
 name_buffer: [name_capacity]u8 = "RANGER".* ++ @as([name_capacity - 6]u8, @splat(0)),
 name_len: u8 = 6,
@@ -118,6 +128,9 @@ hair_color: u8 = 1,
 /// Zero disables streaks; 1..hair_colors.len selects a contrasting streak color.
 hair_highlight: u8 = 0,
 face_style: FaceStyle = .classic,
+face_mark: FaceMark = .none,
+/// 0 = the presentation's default iris; 1..eye_colors.len picks one.
+eye_color: u8 = 0,
 boot_style: BootStyle = .trail_runner,
 outfit: u8 = 0,
 accent: u8 = 0,
@@ -176,6 +189,8 @@ pub fn adjust(self: *Profile, field: Field, delta: i32) void {
         .marking => self.marking = cycle(self.marking, delta, coat_colors.len),
         .presentation => self.presentation = @enumFromInt(cycle(@intFromEnum(self.presentation), delta, enum_compat.fields(Presentation).len)),
         .face_style => self.face_style = @enumFromInt(cycle(@intFromEnum(self.face_style), delta, enum_compat.fields(FaceStyle).len)),
+        .face_mark => self.face_mark = @enumFromInt(cycle(@intFromEnum(self.face_mark), delta, enum_compat.fields(FaceMark).len)),
+        .eye_color => self.eye_color = cycle(self.eye_color, delta, eye_colors.len + 1),
         .height => self.height = std.math.clamp(self.height + @as(f32, @floatFromInt(delta)) * 0.02, 0.9, 1.1),
         .build => self.build = std.math.clamp(self.build + @as(f32, @floatFromInt(delta)) * 0.05, 0.85, 1.15),
         .skin => self.skin = cycle(self.skin, delta, skin_tones.len),
@@ -241,6 +256,9 @@ pub const Doc = struct {
     hair_color: u8,
     hair_highlight: u8 = 0,
     face_style: FaceStyle = .classic,
+    /// Absent in saves before format 32: no mark and the default eyes.
+    face_mark: FaceMark = .none,
+    eye_color: u8 = 0,
     boot_style: BootStyle = .trail_runner,
     outfit: u8,
     accent: u8,
@@ -257,7 +275,7 @@ pub const Doc = struct {
 };
 
 pub fn toDoc(self: *const Profile) Doc {
-    return .{ .name = self.name(), .class = self.class, .body_style = self.body_style, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .armor_metal_color = self.armor_metal_color, .armor_secondary_color = self.armor_secondary_color, .armor_trim_color = self.armor_trim_color, .mod = self.mod.toDoc() };
+    return .{ .name = self.name(), .class = self.class, .body_style = self.body_style, .species = self.species, .coat = self.coat, .marking = self.marking, .presentation = self.presentation, .face_style = self.face_style, .face_mark = self.face_mark, .eye_color = self.eye_color, .height = self.height, .build = self.build, .skin = self.skin, .hair_style = self.hair_style, .hair_spike = self.hair_spike, .hair_volume = self.hair_volume, .hair_length = self.hair_length, .hair_color = self.hair_color, .hair_highlight = self.hair_highlight, .outfit = self.outfit, .clothing = self.clothing, .armor = self.armor, .helmet = self.helmet, .boot_style = self.boot_style, .accent = self.accent, .gemstone = self.gemstone, .gem_cut = self.gem_cut, .armor_metal_color = self.armor_metal_color, .armor_secondary_color = self.armor_secondary_color, .armor_trim_color = self.armor_trim_color, .mod = self.mod.toDoc() };
 }
 
 pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
@@ -265,7 +283,7 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     try result.setName(doc.name);
     if (!(doc.height >= 0.9 and doc.height <= 1.1) or !(doc.build >= 0.85 and doc.build <= 1.15)) return error.InvalidProfile;
     if (doc.coat >= coat_colors.len or doc.marking >= coat_colors.len) return error.InvalidProfile;
-    if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.hair_highlight > hair_colors.len or doc.hair_spike >= hair_levels or doc.hair_volume >= hair_levels or doc.hair_length >= hair_levels or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len) return error.InvalidProfile;
+    if (doc.skin >= skin_tones.len or doc.hair_color >= hair_colors.len or doc.hair_highlight > hair_colors.len or doc.hair_spike >= hair_levels or doc.hair_volume >= hair_levels or doc.hair_length >= hair_levels or doc.outfit >= outfit_colors.len or doc.accent >= accent_colors.len or doc.eye_color > eye_colors.len) return error.InvalidProfile;
     result.height = doc.height;
     result.build = doc.build;
     result.class = doc.class;
@@ -282,6 +300,8 @@ pub fn fromDoc(doc: Doc) error{ InvalidName, InvalidProfile }!Profile {
     result.hair_color = doc.hair_color;
     result.hair_highlight = doc.hair_highlight;
     result.face_style = doc.face_style;
+    result.face_mark = doc.face_mark;
+    result.eye_color = doc.eye_color;
     result.boot_style = doc.boot_style;
     result.outfit = doc.outfit;
     result.accent = doc.accent;
@@ -372,6 +392,21 @@ test "every face style, including the newest, survives the JSON round trip by na
     defer arena.deinit();
     const legacy = try std.json.parseFromSlice(Doc, arena.allocator(), "{\"name\":\"RANGER\",\"height\":1,\"build\":1,\"skin\":2,\"hair_style\":\"short\",\"hair_color\":1,\"outfit\":0,\"accent\":0}", .{});
     try std.testing.expectEqual(FaceStyle.classic, (try fromDoc(legacy.value)).face_style);
+    try std.testing.expectEqual(FaceMark.none, (try fromDoc(legacy.value)).face_mark);
+    try std.testing.expectEqual(@as(u8, 0), (try fromDoc(legacy.value)).eye_color);
+    // Marks and eye colours round-trip; an eye colour past the palette is rejected.
+    for (std.enums.values(FaceMark)) |mark| {
+        var q: Profile = .{ .face_mark = mark, .eye_color = eye_colors.len };
+        const json = try std.json.Stringify.valueAlloc(arena.allocator(), q.toDoc(), .{});
+        const back = try fromDoc((try std.json.parseFromSlice(Doc, arena.allocator(), json, .{})).value);
+        try std.testing.expectEqual(mark, back.face_mark);
+        try std.testing.expectEqual(q.eye_color, back.eye_color);
+        q.adjust(.eye_color, 1);
+        try std.testing.expectEqual(@as(u8, 0), q.eye_color);
+    }
+    var bad = (Profile{}).toDoc();
+    bad.eye_color = eye_colors.len + 1;
+    try std.testing.expectError(error.InvalidProfile, fromDoc(bad));
 }
 
 test "every armor set round-trips through a save document by name, and old saves keep their armor" {

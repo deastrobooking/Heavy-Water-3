@@ -1462,7 +1462,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
 /// Face and hair fields get a head close-up in the creator.
 pub fn creatorFocusesHead(field: Profile.Field) bool {
     return switch (field) {
-        .face_style, .hair_style, .hair_spike, .hair_volume, .hair_length, .hair_color, .hair_highlight, .helmet => true,
+        .face_style, .face_mark, .eye_color, .hair_style, .hair_spike, .hair_volume, .hair_length, .hair_color, .hair_highlight, .helmet => true,
         else => false,
     };
 }

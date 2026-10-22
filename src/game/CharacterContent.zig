@@ -776,6 +776,10 @@ const face_limits = [_]Limit{
     .{ "brow_gap", 0.015, 0.09 },
     .{ "nose_mark", 0, 1 },
     .{ "mouth_width", 0.02, 0.09 },
+    .{ "eye_lid", 0, 0.8 },
+    .{ "brow_arch", -0.02, 0.03 },
+    .{ "highlights", 1, 2 },
+    .{ "smile", -0.6, 0.6 },
 };
 
 fn withinLimits(comptime T: type, v: T, comptime limits: []const Limit) bool {

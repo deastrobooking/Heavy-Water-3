@@ -39,7 +39,7 @@ How to build, run, test, benchmark and capture Heavy Water, and what to check be
 
 In the Character Designer, choose **IMPORTED PARTS** to browse the bundled Captain or use **IMPORT GLB** to select a binary `.glb` character. The importer maps named humanoid bones to the game's Ranger pose and carries glTF skin weights and each bone's bind pivot through HWMS v3; at runtime the Ranger's rotation is applied about that pivot, with joint travel converted to the model's units. At runtime `Characters` skins the imported mesh from each player's current Ranger pose palette; the CPU bind/run previews remain static. One glTF skin of up to 128 joints is supported per imported model. Select a component to hide/restore it, assign or clear a palette paint, switch its surface role, and adjust the selected skin, eye, armor, or energy color with the RGB controls. **SAVE LIBRARY** saves the matching modifier sidecar. The bundled Captain override uses `saves/captain.modifiers.json`; a user import and its sidecar are stored as `saves/imported-character.glb` and `saves/imported-character.modifiers.json` and reload on later launches.
 
-The main Character Designer groups its 35 profile fields into Basics, Hair, Gear, Armor RGB, and Style tabs so all fields remain reachable at 720p. Field navigation remains continuous across tabs; clicking a tab selects its first field.
+The main Character Designer groups its 37 profile fields into Basics, Face/Hair, Gear, Armor RGB, and Style tabs so all fields remain reachable at 720p. Field navigation remains continuous across tabs; clicking a tab selects its first field.
 
 To capture the imported-component window on Metal for visual review:
 
@@ -104,7 +104,8 @@ Options are compiled in, so changing one rebuilds.
 | `-Dcharacter-view=0..5` | 0 | Character review camera around the avatar (with `-Dcharacter-showcase`): 0 front, 1 side, 2 back, 3 three-quarter, 4 face close-up, 5 face three-quarter close-up. The close-ups use the same frame as the creator's head zoom. |
 | `-Dcharacter-pose=0..4` | 0 | Hold an arm pose for armor review: 1 aim, 2 overhead swing, 3 cast (arms raised), 4 guard. |
 | `-Dcharacter-tweak=bits` | 0 | Review variations: 1 feminine, 2 height 0.9, 4 height 1.1, 8 open helmet, 16 sealed, 32 visor. |
-| `-Dcharacter-face=N`, `-Dcharacter-hair-color=N` | 0 | Face style (1 = classic ... 6 = hero) and hair color (1-based); 0 keeps the default. |
+| `-Dcharacter-face=N`, `-Dcharacter-hair-color=N` | 0 | Face style (1-based in `Profile.FaceStyle`: 1 classic, 2 soft, 3 angular, 4 heroic, 5 alien, 6 hero, 7 youthful, 8 noble, 9 rugged, 10 fierce, 11 gentle, 12 stoic) and hair color (1-based); 0 keeps the default. |
+| `-Dcharacter-face-mark=N`, `-Dcharacter-eye-color=N` | 0 | Face mark (1 freckles, 2 scar, 3 war paint, 4 beauty mark, 5 tech seams, 6 tear lines) and eye colour (1-based in `Profile.eye_colors`); 0 keeps none and the default eyes. |
 | `-Dcel-style=0..3`, `-Dcel-debug=bits` | 0, 0 | Character look-dev: starting cel style (Heavy Water, Watercolor, Comic ink, Flat) and debug views (1 hide ink, 2 ramp bands, 4 face shadow mask). In any running build, F3 cycles the style, F8 toggles ink and F10 cycles normal, ramp bands and face mask (it logs the state). |
 | `-Dcapture-frame=N` | 0 | Write rendered frame N to `zig-out/capture.bmp`, then exit. |
 | `-Dcpu-skinning=true` | false | Skin characters on the CPU instead of the GPU palette pipeline (comparison and fallback). |

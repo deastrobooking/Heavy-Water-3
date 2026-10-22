@@ -13,6 +13,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(u8, "character_pose", b.option(u8, "character-pose", "Character review pose: 0 rest, 1 aim, 2 overhead swing, 3 cast, 4 guard") orelse 0);
     options.addOption(u8, "character_tweak", b.option(u8, "character-tweak", "Character review variations, bits: 1 feminine, 2 height 0.9, 4 height 1.1, 8 open helmet, 16 sealed helmet, 32 visor helmet") orelse 0);
     options.addOption(u8, "character_face", b.option(u8, "character-face", "Character review face style, 1-based in Profile.FaceStyle order (0 keeps the default)") orelse 0);
+    options.addOption(u8, "character_face_mark", b.option(u8, "character-face-mark", "Character review face mark in Profile.FaceMark order (1 freckles ... 6 tear lines; 0 none)") orelse 0);
+    options.addOption(u8, "character_eye_color", b.option(u8, "character-eye-color", "Character review eye colour, 1-based in Profile.eye_colors (0 keeps the default)") orelse 0);
     options.addOption(u8, "character_hair_color", b.option(u8, "character-hair-color", "Character review hair color, 1-based (0 keeps the default)") orelse 0);
     options.addOption(u8, "cel_style", b.option(u8, "cel-style", "Character look-dev: starting cel style preset (0 Heavy Water, 1 Watercolor, 2 Comic ink, 3 Flat)") orelse 0);
     options.addOption(u8, "cel_debug", b.option(u8, "cel-debug", "Character look-dev: debug view bits (1 hide ink, 2 ramp bands, 4 face shadow mask)") orelse 0);

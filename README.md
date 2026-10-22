@@ -74,6 +74,7 @@ python3 tools/benchmark.py --pack 64    # background-load an 80 MiB pack of 64 m
 
 | Guide | What it covers |
 | --- | --- |
+| [Player Guide](docs/user-guide.md) | How to play: goal, controls, building, four players, the character designer and uploading your own model |
 | [Project Overview](docs/project-overview.md) | Gameplay, controls, local co-op, and the technical snapshot |
 | [World and Systems](docs/world.md) | Setting, pillars, Arbors, and visual direction |
 | [Building and Testing](docs/building-and-testing.md) | Build steps and options, running, tests, smoke runs, benchmarks, showcases, captures, and troubleshooting |

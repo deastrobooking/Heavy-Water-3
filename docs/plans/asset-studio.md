@@ -69,7 +69,7 @@ Folds in today's Character Designer and imported-part editor.
 - **Operations:** body proportion sliders (height, build, head and limb ratios), armor plate placement on named body envelopes, hair clump strokes, face preset, surface paint by role (armor, skin, eyes, energy).
 - **Brushes:** pull and smooth on armor plate cages; a hair-stroke brush that lays loft strands along a drawn curve (the existing loft supports this).
 - **Automation:** plates fit to the body envelope, symmetry on by default, rig-fit for imported bodies ([mesheditor](mesheditor.md) section 4.11), collision and level of detail from the recipe.
-- **Keeps the Designer's new structure:** the 35-field list is already split into tabs (Basics, Hair, Gear, Armor RGB, Style), and the studio shell keeps that tabbed layout and its Screens layout test.
+- **Keeps the Designer's new structure:** the 37-field list is already split into tabs (Basics, Face/Hair, Gear, Armor RGB, Style), and the studio shell keeps that tabbed layout and its Screens layout test.
 
 ### 4.2 Vehicle studio
 

@@ -344,6 +344,8 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
         if (options.character_face > 0) self.sandbox.profile.face_style = @enumFromInt(@min(options.character_face - 1, enum_compat.fields(Profile.FaceStyle).len - 1));
         if (options.character_hair_color > 0) self.sandbox.profile.hair_color = @min(options.character_hair_color - 1, Profile.hair_colors.len - 1);
         self.sandbox.pose_override = switch (options.character_pose) {
+        if (options.character_face_mark > 0) self.sandbox.profile.face_mark = @enumFromInt(@min(options.character_face_mark, enum_compat.fields(Profile.FaceMark).len - 1));
+        if (options.character_eye_color > 0) self.sandbox.profile.eye_color = @min(options.character_eye_color, Profile.eye_colors.len);
             1 => .{ .action = .aim },
             2 => .{ .action = .swing, .arc = .overhead, .t = 0.35 },
             3 => .{ .action = .cast, .t = 0.5 },

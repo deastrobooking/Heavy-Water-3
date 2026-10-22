@@ -161,6 +161,111 @@ fn ellipse(p: Vec2, c: Vec2, rx: f32, ry: f32) f32 {
     return (@sqrt(dx * dx + dy * dy) - 1.0) * @min(rx, ry);
 }
 
+/// The eye opening with the upper lid cut flat by `lid` (0 = the plain ellipse): the cut line
+/// sits lower as the lid closes and slants down toward the inner corner. `skin_lit.wgsl`
+/// `eye_opening` is the same formula.
+fn eyeOpening(q: Vec2, c: Vec2, w: f32, h: f32, lid: f32) f32 {
+    return @max(ellipse(q, c, w, h), q.y - lidLine(q, c, w, h, lid));
+}
+
+fn lidLine(q: Vec2, c: Vec2, w: f32, h: f32, lid: f32) f32 {
+    return c.y + h * (1 - 0.5 * lid) + (q.x - c.x) / w * h * 0.3 * lid;
+}
+
+/// Distance from `p` to the segment a..b and how far along it (0..1) the nearest point lies.
+fn segment(p: Vec2, a: Vec2, b: Vec2) struct { d: f32, k: f32 } {
+    const ab = b.sub(a);
+    const k = m.saturate(p.sub(a).dot(ab) / ab.dot(ab));
+    return .{ .d = p.sub(a.add(ab.scale(k))).length(), .k = k };
+}
+
+/// A face mark's paint colour packed into one float (4 bits a channel) for a spare vertex lane.
+pub fn packMarkColor(c: Rgb) f32 {
+    const r = @round(m.saturate(c.r) * 15);
+    const g = @round(m.saturate(c.g) * 15);
+    const b = @round(m.saturate(c.b) * 15);
+    return r * 256 + g * 16 + b;
+}
+
+pub fn unpackMarkColor(v: f32) Rgb {
+    const x = @floor(v + 0.5);
+    const r = @floor(x / 256);
+    const g = @floor((x - r * 256) / 16);
+    const b = x - r * 256 - g * 16;
+    return Rgb.init(r / 15, g / 15, b / 15);
+}
+
+fn hash2(x: f32, y: f32) f32 {
+    const v = @sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return v - @floor(v);
+}
+
+/// Freckles, a scar, war paint and the like, drawn under the eyes. Coordinates follow the
+/// eye: `p` is the mirrored face UV, `ec` the eye centre, `w` and `h0` its half width and open
+/// half height. `skin_lit.wgsl` `draw_face_mark` is the same drawing per fragment.
+fn faceMark(dst: Decal, uv: Vec2, eyes: EyeSpec, aa: f32) Decal {
+    var out = dst;
+    const p = Vec2.init(0.5 + @abs(uv.x - 0.5), uv.y);
+    const ec = Vec2.init(0.5 + eyes.spacing, eyes.height);
+    const w = eyes.size * 0.5;
+    const h0 = w * eyes.aspect;
+    const left = uv.x >= 0.5;
+    switch (eyes.mark) {
+        .none => {},
+        .freckles => {
+            const rx = (uv.x - 0.5) / (eyes.spacing + w * 0.9);
+            const ry = (uv.y - (ec.y - h0 * 1.5)) / (h0 * 0.75);
+            const region = m.saturate(1 - (rx * rx + ry * ry));
+            if (region > 0) {
+                const cell: f32 = 0.024;
+                const ix = @floor(uv.x / cell);
+                const iy = @floor(uv.y / cell);
+                const n = hash2(ix, iy);
+                if (n > 0.5) {
+                    const center = Vec2.init((ix + 0.5 + (hash2(iy, ix) - 0.5) * 0.5) * cell, (iy + 0.5 + (n - 0.5) * 0.5) * cell);
+                    const d = uv.sub(center).length() - cell * (0.12 + 0.1 * n);
+                    out = over(out, Rgb.hex(0xa0603f), (1 - m.smoothstep(-aa * 0.5, aa * 0.5, d)) * 0.55 * m.smoothstep(0, 0.4, region));
+                }
+            }
+        },
+        .scar => if (left) {
+            const sg = segment(uv, Vec2.init(ec.x - w * 0.35, ec.y + h0 * 1.9), Vec2.init(ec.x + w * 0.45, ec.y - h0 * 1.7));
+            const radius = 0.008 * (1 - 0.3 * @abs(sg.k * 2 - 1));
+            out = over(out, Rgb.hex(0xc9736c), (1 - m.smoothstep(radius - aa * 0.5, radius + aa * 0.5, sg.d)) * 0.9);
+        },
+        .war_paint => {
+            const a1 = Vec2.init(ec.x - w * 0.5, ec.y - h0 * 1.25);
+            const b1 = Vec2.init(ec.x + w * 1.15, ec.y - h0 * 1.05);
+            for ([_]f32{ 0, 1 }) |i| {
+                const drop = Vec2.init(w * 0.3 * i, -0.03 * i);
+                const sg = segment(p, a1.add(drop), b1.add(drop));
+                const radius = 0.0085 * m.lerp(1.0, 0.45, sg.k);
+                out = over(out, eyes.mark_color, (1 - m.smoothstep(radius - aa * 0.5, radius + aa * 0.5, sg.d)) * 0.92);
+            }
+        },
+        .beauty_mark => if (left) {
+            const d = uv.sub(Vec2.init(ec.x + w * 0.75, ec.y - h0 * 1.35)).length() - 0.0075;
+            out = over(out, Rgb.hex(0x3b2520), (1 - m.smoothstep(-aa * 0.5, aa * 0.5, d)) * 0.9);
+        },
+        .tech_seams => {
+            const top = Vec2.init(ec.x + w * 0.2, ec.y - h0 * 1.15);
+            const knee = Vec2.init(ec.x + w * 0.2, ec.y - h0 * 2.2);
+            const foot = Vec2.init(ec.x + w * 0.95, ec.y - h0 * 2.8);
+            const d = @min(segment(p, top, knee).d, segment(p, knee, foot).d) - 0.0035;
+            out = over(out, eyes.mark_color, (1 - m.smoothstep(-aa * 0.5, aa * 0.5, d)) * 0.95);
+            const node = p.sub(top).length() - 0.0075;
+            out = over(out, eyes.mark_color, 1 - m.smoothstep(-aa * 0.5, aa * 0.5, node));
+        },
+        .tear_lines => {
+            // Ends beside the default mouth corner (the shader has no mouth data).
+            const sg = segment(p, Vec2.init(ec.x - w * 0.8, ec.y - h0 * 0.7), Vec2.init(0.575, 0.205));
+            const radius = 0.0065 * m.lerp(1.0, 0.3, sg.k);
+            out = over(out, Rgb.hex(0x3a2622), (1 - m.smoothstep(radius - aa * 0.5, radius + aa * 0.5, sg.d)) * 0.85);
+        },
+    }
+    return out;
+}
+
 /// Porter-Duff "over" with straight (non-premultiplied) alpha.
 fn over(dst: Decal, src: Rgb, a: f32) Decal {
     const out_a = a + dst.alpha * (1 - a);
@@ -213,10 +318,11 @@ fn faceDecalImpl(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32, draw_eyes: 
     const h = w * eyes.aspect * m.lerp(0.06, 1.0, expr.eye_open);
     // tilt outer corner up
     const q = Vec2.init(p.x, p.y - (p.x - ec.x) * eyes.tilt);
+    if (draw_eyes) out = faceMark(out, uv, eyes, aa);
 
     if (draw_eyes and expr.eye_open > 0.08) {
-        // eye opening: ellipse with flattened bottom
-        const d_open = ellipse(q, ec, w, h);
+        // eye opening: an ellipse, its top cut by the lid
+        const d_open = eyeOpening(q, ec, w, h, eyes.lid);
         const in_eye = 1 - m.smoothstep(-aa, aa, d_open);
         if (in_eye > 0) {
             out = over(out, white, in_eye);
@@ -246,7 +352,8 @@ fn faceDecalImpl(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32, draw_eyes: 
                 out = over(out, white, (1 - m.smoothstep(-aa, aa, hl2)) * in_eye * 0.9);
             }
             // upper-lid shadow on the eye white
-            const lid_sh = m.smoothstep(ec.y + h * 0.45, ec.y + h * 0.95, q.y) * in_eye;
+            const lid_y = lidLine(q, ec, w, h, eyes.lid);
+            const lid_sh = m.smoothstep(lid_y - h * 0.55, lid_y - h * 0.05, q.y) * in_eye;
             out = over(out, Rgb.init(0.72, 0.70, 0.86), lid_sh * 0.6 * (1 - a_iris));
         }
         // upper lash line: a band hugging the top of the opening, thin at the
@@ -255,7 +362,7 @@ fn faceDecalImpl(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32, draw_eyes: 
         if (ang > -0.35 and ang < m.pi + 0.15) {
             const s_out = 1 - m.saturate(ang / m.pi);
             const thick = h * (0.035 + 0.13 * m.smoothstep(0.05, 0.75, s_out));
-            const d_edge = ellipse(q, ec, w, h);
+            const d_edge = eyeOpening(q, ec, w, h, eyes.lid);
             var a_lash = (1 - m.smoothstep(thick - aa, thick + aa, d_edge)) * m.smoothstep(-0.25 * thick - aa, -0.25 * thick + aa, d_edge);
             a_lash *= m.smoothstep(-0.35, 0.0, ang) * (1 - m.smoothstep(m.pi - 0.1, m.pi + 0.15, ang));
             out = over(out, lash, a_lash);
@@ -289,7 +396,8 @@ fn faceDecalImpl(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32, draw_eyes: 
         const outer = Vec2.init(ec.x + half_len * 0.85, by + eyes.brow_tilt * half_len * 0.6);
         const seg = outer.sub(inner);
         const k = m.saturate(p.sub(inner).dot(seg) / seg.dot(seg));
-        const on = inner.add(seg.scale(k));
+        // The arch lifts the middle of the stroke (a parabola along it).
+        const on = inner.add(seg.scale(k)).add(Vec2.init(0, eyes.brow_arch * 4 * k * (1 - k)));
         const radius = eyes.brow_weight * m.lerp(1.0, 0.4, k);
         const d_brow = p.sub(on).length() - radius;
         if (d_brow < aa * 2) out = over(out, scalec(lash, 0.9), (1 - m.smoothstep(-aa * 0.5, aa * 1.2, d_brow)) * 0.8);
@@ -313,7 +421,7 @@ fn faceDecalImpl(uv: Vec2, eyes: EyeSpec, expr: Expression, aa: f32, draw_eyes: 
             const d_m = ellipse(uv, Vec2.init(0.5, eyes.mouth_height - 0.005), eyes.mouth_width * 0.65, 0.03 * expr.mouth_open);
             out = over(out, Rgb.hex(0x8a2f3c), 1 - m.smoothstep(-aa, aa, d_m));
         } else {
-            out = over(out, Rgb.hex(0x8b5650), (1 - m.smoothstep(aa * 0.4, aa * 1.4, @abs(my))) * 0.68 * (1 - @abs(mx)));
+            out = over(out, Rgb.hex(0x7a4440), (1 - m.smoothstep(aa * 0.7, aa * 1.7, @abs(my))) * 0.85 * m.saturate(1.25 * (1 - @abs(mx))));
         }
     }
     // blush
@@ -382,6 +490,38 @@ test "face marks follow the spec: brow above the eye, nose and mouth at their he
     const under_tip = Vec2.init(0.5, e.nose_height - 0.026);
     try std.testing.expect(faceDecal(under_tip, e, .{}, 0.002).alpha > 0.1);
     try std.testing.expect(faceDecal(under_tip, no_nose, .{}, 0.002).alpha < 0.01);
+}
+
+test "the lid cut lowers the top of the eye; marks draw where they belong and pack their colour" {
+    var e: EyeSpec = .{};
+    const top = Vec2.init(0.5 + e.spacing, e.height + e.size * 0.5 * e.aspect * 0.85);
+    try std.testing.expect(faceDecal(top, e, .{}, 0.002).color.r > 0.6);
+    e.lid = 0.6;
+    // The same point is now above the lid: skin (no white) or lash ink, never the eye white.
+    const cut = faceDecal(top, e, .{}, 0.002);
+    try std.testing.expect(cut.alpha < 0.05 or cut.color.r < 0.5);
+    // Each mark changes some part of the face and nothing far above the brows.
+    for (std.enums.values(spec_mod.FaceMark)) |mark| {
+        if (mark == .none) continue;
+        var marked: EyeSpec = .{};
+        marked.mark = mark;
+        var changed = false;
+        var y: f32 = 0.12;
+        while (y < 0.62) : (y += 0.0025) {
+            var x: f32 = 0.3;
+            while (x < 0.95) : (x += 0.0025) {
+                const a = faceDecal(.{ .x = x, .y = y }, .{}, .{}, 0.002);
+                const b = faceDecal(.{ .x = x, .y = y }, marked, .{}, 0.002);
+                if (@abs(a.alpha - b.alpha) > 0.3) changed = true;
+            }
+        }
+        try std.testing.expect(changed);
+        try std.testing.expectEqual(faceDecal(.{ .x = 0.6, .y = 0.85 }, .{}, .{}, 0.002).alpha, faceDecal(.{ .x = 0.6, .y = 0.85 }, marked, .{}, 0.002).alpha);
+    }
+    const paint = Rgb.hex(0x30e0ff);
+    const back = unpackMarkColor(packMarkColor(paint) + 0.2);
+    try std.testing.expectApproxEqAbs(paint.g, back.g, 1.0 / 30.0);
+    try std.testing.expectApproxEqAbs(paint.b, back.b, 1.0 / 30.0);
 }
 
 test "eye decal is symmetric and opaque in the iris" {

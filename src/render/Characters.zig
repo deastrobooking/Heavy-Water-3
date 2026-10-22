@@ -185,8 +185,8 @@ fn importedVertices(a: std.mem.Allocator, model: *const Model) ![]Ranger.Skinned
             .face_uv = .{ -1, -1 },
             .eye_geometry = .{ 0.14, 0.56, 0.025, 1 },
             .eye_style = .{ 0, 0.5, 2, 0 },
-            .eye_iris = .{ 0.16, 0.12, 0.1, 1 },
-            .eye_shadow = .{ 0.08, 0.06, 0.05, 1 },
+            .eye_iris = .{ 0.16, 0.12, 0.1, 0 },
+            .eye_shadow = .{ 0.08, 0.06, 0.05, 0 },
         };
     }
     for (model.submeshes) |submesh| {

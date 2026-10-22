@@ -513,6 +513,8 @@ pub fn value(self: *const Creator, field: Profile.Field, buffer: []u8) []const u
         .marking => std.fmt.bufPrint(buffer, "MARKING {d} OF {d}", .{ p.marking + 1, Profile.coat_colors.len }) catch buffer,
         .presentation => @tagName(p.presentation),
         .face_style => @tagName(p.face_style),
+        .face_mark => if (p.face_mark == .none) "none" else @tagName(p.face_mark),
+        .eye_color => if (p.class == .synthetic) "LUMEN (SYNTHETIC)" else if (p.eye_color == 0) "DEFAULT" else std.fmt.bufPrint(buffer, "COLOR {d} OF {d}", .{ p.eye_color, Profile.eye_colors.len }) catch buffer,
         .height => std.fmt.bufPrint(buffer, "{d:.2} M", .{1.8 * p.height}) catch buffer,
         .build => std.fmt.bufPrint(buffer, "{d:.0}%", .{p.build * 100}) catch buffer,
         .skin => std.fmt.bufPrint(buffer, "TONE {d} OF {d}", .{ p.skin + 1, Profile.skin_tones.len }) catch buffer,
