@@ -21,6 +21,18 @@ pub const ready_fade: f32 = 0.8;
 /// Seconds between a cleared wave and the next.
 pub const intermission: f32 = 6;
 pub const max_players = 4;
+pub const Venue = enum { current_landscape, wilds_overlook, detroit_skyline, new_york_skyline, chicago_skyline };
+pub const venue_count = 5;
+
+pub fn venueName(venue: Venue) []const u8 {
+    return switch (venue) {
+        .current_landscape => "CURRENT LANDSCAPE",
+        .wilds_overlook => "WILDS OVERLOOK",
+        .detroit_skyline => "DETROIT SKYLINE",
+        .new_york_skyline => "NEW YORK SKYLINE",
+        .chicago_skyline => "CHICAGO SKYLINE",
+    };
+}
 
 pub const Mix = struct { drones: u8, troopers: u8, sentinels: u8 };
 
@@ -58,6 +70,7 @@ pub const Event = union(enum) {
 };
 
 active: bool = false,
+venue: Venue = .current_landscape,
 center: V = @splat(0),
 wave: u16 = 0,
 /// Counting down to the next wave (0 while a wave is being fought).
@@ -68,9 +81,26 @@ colliders: [5]Physics.MeshCollider = @splat(.none),
 
 /// The bowl's floor centre above the place where the party starts it.
 pub fn site(seed: u64, origin: V) V {
-    const x = origin[0];
-    const z = origin[2];
-    return .{ x, Terrain.surface(seed, x, z).height + altitude, z };
+    return siteFor(seed, origin, .current_landscape);
+}
+
+pub fn siteFor(seed: u64, origin: V, venue: Venue) V {
+    const Region = @import("../world/Region.zig");
+    const anchor: V = switch (venue) {
+        .current_landscape => origin,
+        .wilds_overlook => R.add(origin, .{ 180, 0, -140 }),
+        .detroit_skyline => .{ Region.detroit.arrival[0], 0, Region.detroit.arrival[1] },
+        .new_york_skyline => .{ Region.new_york.arrival[0], 0, Region.new_york.arrival[1] },
+        .chicago_skyline => .{ Region.chicago.arrival[0], 0, Region.chicago.arrival[1] },
+    };
+    const x = anchor[0];
+    const z = anchor[2];
+    const height = Terrain.surface(seed, x, z).height;
+    const offset: f32 = switch (venue) {
+        .detroit_skyline, .new_york_skyline, .chicago_skyline => @import("../procedural/Skyline.zig").skyline_max_height + 40,
+        else => altitude,
+    };
+    return .{ x, height + offset, z };
 }
 
 /// The opening countdown fades out just before wave one starts.
@@ -211,4 +241,24 @@ test "waves grow with the wave and the party, pay out, and the bowl opens and cl
     arena.close(&physics);
     try std.testing.expect(!arena.active);
     for (arena.colliders) |c| try std.testing.expect(c.eql(.none));
+}
+
+test "battle venue anchors frame the current terrain, wilds, and three playable city regions" {
+    const origin: V = .{ 100, 0, -80 };
+    const current = siteFor(42, origin, .current_landscape);
+    const wilds = siteFor(42, origin, .wilds_overlook);
+    try std.testing.expectEqual(origin[0], current[0]);
+    try std.testing.expectEqual(origin[2], current[2]);
+    try std.testing.expect(wilds[0] != current[0] and wilds[2] != current[2]);
+    inline for (.{
+        .{ Venue.detroit_skyline, @import("../world/Region.zig").detroit },
+        .{ Venue.new_york_skyline, @import("../world/Region.zig").new_york },
+        .{ Venue.chicago_skyline, @import("../world/Region.zig").chicago },
+    }) |entry| {
+        const place = siteFor(42, origin, entry[0]);
+        try std.testing.expectEqual(entry[1].arrival[0], place[0]);
+        try std.testing.expectEqual(entry[1].arrival[1], place[2]);
+        const ground = Terrain.surface(42, place[0], place[2]).height;
+        try std.testing.expect(place[1] - ground >= @import("../procedural/Skyline.zig").skyline_max_height + 40);
+    }
 }

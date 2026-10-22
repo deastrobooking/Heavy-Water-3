@@ -6,6 +6,7 @@ const Settings = @import("../game/Settings.zig");
 const Bindings = @import("../game/Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 const Sandbox = @import("../game/Sandbox.zig");
+const Arena = @import("../game/Arena.zig");
 const Menu = @This();
 
 comptime {
@@ -84,7 +85,8 @@ pub const quest_items = [_]Item{.{ .label = "BACK" }};
 pub const guide_back = @import("Guide.zig").page_count;
 pub const guide_rows = guide_back + 1;
 pub const arena_items = [_]Item{
-    .{ .label = "START THE ARENA", .command = .start_arena },
+    .{ .label = "BATTLE LOCATION" },
+    .{ .label = "DROP IN AND FIGHT", .command = .start_arena },
     .{ .label = "LEAVE THE ARENA", .command = .leave_arena },
     .{ .label = "BACK" },
 };
@@ -158,6 +160,7 @@ pad_preset_label: [64]u8 = @splat(0),
 heroes_unlocked: u32 = 0,
 players_present: u8 = 1,
 arena_active: bool = false,
+arena_venue: Arena.Venue = .current_landscape,
 /// The player a hero card is chosen for (Heroes screen tabs).
 hero_player: u8 = 0,
 controller_players: [4]u8 = .{ 0, 1, 2, 3 },
@@ -227,7 +230,7 @@ pub fn enabled(self: *const Menu, row: usize) bool {
     if (self.screen == .arena) return switch (arena_items[row].command) {
         .start_arena => !self.arena_active,
         .leave_arena => self.arena_active,
-        else => true,
+        else => row != 0 or !self.arena_active,
     };
     if (self.screen == .heroes) {
         if (row < heroes_tabs) return self.players_present & (@as(u8, 1) << @intCast(row)) != 0;
@@ -290,6 +293,13 @@ pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .quest_log and k == .confirm) return self.back();
     if (self.screen == .guide) return self.guideKey(k);
     if (self.screen == .heroes) return self.heroesKey(k);
+    if (self.screen == .arena and self.row == arena_items.len - 1 and k == .confirm) return self.back();
+    if (self.screen == .arena and self.row == 0) switch (k) {
+        .left => self.cycleArenaVenue(-1),
+        .right, .confirm => self.cycleArenaVenue(1),
+        .back => return self.back(),
+        .up, .down => {},
+    };
     if (self.screen == .party and k == .confirm and self.row < 4) {
         self.hero_player = self.row;
         return .none;
@@ -321,6 +331,12 @@ pub fn key(self: *Menu, k: Key) Command {
         },
     }
     return .none;
+}
+
+fn cycleArenaVenue(self: *Menu, delta: i32) void {
+    const count: i32 = Arena.venue_count;
+    const current: i32 = @intCast(@intFromEnum(self.arena_venue));
+    self.arena_venue = @enumFromInt(@mod(current + delta, count));
 }
 
 /// Tabs choose a bounded page; the selected page is a four-by-four inventory grid.
@@ -638,10 +654,21 @@ test "heroes are chosen per player from unlocked cards, and the arena starts or 
     try std.testing.expectEqual(@as(u8, 2), m.row);
     // Arena: start when outside, leave when in.
     m.open(.arena);
-    try std.testing.expect(m.enabled(0) and !m.enabled(1));
+    try std.testing.expect(m.enabled(0) and m.enabled(1) and !m.enabled(2));
+    try std.testing.expectEqual(Command.none, m.key(.right));
+    try std.testing.expectEqual(Arena.Venue.wilds_overlook, m.arena_venue);
+    try std.testing.expectEqual(Command.none, m.key(.right));
+    try std.testing.expectEqual(Arena.Venue.detroit_skyline, m.arena_venue);
+    try std.testing.expectEqual(Command.none, m.key(.right));
+    try std.testing.expectEqual(Arena.Venue.new_york_skyline, m.arena_venue);
+    try std.testing.expectEqual(Command.none, m.key(.right));
+    try std.testing.expectEqual(Arena.Venue.chicago_skyline, m.arena_venue);
+    try std.testing.expectEqual(Command.none, m.key(.left));
+    try std.testing.expectEqual(Arena.Venue.new_york_skyline, m.arena_venue);
+    try std.testing.expectEqual(Command.none, m.key(.down));
     try std.testing.expectEqual(Command.start_arena, m.key(.confirm));
     m.arena_active = true;
-    try std.testing.expect(!m.enabled(0) and m.enabled(1));
+    try std.testing.expect(!m.enabled(1) and m.enabled(2));
 }
 
 test "controls rebind by capture, swap conflicts, cancel, and reset" {

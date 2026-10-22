@@ -1924,5 +1924,10 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 
 - **Added:** the Starbowl platform is now 72 m square and opens above the party's current location, so pause-menu drop-ins use the current landscape as their backdrop. The three-second wave-one countdown now shows a pulsing GET READY banner that fades out in the final 0.8 seconds. The compact Dogfight square remains a separate planned space venue.
 - **Checked:** default `build check` passes; the focused wave/countdown filter passes **4/4**; the 300-frame ReleaseSafe smoke passes with Metal API Validation enabled and confirms arena entry, wave start, clear and rewards. No GET READY capture or hands-on readability review was run. Venue-specific city/biome presets and the Dogfight square runtime remain future work.
+
+## Starbowl location picker — 2026-10-22
+
+- **Added:** the arena menu cycles through Current Landscape, Wilds Overlook, Detroit Skyline, New York Skyline, and Chicago Skyline using keyboard or gamepad arrows/confirm, plus mouse arrows. City sites resolve through the same playable `Region` arrival coordinates used by the world map; the selected point is where the expanded Starbowl opens, and party return positions stay local.
+- **Checked:** arena venue anchor and menu-cycle tests pass (**4/4** on the arena filter); default `build check` passes; the 300-frame ReleaseSafe smoke passes with Metal API Validation and the existing arena wave/reward flow intact. Venue-specific captures, hands-on city streaming/readability review, and terrain-specific arena geometry remain open.
 - **Still open:** the robot capital ship currently shares the carrier mesh with metallic/blue lighting; its bespoke robot silhouette remains art work. Hands-on deck landings, dismounts, travel combat pacing and balance are unverified.
 

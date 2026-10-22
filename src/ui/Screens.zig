@@ -530,7 +530,7 @@ fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
     const r = menuRect(c, 560, 380);
     panel(c, r, "THE STARBOWL");
     var wrapped: [4][]const u8 = undefined;
-    const lines = Canvas.wrap("A sky arena over the Frontier. Up to four heroes hold out against waves of Hive bots. Every wave cleared drops loot and scrap; every third brings a Wildkin champion to your roster.", 60, &wrapped);
+    const lines = Canvas.wrap("Drop into a larger battle stage above the current wilds or a city skyline. Up to four heroes hold out against Hive waves; every clear pays loot and scrap, and every third wave brings a Wildkin champion.", 60, &wrapped);
     for (wrapped[0..lines], 0..) |line, i| c.text(r.x + 22, r.y + 52 + @as(f32, @floatFromInt(i)) * 17, line, 1, ink);
     var y = r.y + 52 + @as(f32, @floatFromInt(lines)) * 17 + 10;
     if (sb) |s| {
@@ -541,13 +541,22 @@ fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
             y += 17;
         };
     }
-    y = r.y + r.h - 3 * 36 - 14;
+    y = r.y + r.h - @as(f32, @floatFromInt(Menu.arena_items.len)) * 36 - 14;
     for (Menu.arena_items, 0..) |item, i| {
         const row: Rect = .{ .x = r.x + 12, .y = y, .w = r.w - 24, .h = 30 };
         const on = menu.enabled(i);
         rowBack(c, row, menu.row == i);
-        c.text(row.x + 16, row.y + 9, if (menu.screen == .party and menu.base == .title and item.command == .@"resume") "START GAME" else item.label, if (menu.screen == .party) 1 else 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
-        if (on) c.hit(row, hitId(.menu, i));
+        if (i == 0) {
+            const left: Rect = .{ .x = row.x + 8, .y = row.y + 2, .w = 30, .h = 26 };
+            const right: Rect = .{ .x = row.x + row.w - 38, .y = row.y + 2, .w = 30, .h = 26 };
+            button(c, left, "<", hitId(.setting_left, i), false);
+            button(c, right, ">", hitId(.setting_right, i), false);
+            c.centered(row.x + row.w / 2, row.y + 9, Arena.venueName(menu.arena_venue), 1.05, if (menu.row == i) accent else ink);
+            c.hit(.{ .x = row.x + 40, .y = row.y, .w = row.w - 80, .h = row.h }, hitId(.menu, i));
+        } else {
+            c.text(row.x + 16, row.y + 9, item.label, 1.25, if (!on) alpha(dim, 0.5) else if (menu.row == i) accent else ink);
+            if (on) c.hit(row, hitId(.menu, i));
+        }
         y += 36;
     }
 }

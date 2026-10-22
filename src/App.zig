@@ -860,6 +860,7 @@ fn startArena(self: *App) void {
             self.sandbox.creator.confirmed = true;
         }
     }
+    self.sandbox.arena.venue = self.menu.arena_venue;
     @import("game/Frontier.zig").enterArena(&self.sandbox, &self.engine.camera);
     self.menu.open(.none);
     self.capture(self.core, true);
