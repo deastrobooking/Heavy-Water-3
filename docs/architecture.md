@@ -338,7 +338,7 @@ The Wildkin are 26 collectible animal and insect heroes. The roster, powers, hom
   - **Scalari ground roles:** the starter patrol replenishes to three melee-only scout/stinger units, with 34/58 health and 5/11 base melee damage. A 1,850-health titan uses a 42-damage close attack at a slower cadence. Its scale, armor and mass make it a distant escalation rather than a starter enemy.
   - **Poses and held weapons:** each arsenal reports a stance (aim, swing with its arc and progress, guard, cast) that the player's drawn pose takes, and a grip (hand and direction) where its weapon is drawn from block parts. Shots leave the held weapon. In first person the held weapon is the viewmodel.
   - **Health:** players have health, which recovers after 5 quiet seconds. A downed P1 is restored at the spawn, and a downed guest beside P1.
-- **Classes and specials:** a profile is a Ranger (human, tech) or a Synthetic (engineered human, powers), chosen in the creator and saved (`Profile.class`, defaulting to Ranger for older saves). `game/Specials.zig` gives each player energy (100, regenerating at 10/s for Rangers and 7/s for Synthetics) and three specials with costs and cooldowns:
+- **Classes and specials:** a profile is a Ranger (human, tech) or a Synthetic (engineered human, powers), chosen in the creator and saved (`Profile.class`, defaulting to Ranger for older saves). `game/Specials.zig` gives each player three specials with no ammo, charges or energy: each is limited only by its own recharge, which runs a quarter faster for Rangers (rate 10) and slower for Synthetics (rate 7); a Wildkin hero's rate is their recharge passive (8 is real time). The numbers in brackets below are an old energy cost (no longer charged) and the recharge in seconds at the normal rate:
 
   | Class | Special 1 | Special 2 | Special 3 |
   | --- | --- | --- | --- |
@@ -347,7 +347,7 @@ The Wildkin are 26 collectible animal and insect heroes. The roster, powers, hom
 
   Synthetics also have 30 more maximum health and cut 25% harder. They are drawn with a porcelain sheen, eyes in the accent colour, and lit seams (collar, sternum core, cheek lines). Specials are session state, like vitals.
 - **Wildkin heroes:** see the section below. A Wildkin form's loadout (three powers and passives) comes from its hero instead of the class (`Specials.loadout(profile)`).
-- **HUD:** health, fuel and stamina bars; the weapon and its charge (or heat); the overshield over the health bar; energy and the three specials with their keys and cooldowns; collectible counts; and a red edge flash when hurt, for P1 and each guest. In a car, the HUD shows speed, height above the ground, and the controls.
+- **HUD:** health, fuel and stamina bars; the weapon and its charge (or heat); the overshield over the health bar; the three specials with their keys and recharge; collectible counts; and a red edge flash when hurt, for P1 and each guest. In a car, the HUD shows speed, height above the ground, and the controls.
 
 ## Audio
 

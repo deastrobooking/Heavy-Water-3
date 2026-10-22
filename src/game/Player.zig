@@ -21,17 +21,17 @@ pub const Motion = enum { idle, run, sprint, jump, long_jump, backflip, fall, ro
 pub const eye_height: f32 = 1.62;
 pub const walk_speed: f32 = 5.8;
 pub const sprint_speed: f32 = 10.8;
-/// Launch speed of a standing jump (about a 4 m peak under the -15 m/s² rise gravity).
-pub const jump_speed: f32 = 11;
-/// Extra launch, as a fraction, a jump gains at full sprint; it scales with ground speed, so a
-/// running jump climbs higher than a standing one and a sprinting jump higher still.
-pub const running_jump_bonus: f32 = 0.18;
+/// Launch speed of a standing jump: a peak of about 15 ft (4.6 m).
+pub const jump_speed: f32 = 11.8;
+/// Extra launch, as a fraction, a jump gains from running: it grows with ground speed and is full
+/// at normal running speed, for a peak of about 30 ft (9.1 m).
+pub const running_jump_bonus: f32 = 0.42;
 /// Launch multiplier of the sprint long jump (on top of the running bonus).
 pub const long_jump_lift: f32 = 1.0;
 
 /// Launch speed of a ground jump at `ground_speed` (m/s across the ground).
 pub fn runningJumpSpeed(ground_speed: f32) f32 {
-    return jump_speed * (1 + running_jump_bonus * std.math.clamp(ground_speed / sprint_speed, 0, 1));
+    return jump_speed * (1 + running_jump_bonus * std.math.clamp(ground_speed / walk_speed, 0, 1));
 }
 pub const Water = struct { min: V, max: V };
 /// Suit tuning from purchased upgrades (see `Progress`); the defaults are the base suit.
@@ -843,7 +843,7 @@ test "walking into a wall is blocked; jumping into it climbs and mantles onto th
     try std.testing.expect(p.grounded and p.feet[1] > 2.95 and p.feet[2] > 1.75);
 }
 
-test "a running jump climbs higher than a standing one, and every jump beats the old 2.9 m peak" {
+test "a standing jump peaks near 15 ft and a running jump near 30 ft" {
     var standing_physics: Physics = .init(.{ .sample = flatGroundForJumps });
     defer standing_physics.deinit();
     var camera: Camera = .{};
@@ -864,9 +864,10 @@ test "a running jump climbs higher than a standing one, and every jump beats the
     var running_physics: Physics = .init(.{ .sample = flatGroundForJumps });
     defer running_physics.deinit();
     const running = peak(&running_physics, &camera, 90);
-    try std.testing.expect(standing > 3.4);
-    try std.testing.expect(running > standing + 0.6);
-    try std.testing.expect(runningJumpSpeed(sprint_speed) > runningJumpSpeed(walk_speed));
+    try std.testing.expectApproxEqAbs(@as(f32, 4.6), standing, 0.25);
+    try std.testing.expectApproxEqAbs(@as(f32, 9.1), running, 0.45);
+    try std.testing.expect(runningJumpSpeed(walk_speed) > runningJumpSpeed(walk_speed / 2));
+    try std.testing.expectEqual(runningJumpSpeed(walk_speed), runningJumpSpeed(sprint_speed));
     try std.testing.expectEqual(jump_speed, runningJumpSpeed(0));
 }
 

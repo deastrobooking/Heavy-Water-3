@@ -16,7 +16,7 @@ Players meet them in the world, recruit them to a shared roster, and play as any
 
 Joining unlocks the hero's form in the character creator, and **Pause > HEROES** lets any present player become any joined hero (P1–P4 tabs). Choosing **YOUR RANGER** returns that player to the character they made. The roster saves by hero name, so adding heroes never breaks old saves.
 
-Every hero has three powers on Z / C / H (D-pad up, D-pad down, and D-pad up with the right stick held on a controller), plus passives: extra health, saber weight, energy regeneration, run speed, and flight for winged forms.
+Every hero has three powers on Z / C / H (D-pad up, D-pad down, and D-pad up with the right stick held on a controller), plus passives: extra health, saber weight, recharge rate, run speed, and flight for winged forms.
 
 ## The roster
 

@@ -10,7 +10,7 @@
 //! hero's form becomes available in the creator).
 //!
 //! Every hero has three powers (`Specials`, keyed Z / C / H), a passive (health, saber weight,
-//! energy regeneration, run speed), and flight if they have wings.
+//! recharge rate, run speed), and flight if they have wings.
 const std = @import("std");
 const Profile = @import("Profile.zig");
 const Specials = @import("Specials.zig");

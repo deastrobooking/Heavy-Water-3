@@ -3525,7 +3525,6 @@ fn smokeHeroes(self: *App) void {
     const became = met != null and sb.profile.species == Heroes.roster[met.?].species;
     var used: usize = 0;
     for (0..3) |k| {
-        sb.specials.players[0].energy = 100;
         var actions: Sandbox.Actions = .{};
         switch (k) {
             0 => actions.special_1 = true,
@@ -4071,6 +4070,19 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         renderer.views[0].camera.position = mach.math.vec3(feet[0] + dist * @sin(angle), feet[1] + eye_y, feet[2] + dist * @cos(angle));
         renderer.views[0].camera.yaw = std.math.pi + angle;
         renderer.views[0].camera.pitch = if (face) frame.pitch else -0.08;
+    }
+    if (options.character_showcase >= 51 and options.character_showcase <= 54) {
+        // Jump phases held for review: 51 drive off the ground, 52 the float at the top, 53 the
+        // reach for the landing, 54 a running stride leap at the top.
+        const player = &self.sandbox.player;
+        player.grounded = false;
+        player.motion = if (options.character_showcase == 53) .fall else .jump;
+        player.velocity = switch (options.character_showcase) {
+            51 => .{ 0, 12, 0 },
+            53 => .{ 0, -12, 0 },
+            54 => .{ 0, 0, 8 },
+            else => .{ 0, 0, 0 },
+        };
     }
     if (options.showcase == 63) {
         // A repeatable pose reel for checking locomotion silhouettes in the Metal renderer.

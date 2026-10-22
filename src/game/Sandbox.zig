@@ -1166,6 +1166,10 @@ fn stride(player: Player, phase: *f32, amount: *f32, dt: f32) void {
     amount.* = if (player.grounded) @min(1, ground_speed / Player.walk_speed) else 0.3;
 }
 
+fn groundSpeed(player: Player) f32 {
+    return @sqrt(player.velocity[0] * player.velocity[0] + player.velocity[2] * player.velocity[2]);
+}
+
 fn motionProgress(player: Player) f32 {
     return switch (player.motion) {
         .backflip => 1 - player.backflip_timer / 0.72,
@@ -2270,7 +2274,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
     }
     // Every walking body is published; each player's own first-person view hides its owner tag.
     if (self.seated == null and (self.player.mode == .walk or self.player.mode == .fly) and n < out.len) {
-        var preview_pose: Avatar.Pose = .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60, .landing = self.player.landing };
+        var preview_pose: Avatar.Pose = .{ .feet = self.player.feet, .yaw = self.body_yaw, .walk_phase = self.walk_phase, .walk_amount = self.walk_amount, .motion = self.player.motion, .motion_t = motionProgress(self.player), .time = @as(f32, @floatFromInt(self.tick)) / 60, .landing = self.player.landing, .rise = self.player.velocity[1], .stride = groundSpeed(self.player) };
         preview_pose.feet = self.importedPreviewFeet();
         const first = n;
         n = avatar(if (self.creator.open) self.creator.draft else self.profile, preview_pose, self.pose_override orelse self.specials.stance(0) orelse self.combat.arsenals[0].stance(), 1, self.catalog, out, n);
@@ -2403,7 +2407,7 @@ pub fn publishProps(self: *const Sandbox, out: []World.Prop) usize {
         if (n > keeper_index) out[keeper_index].character.?.id = @intCast(4 + i);
     };
     for (self.guests, 0..) |g, i| if (g.active and n < out.len) {
-        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60, .landing = g.player.landing }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog, out, n);
+        n = avatar(g.profile, .{ .feet = g.player.feet, .yaw = g.body_yaw, .walk_phase = g.walk_phase, .walk_amount = g.walk_amount, .motion = g.player.motion, .motion_t = motionProgress(g.player), .time = @as(f32, @floatFromInt(self.tick)) / 60, .landing = g.player.landing, .rise = g.player.velocity[1], .stride = groundSpeed(g.player) }, self.specials.stance(i + 1) orelse self.combat.arsenals[i + 1].stance(), @intCast(i + 2), self.catalog, out, n);
     };
     n = Frontier.publish(self, out, n);
     return Build.publish(self, out, n);

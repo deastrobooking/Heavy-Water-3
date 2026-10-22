@@ -43,6 +43,9 @@ pub const Pose = struct {
     aim_pitch: f32 = 0,
     /// Seconds of landing recovery left (`Player.landing`, 0.25 at touchdown): a knee-bend dip.
     landing: f32 = 0,
+    /// Vertical speed (m/s, up positive) and speed across the ground: they phase the jump.
+    rise: f32 = 0,
+    stride: f32 = 0,
 };
 pub const Draw = struct {
     profile: Profile,
@@ -419,6 +422,75 @@ fn pointBone(p: *sk.Pose, skel: *const sk.Skeleton, joint: sk.Joint, child: sk.J
     p.setGlobalRotation(skel, joint.idx(), q.mul(p.global[joint.idx()].rotation));
 }
 
+/// Weights of the jump's three phases from vertical speed: driving up off the ground, the float
+/// at the top, and reaching down for the landing. They always sum to one.
+pub const JumpPhases = struct { drive: f32, float: f32, reach: f32 };
+
+pub fn jumpPhases(rise: f32) JumpPhases {
+    const drive = smoothstep(2, 9, rise);
+    const reach = smoothstep(2, 9, -rise);
+    return .{ .drive = drive, .float = 1 - drive - reach, .reach = reach };
+}
+
+fn blend3(a: V, b: V, c: V, w: JumpPhases) V {
+    return a.scale(w.drive).add(b.scale(w.float)).add(c.scale(w.reach));
+}
+
+/// The jump, posed from its phase rather than one held frame. Directions are in the character's
+/// frame (+z ahead, +x its left, +y up).
+///
+/// - **Drive** (rising fast): the body has just exploded off the ground. Legs fully extended,
+///   toes pointed, both arms swung up overhead, chest lifted.
+/// - **Float** (near the top): knees pull up into a tuck, arms open wide for balance, the chest
+///   leans in over the knees.
+/// - **Reach** (falling): a braced landing reach. Legs drop toward the ground with the knees soft
+///   and forward, feet flex ready to land, arms come out in front to absorb the touchdown.
+///
+/// A running jump (or a long jump) is a stride leap instead of a tuck: the left leg leads forward,
+/// the right trails folded behind, and the arms counter-swing (right forward, left back). The leap
+/// fades in with ground speed and folds back to both legs reaching forward for the landing.
+fn jumpPose(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose) void {
+    const w = jumpPhases(state.rise);
+    const leap = if (state.motion == .long_jump) 1 else smoothstep(1.5, 5.5, state.stride);
+    const lean = (0.22 * w.float - 0.12 * w.drive + 0.05 * w.reach) + leap * 0.18 * (1 - w.reach);
+    p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, lean));
+    p.rotateLocal(sk.Joint.head.idx(), Q.fromAxisAngle(V.unit_x, -0.5 * lean));
+    inline for (.{ @as(f32, 1), @as(f32, -1) }, .{ sk.Joint.thigh_l, sk.Joint.thigh_r }, .{ sk.Joint.shin_l, sk.Joint.shin_r }, .{ sk.Joint.foot_l, sk.Joint.foot_r }, .{ sk.Joint.toe_l, sk.Joint.toe_r }) |side, thigh, shin, foot, toe| {
+        // Standing jump legs, per phase.
+        const tuck_thigh = blend3(V.init(0, -1, -0.08), V.init(side * 0.06, -0.3, 0.95), V.init(side * 0.06, -0.78, 0.62), w);
+        const tuck_shin = blend3(V.init(0, -1, -0.12), V.init(0, -0.92, -0.38), V.init(0, -0.96, -0.28), w);
+        // The stride leap: the left (side +1) leads, the right trails; both reach forward to land.
+        const lead = side > 0;
+        const leap_thigh = blend3(
+            if (lead) V.init(0.04, -0.5, 0.86) else V.init(-0.04, -0.85, -0.52),
+            if (lead) V.init(0.05, -0.2, 0.98) else V.init(-0.05, -0.7, -0.7),
+            V.init(side * 0.05, -0.85, 0.5),
+            w,
+        );
+        const leap_shin = blend3(
+            if (lead) V.init(0, -0.92, 0.38) else V.init(0, -0.35, -0.94),
+            if (lead) V.init(0, -0.8, 0.6) else V.init(0, -0.1, -0.99),
+            V.init(0, -1, 0.15),
+            w,
+        );
+        pointBone(p, skel, thigh, shin, tuck_thigh.scale(1 - leap).add(leap_thigh.scale(leap)));
+        pointBone(p, skel, shin, foot, tuck_shin.scale(1 - leap).add(leap_shin.scale(leap)));
+        // Toes point through the drive and flex up to meet the ground.
+        pointBone(p, skel, foot, toe, blend3(V.init(0, -0.9, 0.42), V.init(0, -0.5, 0.86), V.init(0, -0.08, 1), w));
+    }
+    inline for (.{ @as(f32, 1), @as(f32, -1) }, .{ sk.Joint.upper_arm_l, sk.Joint.upper_arm_r }, .{ sk.Joint.lower_arm_l, sk.Joint.lower_arm_r }, .{ sk.Joint.hand_l, sk.Joint.hand_r }) |side, arm, fore, hand| {
+        const open_arm = blend3(V.init(side * 0.22, 0.86, 0.45), V.init(side * 0.95, 0.12, 0.25), V.init(side * 0.62, 0.1, 0.78), w);
+        const open_fore = blend3(V.init(side * 0.12, 0.92, 0.36), V.init(side * 0.88, 0.3, 0.38), V.init(side * 0.42, 0.22, 0.88), w);
+        // Counter-swing: the arm opposite the leading leg (the right) drives forward and up.
+        const forward = side < 0;
+        const swing_arm = if (forward) V.init(-0.18, 0.35, 0.92) else V.init(0.3, -0.25, -0.92);
+        const swing_fore = if (forward) V.init(-0.1, 0.65, 0.75) else V.init(0.2, 0.1, -0.97);
+        const k = leap * (1 - w.reach);
+        pointBone(p, skel, arm, fore, open_arm.scale(1 - k).add(swing_arm.scale(k)));
+        pointBone(p, skel, fore, hand, open_fore.scale(1 - k).add(swing_fore.scale(k)));
+    }
+}
+
 /// Direction from azimuth `a` (0 ahead, + toward the character's left) and elevation `e`.
 fn heading(a: f32, e: f32) V {
     return V.init(@sin(a) * @cos(e), @sin(e), @cos(a) * @cos(e));
@@ -508,12 +580,13 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
     p.local[sk.Joint.hips.idx()].translation.x += @sin(state.time * 0.45) * 0.012 * still;
     p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -@sin(state.time * 2) * 0.02 * still));
     p.rotateLocal(sk.Joint.head.idx(), Q.fromAxisAngle(V.unit_y, @sin(state.time * 0.31) * 0.08 * still));
-    // Landing recovery: knees give and the hips drop, easing out over `Player.landing`.
+    // Landing recovery: knees give and the hips drop, easing out over `Player.landing`. The
+    // higher jumps land harder, so the absorb is deep and the chest folds over the knees.
     if (state.landing > 0 and !airborne) {
         const k = std.math.clamp(state.landing / 0.25, 0, 1);
         const dip = k * k * (3 - 2 * k);
-        p.local[sk.Joint.hips.idx()].translation.y -= 0.09 * dip;
-        p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.14 * dip));
+        p.local[sk.Joint.hips.idx()].translation.y -= 0.14 * dip;
+        p.rotateLocal(sk.Joint.spine.idx(), Q.fromAxisAngle(V.unit_x, 0.22 * dip));
         inline for ([_]sk.Joint{ .thigh_l, .thigh_r }, [_]sk.Joint{ .shin_l, .shin_r }) |thigh, shin| {
             p.rotateLocal(thigh.idx(), Q.fromAxisAngle(V.unit_x, 0.32 * dip));
             p.rotateLocal(shin.idx(), Q.fromAxisAngle(V.unit_x, 0.62 * dip));
@@ -542,12 +615,8 @@ fn poseSkeletonBlended(p: *sk.Pose, skel: *const sk.Skeleton, state: Pose, blend
         p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, 0.85));
         p.rotateLocal(sk.Joint.shin_l.idx(), Q.fromAxisAngle(V.unit_x, -1.1));
         p.rotateLocal(sk.Joint.shin_r.idx(), Q.fromAxisAngle(V.unit_x, -1.1));
-    } else if (state.motion == .long_jump) {
-        p.rotateLocal(sk.Joint.chest.idx(), Q.fromAxisAngle(V.unit_x, -0.34));
-        p.rotateLocal(sk.Joint.upper_arm_l.idx(), Q.fromAxisAngle(V.unit_x, -0.7));
-        p.rotateLocal(sk.Joint.upper_arm_r.idx(), Q.fromAxisAngle(V.unit_x, -0.7));
-        p.rotateLocal(sk.Joint.thigh_l.idx(), Q.fromAxisAngle(V.unit_x, -0.38));
-        p.rotateLocal(sk.Joint.thigh_r.idx(), Q.fromAxisAngle(V.unit_x, -0.38));
+    } else if (state.motion == .jump or state.motion == .long_jump or state.motion == .fall) {
+        jumpPose(p, skel, state);
     } else if (state.motion == .backflip) {
         const progress = std.math.clamp(state.motion_t, 0, 1);
         p.rotateLocal(sk.Joint.hips.idx(), Q.fromAxisAngle(V.unit_x, 2 * std.math.pi * progress));
@@ -1194,6 +1263,57 @@ test "trooper strike and cover actions drive the skinned skeleton" {
     try std.testing.expect(cover_hips.y < strike_hips.y - 0.1);
     try std.testing.expect(cover_hand.sub(rest_hand).length() > 0.1);
     for (ranger.mesh.vertices) |v| for (v.position ++ v.normal) |value| try std.testing.expect(std.math.isFinite(value));
+}
+
+test "the jump drives up with arms overhead, tucks at the top, reaches down to land, and leaps when running" {
+    const a = std.testing.allocator;
+    var ranger = try init(a, .{});
+    defer ranger.deinit(a);
+    const skel = &ranger.character.skeleton;
+    const pose = &ranger.instance.pose;
+    const Probe = struct { hand_y: f32, knee_y: f32, foot_y: f32, foot_l_z: f32, foot_r_z: f32 };
+    const probe = struct {
+        fn at(p: *sk.Pose, s: *const sk.Skeleton, state: Pose) Probe {
+            poseSkeleton(p, s, state);
+            p.updateGlobal(s);
+            const hips = p.global[sk.Joint.hips.idx()].translation;
+            return .{
+                .hand_y = p.global[sk.Joint.hand_l.idx()].translation.y - hips.y,
+                .knee_y = p.global[sk.Joint.shin_l.idx()].translation.y - hips.y,
+                .foot_y = p.global[sk.Joint.foot_l.idx()].translation.y - hips.y,
+                .foot_l_z = p.global[sk.Joint.foot_l.idx()].translation.z - hips.z,
+                .foot_r_z = p.global[sk.Joint.foot_r.idx()].translation.z - hips.z,
+            };
+        }
+    }.at;
+    const base: Pose = .{ .feet = .{ 0, 0, 0 }, .yaw = 0, .motion = .jump, .time = 1 };
+    var drive = base;
+    drive.rise = 12;
+    var float = base;
+    float.rise = 0;
+    var reach = base;
+    reach.motion = .fall;
+    reach.rise = -12;
+    const d = probe(pose, skel, drive);
+    const f = probe(pose, skel, float);
+    const r = probe(pose, skel, reach);
+    // Drive: hands above the hips by more than at the top, legs fully extended (feet lowest).
+    try std.testing.expect(d.hand_y > 0.4 and d.hand_y > f.hand_y);
+    try std.testing.expect(d.foot_y < f.foot_y - 0.2);
+    // Float: knees pulled up close to hip height.
+    try std.testing.expect(f.knee_y > d.knee_y + 0.15);
+    // Reach: legs down again, feet below the tuck.
+    try std.testing.expect(r.foot_y < f.foot_y - 0.15);
+    // Running: a stride leap, the left foot well ahead of the right.
+    var leap = float;
+    leap.stride = 8;
+    const l = probe(pose, skel, leap);
+    try std.testing.expect(l.foot_l_z - l.foot_r_z > 0.5);
+    // The phases always share the whole pose.
+    for ([_]f32{ -20, -5, -1, 0, 1, 5, 20 }) |v| {
+        const w = jumpPhases(v);
+        try std.testing.expectApproxEqAbs(@as(f32, 1), w.drive + w.float + w.reach, 1e-5);
+    }
 }
 
 test "motion and action changes crossfade from the displayed pose, then settle on the target" {

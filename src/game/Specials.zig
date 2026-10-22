@@ -1,5 +1,7 @@
-//! Specials: three powers per character, paid from energy (0–100, regenerating) and gated by
-//! cooldowns. Humans get their class kit; each Wildkin form gets its hero's kit (`Heroes`).
+//! Specials: three powers per character with no ammo, charges or energy: each is limited only by
+//! its own recharge (`cooldown`), which runs faster for characters with a higher recharge rate
+//! (`Loadout.regen`; 8 is normal). Humans get their class kit; each Wildkin form gets its hero's
+//! kit (`Heroes`).
 //!
 //! Rangers use tech: an **arc grenade** (thrown; bursts for 60 and a 2 s stun), a **sentry
 //! turret** (zaps the nearest unit in sight four times a second for 20 s) and an **overshield**
@@ -36,7 +38,8 @@ const V = Physics.Vec3;
 const Specials = @This();
 
 pub const max_players = 4;
-pub const max_energy: f32 = 100;
+/// The recharge rate at which cooldowns run in real time.
+pub const normal_recharge: f32 = 8;
 pub const max_grenades = 8;
 pub const max_fields = 8;
 
@@ -135,7 +138,7 @@ pub const Mechanic = enum { grenade, sentry, shield, blink, slam, lance, launch,
 pub const Info = struct {
     label: []const u8,
     mechanic: Mechanic,
-    cost: f32,
+    /// Seconds to recharge at the normal rate.
     cooldown: f32,
     damage: f32 = 0,
     radius: f32 = 0,
@@ -149,98 +152,99 @@ pub const Info = struct {
 
 pub fn info(kind: Kind) Info {
     return switch (kind) {
-        .arc_grenade => .{ .label = "ARC GRENADE", .mechanic = .grenade, .cost = 30, .cooldown = 4, .damage = 60, .radius = 5, .stun = 2, .push = 3, .color = .{ 0.45, 0.8, 1 } },
-        .sentry => .{ .label = "SENTRY", .mechanic = .sentry, .cost = 50, .cooldown = 15, .damage = 8, .time = 20, .color = .{ 0.4, 0.95, 1 } },
-        .overshield => .{ .label = "OVERSHIELD", .mechanic = .shield, .cost = 40, .cooldown = 12, .damage = 80, .time = 8, .color = .{ 0.4, 0.85, 1 } },
-        .phase_dash => .{ .label = "PHASE DASH", .mechanic = .blink, .cost = 25, .cooldown = 2.5, .damage = 45, .radius = 14, .stun = 1, .push = 4, .color = .{ 0.75, 0.9, 1 } },
-        .kinetic_slam => .{ .label = "KINETIC SLAM", .mechanic = .slam, .cost = 40, .cooldown = 6, .damage = 70, .radius = 8, .stun = 1.5, .push = 14, .color = .{ 0.85, 0.75, 1 } },
-        .lumen_lance => .{ .label = "LUMEN LANCE", .mechanic = .lance, .cost = 60, .cooldown = 10, .damage = 90, .time = 2.5, .color = .{ 0.95, 0.9, 1 } },
+        .arc_grenade => .{ .label = "ARC GRENADE", .mechanic = .grenade, .cooldown = 4, .damage = 60, .radius = 5, .stun = 2, .push = 3, .color = .{ 0.45, 0.8, 1 } },
+        .sentry => .{ .label = "SENTRY", .mechanic = .sentry, .cooldown = 15, .damage = 8, .time = 20, .color = .{ 0.4, 0.95, 1 } },
+        .overshield => .{ .label = "OVERSHIELD", .mechanic = .shield, .cooldown = 12, .damage = 80, .time = 8, .color = .{ 0.4, 0.85, 1 } },
+        .phase_dash => .{ .label = "PHASE DASH", .mechanic = .blink, .cooldown = 2.5, .damage = 45, .radius = 14, .stun = 1, .push = 4, .color = .{ 0.75, 0.9, 1 } },
+        .kinetic_slam => .{ .label = "KINETIC SLAM", .mechanic = .slam, .cooldown = 6, .damage = 70, .radius = 8, .stun = 1.5, .push = 14, .color = .{ 0.85, 0.75, 1 } },
+        .lumen_lance => .{ .label = "LUMEN LANCE", .mechanic = .lance, .cooldown = 10, .damage = 90, .time = 2.5, .color = .{ 0.95, 0.9, 1 } },
 
-        .spin_dash => .{ .label = "SPIN DASH", .mechanic = .launch, .cost = 20, .cooldown = 2, .damage = 120, .radius = 2.2, .stun = 0.5, .push = 26, .lift = 2, .time = 0.8, .color = .{ 0.2, 0.5, 1 } },
-        .quill_storm => .{ .label = "QUILL STORM", .mechanic = .slam, .cost = 35, .cooldown = 6, .damage = 45, .radius = 6, .stun = 0.8, .push = 6, .color = .{ 0.3, 0.6, 1 } },
-        .homing_hop => .{ .label = "HOMING HOP", .mechanic = .launch, .cost = 20, .cooldown = 3, .damage = 70, .radius = 2, .stun = 0.6, .push = 10, .lift = 13, .time = 0.6, .color = .{ 0.4, 0.7, 1 } },
-        .fox_fire => .{ .label = "FOX FIRE", .mechanic = .chain, .cost = 30, .cooldown = 4, .damage = 40, .radius = 28, .count = 3, .color = .{ 1, 0.55, 0.25 } },
-        .mirage_step => .{ .label = "MIRAGE STEP", .mechanic = .vanish, .cost = 30, .cooldown = 10, .damage = 20, .time = 4, .color = .{ 1, 0.7, 0.9 } },
-        .tail_whirl => .{ .label = "TAIL WHIRL", .mechanic = .slam, .cost = 25, .cooldown = 4, .damage = 35, .radius = 5, .stun = 1, .push = 10, .color = .{ 1, 0.6, 0.3 } },
-        .shell_guard => .{ .label = "SHELL GUARD", .mechanic = .shield, .cost = 40, .cooldown = 12, .damage = 140, .time = 8, .color = .{ 0.4, 0.9, 0.5 } },
-        .shell_spin => .{ .label = "SHELL SPIN", .mechanic = .launch, .cost = 30, .cooldown = 5, .damage = 90, .radius = 2.5, .stun = 0.6, .push = 12, .time = 2.5, .color = .{ 0.5, 0.9, 0.5 } },
-        .tidal_slam => .{ .label = "TIDAL SLAM", .mechanic = .slam, .cost = 40, .cooldown = 7, .damage = 55, .radius = 9, .stun = 1.2, .push = 14, .color = .{ 0.3, 0.7, 1 } },
-        .moon_leap => .{ .label = "MOON LEAP", .mechanic = .launch, .cost = 15, .cooldown = 2, .push = 6, .lift = 17, .color = .{ 0.9, 0.9, 1 } },
-        .thump_quake => .{ .label = "THUMP QUAKE", .mechanic = .slam, .cost = 35, .cooldown = 5, .damage = 50, .radius = 7, .stun = 1.2, .push = 8, .color = .{ 0.9, 0.8, 0.6 } },
-        .bunny_barrage => .{ .label = "BUNNY BARRAGE", .mechanic = .cone, .cost = 25, .cooldown = 3, .damage = 55, .radius = 7, .stun = 0.5, .push = 8, .color = .{ 1, 0.7, 0.8 } },
-        .gizmo_turret => .{ .label = "GIZMO TURRET", .mechanic = .sentry, .cost = 45, .cooldown = 14, .damage = 9, .time = 20, .color = .{ 0.7, 0.9, 0.4 } },
-        .smoke_bomb => .{ .label = "SMOKE BOMB", .mechanic = .field, .cost = 30, .cooldown = 8, .damage = 5, .radius = 6, .stun = 2.5, .time = 4, .color = .{ 0.6, 0.6, 0.65 } },
-        .trash_toss => .{ .label = "TRASH TOSS", .mechanic = .grenade, .cost = 25, .cooldown = 4, .damage = 55, .radius = 5, .stun = 1.5, .push = 5, .color = .{ 0.75, 0.75, 0.4 } },
-        .super_hop => .{ .label = "SUPER HOP", .mechanic = .launch, .cost = 15, .cooldown = 2, .push = 8, .lift = 18, .color = .{ 0.4, 1, 0.4 } },
-        .tongue_lash => .{ .label = "TONGUE LASH", .mechanic = .cone, .cost = 25, .cooldown = 3, .damage = 45, .radius = 10, .stun = 0.8, .push = -10, .color = .{ 1, 0.4, 0.5 } },
-        .splash_quake => .{ .label = "SPLASH QUAKE", .mechanic = .slam, .cost = 35, .cooldown = 6, .damage = 50, .radius = 8, .stun = 1, .push = 10, .color = .{ 0.4, 0.8, 1 } },
-        .hypno_gaze => .{ .label = "HYPNO GAZE", .mechanic = .cone, .cost = 30, .cooldown = 7, .damage = 10, .radius = 12, .stun = 3.5, .color = .{ 0.8, 0.4, 1 } },
-        .venom_cloud => .{ .label = "VENOM CLOUD", .mechanic = .field, .cost = 35, .cooldown = 8, .damage = 30, .radius = 5, .stun = 0.3, .time = 5, .color = .{ 0.5, 1, 0.3 } },
-        .coil_strike => .{ .label = "COIL STRIKE", .mechanic = .blink, .cost = 25, .cooldown = 3, .damage = 55, .radius = 12, .stun = 1, .push = 6, .color = .{ 0.4, 0.9, 0.4 } },
-        .jaw_snap => .{ .label = "JAW SNAP", .mechanic = .cone, .cost = 25, .cooldown = 3, .damage = 95, .radius = 5, .stun = 0.8, .push = 4, .color = .{ 0.9, 0.9, 0.7 } },
-        .death_roll => .{ .label = "DEATH ROLL", .mechanic = .launch, .cost = 35, .cooldown = 6, .damage = 110, .radius = 2.6, .stun = 0.8, .push = 10, .time = 2, .color = .{ 0.4, 0.7, 0.3 } },
-        .swamp_stomp => .{ .label = "SWAMP STOMP", .mechanic = .slam, .cost = 40, .cooldown = 7, .damage = 60, .radius = 8, .stun = 1.3, .push = 10, .color = .{ 0.5, 0.6, 0.3 } },
-        .play_dead => .{ .label = "PLAY DEAD", .mechanic = .vanish, .cost = 30, .cooldown = 14, .damage = 40, .time = 5, .color = .{ 0.9, 0.85, 0.9 } },
-        .junk_bomb => .{ .label = "JUNK BOMB", .mechanic = .grenade, .cost = 25, .cooldown = 4, .damage = 50, .radius = 5, .stun = 1.5, .push = 4, .color = .{ 0.8, 0.7, 0.5 } },
-        .tail_trip => .{ .label = "TAIL TRIP", .mechanic = .cone, .cost = 20, .cooldown = 4, .damage = 15, .radius = 6, .stun = 2.5, .push = 3, .color = .{ 0.95, 0.75, 0.8 } },
-        .mighty_roar => .{ .label = "MIGHTY ROAR", .mechanic = .cone, .cost = 35, .cooldown = 8, .damage = 20, .radius = 14, .stun = 2.5, .push = 16, .color = .{ 1, 0.8, 0.3 } },
-        .pounce => .{ .label = "POUNCE", .mechanic = .blink, .cost = 25, .cooldown = 3, .damage = 70, .radius = 14, .stun = 1.2, .push = 6, .color = .{ 1, 0.75, 0.3 } },
-        .pride_rally => .{ .label = "PRIDE RALLY", .mechanic = .heal, .cost = 45, .cooldown = 14, .damage = 50, .radius = 14, .color = .{ 1, 0.9, 0.4 } },
-        .trunk_blast => .{ .label = "TRUNK BLAST", .mechanic = .cone, .cost = 30, .cooldown = 5, .damage = 40, .radius = 12, .stun = 1, .push = 22, .color = .{ 0.7, 0.8, 1 } },
-        .stampede => .{ .label = "STAMPEDE", .mechanic = .launch, .cost = 35, .cooldown = 6, .damage = 100, .radius = 2.6, .stun = 1, .push = 20, .time = 1.2, .color = .{ 0.75, 0.7, 0.7 } },
-        .earthshaker => .{ .label = "EARTHSHAKER", .mechanic = .slam, .cost = 45, .cooldown = 8, .damage = 70, .radius = 10, .stun = 1.5, .push = 10, .color = .{ 0.8, 0.7, 0.5 } },
-        .haymaker => .{ .label = "HAYMAKER", .mechanic = .cone, .cost = 25, .cooldown = 3, .damage = 110, .radius = 4.5, .stun = 1, .push = 18, .color = .{ 1, 0.5, 0.3 } },
-        .pogo_bounce => .{ .label = "POGO BOUNCE", .mechanic = .launch, .cost = 15, .cooldown = 2, .damage = 40, .radius = 2, .stun = 0.5, .push = 9, .lift = 16, .time = 0.5, .color = .{ 1, 0.7, 0.4 } },
-        .pouch_shield => .{ .label = "POUCH SHIELD", .mechanic = .shield, .cost = 35, .cooldown = 12, .damage = 90, .time = 8, .color = .{ 1, 0.8, 0.5 } },
-        .moon_howl => .{ .label = "MOON HOWL", .mechanic = .heal, .cost = 40, .cooldown = 12, .damage = 35, .radius = 16, .color = .{ 0.75, 0.85, 1 } },
-        .pack_dash => .{ .label = "PACK DASH", .mechanic = .blink, .cost = 25, .cooldown = 3, .damage = 50, .radius = 16, .stun = 0.8, .push = 5, .color = .{ 0.7, 0.8, 1 } },
-        .frost_bite => .{ .label = "FROST BITE", .mechanic = .cone, .cost = 25, .cooldown = 4, .damage = 70, .radius = 5, .stun = 2, .push = 3, .color = .{ 0.6, 0.9, 1 } },
-        .horn_charge => .{ .label = "HORN CHARGE", .mechanic = .launch, .cost = 30, .cooldown = 5, .damage = 130, .radius = 2.4, .stun = 1.2, .push = 24, .time = 1, .color = .{ 0.85, 0.8, 0.7 } },
-        .iron_hide => .{ .label = "IRON HIDE", .mechanic = .shield, .cost = 40, .cooldown = 12, .damage = 120, .time = 10, .color = .{ 0.7, 0.75, 0.8 } },
-        .ground_crack => .{ .label = "GROUND CRACK", .mechanic = .slam, .cost = 40, .cooldown = 7, .damage = 65, .radius = 9, .stun = 1.4, .push = 8, .color = .{ 0.85, 0.65, 0.4 } },
-        .bamboo_whirl => .{ .label = "BAMBOO WHIRL", .mechanic = .aura, .cost = 30, .cooldown = 6, .damage = 80, .radius = 3, .stun = 0.4, .time = 2.5, .color = .{ 0.5, 0.95, 0.4 } },
-        .belly_bounce => .{ .label = "BELLY BOUNCE", .mechanic = .slam, .cost = 30, .cooldown = 5, .damage = 55, .radius = 7, .stun = 1, .push = 12, .color = .{ 0.95, 0.95, 0.9 } },
-        .snack_break => .{ .label = "SNACK BREAK", .mechanic = .heal, .cost = 40, .cooldown = 12, .damage = 60, .radius = 10, .color = .{ 1, 0.85, 0.5 } },
-        .ground_pound => .{ .label = "GROUND POUND", .mechanic = .slam, .cost = 40, .cooldown = 7, .damage = 80, .radius = 9, .stun = 1.5, .push = 12, .color = .{ 0.7, 0.6, 0.5 } },
-        .boulder_toss => .{ .label = "BOULDER TOSS", .mechanic = .grenade, .cost = 35, .cooldown = 5, .damage = 90, .radius = 6, .stun = 1.5, .push = 8, .color = .{ 0.65, 0.6, 0.55 } },
-        .chest_drum => .{ .label = "CHEST DRUM", .mechanic = .cone, .cost = 30, .cooldown = 8, .damage = 15, .radius = 12, .stun = 2, .push = 12, .color = .{ 0.9, 0.6, 0.3 } },
-        .dive_bomb => .{ .label = "DIVE BOMB", .mechanic = .blink, .cost = 30, .cooldown = 4, .damage = 75, .radius = 18, .stun = 1.2, .push = 8, .color = .{ 1, 0.85, 0.4 } },
-        .gale_gust => .{ .label = "GALE GUST", .mechanic = .cone, .cost = 30, .cooldown = 6, .damage = 20, .radius = 14, .stun = 1, .push = 20, .color = .{ 0.85, 0.95, 1 } },
-        .sky_lift => .{ .label = "SKY LIFT", .mechanic = .launch, .cost = 15, .cooldown = 3, .push = 4, .lift = 20, .color = .{ 0.9, 0.95, 1 } },
-        .talon_strike => .{ .label = "TALON STRIKE", .mechanic = .blink, .cost = 25, .cooldown = 3, .damage = 65, .radius = 14, .stun = 1, .push = 6, .color = .{ 1, 0.5, 0.35 } },
-        .feather_barrage => .{ .label = "FEATHER BARRAGE", .mechanic = .chain, .cost = 35, .cooldown = 5, .damage = 30, .radius = 30, .count = 5, .color = .{ 1, 0.6, 0.4 } },
-        .updraft => .{ .label = "UPDRAFT", .mechanic = .launch, .cost = 15, .cooldown = 3, .push = 4, .lift = 18, .color = .{ 0.95, 0.9, 1 } },
-        .moon_lance => .{ .label = "MOON LANCE", .mechanic = .lance, .cost = 55, .cooldown = 10, .damage = 85, .time = 2.2, .color = .{ 0.75, 0.8, 1 } },
-        .night_veil => .{ .label = "NIGHT VEIL", .mechanic = .vanish, .cost = 30, .cooldown = 12, .damage = 20, .time = 4, .color = .{ 0.4, 0.4, 0.7 } },
-        .wisdom_ward => .{ .label = "WISDOM WARD", .mechanic = .heal, .cost = 40, .cooldown = 12, .damage = 45, .radius = 14, .color = .{ 0.8, 0.85, 1 } },
-        .sonic_screech => .{ .label = "SONIC SCREECH", .mechanic = .cone, .cost = 30, .cooldown = 6, .damage = 25, .radius = 12, .stun = 3, .push = 6, .color = .{ 0.85, 0.5, 1 } },
-        .echo_pulse => .{ .label = "ECHO PULSE", .mechanic = .chain, .cost = 30, .cooldown = 4, .damage = 35, .radius = 26, .count = 4, .color = .{ 0.75, 0.5, 1 } },
-        .night_glide => .{ .label = "NIGHT GLIDE", .mechanic = .vanish, .cost = 25, .cooldown = 10, .damage = 15, .time = 3, .color = .{ 0.5, 0.35, 0.8 } },
-        .web_snare => .{ .label = "WEB SNARE", .mechanic = .field, .cost = 30, .cooldown = 6, .damage = 4, .radius = 6, .stun = 3.5, .time = 4, .color = .{ 0.95, 0.95, 1 } },
-        .web_swing => .{ .label = "WEB SWING", .mechanic = .blink, .cost = 15, .cooldown = 2, .damage = 10, .radius = 18, .stun = 0.4, .color = .{ 0.9, 0.9, 1 } },
-        .spiderling_swarm => .{ .label = "SPIDERLING SWARM", .mechanic = .chain, .cost = 35, .cooldown = 6, .damage = 20, .radius = 24, .count = 6, .color = .{ 1, 0.4, 0.5 } },
-        .scythe_flurry => .{ .label = "SCYTHE FLURRY", .mechanic = .aura, .cost = 30, .cooldown = 5, .damage = 140, .radius = 3, .stun = 0.3, .time = 1.5, .color = .{ 0.6, 1, 0.5 } },
-        .mantis_leap => .{ .label = "MANTIS LEAP", .mechanic = .blink, .cost = 20, .cooldown = 3, .damage = 60, .radius = 12, .stun = 0.8, .push = 4, .color = .{ 0.6, 1, 0.5 } },
-        .zen_guard => .{ .label = "ZEN GUARD", .mechanic = .shield, .cost = 35, .cooldown = 10, .damage = 100, .time = 6, .color = .{ 0.7, 1, 0.7 } },
-        .horn_toss => .{ .label = "HORN TOSS", .mechanic = .cone, .cost = 25, .cooldown = 4, .damage = 70, .radius = 5, .stun = 1, .push = 20, .color = .{ 1, 0.8, 0.3 } },
-        .solar_flare => .{ .label = "SOLAR FLARE", .mechanic = .lance, .cost = 55, .cooldown = 10, .damage = 100, .time = 2, .color = .{ 1, 0.85, 0.35 } },
-        .carapace => .{ .label = "CARAPACE", .mechanic = .shield, .cost = 40, .cooldown = 12, .damage = 130, .time = 9, .color = .{ 1, 0.75, 0.3 } },
-        .honey_heal => .{ .label = "HONEY HEAL", .mechanic = .heal, .cost = 35, .cooldown = 9, .damage = 50, .radius = 14, .color = .{ 1, 0.8, 0.2 } },
-        .sting_swarm => .{ .label = "STING SWARM", .mechanic = .chain, .cost = 30, .cooldown = 4, .damage = 30, .radius = 26, .count = 5, .color = .{ 1, 0.85, 0.2 } },
-        .buzz_dash => .{ .label = "BUZZ DASH", .mechanic = .blink, .cost = 20, .cooldown = 2.5, .damage = 40, .radius = 12, .stun = 0.6, .push = 4, .color = .{ 1, 0.9, 0.3 } },
-        .prism_dust => .{ .label = "PRISM DUST", .mechanic = .field, .cost = 35, .cooldown = 8, .damage = 20, .radius = 6, .stun = 2.5, .time = 4, .color = .{ 1, 0.6, 1 } },
-        .rainbow_beam => .{ .label = "RAINBOW BEAM", .mechanic = .lance, .cost = 55, .cooldown = 10, .damage = 80, .time = 2.5, .color = .{ 0.6, 1, 0.9 } },
-        .wing_gust => .{ .label = "WING GUST", .mechanic = .cone, .cost = 25, .cooldown = 5, .damage = 15, .radius = 12, .stun = 0.8, .push = 18, .color = .{ 0.9, 0.8, 1 } },
-        .tail_sting => .{ .label = "TAIL STING", .mechanic = .cone, .cost = 25, .cooldown = 3, .damage = 85, .radius = 6, .stun = 1.2, .push = 4, .color = .{ 0.9, 0.5, 1 } },
-        .sandstorm => .{ .label = "SANDSTORM", .mechanic = .field, .cost = 35, .cooldown = 8, .damage = 35, .radius = 7, .stun = 0.2, .time = 5, .color = .{ 0.95, 0.8, 0.5 } },
-        .pincer_slam => .{ .label = "PINCER SLAM", .mechanic = .slam, .cost = 30, .cooldown = 5, .damage = 60, .radius = 6, .stun = 1.2, .push = 8, .color = .{ 1, 0.6, 0.4 } },
+        .spin_dash => .{ .label = "SPIN DASH", .mechanic = .launch, .cooldown = 2, .damage = 120, .radius = 2.2, .stun = 0.5, .push = 26, .lift = 2, .time = 0.8, .color = .{ 0.2, 0.5, 1 } },
+        .quill_storm => .{ .label = "QUILL STORM", .mechanic = .slam, .cooldown = 6, .damage = 45, .radius = 6, .stun = 0.8, .push = 6, .color = .{ 0.3, 0.6, 1 } },
+        .homing_hop => .{ .label = "HOMING HOP", .mechanic = .launch, .cooldown = 3, .damage = 70, .radius = 2, .stun = 0.6, .push = 10, .lift = 13, .time = 0.6, .color = .{ 0.4, 0.7, 1 } },
+        .fox_fire => .{ .label = "FOX FIRE", .mechanic = .chain, .cooldown = 4, .damage = 40, .radius = 28, .count = 3, .color = .{ 1, 0.55, 0.25 } },
+        .mirage_step => .{ .label = "MIRAGE STEP", .mechanic = .vanish, .cooldown = 10, .damage = 20, .time = 4, .color = .{ 1, 0.7, 0.9 } },
+        .tail_whirl => .{ .label = "TAIL WHIRL", .mechanic = .slam, .cooldown = 4, .damage = 35, .radius = 5, .stun = 1, .push = 10, .color = .{ 1, 0.6, 0.3 } },
+        .shell_guard => .{ .label = "SHELL GUARD", .mechanic = .shield, .cooldown = 12, .damage = 140, .time = 8, .color = .{ 0.4, 0.9, 0.5 } },
+        .shell_spin => .{ .label = "SHELL SPIN", .mechanic = .launch, .cooldown = 5, .damage = 90, .radius = 2.5, .stun = 0.6, .push = 12, .time = 2.5, .color = .{ 0.5, 0.9, 0.5 } },
+        .tidal_slam => .{ .label = "TIDAL SLAM", .mechanic = .slam, .cooldown = 7, .damage = 55, .radius = 9, .stun = 1.2, .push = 14, .color = .{ 0.3, 0.7, 1 } },
+        .moon_leap => .{ .label = "MOON LEAP", .mechanic = .launch, .cooldown = 2, .push = 6, .lift = 17, .color = .{ 0.9, 0.9, 1 } },
+        .thump_quake => .{ .label = "THUMP QUAKE", .mechanic = .slam, .cooldown = 5, .damage = 50, .radius = 7, .stun = 1.2, .push = 8, .color = .{ 0.9, 0.8, 0.6 } },
+        .bunny_barrage => .{ .label = "BUNNY BARRAGE", .mechanic = .cone, .cooldown = 3, .damage = 55, .radius = 7, .stun = 0.5, .push = 8, .color = .{ 1, 0.7, 0.8 } },
+        .gizmo_turret => .{ .label = "GIZMO TURRET", .mechanic = .sentry, .cooldown = 14, .damage = 9, .time = 20, .color = .{ 0.7, 0.9, 0.4 } },
+        .smoke_bomb => .{ .label = "SMOKE BOMB", .mechanic = .field, .cooldown = 8, .damage = 5, .radius = 6, .stun = 2.5, .time = 4, .color = .{ 0.6, 0.6, 0.65 } },
+        .trash_toss => .{ .label = "TRASH TOSS", .mechanic = .grenade, .cooldown = 4, .damage = 55, .radius = 5, .stun = 1.5, .push = 5, .color = .{ 0.75, 0.75, 0.4 } },
+        .super_hop => .{ .label = "SUPER HOP", .mechanic = .launch, .cooldown = 2, .push = 8, .lift = 18, .color = .{ 0.4, 1, 0.4 } },
+        .tongue_lash => .{ .label = "TONGUE LASH", .mechanic = .cone, .cooldown = 3, .damage = 45, .radius = 10, .stun = 0.8, .push = -10, .color = .{ 1, 0.4, 0.5 } },
+        .splash_quake => .{ .label = "SPLASH QUAKE", .mechanic = .slam, .cooldown = 6, .damage = 50, .radius = 8, .stun = 1, .push = 10, .color = .{ 0.4, 0.8, 1 } },
+        .hypno_gaze => .{ .label = "HYPNO GAZE", .mechanic = .cone, .cooldown = 7, .damage = 10, .radius = 12, .stun = 3.5, .color = .{ 0.8, 0.4, 1 } },
+        .venom_cloud => .{ .label = "VENOM CLOUD", .mechanic = .field, .cooldown = 8, .damage = 30, .radius = 5, .stun = 0.3, .time = 5, .color = .{ 0.5, 1, 0.3 } },
+        .coil_strike => .{ .label = "COIL STRIKE", .mechanic = .blink, .cooldown = 3, .damage = 55, .radius = 12, .stun = 1, .push = 6, .color = .{ 0.4, 0.9, 0.4 } },
+        .jaw_snap => .{ .label = "JAW SNAP", .mechanic = .cone, .cooldown = 3, .damage = 95, .radius = 5, .stun = 0.8, .push = 4, .color = .{ 0.9, 0.9, 0.7 } },
+        .death_roll => .{ .label = "DEATH ROLL", .mechanic = .launch, .cooldown = 6, .damage = 110, .radius = 2.6, .stun = 0.8, .push = 10, .time = 2, .color = .{ 0.4, 0.7, 0.3 } },
+        .swamp_stomp => .{ .label = "SWAMP STOMP", .mechanic = .slam, .cooldown = 7, .damage = 60, .radius = 8, .stun = 1.3, .push = 10, .color = .{ 0.5, 0.6, 0.3 } },
+        .play_dead => .{ .label = "PLAY DEAD", .mechanic = .vanish, .cooldown = 14, .damage = 40, .time = 5, .color = .{ 0.9, 0.85, 0.9 } },
+        .junk_bomb => .{ .label = "JUNK BOMB", .mechanic = .grenade, .cooldown = 4, .damage = 50, .radius = 5, .stun = 1.5, .push = 4, .color = .{ 0.8, 0.7, 0.5 } },
+        .tail_trip => .{ .label = "TAIL TRIP", .mechanic = .cone, .cooldown = 4, .damage = 15, .radius = 6, .stun = 2.5, .push = 3, .color = .{ 0.95, 0.75, 0.8 } },
+        .mighty_roar => .{ .label = "MIGHTY ROAR", .mechanic = .cone, .cooldown = 8, .damage = 20, .radius = 14, .stun = 2.5, .push = 16, .color = .{ 1, 0.8, 0.3 } },
+        .pounce => .{ .label = "POUNCE", .mechanic = .blink, .cooldown = 3, .damage = 70, .radius = 14, .stun = 1.2, .push = 6, .color = .{ 1, 0.75, 0.3 } },
+        .pride_rally => .{ .label = "PRIDE RALLY", .mechanic = .heal, .cooldown = 14, .damage = 50, .radius = 14, .color = .{ 1, 0.9, 0.4 } },
+        .trunk_blast => .{ .label = "TRUNK BLAST", .mechanic = .cone, .cooldown = 5, .damage = 40, .radius = 12, .stun = 1, .push = 22, .color = .{ 0.7, 0.8, 1 } },
+        .stampede => .{ .label = "STAMPEDE", .mechanic = .launch, .cooldown = 6, .damage = 100, .radius = 2.6, .stun = 1, .push = 20, .time = 1.2, .color = .{ 0.75, 0.7, 0.7 } },
+        .earthshaker => .{ .label = "EARTHSHAKER", .mechanic = .slam, .cooldown = 8, .damage = 70, .radius = 10, .stun = 1.5, .push = 10, .color = .{ 0.8, 0.7, 0.5 } },
+        .haymaker => .{ .label = "HAYMAKER", .mechanic = .cone, .cooldown = 3, .damage = 110, .radius = 4.5, .stun = 1, .push = 18, .color = .{ 1, 0.5, 0.3 } },
+        .pogo_bounce => .{ .label = "POGO BOUNCE", .mechanic = .launch, .cooldown = 2, .damage = 40, .radius = 2, .stun = 0.5, .push = 9, .lift = 16, .time = 0.5, .color = .{ 1, 0.7, 0.4 } },
+        .pouch_shield => .{ .label = "POUCH SHIELD", .mechanic = .shield, .cooldown = 12, .damage = 90, .time = 8, .color = .{ 1, 0.8, 0.5 } },
+        .moon_howl => .{ .label = "MOON HOWL", .mechanic = .heal, .cooldown = 12, .damage = 35, .radius = 16, .color = .{ 0.75, 0.85, 1 } },
+        .pack_dash => .{ .label = "PACK DASH", .mechanic = .blink, .cooldown = 3, .damage = 50, .radius = 16, .stun = 0.8, .push = 5, .color = .{ 0.7, 0.8, 1 } },
+        .frost_bite => .{ .label = "FROST BITE", .mechanic = .cone, .cooldown = 4, .damage = 70, .radius = 5, .stun = 2, .push = 3, .color = .{ 0.6, 0.9, 1 } },
+        .horn_charge => .{ .label = "HORN CHARGE", .mechanic = .launch, .cooldown = 5, .damage = 130, .radius = 2.4, .stun = 1.2, .push = 24, .time = 1, .color = .{ 0.85, 0.8, 0.7 } },
+        .iron_hide => .{ .label = "IRON HIDE", .mechanic = .shield, .cooldown = 12, .damage = 120, .time = 10, .color = .{ 0.7, 0.75, 0.8 } },
+        .ground_crack => .{ .label = "GROUND CRACK", .mechanic = .slam, .cooldown = 7, .damage = 65, .radius = 9, .stun = 1.4, .push = 8, .color = .{ 0.85, 0.65, 0.4 } },
+        .bamboo_whirl => .{ .label = "BAMBOO WHIRL", .mechanic = .aura, .cooldown = 6, .damage = 80, .radius = 3, .stun = 0.4, .time = 2.5, .color = .{ 0.5, 0.95, 0.4 } },
+        .belly_bounce => .{ .label = "BELLY BOUNCE", .mechanic = .slam, .cooldown = 5, .damage = 55, .radius = 7, .stun = 1, .push = 12, .color = .{ 0.95, 0.95, 0.9 } },
+        .snack_break => .{ .label = "SNACK BREAK", .mechanic = .heal, .cooldown = 12, .damage = 60, .radius = 10, .color = .{ 1, 0.85, 0.5 } },
+        .ground_pound => .{ .label = "GROUND POUND", .mechanic = .slam, .cooldown = 7, .damage = 80, .radius = 9, .stun = 1.5, .push = 12, .color = .{ 0.7, 0.6, 0.5 } },
+        .boulder_toss => .{ .label = "BOULDER TOSS", .mechanic = .grenade, .cooldown = 5, .damage = 90, .radius = 6, .stun = 1.5, .push = 8, .color = .{ 0.65, 0.6, 0.55 } },
+        .chest_drum => .{ .label = "CHEST DRUM", .mechanic = .cone, .cooldown = 8, .damage = 15, .radius = 12, .stun = 2, .push = 12, .color = .{ 0.9, 0.6, 0.3 } },
+        .dive_bomb => .{ .label = "DIVE BOMB", .mechanic = .blink, .cooldown = 4, .damage = 75, .radius = 18, .stun = 1.2, .push = 8, .color = .{ 1, 0.85, 0.4 } },
+        .gale_gust => .{ .label = "GALE GUST", .mechanic = .cone, .cooldown = 6, .damage = 20, .radius = 14, .stun = 1, .push = 20, .color = .{ 0.85, 0.95, 1 } },
+        .sky_lift => .{ .label = "SKY LIFT", .mechanic = .launch, .cooldown = 3, .push = 4, .lift = 20, .color = .{ 0.9, 0.95, 1 } },
+        .talon_strike => .{ .label = "TALON STRIKE", .mechanic = .blink, .cooldown = 3, .damage = 65, .radius = 14, .stun = 1, .push = 6, .color = .{ 1, 0.5, 0.35 } },
+        .feather_barrage => .{ .label = "FEATHER BARRAGE", .mechanic = .chain, .cooldown = 5, .damage = 30, .radius = 30, .count = 5, .color = .{ 1, 0.6, 0.4 } },
+        .updraft => .{ .label = "UPDRAFT", .mechanic = .launch, .cooldown = 3, .push = 4, .lift = 18, .color = .{ 0.95, 0.9, 1 } },
+        .moon_lance => .{ .label = "MOON LANCE", .mechanic = .lance, .cooldown = 10, .damage = 85, .time = 2.2, .color = .{ 0.75, 0.8, 1 } },
+        .night_veil => .{ .label = "NIGHT VEIL", .mechanic = .vanish, .cooldown = 12, .damage = 20, .time = 4, .color = .{ 0.4, 0.4, 0.7 } },
+        .wisdom_ward => .{ .label = "WISDOM WARD", .mechanic = .heal, .cooldown = 12, .damage = 45, .radius = 14, .color = .{ 0.8, 0.85, 1 } },
+        .sonic_screech => .{ .label = "SONIC SCREECH", .mechanic = .cone, .cooldown = 6, .damage = 25, .radius = 12, .stun = 3, .push = 6, .color = .{ 0.85, 0.5, 1 } },
+        .echo_pulse => .{ .label = "ECHO PULSE", .mechanic = .chain, .cooldown = 4, .damage = 35, .radius = 26, .count = 4, .color = .{ 0.75, 0.5, 1 } },
+        .night_glide => .{ .label = "NIGHT GLIDE", .mechanic = .vanish, .cooldown = 10, .damage = 15, .time = 3, .color = .{ 0.5, 0.35, 0.8 } },
+        .web_snare => .{ .label = "WEB SNARE", .mechanic = .field, .cooldown = 6, .damage = 4, .radius = 6, .stun = 3.5, .time = 4, .color = .{ 0.95, 0.95, 1 } },
+        .web_swing => .{ .label = "WEB SWING", .mechanic = .blink, .cooldown = 2, .damage = 10, .radius = 18, .stun = 0.4, .color = .{ 0.9, 0.9, 1 } },
+        .spiderling_swarm => .{ .label = "SPIDERLING SWARM", .mechanic = .chain, .cooldown = 6, .damage = 20, .radius = 24, .count = 6, .color = .{ 1, 0.4, 0.5 } },
+        .scythe_flurry => .{ .label = "SCYTHE FLURRY", .mechanic = .aura, .cooldown = 5, .damage = 140, .radius = 3, .stun = 0.3, .time = 1.5, .color = .{ 0.6, 1, 0.5 } },
+        .mantis_leap => .{ .label = "MANTIS LEAP", .mechanic = .blink, .cooldown = 3, .damage = 60, .radius = 12, .stun = 0.8, .push = 4, .color = .{ 0.6, 1, 0.5 } },
+        .zen_guard => .{ .label = "ZEN GUARD", .mechanic = .shield, .cooldown = 10, .damage = 100, .time = 6, .color = .{ 0.7, 1, 0.7 } },
+        .horn_toss => .{ .label = "HORN TOSS", .mechanic = .cone, .cooldown = 4, .damage = 70, .radius = 5, .stun = 1, .push = 20, .color = .{ 1, 0.8, 0.3 } },
+        .solar_flare => .{ .label = "SOLAR FLARE", .mechanic = .lance, .cooldown = 10, .damage = 100, .time = 2, .color = .{ 1, 0.85, 0.35 } },
+        .carapace => .{ .label = "CARAPACE", .mechanic = .shield, .cooldown = 12, .damage = 130, .time = 9, .color = .{ 1, 0.75, 0.3 } },
+        .honey_heal => .{ .label = "HONEY HEAL", .mechanic = .heal, .cooldown = 9, .damage = 50, .radius = 14, .color = .{ 1, 0.8, 0.2 } },
+        .sting_swarm => .{ .label = "STING SWARM", .mechanic = .chain, .cooldown = 4, .damage = 30, .radius = 26, .count = 5, .color = .{ 1, 0.85, 0.2 } },
+        .buzz_dash => .{ .label = "BUZZ DASH", .mechanic = .blink, .cooldown = 2.5, .damage = 40, .radius = 12, .stun = 0.6, .push = 4, .color = .{ 1, 0.9, 0.3 } },
+        .prism_dust => .{ .label = "PRISM DUST", .mechanic = .field, .cooldown = 8, .damage = 20, .radius = 6, .stun = 2.5, .time = 4, .color = .{ 1, 0.6, 1 } },
+        .rainbow_beam => .{ .label = "RAINBOW BEAM", .mechanic = .lance, .cooldown = 10, .damage = 80, .time = 2.5, .color = .{ 0.6, 1, 0.9 } },
+        .wing_gust => .{ .label = "WING GUST", .mechanic = .cone, .cooldown = 5, .damage = 15, .radius = 12, .stun = 0.8, .push = 18, .color = .{ 0.9, 0.8, 1 } },
+        .tail_sting => .{ .label = "TAIL STING", .mechanic = .cone, .cooldown = 3, .damage = 85, .radius = 6, .stun = 1.2, .push = 4, .color = .{ 0.9, 0.5, 1 } },
+        .sandstorm => .{ .label = "SANDSTORM", .mechanic = .field, .cooldown = 8, .damage = 35, .radius = 7, .stun = 0.2, .time = 5, .color = .{ 0.95, 0.8, 0.5 } },
+        .pincer_slam => .{ .label = "PINCER SLAM", .mechanic = .slam, .cooldown = 5, .damage = 60, .radius = 6, .stun = 1.2, .push = 8, .color = .{ 1, 0.6, 0.4 } },
     };
 }
 
 /// What a body brings to a fight: three powers and its passives.
 pub const Loadout = struct {
     kit: [3]Kind,
-    /// Energy per second, extra maximum health, saber damage factor, run-speed factor.
+    /// Recharge rate (8 recharges in real time, 10 a quarter faster), extra maximum health, saber
+    /// damage factor, run-speed factor.
     regen: f32,
     health: f32,
     melee: f32,
@@ -268,7 +272,6 @@ pub const Use = struct {
 };
 
 pub const Player = struct {
-    energy: f32 = max_energy,
     cooldowns: [3]f32 = @splat(0),
     /// A channelled lance: time left and which power it is.
     lance: f32 = 0,
@@ -291,7 +294,7 @@ pub const Field = struct { kind: Kind, position: V, left: f32, tick: f32 = 0 };
 
 pub const Event = union(enum) {
     used: struct { player: u8, kind: Kind },
-    /// Pressed without the energy, or still cooling down.
+    /// Pressed while still recharging.
     denied: u8,
     burst: V,
     blink: struct { player: u8, to: V },
@@ -336,15 +339,15 @@ pub fn hidden(self: *const Specials, p: usize) bool {
     return self.players[p].hidden > 0;
 }
 
-/// One fixed step of player `p`'s specials: energy, cooldowns, presses, channels and auras.
+/// One fixed step of player `p`'s specials: recharges, presses, channels and auras.
 pub fn step(self: *Specials, p: u8, profile: Profile, physics: *const Physics, enemies: *Enemies, combat: *Combat, use: Use, dt: f32, out: []Event) usize {
     var n: usize = 0;
     var hive: [16]Enemies.Event = undefined;
     var hn: usize = 0;
     const s = &self.players[p];
     const kit = loadout(profile);
-    s.energy = @min(max_energy, s.energy + kit.regen * dt);
-    for (&s.cooldowns) |*c| c.* = @max(0, c.* - dt);
+    const recharge = dt * kit.regen / normal_recharge;
+    for (&s.cooldowns) |*c| c.* = @max(0, c.* - recharge);
     s.pose_left = @max(0, s.pose_left - dt);
     s.hidden = @max(0, s.hidden - dt);
     for (use.pressed, 0..) |pressed, i| if (pressed) {
@@ -355,11 +358,10 @@ pub fn step(self: *Specials, p: u8, profile: Profile, physics: *const Physics, e
             continue;
         }
         const about = info(kind);
-        if (s.cooldowns[i] > 0 or s.energy < about.cost) {
+        if (s.cooldowns[i] > 0) {
             push(out, &n, .{ .denied = p });
             continue;
         }
-        s.energy -= about.cost;
         s.cooldowns[i] = about.cooldown;
         push(out, &n, .{ .used = .{ .player = p, .kind = kind } });
         self.activate(p, kind, physics, enemies, combat, use, out, &n, &hive, &hn);
@@ -604,7 +606,7 @@ fn testPhysics() Physics {
     }.f });
 }
 
-test "each class has its own specials, paid in energy and gated by cooldowns" {
+test "each class has its own specials, limited only by their recharge" {
     var physics = testPhysics();
     defer physics.deinit();
     var enemies: Enemies = .{};
@@ -620,17 +622,28 @@ test "each class has its own specials, paid in energy and gated by cooldowns" {
     var press = use;
     press.pressed = .{ false, false, true };
     _ = specials.step(0, ranger, &physics, &enemies, &combat, press, dt, &events);
-    try std.testing.expect(specials.players[0].energy < 61);
+    try std.testing.expect(specials.players[0].cooldowns[2] > 0);
     var hurt: [4]Combat.Event = undefined;
     var hn: usize = 0;
     _ = combat.hurt(0, 50, &hurt, &hn);
     try std.testing.expectEqual(@as(f32, 100), combat.vitals[0].health);
     try std.testing.expectEqual(@as(f32, 30), combat.vitals[0].shield);
-    // Pressed again while cooling down: refused, no energy spent.
-    const before = specials.players[0].energy;
+    // Pressed again while recharging: refused. Once recharged it works again, as often as it
+    // recharges: there is nothing else to run out of.
     const count = specials.step(0, ranger, &physics, &enemies, &combat, press, dt, &events);
     try std.testing.expect(count >= 1 and events[0] == .denied);
-    try std.testing.expect(specials.players[0].energy > before);
+    for (0..20) |_| {
+        for (0..@as(usize, @intFromFloat(info(.overshield).cooldown * 60)) + 2) |_| _ = specials.step(0, ranger, &physics, &enemies, &combat, use, dt, &events);
+        const again = specials.step(0, ranger, &physics, &enemies, &combat, press, dt, &events);
+        try std.testing.expect(again >= 1 and events[0] == .used);
+    }
+    // A Ranger (rate 10) recharges a quarter faster than real time.
+    try std.testing.expectApproxEqAbs(info(.overshield).cooldown - 1.25, blk: {
+        var probe: Specials = .{};
+        _ = probe.step(0, ranger, &physics, &enemies, &combat, press, dt, &events);
+        for (0..59) |_| _ = probe.step(0, ranger, &physics, &enemies, &combat, use, dt, &events);
+        break :blk probe.players[0].cooldowns[2];
+    }, 0.05);
 
     // An arc grenade thrown at a trooper bursts on it and stuns it.
     enemies.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 0, 7 }, .health = 500, .orbit = 0 };
@@ -661,14 +674,12 @@ test "each class has its own specials, paid in energy and gated by cooldowns" {
     };
     try std.testing.expect(blinked and enemies.units[0].?.stun > 0);
     // Kinetic slam throws everything nearby away.
-    specials.players[3].energy = max_energy;
     enemies.units[1] = .{ .kind = .drone, .nest = 0, .position = .{ 3, 1, 0 }, .health = 500, .orbit = 0 };
     press.pressed = .{ false, true, false };
     _ = specials.step(3, synthetic, &physics, &enemies, &combat, press, dt, &events);
     try std.testing.expect(enemies.units[1].?.velocity[0] > 3 and enemies.units[1].?.health < 500);
     // The lumen lance channels a beam; the body holds the cast pose meanwhile.
     press.pressed = .{ false, false, true };
-    specials.players[3].energy = max_energy;
     const lance_health = enemies.units[0].?.health;
     _ = specials.step(3, synthetic, &physics, &enemies, &combat, press, dt, &events);
     for (0..60) |_| _ = specials.step(3, synthetic, &physics, &enemies, &combat, use, dt, &events);
@@ -677,11 +688,11 @@ test "each class has its own specials, paid in energy and gated by cooldowns" {
     try std.testing.expectEqual(@as(f32, 1.25), loadout(synthetic).melee);
 }
 
-test "every Wildkin power is affordable, distinct, and does what its mechanic says" {
-    // Every power can be paid from a full bar and has the numbers its mechanic needs.
+test "every Wildkin power recharges, is distinct, and does what its mechanic says" {
+    // Every power recharges and has the numbers its mechanic needs.
     for (0..kind_count) |k| {
         const about = info(@enumFromInt(k));
-        try std.testing.expect(about.cost > 0 and about.cost <= max_energy and about.cooldown > 0);
+        try std.testing.expect(about.cooldown > 0);
         switch (about.mechanic) {
             .grenade, .slam, .cone => try std.testing.expect(about.radius > 0 and (about.damage > 0 or about.stun > 0)),
             .blink, .chain, .heal => try std.testing.expect(about.radius > 0),

@@ -886,11 +886,10 @@ fn specials(c: *Canvas, v: Rect, sb: *const Sandbox, player: u8, profile: Profil
     c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
     const lumen = Profile.accent_colors[profile.accent];
     c.text(r.x + 12, r.y + 10, if (profile.species != .human) "WILD" else if (profile.class == .synthetic) "POWERS" else "TECH", 0.9, lumen);
-    bar(c, .{ .x = r.x + 70, .y = r.y + 11, .w = r.w - 82, .h = 7 }, s.energy / Specials.max_energy, lumen);
     for (Specials.loadout(profile).kit, 0..) |kind, i| {
         const about = Specials.info(kind);
         const y = r.y + 30 + @as(f32, @floatFromInt(i)) * 19;
-        const ready = s.cooldowns[i] == 0 and s.energy >= about.cost;
+        const ready = s.cooldowns[i] == 0;
         c.rect(.{ .x = r.x + 10, .y = y - 2, .w = 20, .h = 15 }, if (ready) alpha(lumen, 0.35) else .{ 1, 1, 1, 0.08 });
         c.centered(r.x + 20, y + 2, keys[i], 0.8, ink);
         c.text(r.x + 38, y + 2, about.label, 0.85, if (ready) ink else dim);
