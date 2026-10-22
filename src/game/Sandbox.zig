@@ -31,6 +31,7 @@ const R = Physics.Rotation;
 const Player = @import("Player.zig");
 const Save = @import("Save.zig");
 const Build = @import("Build.zig");
+const Tools = @import("Tools.zig");
 const Profile = @import("Profile.zig");
 const Avatar = @import("Avatar.zig");
 const Creator = @import("Creator.zig");
@@ -1284,7 +1285,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
             camera.position = self.player.eye();
         } else self.player.setMode(.fly, camera.*);
     }
-    if (actions.select_tool != 0 and !riding) Build.selectTool(self, @enumFromInt(actions.select_tool - 1));
+    if (actions.select_tool != 0 and !riding) if (Tools.fromNumber(actions.select_tool)) |tool| Build.selectTool(self, tool);
     var primary = actions.interact;
     if (self.seated != null) {
         if (primary) self.exitVehicle(camera) else self.driver_input = .{ .throttle = input.forward, .steer = input.right, .brake = @floatFromInt(@intFromBool(input.jump)) };

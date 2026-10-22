@@ -12,6 +12,7 @@ const Node = @import("../machine/Node.zig").Node;
 const Camera = @import("../world/Camera.zig");
 const World = @import("../world/World.zig");
 const Sandbox = @import("Sandbox.zig");
+const Tools = @import("Tools.zig");
 const Vec3 = Physics.Vec3;
 
 pub const Tool = enum { hands, build, wire, bridge, weapon, terrain, blocks };
@@ -225,57 +226,56 @@ pub fn selectTool(sb: *Sandbox, tool: Tool) void {
     sb.tools.bridge_from = null;
     sb.tools.bridge_hover = null;
     if (tool != .hands) sb.release();
-    sb.say("{s} tool", .{@tagName(tool)});
-    if (tool == .blocks) @import("BuildTips.zig").intro(sb, 0);
+    const module = Tools.of(tool);
+    sb.say("{s} tool", .{module.name});
+    if (module.selected) |hook| hook(sb);
 }
 
+/// Runs the active tool's per-step update (the registry in `Tools.zig` holds each tool's entry).
 pub fn update(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Actions) !void {
+    if (Tools.of(sb.tools.tool).update) |run| try run(sb, camera, primary, actions);
+}
+
+/// The build tool: place the selected entry, remove the aimed one, capture a blueprint.
+pub fn updateBuild(sb: *Sandbox, camera: Camera, primary: bool, actions: Sandbox.Actions) !void {
     const st = &sb.tools;
-    switch (st.tool) {
-        .hands, .weapon => {},
-        .terrain => try TerrainTool.update(sb, camera, actions),
-        .blocks => try BlockTool.update(sb, camera, primary, actions, actions.box_modifier),
-        .bridge => {
-            if (actions.next_item) @import("BridgeTool.zig").cycleStyle(sb);
-            try @import("BridgeTool.zig").update(sb, camera, primary, actions.secondary);
-        },
-        .build => {
-            if (actions.rotate) st.yaw +%= 1;
-            st.preview = preview(sb, camera);
-            if (primary) {
-                if (st.preview) |p| {
-                    if (p.valid) {
-                        try place(sb, p);
-                    } else {
-                        const wood_item = p.entry == .item and switch (p.entry.item) {
-                            .sap_tap, .sap_beacon, .root_sender, .root_listener => true,
-                            else => false,
-                        };
-                        if (wood_item) sb.say("blocked: needs clear space within 4 m of wood", .{}) else sb.say("blocked", .{});
-                    }
-                } else sb.say("aim at the ground within {d:.0} m", .{build_reach});
+    if (actions.rotate) st.yaw +%= 1;
+    st.preview = preview(sb, camera);
+    if (primary) {
+        if (st.preview) |p| {
+            if (p.valid) {
+                try place(sb, p);
+            } else {
+                const wood_item = p.entry == .item and switch (p.entry.item) {
+                    .sap_tap, .sap_beacon, .root_sender, .root_listener => true,
+                    else => false,
+                };
+                if (wood_item) sb.say("blocked: needs clear space within 4 m of wood", .{}) else sb.say("blocked", .{});
             }
-            if (actions.secondary) remove(sb, sb.target);
-            if (actions.capture) capture(sb);
-        },
-        .wire => {
-            if (actions.next_item) st.wire_choice += 1;
-            if (actions.capture) capture(sb);
-            if (primary) wireClick(sb);
-            if (actions.secondary) {
-                if (st.wire_from != null) {
-                    st.wire_from = null;
-                    sb.say("wire canceled", .{});
-                } else if (sb.target == .device) {
-                    const d = sb.target.device;
-                    if (sb.machines[d.machine].shrine != null) return sb.say("shrine machines cannot be rewired", .{});
-                    const placed = &sb.machines[d.machine];
-                    const removed = placed.blueprint.disconnectInputs(d.device);
-                    placed.machine.reconfigure();
-                    sb.say("disconnected {d} inputs of {s}", .{ removed, placed.blueprint.devices[d.device].name() });
-                }
-            }
-        },
+        } else sb.say("aim at the ground within {d:.0} m", .{build_reach});
+    }
+    if (actions.secondary) remove(sb, sb.target);
+    if (actions.capture) capture(sb);
+}
+
+/// The wire tool: pick a source, then a target; right click cancels or disconnects inputs.
+pub fn updateWire(sb: *Sandbox, _: Camera, primary: bool, actions: Sandbox.Actions) !void {
+    const st = &sb.tools;
+    if (actions.next_item) st.wire_choice += 1;
+    if (actions.capture) capture(sb);
+    if (primary) wireClick(sb);
+    if (actions.secondary) {
+        if (st.wire_from != null) {
+            st.wire_from = null;
+            sb.say("wire canceled", .{});
+        } else if (sb.target == .device) {
+            const d = sb.target.device;
+            if (sb.machines[d.machine].shrine != null) return sb.say("shrine machines cannot be rewired", .{});
+            const placed = &sb.machines[d.machine];
+            const removed = placed.blueprint.disconnectInputs(d.device);
+            placed.machine.reconfigure();
+            sb.say("disconnected {d} inputs of {s}", .{ removed, placed.blueprint.devices[d.device].name() });
+        }
     }
 }
 
@@ -641,30 +641,34 @@ pub fn inspect(sb: *const Sandbox, lines: []PanelLine) usize {
 
 /// One HUD line describing the active tool.
 pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
-    const st = sb.tools;
-    return switch (st.tool) {
-        .hands => "",
-        .terrain => TerrainTool.hint(sb, buffer),
-        .blocks => BlockTool.hint(sb, buffer),
-        .weapon => if (sb.combat.arsenals[0].active) |w| switch (w) {
-            .beam_saber => "BEAM SABER  CLICK COMBO  HOLD AFTER CUT FOR WAVE  RMB GUARD / PARRY",
-            .blaster => "BUSTER  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
-            .giant_blast => "GIANT BLAST  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
-            .energy_net => "ENERGY NET  CLICK TO SNARE FLYERS IN A WIDE SHOT  TAB SWITCH",
-            else => std.fmt.bufPrint(buffer, "{s}  CLICK FIRE  RMB ALTERNATE  TAB SWITCH", .{@tagName(w)}) catch buffer,
-        } else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK",
-        .bridge => @import("BridgeTool.zig").hint(sb, buffer),
-        .build => switch (current(sb)) {
-            .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  T TURN  CLICK PLACE  ESC > BUILD MENU", .{ entryName(sb, current(sb)), sb.kits[0].wallet.kits[@intFromEnum(ware)] }) catch buffer,
-            else => std.fmt.bufPrint(buffer, "BUILD {s}  T TURN  CLICK PLACE  RMB REMOVE  P SAVE BLUEPRINT  ESC > BUILD MENU", .{entryName(sb, current(sb))}) catch buffer,
-        },
-        .wire => if (pendingWire(sb)) |w| blk: {
-            const bp = &sb.machines[st.wire_from.?.machine].blueprint;
-            const a = bp.devices[w.from.device];
-            const b = bp.devices[w.to.device];
-            break :blk std.fmt.bufPrint(buffer, "{s}.{s} TO {s}.{s}  CLICK WIRE  TAB NEXT", .{ a.name(), Device.ports(a.kind)[w.from.port].name, b.name(), Device.ports(b.kind)[w.to.port].name }) catch buffer;
-        } else if (st.wire_from != null) "WIRE: AIM AT A TARGET DEVICE  RMB CANCEL" else "WIRE: CLICK A SOURCE DEVICE  RMB DISCONNECT INPUTS",
+    return Tools.of(sb.tools.tool).hint(sb, buffer);
+}
+
+pub fn buildHint(sb: *const Sandbox, buffer: []u8) []const u8 {
+    return switch (current(sb)) {
+        .kit => |ware| std.fmt.bufPrint(buffer, "BUILD {s} KIT  {d} HELD  T TURN  CLICK PLACE  ESC > BUILD MENU", .{ entryName(sb, current(sb)), sb.kits[0].wallet.kits[@intFromEnum(ware)] }) catch buffer,
+        else => std.fmt.bufPrint(buffer, "BUILD {s}  T TURN  CLICK PLACE  RMB REMOVE  P SAVE BLUEPRINT  ESC > BUILD MENU", .{entryName(sb, current(sb))}) catch buffer,
     };
+}
+
+pub fn wireHint(sb: *const Sandbox, buffer: []u8) []const u8 {
+    const st = sb.tools;
+    return if (pendingWire(sb)) |w| blk: {
+        const bp = &sb.machines[st.wire_from.?.machine].blueprint;
+        const a = bp.devices[w.from.device];
+        const b = bp.devices[w.to.device];
+        break :blk std.fmt.bufPrint(buffer, "{s}.{s} TO {s}.{s}  CLICK WIRE  TAB NEXT", .{ a.name(), Device.ports(a.kind)[w.from.port].name, b.name(), Device.ports(b.kind)[w.to.port].name }) catch buffer;
+    } else if (st.wire_from != null) "WIRE: AIM AT A TARGET DEVICE  RMB CANCEL" else "WIRE: CLICK A SOURCE DEVICE  RMB DISCONNECT INPUTS";
+}
+
+pub fn weaponHint(sb: *const Sandbox, buffer: []u8) []const u8 {
+    return if (sb.combat.arsenals[0].active) |w| switch (w) {
+        .beam_saber => "BEAM SABER  CLICK COMBO  HOLD AFTER CUT FOR WAVE  RMB GUARD / PARRY",
+        .blaster => "BUSTER  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
+        .giant_blast => "GIANT BLAST  HOLD CLICK TO CHARGE  RELEASE TO FIRE  TAB SWITCH",
+        .energy_net => "ENERGY NET  CLICK TO SNARE FLYERS IN A WIDE SHOT  TAB SWITCH",
+        else => std.fmt.bufPrint(buffer, "{s}  CLICK FIRE  RMB ALTERNATE  TAB SWITCH", .{@tagName(w)}) catch buffer,
+    } else "NO WEAPONS: FABRICATE ONE AT THE GARAGE KIOSK";
 }
 
 fn fromTo(a: Vec3, b: Vec3) R.Quat {

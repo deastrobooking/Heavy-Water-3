@@ -18,6 +18,7 @@ const TestWorld = @import("game/TestWorld.zig");
 const Sandbox = @import("game/Sandbox.zig");
 const Save = @import("game/Save.zig");
 const Build = @import("game/Build.zig");
+const Tools = @import("game/Tools.zig");
 const Blueprint = @import("machine/Blueprint.zig");
 const prefab_dir = "saves/prefabs";
 const Creator = @import("game/Creator.zig");
@@ -1251,13 +1252,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .culling => self.culling = !self.culling,
             .quicksave => self.quicksave(),
             .quickload => _ = self.quickload(),
-            .tool_hands => self.actions.select_tool = 1,
-            .tool_build => self.actions.select_tool = 2,
-            .tool_wire => self.actions.select_tool = 3,
-            .tool_bridge => self.actions.select_tool = 4,
-            .tool_weapon => self.actions.select_tool = 5,
-            .tool_terrain => self.actions.select_tool = 6,
-            .tool_blocks => self.actions.select_tool = 7,
+            .tool_hands, .tool_build, .tool_wire, .tool_bridge, .tool_weapon, .tool_terrain, .tool_blocks => self.actions.select_tool = Tools.number(Tools.fromAction(action).?),
             .next_item => self.actions.next_item = true,
             .rotate => self.actions.rotate = true,
             .capture_prefab => self.actions.capture = true,
@@ -1531,7 +1526,7 @@ fn routePads(self: *App) void {
         const build = BlockTool.fromPad(.{ .fire = cmd.fire, .alt = cmd.alt, .up = cmd.up, .down = cmd.down, .left = cmd.left, .right = cmd.right, .modifier = cmd.input.fast }, before);
         if (p == 0) {
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
-            if (build.toggle) self.actions.select_tool = if (self.sandbox.tools.tool == .blocks) 1 else 7;
+            if (build.toggle) self.actions.select_tool = Tools.number(if (self.sandbox.tools.tool == .blocks) .hands else .blocks);
             if (self.sandbox.tools.tool == .blocks and !build.toggle) {
                 // Building on a pad: the triggers and D-pad drive the block tool, not weapons.
                 self.actions.interact = self.actions.interact or build.cmd.place;

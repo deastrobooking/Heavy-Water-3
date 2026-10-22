@@ -1,3 +1,8 @@
+## Tool registry (automation plan BS1) — 2026-10-22
+
+- **Changed:** `game/Tools.zig` is a table of the seven tools (hands, build, wire, bridge, weapon, terrain, blocks): name, key action, update, hint and select hook. `Build.update`, `Build.hint`, `Build.selectTool`, the number-key and pad-toggle routing in `App.zig` and `Sandbox.zig` now go through it. The build and wire updates moved into `Build.updateBuild` and `Build.updateWire` unchanged, and the weapon, build and wire HUD hints into `Build`. No behaviour was meant to change.
+- **Checked:** a test that the table matches the tool enum in order with distinct key actions and number keys; default and 0.17 `build check`; the full suite (613/613); the Metal smoke (exit 0, no validation messages), whose stages drive every tool through number keys. Not checked by hand: pressing the number keys and the pad build chord in play.
+
 ## Face designs: twelve faces, eye shapes, face marks, eye colours — 2026-10-22
 
 - **Decided:** reusable character parts will be a shared library for the team; the face swap on imported bodies covers only the face area ([character assets](plans/character-assets.md)).
