@@ -400,7 +400,7 @@ The district is rebuilt as a sky city held up by steel:
 
 - **Bridges:** five steel bridge styles plus the vine spurs. The six roads are assigned styles by span length, and players choose a style with Tab.
 - **Supports:** braced pole piers under every non-suspension road, and braced legs under the free-standing plazas.
-- **Skyline:** about twenty seeded, validated megatowers with roof gardens, stone-and-glass material variety, hanging ivy, and a cable-supported crown skyway network joining the high-rises; lower factory blocks stay in the ground city, and one sky-lobby tower sits beside each tower plaza.
+- **Skyline:** about twenty seeded, validated megatowers (modern, rounded eco, Gothic and industrial) with roof gardens, stone-and-glass material variety, hanging ivy, and a cable-supported, level skyway network joining the high-rises through roof gardens and sky collars (rebuilt 2026-10-23 after it had silently disappeared); lower factory blocks stay in the ground city, and one sky-lobby tower sits beside each tower plaza.
 - **Night lighting:** window columns, spire beacons, lit rails, and cable light strings.
 - **Saves:** district generator 2 and save format 12 (bridge styles and the sprint course best lap).
 

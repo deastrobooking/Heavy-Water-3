@@ -2148,6 +2148,33 @@ fn showcase(self: *App) void {
         eye = s.point(0.1);
         eye[1] += 2;
         target[1] += 2;
+    } else if (v == 112 or v == 113) {
+        // The skyline: standing on the first skyway at deck height looking at the tower it
+        // reaches (112), or a wide look across the towers from just above the roofs (113).
+        const Skyline = @import("procedural/Skyline.zig");
+        var plan: [Skyline.max_skyways]Skyline.SkySpan = undefined;
+        const spans = Skyline.plannedSkyways(layout, &plan);
+        if (v == 112 and spans.len > 0) {
+            const a = layout.buildings[spans[0].a];
+            const b = layout.buildings[spans[0].b];
+            // A third of the way along, clear of the market kiosk at mid-span.
+            const far = if (a.roof > b.roof) a else b;
+            const near = if (a.roof > b.roof) b else a;
+            const mid: [3]f32 = .{ near.base[0] + (far.base[0] - near.base[0]) * 0.3, spans[0].deck, near.base[2] + (far.base[2] - near.base[2]) * 0.3 };
+            target = .{ far.base[0], spans[0].deck + 30, far.base[2] };
+            eye = .{ mid[0], mid[1] + 2.2, mid[2] };
+        } else {
+            var eco: ?@import("procedural/District.zig").Building = null;
+            for (layout.buildings[0..layout.building_count]) |t| if (t.architecture == .eco) {
+                eco = t;
+                break;
+            };
+            const t = eco orelse layout.buildings[0];
+            target = .{ t.base[0], t.roof - 120, t.base[2] };
+            eye = .{ t.base[0] + 520, t.roof + 140, t.base[2] - 460 };
+        }
+        self.sandbox.player.feet = .{ eye[0], eye[1], eye[2] };
+        self.sandbox.player.velocity = @splat(0);
     } else if (v == 110 or v == 111) {
         // The living-sap flora in its richest nearby meadow, by day (110) and by night (111).
         const Terrain = @import("procedural/Terrain.zig");

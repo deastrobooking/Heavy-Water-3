@@ -312,6 +312,8 @@ pub fn geometry(layout: *const Layout) !CityParts {
         for (parts.slice()) |p| try out.add(p);
     }
     for (layout.buildings[0..layout.building_count]) |b| try Skyline.geometry(layout, b, &out);
+    // The skyways belong to the district, not to one tower, so a missing tower cannot drop them.
+    try Skyline.skyways(layout, &out);
     for (layout.nodes, 0..) |node, i| {
         try plaza(&out, node.position);
         if (node.kind == .tower) {

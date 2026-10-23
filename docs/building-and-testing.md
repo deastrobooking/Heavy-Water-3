@@ -49,6 +49,8 @@ MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dcharac
 
 `-Dshowcase=60` shows a Rootdeep shrine from outside and `-Dshowcase=77` from inside its first room.
 
+To review the skyline, use `-Dshowcase=112` (standing on a skyway at deck height, looking at the tower it reaches) or `-Dshowcase=113` (a wide view across the towers, framed on a rounded eco tower).
+
 To review the living-sap flora in the wild use `-Dshowcase=110` (the richest meadow near the spawn by day) or `-Dshowcase=111` (the same spot at night, where the glow parts light up).
 
 To review the redesigned cave temple (an ancient sanctuary that doubles as a lab) use `-Dshowcase=67` for the wilds set or `-Dshowcase=76` for a close-up of the temple alone.
