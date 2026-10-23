@@ -39,9 +39,9 @@ The table and technical review below record the 2026-10-14 state before the foll
 - **Missile lock on a reused slot:** fixed by giving each spawned ground Hive unit a generation number and checking `(slot, generation)` when resolving missile and HUD targets.
 - **Reticle capture:** verified in milestone A with a live Kestrel lock; see `-Dshowcase=45` in the capture guide.
 - **Frontier frame cost measured:** `tools/benchmark.py --frontier` scripts four local players through ground and air combat, then reports simulation-stage, character-skinning, render CPU, presentation, and audio callback percentiles. The latest recorded M3 Pro run (2026-10-10) reports simulation p95/p99 of 3.57 / 3.99 ms against the 4 ms target and skinning p99 of 0.15 ms. Physics and Hive AI are the largest remaining stages. This is a baseline, not a claim that later content has been profiled.
-- **Guests:** they can't pilot, talk, or open the fabricator.
-- **Save versioning:** saves are at format v26. The loader accepts formats 13 and newer; the floor changes only by policy, while content fields with defaults can migrate forward. See R2 in the [technical review](#technical-review--2026-10-14) and the save ownership notes in `architecture.md`.
-- **Headless suite:** four tests fail on both compiler channels (435 of 439); see R1.
+- **Guests:** they can't pilot or talk to keepers; since 2026-10-22 they can use the fabricator kiosk.
+- **Save versioning:** saves are at format v34 (2026-10-23). The loader accepts formats 13 and newer; the floor changes only by policy, while content fields with defaults can migrate forward. See R2 in the [technical review](#technical-review--2026-10-14) and the save ownership notes in `architecture.md`.
+- **Headless suite:** green since 2026-10-21; 632 of 632 on the default compiler as of 2026-10-23 (it was 435 of 439 at this review; see R1).
 
 ## Technical review — 2026-10-14
 
@@ -279,4 +279,4 @@ Next performance review: refresh the fixed-seed frontier report on a visible, un
 - **Frame cost.** CPU skinning (24 characters), many probes, and wasps all scale with content. Mitigation: milestone A's benchmark budgets; GPU skinning (done) removed most of the skinning cost.
 - **Tuning without play.** Values are set from tests and captures, not feel. Mitigation: hand-play in milestone A before adding depth.
 - **Monolithic modules.** `Sandbox.zig` and `App.zig` keep growing. Mitigation: keep new behavior in focused modules following the existing `Frontier`, `Garage`, `Hangar` and `Skies` pattern. Split older code only when a feature change gives a clear boundary and the move can stay behavior-preserving.
-- **Test time.** The catalog allocation-failure test grows with every generated mesh (the suite takes about 2 minutes). Mitigation: cache generated vehicle meshes across that test's iterations, or sample failure points.
+- **Test time.** The catalog allocation-failure test grows with every generated mesh (the suite took about 2 minutes then and about 6.5 minutes on 2026-10-23). Mitigation: cache generated vehicle meshes across that test's iterations, or sample failure points.

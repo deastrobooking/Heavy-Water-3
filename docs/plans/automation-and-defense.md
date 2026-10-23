@@ -1,6 +1,6 @@
 # Automation, strategy and defense: modular structures, mining and farming bases, drones, turrets
 
-**Status:** BS1–BS3 are implemented as of 2026-10-22; behavior modules, mining, drones and command view remain planned. The [roadmap](../roadmap.md) stays the single plan. This extends [settlement building](settlement-building.md) (the shared stockpile, the hourly integer economy, claims) and [block building](block-building.md) (blocks, prefabs, platformer parts), and replaces their open "mining" and "light simulation" sketches with a first slice.
+**Status:** BS1–BS4 are implemented as of 2026-10-22 (tool registry, loot table, structure definitions, defense behaviours with raids); BS5 (ore, drills, shared stockpile) is next; behavior modules, mining, drones and command view remain planned. The [roadmap](../roadmap.md) stays the single plan. This extends [settlement building](settlement-building.md) (the shared stockpile, the hourly integer economy, claims) and [block building](block-building.md) (blocks, prefabs, platformer parts), and replaces their open "mining" and "light simulation" sketches with a first slice.
 
 **Owner request (2026-10-22):** make the existing building tools modular so users can build their own; make parts and scrap easy to get, especially from fighting robots; build mining bases and mining drones, and farming bases and drones, so production is automated; add Civilization-style strategy play in 3D with its own GUI controls; add protective prefabs (turrets, shield generators, missile launchers).
 

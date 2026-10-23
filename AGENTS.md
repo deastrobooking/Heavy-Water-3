@@ -33,8 +33,8 @@ Heavy Water is Zig-first: engine systems are Zig, the build is Zig, and the plat
 
 | Channel | Zig | Status |
 | --- | --- | --- |
-| default (`mach`) | `0.16.0-dev.3142+5ccfeb926`, the compiler Mach nominates | The shipping pair and required validation target. The 2026-10-14 gate passes `build check`, all 440 headless tests, and the Metal smoke. |
-| `HEAVYWATER_ZIG_CHANNEL=0.17` | `0.17.0` stable | Migration target. Opt-in. The 2026-10-14 gate passes `build check` and all 440 headless tests; Linux Vulkan/OpenGL and Windows D3D12 cross-compiles also pass. Asset build and Metal smoke passed in the 2026-10-10 candidate matrix; 0.17 smoke was not rerun on 2026-10-14. Adoption pending. |
+| default (`mach`) | `0.16.0-dev.3142+5ccfeb926`, the compiler Mach nominates | The shipping pair and required validation target. As of 2026-10-23 it passes `build check`, all 632 headless tests and the Metal smoke (the 2026-10-14 gate passed 440). |
+| `HEAVYWATER_ZIG_CHANNEL=0.17` | `0.17.0` stable | Migration target. Opt-in. `build check` passes as of 2026-10-23; the headless suite was last run on 0.17 at the 2026-10-14 gate (440 of 440, before the suite grew to 632); Linux Vulkan/OpenGL and Windows D3D12 cross-compiles also pass. Asset build and Metal smoke passed in the 2026-10-10 candidate matrix; 0.17 smoke was not rerun on 2026-10-14. Adoption pending. |
 | `HEAVYWATER_ZIG_CHANNEL=0.18-dev` | `0.18.0-dev.146+35accc06e` snapshot | Early warning. Opt-in. Passes on macOS and Linux Vulkan; Windows targets fail in Zig's own translate-C. |
 
 **Where 0.17 stands** (candidate matrix, 2026-10-10; dated re-gates in [alignment](docs/plans/alignment.md#mach-tracking)): `build check`, all 440 headless tests, and Linux Vulkan/OpenGL plus Windows D3D12 cross-compiles pass as of 2026-10-14. `build assets` and the Metal smoke passed in the 2026-10-10 matrix; the 2026-10-14 gate did not rerun the 0.17 smoke. Not done: benchmarks, any run on Linux or Windows (they are compile-only here), and the adoption change itself (Mach and root `build.zig.zon` metadata, the `tools/zig.py` default pin, docs, in one change). Windows OpenGL fails for reasons unrelated to the migration.
