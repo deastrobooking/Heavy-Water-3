@@ -31,6 +31,8 @@ The Hive holds Earth. You free it one city at a time, starting with Detroit.
 
 **Reading a fight:** an orange gem spins and grows over a Hive fighter for a moment before it swings, and over a drone or sentinel just before it fires. Raise your guard (right click with the saber) as the glow peaks: guarding cuts the damage, and a guard raised just in time parries, which staggers the attacker or sends a bolt back. Heavy fighters (bulwarks and the Titan) do not flinch when hit, so parry or dodge their swings. Your hits show floating damage numbers (gold for a kill), land with a short pause on the saber, and shake your own screen; controllers rumble. Turn shake, numbers and rumble down or off in SETTINGS.
 
+**Sun shadows:** trees, towers and props cast crisp shadows in the sun (blue on snow), and the moon casts faint ones at night. If four-player feels slow, turn SUN SHADOWS off in SETTINGS.
+
 Specials are unlimited; each one only has to recharge. Pets and Wildkin heroes fight beside you (pause menu, HEROES). If you are knocked out you recover at your last checkpoint, or back with the team. R returns you to the spawn, and the pause menu's WORLD MAP fast travels.
 
 ## Tools (keys 1 to 7)

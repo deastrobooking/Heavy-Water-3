@@ -60,7 +60,7 @@
     color = mix(color, glacial_ground, antarctic);
 
     var shaded = lit(color, n, w);
-    let light = band(n);
+    let light = band(n) * sunlight(w, n);
     // Snow shadows go blue rather than grey.
     shaded = shaded + vec3<f32>(-0.03, 0.01, 0.07) * snow * (1.0 - light);
     shaded = shaded + vec3<f32>(-0.015, 0.025, 0.11) * antarctic * (1.0 - light);

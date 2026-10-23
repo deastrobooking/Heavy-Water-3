@@ -4518,6 +4518,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 103 or options.showcase == 94 or options.showcase == 97 or options.showcase == 98 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
     shakeView(&renderer.views[0].camera, sandbox.impact.offset(0));
     renderer.view_count = 1;
+    renderer.shadows = self.menu.settings.shadows;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
         const view = &renderer.views[renderer.view_count];

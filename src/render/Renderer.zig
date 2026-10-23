@@ -28,7 +28,16 @@ comptime {
 }
 const Sky = @import("../engine/Sky.zig");
 /// Matches `Frame` in scene.wgsl.
-const Frame = struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32 };
+const Frame = struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32, shadow_vp: [4][4]f32, shadow: [4]f32 };
+
+/// A matrix's columns as plain floats: a second Mach matrix field would be laid out before the
+/// arrays (fields sort by alignment), breaking the uniform layout.
+fn columns(m: mach.math.Mat4x4) [4][4]f32 {
+    var out: [4][4]f32 = undefined;
+    for (&out, m.v) |*column, v| column.* = v.v;
+    return out;
+}
+const Shadow = @import("Shadow.zig");
 
 fn scale3(a: [3]f32, s: f32) [3]f32 {
     return .{ a[0] * s, a[1] * s, a[2] * s };
@@ -53,7 +62,7 @@ test "cave light is dark, tinted by the hue and brighter with strength" {
 }
 
 comptime {
-    if (@sizeOf(Frame) != 272 or @offsetOf(Frame, "planes") != 160 or @offsetOf(Frame, "params") != 256) {
+    if (@sizeOf(Frame) != 352 or @offsetOf(Frame, "planes") != 160 or @offsetOf(Frame, "params") != 256 or @offsetOf(Frame, "shadow_vp") != 272 or @offsetOf(Frame, "shadow") != 336) {
         @compileError("Frame uniform layout changed; update the GPU layout before continuing");
     }
 }
@@ -144,6 +153,18 @@ overlay_texture: ?*gpu.Texture = null,
 overlay_texture_view: ?*gpu.TextureView = null,
 overlay_sampler: ?*gpu.Sampler = null,
 scene_layout: ?*gpu.BindGroupLayout = null,
+/// Sun shadows (Shadow.zig): one depth map per view, drawn from the sun before the scene with the
+/// view's own instances, under its own frame uniform and bind group. The shadow pass binds a 1×1
+/// stand-in, since a pass cannot sample the map it writes. Off when `shadows` is false (settings).
+shadows: bool = true,
+shadow_maps: [max_views]?*gpu.Texture = @splat(null),
+shadow_views: [max_views]?*gpu.TextureView = @splat(null),
+shadow_uniforms: [max_views]?*gpu.Buffer = @splat(null),
+shadow_bind_groups: [max_views]?*gpu.BindGroup = @splat(null),
+shadow_stand_in: ?*gpu.Texture = null,
+shadow_stand_in_view: ?*gpu.TextureView = null,
+shadow_pipeline: ?*gpu.RenderPipeline = null,
+shadow_foliage_pipeline: ?*gpu.RenderPipeline = null,
 uniforms: [max_views]?*gpu.Buffer = @splat(null),
 instance_buffers: [max_views]?*gpu.Buffer = @splat(null),
 bind_groups: [max_views]?*gpu.BindGroup = @splat(null),
@@ -238,6 +259,7 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         gpu.BindGroupLayout.Entry.initBuffer(0, .{ .vertex = true, .fragment = true }, .uniform, false, @sizeOf(Frame)),
         gpu.BindGroupLayout.Entry.initTexture(1, .{ .fragment = true }, .float, .dimension_2d, false),
         gpu.BindGroupLayout.Entry.initSampler(2, .{ .fragment = true }, .filtering),
+        gpu.BindGroupLayout.Entry.initTexture(3, .{ .fragment = true }, .depth, .dimension_2d, false),
     } }));
     self.scene_layout = layout;
     errdefer {
@@ -263,6 +285,8 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     }
     const ice_albedo = @embedFile("../assets/antarctica_blue_ice.rgba");
     window.queue.writeTexture(&.{ .texture = self.texture.? }, &.{ .bytes_per_row = 512 * 4, .rows_per_image = 512 }, &.{ .width = 512, .height = 512 }, ice_albedo);
+    self.shadow_stand_in = device.createTexture(&.{ .label = "shadow stand-in", .size = .{ .width = 1, .height = 1 }, .format = .depth32_float, .usage = .{ .render_attachment = true, .texture_binding = true } });
+    self.shadow_stand_in_view = self.shadow_stand_in.?.createView(&.{});
     self.createViewResources(device, 0);
     errdefer self.releaseViewResources(0);
     if (self.field) |f| self.field_buffer = device.createBuffer(&.{ .label = "scale field", .size = @max(f.gpuBytes(), 64), .usage = .{ .vertex = true, .copy_dst = true } });
@@ -296,6 +320,8 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     self.terrain_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, terrain_wgsl, "terrain", "vertex_main", false);
     self.foliage_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, foliage_wgsl, "foliage", "vertex_foliage", false);
     self.water_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, water_wgsl, "water", "vertex_main", true);
+    self.shadow_pipeline = shadowPipeline(device, pipeline_layout, &buffers, @embedFile("scene.wgsl"), "shadow solids", "vertex_main");
+    self.shadow_foliage_pipeline = shadowPipeline(device, pipeline_layout, &buffers, foliage_wgsl, "shadow foliage", "vertex_foliage");
     if (!options.cpu_skinning) try self.setupSkinning(device, window.framebuffer_format, layout);
     self.scene.setup(device, window.queue);
 
@@ -397,6 +423,20 @@ fn naturePipeline(self: *Renderer, device: *gpu.Device, layout: *gpu.PipelineLay
     });
 }
 
+/// A depth-only pipeline drawing scene instances from the sun into a shadow map; the vertex stage
+/// is the scene's own (the bound frame carries the sun's projection), so trees sway in it too.
+fn shadowPipeline(device: *gpu.Device, layout: *gpu.PipelineLayout, buffers: []const gpu.VertexBufferLayout, comptime code: [:0]const u8, comptime label: [:0]const u8, comptime vertex: [:0]const u8) *gpu.RenderPipeline {
+    const shader = device.createShaderModuleWGSL(label ++ ".wgsl", code);
+    defer shader.release();
+    return device.createRenderPipeline(&.{
+        .label = label,
+        .layout = layout,
+        .vertex = gpu.VertexState.init(.{ .module = shader, .entry_point = vertex, .buffers = buffers }),
+        .primitive = .{ .cull_mode = .none },
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .greater },
+    });
+}
+
 /// The skinned shader module: `scene.wgsl` with its `vertex_main` cut out (Mach's WGSL compiler
 /// takes one vertex entry point per module) and `skin.wgsl` in its place, before the shared
 /// fragment stage.
@@ -472,10 +512,20 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
 fn createViewResources(self: *Renderer, device: *gpu.Device, i: usize) void {
     self.uniforms[i] = device.createBuffer(&.{ .label = "camera", .size = @sizeOf(Frame), .usage = .{ .uniform = true, .copy_dst = true } });
     self.instance_buffers[i] = device.createBuffer(&.{ .label = "instances", .size = Scene.max_instances * @sizeOf(Instance), .usage = .{ .vertex = true, .copy_dst = true } });
+    self.shadow_maps[i] = device.createTexture(&.{ .label = "sun shadow map", .size = .{ .width = Shadow.size, .height = Shadow.size }, .format = .depth32_float, .usage = .{ .render_attachment = true, .texture_binding = true } });
+    self.shadow_views[i] = self.shadow_maps[i].?.createView(&.{});
+    self.shadow_uniforms[i] = device.createBuffer(&.{ .label = "sun camera", .size = @sizeOf(Frame), .usage = .{ .uniform = true, .copy_dst = true } });
     self.bind_groups[i] = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.scene_layout.?, .entries = &.{
         gpu.BindGroup.Entry.initBuffer(0, self.uniforms[i].?, 0, @sizeOf(Frame), @sizeOf(Frame)),
         gpu.BindGroup.Entry.initTextureView(1, self.texture_view.?),
         gpu.BindGroup.Entry.initSampler(2, self.sampler.?),
+        gpu.BindGroup.Entry.initTextureView(3, self.shadow_views[i].?),
+    } }));
+    self.shadow_bind_groups[i] = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.scene_layout.?, .entries = &.{
+        gpu.BindGroup.Entry.initBuffer(0, self.shadow_uniforms[i].?, 0, @sizeOf(Frame), @sizeOf(Frame)),
+        gpu.BindGroup.Entry.initTextureView(1, self.texture_view.?),
+        gpu.BindGroup.Entry.initSampler(2, self.sampler.?),
+        gpu.BindGroup.Entry.initTextureView(3, self.shadow_stand_in_view.?),
     } }));
 }
 
@@ -483,9 +533,17 @@ fn releaseViewResources(self: *Renderer, i: usize) void {
     if (self.bind_groups[i]) |p| p.release();
     if (self.instance_buffers[i]) |p| p.release();
     if (self.uniforms[i]) |p| p.release();
+    if (self.shadow_bind_groups[i]) |p| p.release();
+    if (self.shadow_uniforms[i]) |p| p.release();
+    if (self.shadow_views[i]) |p| p.release();
+    if (self.shadow_maps[i]) |p| p.release();
     self.bind_groups[i] = null;
     self.instance_buffers[i] = null;
     self.uniforms[i] = null;
+    self.shadow_bind_groups[i] = null;
+    self.shadow_uniforms[i] = null;
+    self.shadow_views[i] = null;
+    self.shadow_maps[i] = null;
 }
 
 /// The scene for view `i`, creating a split-screen view's streamer and GPU pool on first use.
@@ -620,6 +678,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     const count = @max(1, @min(self.view_count, max_views));
     var scenes: [max_views]*Scene = undefined;
     var pixels: [max_views][4]u32 = undefined;
+    var shadowed: [max_views]bool = @splat(false);
     var objects: u32 = 0;
     for (0..count) |i| {
         scenes[i] = self.viewScene(window.device, i) catch |err| {
@@ -644,6 +703,9 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pixels[i] = .{ x0, y0, @max(1, x1 - x0), @max(1, y1 - y0) };
         const vp = view.camera.viewProjection(@as(f32, @floatFromInt(pixels[i][2])) / @as(f32, @floatFromInt(pixels[i][3])));
         const under = std.math.clamp(view.underground, 0, 1);
+        const sun_vp = Shadow.viewProjection(light.direction, Shadow.focus(.{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z() }, .{ view.camera.forward().x(), view.camera.forward().y(), view.camera.forward().z() }));
+        const shadow_strength: f32 = if (self.shadows) Shadow.strength(light.direction) * (1 - under) else 0;
+        shadowed[i] = shadow_strength > 0;
         const frame = Frame{
             .vp = vp,
             .eye = .{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z(), 1 },
@@ -655,7 +717,15 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             .horizon = mix3(light.horizon, scale3(caveAmbient(view.cave_hue, 0.05), 0.5), under) ++ [_]f32{light.night + (1 - light.night) * under},
             .planes = Visibility.frustumPlanes(vp),
             .params = params,
+            .shadow_vp = columns(sun_vp),
+            // A quarter-metre depth bias and a texel and a half of normal offset keep lit
+            // surfaces from shadowing themselves.
+            .shadow = .{ shadow_strength, @floatFromInt(Shadow.size), 0.25 / (2 * Shadow.half_depth), 1.5 * Shadow.texel },
         };
+        var sun_frame = frame;
+        sun_frame.vp = sun_vp;
+        sun_frame.planes = Visibility.frustumPlanes(sun_vp);
+        sun_frame.shadow[0] = 0;
         if (i == 0) if (self.field) |*f| {
             // Stream instances under their own byte budget, then plan visible cells. Uploads go
             // through the frame's encoder, which copies into Mach's staging page immediately and
@@ -671,11 +741,27 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         scenes[i].prepare(window.queue, view.camera, vp, self.culling, budget, &self.modifications, self.props[0..self.prop_count], view.hide_owner);
         budget -= scenes[i].upload_bytes;
         encoder.writeBuffer(self.uniforms[i].?, 0, &[_]Frame{frame});
+        encoder.writeBuffer(self.shadow_uniforms[i].?, 0, &[_]Frame{sun_frame});
         encoder.writeBuffer(self.instance_buffers[i].?, 0, scenes[i].instances[0..scenes[i].instance_count]);
         objects += scenes[i].instance_count - 1;
     }
     self.buildOverlay(objects, window.width, window.height, shown);
     if (self.overlay.len > 0) encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
+    for (0..shown) |i| if (shadowed[i]) {
+        // The view's own trees and solids, seen from the sun. Characters do not cast yet.
+        const sun_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
+            .depth_stencil_attachment = &.{ .view = self.shadow_views[i].?, .depth_load_op = .clear, .depth_store_op = .store, .depth_clear_value = 0 },
+        }));
+        defer sun_pass.release();
+        // Mach's Metal encoder resolves bindings through the current pipeline: set it first.
+        sun_pass.setPipeline(self.shadow_foliage_pipeline.?);
+        sun_pass.setBindGroup(0, self.shadow_bind_groups[i].?, &.{});
+        sun_pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
+        scenes[i].drawFlora(sun_pass);
+        sun_pass.setPipeline(self.shadow_pipeline.?);
+        scenes[i].drawSolids(sun_pass);
+        sun_pass.end();
+    };
     const pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
         .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = light.horizon[0], .g = light.horizon[1], .b = light.horizon[2], .a = 1 } }},
         .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .store, .depth_clear_value = 0 },
@@ -973,7 +1059,9 @@ pub fn deinit(self: *Renderer) void {
     for (0..max_views) |i| self.releaseViewResources(i);
     if (self.scene_layout) |p| p.release();
     if (self.pipeline) |p| p.release();
-    for ([_]?*gpu.RenderPipeline{ self.terrain_pipeline, self.foliage_pipeline, self.water_pipeline }) |maybe| if (maybe) |p| p.release();
+    for ([_]?*gpu.RenderPipeline{ self.terrain_pipeline, self.foliage_pipeline, self.water_pipeline, self.shadow_pipeline, self.shadow_foliage_pipeline }) |maybe| if (maybe) |p| p.release();
+    if (self.shadow_stand_in_view) |p| p.release();
+    if (self.shadow_stand_in) |p| p.release();
     if (self.skin_group) |p| p.release();
     if (self.hull_pipeline) |p| p.release();
     if (self.cel_buffer) |p| p.release();

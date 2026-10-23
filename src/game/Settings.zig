@@ -7,7 +7,7 @@ const Bindings = @import("Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 
 pub const path = "saves/settings.json";
-pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, screen_shake, damage_numbers, rumble, metrics, max_progression_test };
+pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, screen_shake, damage_numbers, rumble, shadows, metrics, max_progression_test };
 pub const field_count = enum_compat.fields(Field).len;
 
 /// Volumes in percent: everything, then the effects, ambience and interface buses.
@@ -30,6 +30,8 @@ screen_shake: u8 = 100,
 damage_numbers: bool = true,
 /// Controller rumble on hits, kills and parries.
 rumble: bool = true,
+/// Sun shadows (one shadow map per view; off saves GPU time in four-player).
+shadows: bool = true,
 /// Performance overlay (F1).
 metrics: bool = false,
 /// Temporary maximum-progression test session. Changes are never written to campaign or ranger saves.
@@ -54,6 +56,7 @@ pub fn adjust(self: *Settings, field: Field, delta: i32) void {
         .screen_shake => self.screen_shake = volumeStep(self.screen_shake, delta),
         .damage_numbers => self.damage_numbers = !self.damage_numbers,
         .rumble => self.rumble = !self.rumble,
+        .shadows => self.shadows = !self.shadows,
         .metrics => self.metrics = !self.metrics,
         .max_progression_test => self.max_progression_test = !self.max_progression_test,
     }
@@ -77,6 +80,7 @@ pub fn label(field: Field) []const u8 {
         .screen_shake => "SCREEN SHAKE",
         .damage_numbers => "DAMAGE NUMBERS",
         .rumble => "CONTROLLER RUMBLE",
+        .shadows => "SUN SHADOWS",
         .metrics => "PERFORMANCE OVERLAY",
         .max_progression_test => "MAX PROGRESSION TEST MODE",
     };
@@ -96,6 +100,7 @@ pub fn value(self: Settings, field: Field, buffer: []u8) []const u8 {
         .screen_shake => std.fmt.bufPrint(buffer, "{d}%", .{self.screen_shake}) catch buffer,
         .damage_numbers => if (self.damage_numbers) "ON" else "OFF",
         .rumble => if (self.rumble) "ON" else "OFF",
+        .shadows => if (self.shadows) "ON" else "OFF",
         .metrics => if (self.metrics) "ON" else "OFF",
         .max_progression_test => if (self.max_progression_test) "ON / NO SAVE" else "OFF",
     };
@@ -120,6 +125,7 @@ const Raw = struct {
     screen_shake: i64 = 100,
     damage_numbers: bool = true,
     rumble: bool = true,
+    shadows: bool = true,
     metrics: bool = false,
     max_progression_test: bool = false,
     bindings: []const Bindings.Entry = &.{},
@@ -145,6 +151,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
         .screen_shake = @intCast(std.math.clamp(r.screen_shake, 0, 100)),
         .damage_numbers = r.damage_numbers,
         .rumble = r.rumble,
+        .shadows = r.shadows,
         .metrics = r.metrics,
         .max_progression_test = r.max_progression_test,
         .bindings = Bindings.fromEntries(r.bindings),
@@ -155,7 +162,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
 /// The settings file's JSON (bindings by action and key name).
 pub fn toJson(self: Settings, allocator: std.mem.Allocator) ![]u8 {
     var entries: [Bindings.count]Bindings.Entry = undefined;
-    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .screen_shake = self.screen_shake, .damage_numbers = self.damage_numbers, .rumble = self.rumble, .metrics = self.metrics, .max_progression_test = self.max_progression_test, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
+    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .screen_shake = self.screen_shake, .damage_numbers = self.damage_numbers, .rumble = self.rumble, .shadows = self.shadows, .metrics = self.metrics, .max_progression_test = self.max_progression_test, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
     return std.json.Stringify.valueAlloc(allocator, doc, .{ .whitespace = .indent_2 });
 }
 
@@ -188,6 +195,7 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     for (0..4) |_| s.adjust(.screen_shake, -1);
     s.adjust(.damage_numbers, 1);
     s.adjust(.rumble, 1);
+    s.adjust(.shadows, 1);
     _ = try s.bindings.bind(.stomp, .k);
     s.pad_mapping.buttons[@intFromEnum(PadBindings.Action.fire)] = 5;
     s.pad_mapping.axes = .{ 2, 3, 0, 1 };

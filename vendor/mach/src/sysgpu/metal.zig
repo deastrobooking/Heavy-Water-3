@@ -1950,8 +1950,9 @@ pub const RenderPassEncoder = struct {
         var mtl_desc = mtl.RenderPassDescriptor.new();
         defer mtl_desc.release();
 
-        // color
-        for (desc.color_attachments.?[0..desc.color_attachment_count], 0..) |attach, i| {
+        // color (none for a depth-only pass, such as a shadow map)
+        const color_attachments: []const sysgpu.RenderPassColorAttachment = if (desc.color_attachments) |attachments| attachments[0..desc.color_attachment_count] else &.{};
+        for (color_attachments, 0..) |attach, i| {
             var mtl_color_attach = mtl_desc.colorAttachments().objectAtIndexedSubscript(i);
             const mtl_render_attach = mtl_color_attach.as(mtl.RenderPassAttachmentDescriptor);
             if (attach.view) |view| {

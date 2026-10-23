@@ -25,6 +25,7 @@ test {
     _ = @import("game/CharacterContent.zig");
     _ = @import("render/Field.zig");
     _ = @import("render/StreamingScene.zig");
+    _ = @import("render/Shadow.zig");
     _ = @import("engine/Memory.zig");
     _ = @import("procedural/Bridges.zig");
     _ = @import("procedural/Skyline.zig");

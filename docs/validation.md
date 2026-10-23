@@ -2,6 +2,33 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Sun shadows, first version — 2026-10-23
+
+- **Added:** one 2048² sun shadow map per view (`render/Shadow.zig`). It is an orthographic box 320 m across, centred about 100 m ahead of the camera and snapped to whole texels, and it is drawn before the scene pass with depth-only pipelines for flora and solids. The scene, terrain and character shaders multiply their cel light band by `sunlight`: four `textureLoad` taps, blended and sharpened into a crisp edge, fading at the box border. Shadows fade with the key light's height and turn off underground. A SUN SHADOWS setting (default on) turns them off.
+- **Engine fix (Mach fork):** Metal's render pass encoder unwrapped a null color attachment list, so any depth-only pass panicked. It now loops over an empty slice; the patch is recorded in `vendor/mach/FORK.md`. Mach's Metal encoder also needs `setPipeline` before `setBindGroup`; the shadow pass follows that order rather than patching the engine.
+- **Frame layout:** `Frame` is an automatically laid-out Zig struct uploaded as bytes. A second `Mat4x4` field moved ahead of the arrays, which the compile-time layout check caught. The sun matrix is stored as `[4][4]f32` columns, and the check now covers the new fields.
+- **Tests:**
+  - The sun's box centres on its focus, keeps depth reversed, puts its edge at the clip edge, and moves a fixed point by whole texels only as the view slides.
+  - The focus sits ahead of the camera and drops toward the ground when looking down.
+  - Strength fades at dusk and is zero at night below the horizon.
+  - The settings round trip covers the new field.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 644/644;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all stages, no validation messages);
+  - captures under the debug layer:
+    - 73: tree shadows on snow, crisp and blue;
+    - 30: the player and crates in a giant tree's shadow;
+    - 113: eco towers and skyways, with no self-shadowing speckle;
+    - 25: the settings screen, with all 16 rows fitting.
+- **Not measured:** GPU cost. The four-player run during this work was invalid: Ableton Live, the editor and a browser loaded the machine (load average about 10). Render CPU and even the simulation-step budget failed, GPU p50 read 0.03 ms, and the frame interval p99 was 1,147 ms. Rerun `--frontier` and `--nature` with shadows on and off on an idle machine before calling the cost acceptable.
+- **Not done:**
+  - characters and terrain do not cast shadows;
+  - casters are taken from the camera's own culled instances, so a tree behind the player casts nothing;
+  - there is one box per view rather than two cascades;
+  - shadows look the same on non-snow ground (grey) and were not reviewed at dusk;
+  - Vulkan, OpenGL and D3D12 were not compiled or run with the new shaders.
+
 ## Tree crowns stop flickering at detail boundaries — 2026-10-23
 
 - **Added:** each view remembers every resident tree's crown detail from the last frame (`StreamingScene.tree_details`, keyed by resident slot and reset when the slot's chunk changes). `treeDetail` changes by one step only once the tree is 10% past the boundary; a jump of two steps (a teleport) takes the plain choice.

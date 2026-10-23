@@ -23,10 +23,15 @@ struct Frame {
     plane5: vec4<f32>,
     // x: seconds (wraps), y: wind strength, zw: wind direction on the ground plane.
     params: vec4<f32>,
+    // The sun's shadow map projection (Shadow.zig).
+    shadow_view_projection: mat4x4<f32>,
+    // x: strength (0 turns shadows off), y: map size in texels, z: depth bias, w: normal offset (m).
+    shadow: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var surface_texture: texture_2d<f32>;
 @group(0) @binding(2) var surface_sampler: sampler;
+@group(0) @binding(3) var shadow_map: texture_depth_2d;
 
 struct VertexOut {
     @builtin(position) clip: vec4<f32>,
@@ -83,9 +88,39 @@ fn band(n: vec3<f32>) -> f32 {
     return smoothstep(-0.04, 0.06, ndl) * 0.6 + smoothstep(0.42, 0.52, ndl) * 0.4;
 }
 
+// 1 where the shadow map texel at `c` lets the sun reach `depth`, else 0. Depth is reversed:
+// an occluder nearer the sun stores a larger value.
+fn shadow_tap(c: vec2<f32>, depth: f32) -> f32 {
+    let last = frame.shadow.y - 1.0;
+    let q = vec2<i32>(clamp(c, vec2<f32>(0.0, 0.0), vec2<f32>(last, last)));
+    return step(textureLoad(shadow_map, q, 0), depth + frame.shadow.z);
+}
+
+// How much sun reaches `world` (1 lit, 0 shadowed). Four texels are blended and then sharpened,
+// so the edge reads as a crisp cel band without stair steps; it fades out at the map's border.
+fn sunlight(world: vec3<f32>, n: vec3<f32>) -> f32 {
+    if (frame.shadow.x <= 0.0) {
+        return 1.0;
+    }
+    let p = frame.shadow_view_projection * vec4<f32>(world + n * frame.shadow.w, 1.0);
+    let uv = vec2<f32>(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+    let border = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    if (border <= 0.0) {
+        return 1.0;
+    }
+    let t = uv * frame.shadow.y - vec2<f32>(0.5, 0.5);
+    let i = floor(t);
+    let f = t - i;
+    let top = mix(shadow_tap(i, p.z), shadow_tap(i + vec2<f32>(1.0, 0.0), p.z), f.x);
+    let bottom = mix(shadow_tap(i + vec2<f32>(0.0, 1.0), p.z), shadow_tap(i + vec2<f32>(1.0, 1.0), p.z), f.x);
+    let sharp = smoothstep(0.3, 0.7, mix(top, bottom, f.y));
+    let reach = frame.shadow.x * clamp(border * 20.0, 0.0, 1.0);
+    return mix(1.0, sharp, reach);
+}
+
 // Toon key, hemispheric fill and rim light on a base colour.
 fn lit(base: vec3<f32>, n: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
-    let b = band(n);
+    let b = band(n) * sunlight(world, n);
     let hemi = n.y * 0.5 + 0.5;
     let ambient = mix(frame.ambient_ground.rgb, frame.ambient_sky.rgb, hemi);
     let view = normalize(frame.eye.xyz - world);

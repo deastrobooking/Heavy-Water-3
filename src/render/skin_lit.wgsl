@@ -256,14 +256,15 @@ fn draw_anime_eyes(
     let view = normalize(frame.eye.xyz - in.world);
     let ndl = dot(n, l);
 
-    var lit = step_band(ndl, a.x, a.y);
-    var deep = step_band(ndl, a.z, a.y);
+    let sun = sunlight(in.world, n);
+    var lit = step_band(ndl, a.x, a.y) * sun;
+    var deep = step_band(ndl, a.z, a.y) * sun;
     var mask = 1.0;
     if (in.style.y > 0.5) {
         // The face terminator comes from the face shadow map, not from the normal.
         mask = face_lit(in.uv, normalize(in.fwd), normalize(in.left), l, cel.v[1].x);
-        lit = mask;
-        deep = max(deep, mask);
+        lit = mask * sun;
+        deep = max(deep, mask * sun);
     }
     if ((flags & 4u) != 0u && in.style.y > 0.5) {
         return vec4<f32>(mask, mask, mask, 1.0);
