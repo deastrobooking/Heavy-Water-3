@@ -13,7 +13,7 @@ comptime {
     if (Sandbox.travel_count > 32) @compileError("world-map travel unlock mask supports at most 32 destinations");
 }
 
-pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit, guide };
+pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, pets, heroes, arena, party, player, world_map, music, confirm_quit, guide };
 pub const Key = enum { up, down, left, right, confirm, back };
 pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, start_space_trial, leave_space_trial, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
 pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
@@ -37,6 +37,7 @@ pub const pause_items = [_]Item{
     .{ .label = "HERO ARENA", .opens = .arena },
     .{ .label = "CUSTOMIZE RANGER", .command = .character },
     .{ .label = "QUEST LOG", .opens = .quest_log },
+    .{ .label = "PETS & ROBOTS", .opens = .pets },
     .{ .label = "HOW TO PLAY", .opens = .guide },
     .{ .label = "SAVE GAME", .command = .save },
     .{ .label = "LOAD GAME", .command = .load },
@@ -82,6 +83,7 @@ pub const build_slots = 16;
 pub const build_tabs = 3;
 pub const build_columns = 4;
 pub const quest_items = [_]Item{.{ .label = "BACK" }};
+pub const pets_items = [_]Item{ .{ .label = "TRACK WILDLIFE", .opens = .world_map }, .{ .label = "BACK" } };
 /// HOW TO PLAY rows: one per page (choosing a row shows that page), then BACK.
 pub const guide_back = @import("Guide.zig").page_count;
 pub const guide_rows = guide_back + 1;
@@ -184,6 +186,7 @@ pub fn open(self: *Menu, screen: Screen) void {
     }
     self.screen = screen;
     self.row = 0;
+    if (screen == .world_map and self.parent_count > 0 and self.parents[self.parent_count - 1].screen == .pets) self.map_target = .wildlife;
     if (screen == .guide) self.guide_page = 0;
     if (screen == .build) {
         self.build_tab = 0;
@@ -201,6 +204,7 @@ pub fn items(self: *const Menu) []const Item {
         .pause => &pause_items,
         .confirm_quit => &confirm_items,
         .quest_log => &quest_items,
+        .pets => &pets_items,
         .arena => &arena_items,
         .party => &party_items,
         .player => &player_items,
@@ -326,6 +330,7 @@ pub fn key(self: *Menu, k: Key) Command {
         .back => return self.back(),
         .confirm => {
             if (self.screen == .music and self.row == music_items.len - 1) return self.back();
+            if (self.screen == .pets and self.row == pets_items.len - 1) return self.back();
             if (self.screen == .settings) {
                 if (self.row == Settings.field_count) return self.back();
                 self.settings.adjust(@enumFromInt(self.row), 1);
@@ -562,7 +567,7 @@ fn back(self: *Menu) Command {
         return .none;
     }
     switch (self.screen) {
-        .build, .settings, .controls, .quest_log, .heroes, .arena, .party, .player, .world_map, .music, .confirm_quit => {
+        .build, .settings, .controls, .quest_log, .pets, .heroes, .arena, .party, .player, .world_map, .music, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.

@@ -4,18 +4,19 @@ const Mesh = @import("../render/Mesh.zig");
 const GenMesh = @import("../character/mesh.zig").Mesh;
 const Seed = @import("Seed.zig");
 const LSystem = @import("LSystem.zig");
-pub const variant_count = 15;
+pub const variant_count = 18;
 pub const tree_first = 3;
 pub const tree_count = 8;
 pub const tree_variants = [_]u8{ 3, 4, 5, 6, 11, 12, 13, 14 };
-pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow", "redwood", "manzanita", "ember_blossom", "moonbell", "sunspear", "copper_fan", "moon_cascade", "star_blossom", "pine" };
+pub const names = [_][]const u8{ "grass", "fern", "wildflower", "broadleaf", "needleleaf", "willow", "redwood", "manzanita", "ember_blossom", "moonbell", "sunspear", "copper_fan", "moon_cascade", "star_blossom", "pine", "sunmeadow_ribbon_grass", "sunmeadow_gold_tuft", "sunmeadow_sky_sedge" };
 /// Material base colours, by variant (scatter tints multiply them).
 pub const colors = [variant_count][4]f32{
-    .{ 0.30, 0.56, 0.22, 1 }, .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 },
-    .{ 0.18, 0.43, 0.20, 1 }, .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 },
+    .{ 0.30, 0.56, 0.22, 1 },  .{ 0.22, 0.48, 0.25, 1 }, .{ 0.82, 0.34, 0.65, 1 },
+    .{ 0.18, 0.43, 0.20, 1 },  .{ 0.12, 0.34, 0.20, 1 }, .{ 0.25, 0.49, 0.30, 1 },
     .{ 0.34, 0.055, 0.09, 1 }, .{ 0.25, 0.43, 0.22, 1 }, .{ 0.82, 0.12, 0.21, 1 },
-    .{ 0.16, 0.42, 0.86, 1 }, .{ 0.92, 0.58, 0.12, 1 },
-    .{ 0.46, 0.68, 0.34, 1 }, .{ 0.26, 0.55, 0.48, 1 }, .{ 0.52, 0.34, 0.68, 1 }, .{ 0.12, 0.31, 0.16, 1 },
+    .{ 0.16, 0.42, 0.86, 1 },  .{ 0.92, 0.58, 0.12, 1 }, .{ 0.46, 0.68, 0.34, 1 },
+    .{ 0.26, 0.55, 0.48, 1 },  .{ 0.52, 0.34, 0.68, 1 }, .{ 0.12, 0.31, 0.16, 1 },
+    .{ 0.48, 0.76, 0.25, 1 },  .{ 0.78, 0.69, 0.28, 1 }, .{ 0.29, 0.66, 0.63, 1 },
 };
 pub const trunk_colors = [tree_count][4]f32{
     .{ 0.24, 0.15, 0.09, 1 }, .{ 0.21, 0.13, 0.08, 1 }, .{ 0.28, 0.19, 0.12, 1 }, .{ 0.76, 0.44, 0.48, 1 },
@@ -94,8 +95,8 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     if (variant >= variant_count or isTree(variant)) return error.InvalidPlant;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
-    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant == 14) 9000 else if (variant >= 8) 600 else 48);
-    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant == 14) 36000 else if (variant >= 8) 2400 else 72);
+    try out.vertices.ensureTotalCapacity(a, if (variant == 1) 100 else if (variant == 7) 1800 else if (variant == 14) 9000 else if (variant >= 8) 600 else 96);
+    try out.indices.ensureTotalCapacity(a, if (variant == 1) 180 else if (variant == 7) 7200 else if (variant == 14) 36000 else if (variant >= 8 and variant <= 13) 2400 else 144);
     if (variant == 0) {
         for (0..9) |i| {
             const t = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 9;
@@ -112,6 +113,16 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
                 try blade(a, &out, .{ @cos(t) * 0.025, h, @sin(t) * 0.025 }, .{ @cos(t) * 0.025 + side * 0.09, h + 0.035, @sin(t) * 0.025 + 0.035 }, 0.045, t);
             }
         }
+    } else if (variant == 15 or variant == 16 or variant == 17) {
+        // Three native fastland grasses: lime ribbons, warm seed heads, and blue-green fans.
+        const blades: usize = if (variant == 15) 11 else if (variant == 16) 7 else 9;
+        for (0..blades) |i| {
+            const angle = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / @as(f32, @floatFromInt(blades));
+            const height: f32 = if (variant == 15) 0.72 + @as(f32, @floatFromInt(i % 4)) * 0.11 else if (variant == 16) 0.54 + @as(f32, @floatFromInt(i % 3)) * 0.09 else 0.62 + @as(f32, @floatFromInt(i % 5)) * 0.075;
+            const reach: f32 = if (variant == 15) 0.30 else if (variant == 16) 0.38 else 0.34;
+            const bend: f32 = if (variant == 16) 0.18 else if (variant == 17) -0.08 else 0.04;
+            try blade(a, &out, .{ 0, 0, 0 }, .{ @cos(angle) * (reach + bend), height, @sin(angle) * (reach + bend) }, if (variant == 16) 0.13 else 0.075, angle);
+        }
     } else if (variant == 2) {
         for (0..5) |i| {
             const t = @as(f32, @floatFromInt(i)) * 2 * std.math.pi / 5;
@@ -124,9 +135,9 @@ pub fn plant(a: std.mem.Allocator, variant: u8) !Mesh {
     } else if (variant == 7) {
         // Low, rounded native shrub clusters with open gaps so the silhouette reads as foliage.
         const centers = [9][3]f32{
-            .{ 0, 0.24, 0 }, .{ 0.25, 0.34, 0.02 }, .{ -0.23, 0.33, 0.08 },
-            .{ 0.04, 0.38, 0.25 }, .{ 0.0, 0.43, -0.24 }, .{ 0.35, 0.22, -0.18 },
-            .{ -0.34, 0.24, -0.16 }, .{ 0.31, 0.2, 0.23 }, .{ -0.28, 0.2, 0.27 },
+            .{ 0, 0.24, 0 },         .{ 0.25, 0.34, 0.02 }, .{ -0.23, 0.33, 0.08 },
+            .{ 0.04, 0.38, 0.25 },   .{ 0.0, 0.43, -0.24 }, .{ 0.35, 0.22, -0.18 },
+            .{ -0.34, 0.24, -0.16 }, .{ 0.31, 0.2, 0.23 },  .{ -0.28, 0.2, 0.27 },
         };
         for (centers, 0..) |center, i| {
             const size = 0.16 + Seed.unit(Seed.mix(i + 7)) * 0.055;
@@ -235,7 +246,13 @@ fn leafCards(a: std.mem.Allocator, out: *GenMesh, center: [3]f32, direction: [3]
         .cascade => .{ .{ 0, -0.82 }, .{ 0.30, -0.56 }, .{ 0.38, -0.08 }, .{ 0.28, 0.38 }, .{ 0.12, 0.78 }, .{ 0, 1.0 }, .{ -0.12, 0.78 }, .{ -0.28, 0.38 } },
         .blossom => .{ .{ 0, -0.56 }, .{ 0.30, -0.42 }, .{ 0.32, -0.10 }, .{ 0.76, 0.06 }, .{ 0.40, 0.34 }, .{ 0.32, 0.72 }, .{ 0, 0.48 }, .{ -0.32, 0.72 } },
     };
-    const size_scale: f32 = switch (form) { .scale => 0.90, .fan => 1.18, .cascade => 1.10, .blossom => 0.82, else => 1.0 };
+    const size_scale: f32 = switch (form) {
+        .scale => 0.90,
+        .fan => 1.18,
+        .cascade => 1.10,
+        .blossom => 0.82,
+        else => 1.0,
+    };
     for (0..count) |i| {
         const key = seed *% 1000 +% @as(u64, @intCast(i)) *% 7;
         const angle = Seed.unit(Seed.mix(key)) * 2 * std.math.pi;

@@ -2148,13 +2148,22 @@ fn showcase(self: *App) void {
         eye = s.point(0.1);
         eye[1] += 2;
         target[1] += 2;
+    } else if (v == 110 or v == 111) {
+        // The living-sap flora in its richest nearby meadow, by day (110) and by night (111).
+        const Terrain = @import("procedural/Terrain.zig");
+        const spot = @import("procedural/Scatter.zig").sapMeadowSpot(self.sandbox.seed);
+        const ground = Terrain.surface(self.sandbox.seed, spot[0], spot[1]).height;
+        self.sandbox.player.feet = .{ spot[0], ground, spot[1] };
+        self.sandbox.player.velocity = @splat(0);
+        target = .{ spot[0], ground + 0.7, spot[1] };
+        eye = .{ spot[0] - 5, ground + 1.8, spot[1] + 9 };
     } else {
         target = .{ -40, layout.nodes[0].position[1], 140 };
         eye = .{ 260, target[1] + 160, -420 };
     }
     // 8 is a dusk overview; 10–15 revisit roads 1–6 at dusk.
     const dusk = v == 8 or (v >= 10 and v <= 15) or v == 62 or v == 64 or v == 65 or v == 95;
-    self.sandbox.tick = if (v == 85 or v == 86 or v == 87 or v == 88) 0 else if (v == 62 or v == 64 or v == 65) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
+    self.sandbox.tick = if (v == 85 or v == 86 or v == 87 or v == 88) 0 else if (v == 62 or v == 64 or v == 65 or v == 111) @import("engine/Sky.zig").day_ticks * 65 / 100 else if (dusk) @import("engine/Sky.zig").day_ticks * 52 / 100 else @import("engine/Sky.zig").day_ticks * 15 / 100;
     camera.position = mach.math.vec3(eye[0], eye[1], eye[2]);
     const dx = target[0] - eye[0];
     const dz = target[2] - eye[2];

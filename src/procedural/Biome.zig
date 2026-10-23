@@ -73,7 +73,10 @@ pub fn coverAt(seed: u64, x: f32, z: f32) Cover {
 
 pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
     const c = cover(seed, x, z, height, slope);
-    const base = c.weights.color();
+    var base = c.weights.color();
+    const hills = sunmeadowWeight(seed, x, z, height, slope);
+    const sunmeadow = [3]f32{ 0.33, 0.67, 0.22 };
+    for (&base, sunmeadow) |*channel, hill_channel| channel.* = channel.* * (1 - hills) + hill_channel * hills;
     const key = ChunkKey.fromPosition(x, z);
     const k2 = Region.k2.contains(key.x, key.z);
     const rock = if (k2) [3]f32{ 0.31, 0.39, 0.45 } else [3]f32{ 0.42, 0.48, 0.49 };
@@ -86,6 +89,30 @@ pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
         channel.* = bare * (1 - c.snow) + snow_color[i] * c.snow;
     }
     return if (k2) Cloudwater.terrainColor(seed, x, z, result, c.snow, slope) else result;
+}
+
+/// Bright rolling upland pockets, blended into ordinary meadows so the style stays native to
+/// the world. The palette and grass species are original and do not depend on a named franchise.
+pub fn sunmeadowWeight(seed: u64, x: f32, z: f32, height: f32, slope: f32) f32 {
+    const meadow = sample(seed, x, z).meadow;
+    // The plain around the city sits near 113 m: full strength up to 150 m, none above 210 m.
+    const lowland = 1 - std.math.clamp((height - 150) / 60, 0, 1);
+    const gentle = 1 - std.math.clamp((slope - 0.12) / 0.48, 0, 1);
+    const rolling = Noise.value(seed ^ 0x53554e4d4541444f, x / 180, z / 180);
+    const patch = std.math.clamp((rolling - 0.37) * 3.1, 0, 1);
+    return std.math.clamp(meadow * lowland * gentle * patch, 0, 1);
+}
+
+/// How strongly the glowing living-sap flora (`SapFlora.zig`) grows here, 0 to 1: patchy meadows
+/// and wet ground on gentle land below the highlands, thinning to nothing on steep, high or dry ground.
+pub fn sapMeadowWeight(seed: u64, x: f32, z: f32, height: f32, slope: f32) f32 {
+    const w = sample(seed, x, z);
+    // The plain around the city sits near 113 m; full strength up to 150 m, none above 210 m.
+    const lowland = 1 - std.math.clamp((height - 150) / 60, 0, 1);
+    const gentle = 1 - std.math.clamp((slope - 0.14) / 0.5, 0, 1);
+    const rolling = Noise.value(seed ^ 0x53415046_4c4f5241, x / 260, z / 260);
+    const patch = std.math.clamp((rolling - 0.40) * 3.4, 0, 1);
+    return std.math.clamp((w.meadow * 0.8 + w.wetland) * lowland * gentle * patch, 0, 1);
 }
 
 /// Continuous world-space moisture mask. No chunk-local normalization or thresholds at seams.
@@ -132,4 +159,20 @@ test "cover is measured on the same height the chunk mesh uses" {
     const nz = CityHeightmaps.heightAt(7, 0, -0.5) - CityHeightmaps.heightAt(7, 0, 0.5);
     const b = cover(7, 0, 0, h, @sqrt(nx * nx + nz * nz));
     try std.testing.expectEqual(b.kind(), a.kind());
+}
+
+test "the sap-meadow weight is bounded, patchy, and zero on steep or high ground" {
+    var any_high = false;
+    var any_zero = false;
+    for (0..40) |zi| for (0..40) |xi| {
+        const x = @as(f32, @floatFromInt(xi)) * 37 - 700;
+        const z = @as(f32, @floatFromInt(zi)) * 37 - 700;
+        const w = sapMeadowWeight(7, x, z, 113, 0.05);
+        try std.testing.expect(w >= 0 and w <= 1);
+        any_high = any_high or w > 0.4;
+        any_zero = any_zero or w == 0;
+        try std.testing.expectEqual(@as(f32, 0), sapMeadowWeight(7, x, z, 260, 0.05));
+        try std.testing.expectEqual(@as(f32, 0), sapMeadowWeight(7, x, z, 113, 0.8));
+    };
+    try std.testing.expect(any_high and any_zero);
 }

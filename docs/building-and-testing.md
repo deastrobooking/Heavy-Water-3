@@ -49,6 +49,8 @@ MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dcharac
 
 `-Dshowcase=60` shows a Rootdeep shrine from outside and `-Dshowcase=77` from inside its first room.
 
+To review the living-sap flora in the wild use `-Dshowcase=110` (the richest meadow near the spawn by day) or `-Dshowcase=111` (the same spot at night, where the glow parts light up).
+
 To review the redesigned cave temple (an ancient sanctuary that doubles as a lab) use `-Dshowcase=67` for the wilds set or `-Dshowcase=76` for a close-up of the temple alone.
 
 To see the bundled rigged GLB driven by the game's pose in the world (third person), add `-Dcharacter-showcase=47` and a `-Dcharacter-pose=N` (0 idle, 1 aim, 2 overhead swing, 3 cast, 4 guard) to the same command.
@@ -130,7 +132,7 @@ python3 tools/zig.py build test --summary all
 ```
 
 - **Scope:** the latest full run (2026-10-14) passed **440/440 tests** on default Zig and Zig 0.17. The suite is deterministic and headless, covering the engine, physics, generation, machines, saves, GUI layout, dialogue, audio synthesis and mixing, vehicles, flight, the Hive, weapons, melee, class specials, every Wildkin form and power, and the arena. Tests are registered in `src/tests.zig`; a new file's tests run only once it is imported there (or from a file that is).
-- **Time:** expect about 3.5 minutes. The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
+- **Time:** expect about 6.5 minutes (about 3.5 before the sap-flora candidates, 2026-10-22). The catalog allocation-failure test samples about 120 failure points across the catalog load; failing every allocation in turn is quadratic and took over 10 minutes. If the suite suddenly takes far longer, sample it before waiting: `sample <pid> 2` on macOS shows where the time goes. A slow suite once exposed expensive per-frame ray casts.
 - **Release mode:** `-Doptimize=ReleaseSafe` runs the same suite optimized.
 
 ## Smoke runs

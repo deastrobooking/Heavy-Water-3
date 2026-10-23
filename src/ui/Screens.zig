@@ -310,6 +310,7 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
         .controls => drawControls(c, menu),
         .pad_controls => drawPadControls(c, menu),
         .quest_log => if (sb) |s| drawQuestLog(c, menu, s),
+        .pets => if (sb) |s| drawPets(c, menu, s),
         .guide => drawGuide(c, menu),
         .heroes => if (sb) |s| drawHeroes(c, menu, s),
         .arena => drawArena(c, menu, sb),
@@ -605,6 +606,68 @@ fn drawQuestLog(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
     c.text(r.x + 58, y, detroit.boss.name, 1, if (boss_done) dim else ink);
     const back: Rect = .{ .x = r.x + r.w - 136, .y = r.y + r.h - 48, .w = 112, .h = 30 };
     button(c, back, "BACK", hitId(.menu, 0), menu.row == 0);
+}
+
+fn drawPets(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const r = menuRect(c, @min(660, c.width - 24), @min(520, c.height - 24));
+    panel(c, r, "PETS & ROBOTS");
+    const kit = &sb.kits[0];
+    var y = r.y + 52;
+    c.text(r.x + 24, y, "YOUR COMPANION", 0.9, dim);
+    y += 22;
+    if (kit.pet_active) |species| {
+        c.print(r.x + 24, y, 1.2, gold, "{s}  {s}  LV {d}", .{ Pets.info(species).name, Pets.info(species).kind, kit.petLevel(species) });
+        y += 24;
+        if (sb.pets.out[0]) |pet| {
+            c.print(r.x + 24, y, 0.88, ink, "HEALTH {d:.0}/{d:.0}", .{ pet.health, pet.max_health });
+        } else c.text(r.x + 24, y, "WILL REJOIN BESIDE YOU WHEN PLAY RESUMES", 0.82, dim);
+        y += 18;
+        const xp = kit.pet_xp[@intFromEnum(species)];
+        const level = kit.petLevel(species);
+        if (level < Pets.max_level) {
+            const start_xp = Pets.xpAtLevel(level);
+            const earned = xp - start_xp;
+            const needed = @as(u32, level) * 60;
+            c.print(r.x + 24, y, 0.78, ink, "XP {d}/{d} TO LV {d}", .{ earned, needed, level + 1 });
+            bar(c, .{ .x = r.x + 164, .y = y + 2, .w = 180, .h = 7 }, @as(f32, @floatFromInt(earned)) / @as(f32, @floatFromInt(needed)), gold);
+        } else {
+            c.text(r.x + 24, y, "MAX LEVEL 20", 0.78, gold);
+        }
+        y += 17;
+        c.text(r.x + 24, y, Pets.milestone(level), 0.78, accent);
+        y += 17;
+        c.text(r.x + 24, y, Pets.nextMilestone(level), 0.78, dim);
+    } else {
+        c.text(r.x + 24, y, "NO ACTIVE COMPANION", 1, bad);
+    }
+    y += 36;
+    c.text(r.x + 24, y, "WILDLIFE TO RESCUE", 0.9, dim);
+    c.text(r.x + 342, y, "DISTANCE", 0.78, dim);
+    y += 22;
+    for (std.enums.values(Pets.Species), 0..) |species, i| {
+        const row: Rect = .{ .x = r.x + 20, .y = y - 3, .w = r.w - 40, .h = 22 };
+        const owned = kit.hasPet(species);
+        if (i % 2 == 0) c.rect(row, .{ 1, 1, 1, 0.035 });
+        c.text(row.x + 8, row.y + 5, Pets.info(species).name, 0.9, if (owned) good else ink);
+        c.text(row.x + 112, row.y + 5, Pets.info(species).kind, 0.82, dim);
+        if (owned) {
+            c.text(row.x + row.w - 112, row.y + 5, "RESCUED", 0.82, good);
+        } else if (sb.pets.placed) {
+            const spot = sb.pets.spots[i].position;
+            const dx = spot[0] - sb.player.feet[0];
+            const dz = spot[2] - sb.player.feet[2];
+            c.print(row.x + row.w - 112, row.y + 5, 0.82, gold, "{d:.0} M", .{@sqrt(dx * dx + dz * dz)});
+        }
+        y += 24;
+    }
+    y += 12;
+    c.text(r.x + 24, y, "WEAKEN A WILD PET WITH TWO ENERGY-NET HITS, THEN INTERACT TO RESCUE IT.", 0.75, ink);
+    y += 20;
+    c.text(r.x + 24, y, if (kit.robot_built) "FIELD DROID: BUILT — FOLLOWS AND FIGHTS BESIDE YOUR ANIMAL." else "FIELD DROID: BUILD AT THE FABRICATOR — 2 ROTOR CORES, 8 HIVE ALLOY, 8 PARTS.", 0.75, if (kit.robot_built) good else accent);
+    const track: Rect = .{ .x = r.x + 20, .y = r.y + r.h - 48, .w = 176, .h = 30 };
+    const back: Rect = .{ .x = r.x + r.w - 136, .y = r.y + r.h - 48, .w = 112, .h = 30 };
+    button(c, track, "TRACK WILDLIFE", hitId(.menu, 0), menu.row == 0);
+    button(c, back, "BACK", hitId(.menu, 1), menu.row == 1);
 }
 
 /// HOW TO PLAY: page tabs across the top, the page's lines, and BACK.

@@ -65,7 +65,7 @@ Run everything from the repository root through the pinned launcher. Never use a
 
 ```sh
 python3 tools/zig.py build check                        # compile the app (Debug)
-python3 tools/zig.py build test --summary all           # headless suite, about 3.5 minutes
+python3 tools/zig.py build test --summary all           # headless suite, about 6.5 minutes
 MTL_DEBUG_LAYER=1 python3 tools/zig.py build run -Doptimize=ReleaseSafe -Dsmoke-frames=300   # scripted smoke
 python3 tools/zig.py build -Doptimize=ReleaseFast       # reinstall zig-out/bin/heavy-water
 HEAVYWATER_ZIG_CHANNEL=0.17 python3 tools/zig.py build check     # migration gate (passes)

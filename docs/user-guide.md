@@ -21,7 +21,7 @@ The Hive holds Earth. You free it one city at a time, starting with Detroit.
 | Do this | With |
 | --- | --- |
 | Move, jump, sprint, dodge | W A S D, Space, Shift, Ctrl |
-| Jump higher | Run first: a standing jump is about 15 ft, a running jump about 30 ft |
+| Jump higher | Run first: a standing jump is about 17 ft (5 m); a jump at full sprint reaches about 54 ft (16 m) |
 | Long jump, backflip | Sprint forward and jump; hold back and jump |
 | Grapple, mantle, cycle traversal suit | G, F, B |
 | Fly (Shift boosts, E and Q climb and descend, Alt brakes) | V |
@@ -93,6 +93,10 @@ Rows that change the head zoom the camera to it.
 4. Set **BODY STYLE** to IMPORTED GLB to wear it. Each part of the model has a surface type (armor, skin, eyes, energy, neutral), a palette colour and a hide switch. VERTEX TOOLS sculpts, paints, bends and re-weights the mesh, and tears parts off.
 
 Not yet possible: wearing the game's face, hair, helmet or armor on an imported body, and reusing torn-off parts. These are planned in [character assets](plans/character-assets.md): the game face on the face area of an imported head, and a library of parts shared by the whole team.
+
+## The wilds' glowing plants
+
+Patchy meadows of **living-sap plants** grow across the lowlands and wet ground: glowing grasses and reeds, lilies, starcups and poppies, lantern bushes hung with pods, crystal shrubs, sapferns, and small glowvine, crystal-leaf and sapwillow trees. They are pale by day and burn lumen-bright at night, even on snow. They are scenery for now; placing them as decoration is planned.
 
 ## Saving
 

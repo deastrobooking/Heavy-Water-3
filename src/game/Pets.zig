@@ -74,9 +74,40 @@ pub fn levelFor(xp: u32) u8 {
     return level;
 }
 
+/// Cumulative XP at the start of a level; the level-N step costs 60×N XP.
+pub fn xpAtLevel(level: u8) u32 {
+    const n: u32 = @intCast(std.math.clamp(level, 1, max_level));
+    return 30 * (n - 1) * n;
+}
+
+/// Pet bond milestones are derived from saved XP, so they require no save migration.
+pub fn damageScale(level: u8) f32 {
+    return (if (level >= 10) @as(f32, 1.10) else 1) * (if (level >= 20) @as(f32, 1.15) else 1);
+}
+
+pub fn healthScale(level: u8) f32 {
+    return (if (level >= 5) @as(f32, 1.10) else 1) * (if (level >= 15) @as(f32, 1.10) else 1);
+}
+
+pub fn milestone(level: u8) []const u8 {
+    if (level >= 20) return "APEX STRIKE  +15% DAMAGE";
+    if (level >= 15) return "HARDENED II  +10% HEALTH";
+    if (level >= 10) return "STRIKE I  +10% DAMAGE";
+    if (level >= 5) return "HARDENED I  +10% HEALTH";
+    return "BONDED  GROW THROUGH HIVE FIGHTS";
+}
+
+pub fn nextMilestone(level: u8) []const u8 {
+    if (level < 5) return "LV 5  HARDENED I  +10% HEALTH";
+    if (level < 10) return "LV 10  STRIKE I  +10% DAMAGE";
+    if (level < 15) return "LV 15  HARDENED II  +10% HEALTH";
+    if (level < 20) return "LV 20  APEX STRIKE  +15% DAMAGE";
+    return "APEX COMPANION  MILESTONES COMPLETE";
+}
+
 pub fn damage(s: Species, level: u8) f32 {
     const i = info(s);
-    return i.damage + i.per_level * @as(f32, @floatFromInt(level -| 1));
+    return (i.damage + i.per_level * @as(f32, @floatFromInt(level -| 1))) * damageScale(level);
 }
 
 /// Pet experience levels improve survivability alongside attack damage.
@@ -87,7 +118,7 @@ pub fn maxHealth(s: Species, level: u8) f32 {
         .golem => 240,
         .moth => 115,
     };
-    return base + 12 * @as(f32, @floatFromInt(level -| 1));
+    return (base + 12 * @as(f32, @floatFromInt(level -| 1))) * healthScale(level);
 }
 
 /// Hover height of fliers over their ground.

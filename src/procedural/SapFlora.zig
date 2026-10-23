@@ -301,6 +301,71 @@ pub fn build(a: std.mem.Allocator, s: Species) !Parts {
     return .{ .body = body_mesh, .glow = glow_mesh };
 }
 
+/// The scatter variant number of a species: well above `Vegetation.variant_count`, so these plants
+/// are a separate list that never collides with the older flora's numbering.
+pub const variant_base: u8 = 200;
+
+pub fn variantOf(s: Species) u8 {
+    return variant_base + @as(u8, @intCast(@intFromEnum(s)));
+}
+
+pub fn speciesOf(variant: u8) ?Species {
+    if (variant < variant_base or variant >= variant_base + count) return null;
+    return @enumFromInt(variant - variant_base);
+}
+
+/// Both meshes scaled to unit height, so an instance's scale is the plant's height in metres and
+/// the scene's culling (which assumes scale is the plant's size) works for every species.
+pub fn buildUnit(a: std.mem.Allocator, s: Species) !Parts {
+    const parts = try build(a, s);
+    const k = 1 / info(s).height;
+    for ([_]Mesh{ parts.body, parts.glow }) |m| for (m.vertices) |*v| {
+        v.position = .{ v.position[0] * k, v.position[1] * k, v.position[2] * k };
+    };
+    return parts;
+}
+
+/// How much of the ground a species wants, as (meadow, wetland) weights: grasses and cups carpet
+/// meadows, reeds and moss the wet ground, bushes edge both, trees are rarer.
+fn appeal(s: Species) [2]f32 {
+    return switch (s) {
+        .glowblade => .{ 3.0, 1.0 },
+        .silk_reed => .{ 0.0, 3.0 },
+        .moonmoss => .{ 1.0, 3.0 },
+        .lumen_lily => .{ 1.0, 2.0 },
+        .starcup => .{ 3.0, 1.0 },
+        .driftpoppy => .{ 3.0, 0.5 },
+        .lantern_bush => .{ 2.0, 0.5 },
+        .crystal_bloom => .{ 1.0, 0.3 },
+        .sapfern => .{ 1.5, 2.0 },
+        .glowvine_tree => .{ 1.0, 0.6 },
+        .crystal_leaf_tree => .{ 0.6, 0.2 },
+        .sapwillow => .{ 0.2, 1.2 },
+    };
+}
+
+/// A species for ground with these biome weights, from a uniform `roll` in [0, 1).
+pub fn choose(meadow: f32, wetland: f32, roll: f32) Species {
+    var total: f32 = 0;
+    inline for (enum_compat.fields(Species)) |f| {
+        const w = appeal(@enumFromInt(f.value));
+        total += w[0] * meadow + w[1] * wetland;
+    }
+    if (total <= 0) return .glowblade;
+    var at = std.math.clamp(roll, 0, 0.9999) * total;
+    inline for (enum_compat.fields(Species)) |f| {
+        const sp: Species = @enumFromInt(f.value);
+        const w = appeal(sp);
+        at -= w[0] * meadow + w[1] * wetland;
+        if (at < 0) return sp;
+    }
+    return .sapwillow;
+}
+
+pub fn isTree(s: Species) bool {
+    return info(s).family == .tree;
+}
+
 // ---------------------------------------------------------------- grasses
 
 fn glowblade(body: *Builder, glow: *Builder) !void {
@@ -641,6 +706,45 @@ test "heights keep to the combat rule by family and species differ from each oth
         seen[k] = parts.body.vertices.len * 7919 + parts.glow.vertices.len;
         for (seen[0..k]) |other| try std.testing.expect(other != seen[k]);
     }
+}
+
+test "unit meshes are one unit tall, variants round-trip and the choice follows the ground" {
+    const a = std.testing.allocator;
+    inline for (enum_compat.fields(Species)) |f| {
+        const sp: Species = @enumFromInt(f.value);
+        try std.testing.expectEqual(@as(?Species, sp), speciesOf(variantOf(sp)));
+        const parts = try buildUnit(a, sp);
+        defer parts.deinit(a);
+        const top = @max(boundsOf(parts.body).hi[1], boundsOf(parts.glow).hi[1]);
+        try std.testing.expect(top > 0.7 and top < 1.25);
+    }
+    try std.testing.expect(speciesOf(199) == null and speciesOf(variant_base + count) == null);
+    // Dry meadow never grows reeds; wet ground grows them often and grows few cups.
+    var reeds_dry: usize = 0;
+    var reeds_wet: usize = 0;
+    var cups_wet: usize = 0;
+    var cups_dry: usize = 0;
+    for (0..1000) |i| {
+        const roll = (@as(f32, @floatFromInt(i)) + 0.5) / 1000;
+        const dry = choose(1, 0, roll);
+        const wet = choose(0, 1, roll);
+        reeds_dry += @intFromBool(dry == .silk_reed);
+        reeds_wet += @intFromBool(wet == .silk_reed);
+        cups_dry += @intFromBool(dry == .starcup);
+        cups_wet += @intFromBool(wet == .starcup);
+    }
+    try std.testing.expectEqual(@as(usize, 0), reeds_dry);
+    try std.testing.expect(reeds_wet > 150 and cups_dry > cups_wet * 2);
+    // Every species is chosen somewhere on a mixed meadow, and trees stay a minority.
+    var seen: [count]bool = @splat(false);
+    var trees: usize = 0;
+    for (0..2000) |i| {
+        const pick = choose(0.6, 0.4, (@as(f32, @floatFromInt(i)) + 0.5) / 2000);
+        seen[@intFromEnum(pick)] = true;
+        trees += @intFromBool(isTree(pick));
+    }
+    for (seen) |x| try std.testing.expect(x);
+    try std.testing.expect(trees > 40 and trees < 500);
 }
 
 test "building a species twice gives identical meshes" {

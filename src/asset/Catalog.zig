@@ -10,6 +10,7 @@ const Arbor = @import("../procedural/Arbor.zig");
 const Seed = @import("../procedural/Seed.zig");
 const District = @import("../procedural/District.zig");
 const Vegetation = @import("../procedural/Vegetation.zig");
+const SapFlora = @import("../procedural/SapFlora.zig");
 const Caves = @import("../procedural/Caves.zig");
 const Mountains = @import("../procedural/Mountains.zig");
 const Guid = @import("Guid.zig");
@@ -18,7 +19,7 @@ pub const Ref = @import("Registry.zig").Ref;
 pub const arbor_count = 2;
 pub const ArborAsset = struct { tree: Arbor.Tree, mesh: MeshHandle, lod: MeshHandle };
 
-pub const mesh_capacity = 128;
+pub const mesh_capacity = 256;
 pub const material_capacity = 256;
 const MeshTag = struct {};
 const MaterialTag = struct {};
@@ -43,6 +44,9 @@ pub const Content = struct {
     relic: MeshHandle,
     plant: MeshHandle,
     flora: [Vegetation.variant_count]MeshHandle,
+    /// The living-sap flora (`SapFlora.zig`): a body and a glow mesh per species, unit height.
+    sap_body: [SapFlora.count]MeshHandle,
+    sap_glow: [SapFlora.count]MeshHandle,
     tree_trunks: [Vegetation.tree_count]MeshHandle,
     /// Puppet parts (pets): a unit sphere and a unit cone.
     orb: MeshHandle,
@@ -274,6 +278,13 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         handle.* = try self.register(allocator, try Model.fromMesh(allocator, generated_mesh, .named(Vegetation.names[i], Vegetation.colors[i])));
     }
     self.content.plant = self.content.flora[0];
+    inline for (0..SapFlora.count) |i| {
+        const species: SapFlora.Species = @enumFromInt(i);
+        const parts = try SapFlora.buildUnit(allocator, species);
+        // The vertex colours carry the colours; the material is white so the instance tint is the only multiplier.
+        self.content.sap_body[i] = try self.register(allocator, try Model.fromMesh(allocator, parts.body, .named(SapFlora.info(species).name, .{ 1, 1, 1, 1 })));
+        self.content.sap_glow[i] = try self.register(allocator, try Model.fromMesh(allocator, parts.glow, .named("glow", .{ 1, 1, 1, 1 })));
+    }
     for (&self.content.tree_trunks, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator, @intCast(i)), .named("canopy trunk", Vegetation.trunk_colors[i])));
     self.content.orb = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.orb(allocator), .named("orb", .{ 1, 1, 1, 1 })));
     self.content.spike = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.spike(allocator), .named("spike", .{ 1, 1, 1, 1 })));

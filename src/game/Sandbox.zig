@@ -528,6 +528,9 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     }
     self.market = .init(seed, 0);
     self.resetPlayer(camera);
+    // Fresh games need the same starter companion that load and join paths provide. Frontier's
+    // pet step only summons the active species recorded in each personal kit.
+    for (&self.kits) |*kit| kit.ensureStarterPet();
     Frontier.init(self);
     // Detroit's discovery challenges are city blocks, laid once the city's colliders exist.
     _ = @import("Challenges.zig").place(self);

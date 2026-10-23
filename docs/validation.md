@@ -1,3 +1,16 @@
+## Movement retune and hill-meadow fix — 2026-10-22
+
+- **Changed (owner's choice of the stronger tuning):** sprint 15.5 m/s (was 10.8), jump launch 12.6 (11.8), running bonus 0.55 (0.42), long-jump lift 1.14 (1.0), wall jump 8 % stronger with some carried momentum, faster dodge launch and hoverboard. Measured peaks: a standing jump 5.2 m (about 17 ft, was 4.6 m) and a full-sprint long jump 16.35 m (about 54 ft, was 9.2 m); the jump test now holds those heights, and the player guide and the `Player.zig` comments say so.
+- **Watch:** a 16 m sprint jump reaches the 16 m plates of Detroit's discovery-course towers directly, so the courses can now be skipped by jumping; they were raised for 9 m jumps. Not changed here.
+- **Fixed:** `Biome.sunmeadowWeight` (the hill-meadow grasses and their terrain tint) cut off above 30 m, but the plain around the city sits near 113 m, so the new variants never grew and their scatter test failed. It now uses the same rule as the sap meadows: full strength up to 150 m, none above 210 m.
+- **Also:** the headless suite now takes about 6.5 minutes (it was about 3.5); tests that generate many chunks now place up to 240 more sap-flora candidates each.
+
+## Fantasy flora FF2: wild placement and drawing — 2026-10-22
+
+- **Added:** `SapFlora.buildUnit`, `variantOf`/`speciesOf`, `choose`; `Biome.sapMeadowWeight`; 240 sap candidates per chunk in `Scatter.generate` (ids after the boulders); catalog handles `sap_body` and `sap_glow` and `mesh_capacity` 256; `StreamingScene.gatherSap` and the sap body and glow draws in `drawFlora`, counted in `submittedTriangles`; review views `-Dshowcase=110` and `111`.
+- **Checked:** scatter tests: over 18 x 18 chunks every species appears, ids are unique and in the new range, scales are inside each species' height band, trees keep off roads and the spawn, none on the ice sheet, the same chunk gives the same plants; the sap weight is bounded, patchy and zero on high or steep ground; the review spot grows at least a dozen plants; the older scatter tests still hold (their assumptions were widened to skip the new range). Captures under `MTL_DEBUG_LAYER=1` of the meadow by day and by night with no validation messages: lantern bush, glowvine tree, starcups and driftpoppy on snow, willows in the distance, and at night the pods, vines and willow veins glow. Reviews changed the plan three times: a 30 m height cutoff that grew nothing (the plain sits near 113 m), a snow gate that removed every plant (the ground is snow), and a meadow far too sparse (72 candidates became 240).
+- **Not checked:** frame cost with the new instances (the `--nature` benchmark and four-player split screen are not rerun), how dense the meadow should be by feel, the placeable decoration (FF4), the shader sway and any dedicated glow pass (FF3), and the species list by the owner.
+
 ## Fantasy flora FF1: the twelve living-sap species — 2026-10-22
 
 - **Added:** `procedural/SapFlora.zig`: twelve glowing species (glowblade grass, silk reed, moonmoss tuft, lumen lily, starcup, driftpoppy, lantern bush, crystal-bloom shrub, sapfern thicket, glowvine tree, crystal-leaf tree, sapwillow). Each is two meshes in real metres, a body with per-vertex colours (stems, bark, leaves, petals) and a glow (the lit tips, pods, veins and vines) meant to be drawn again with the instance tint alpha above 1 so the scene shader makes it night-bright. Meshes are a pure function of the species. The module is standalone: nothing in scatter, biomes, the catalog or the renderer uses it yet.
@@ -2027,3 +2040,15 @@ The face mask view (`-Dcel-debug=4`, showcase 3) shows a clean vertical terminat
 - **Added:** while the block tool is active, keyboard C or controller X toggles free creative block mode. The existing floating preview and material strip identify the current block; unsupported block cells can be placed. On controllers, LT places and RT removes; the D-pad selects pieces/materials and rotates. Creative placements do not spend or refund a player's block kit; normal survival mode still does. Controls and guide text explain the mode.
 - **Checked:** `python3 tools/zig.py build check --cache-dir /tmp/hw-cache-creative-build` passed. Zig formatting and `git diff --check` passed. ReleaseSafe Metal capture exited 0 with Metal API Validation enabled and no Metal validation messages; the capture showed the keyboard controls page, not the gamepad page. Startup logged `block mesh: PoolFull` from concurrent building work and the asset compiler logged its `compile-modified` command as failed, although the overall build check passed.
 - **Not checked:** hands-on controller mapping or gameplay, creative construction save/reload, performance, or behavior on other controllers. Cells still use the existing 1 m grid and quarter-turn yaw rotation.
+
+## Pet initialization and companion guide — 2026-10-22
+
+- **Fixed:** fresh games now initialize every personal Kit with GARU, matching the existing load and guest-join paths; the Frontier step can now summon the starter animal instead of finding an empty active-pet slot. Added a pause-menu PETS & ROBOTS page that shows P1's active pet, rescue roster and distances, field-droid recipe/build status, and a TRACK WILDLIFE button that opens the world map with wildlife tracking selected.
+- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` passed.
+- **Not checked:** hands-on new-game pet appearance, wildlife capture, or field-droid construction and combat.
+
+## Pet bond upgrade path — 2026-10-22
+
+- **Added:** pet XP has four automatic, per-pet bond milestones: level 5 and 15 add 10% maximum health; level 10 adds 10% attack damage; level 20 adds 15% attack damage. The companion page now shows XP to the next level, the current rank and the next milestone. All bonuses derive from existing saved pet XP, so the save format is unchanged.
+- **Checked:** default `python3 tools/zig.py build check` and `git diff --check` passed.
+- **Not checked:** level-up balance or milestone effects in live combat.

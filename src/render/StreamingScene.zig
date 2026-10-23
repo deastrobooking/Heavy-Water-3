@@ -17,13 +17,15 @@ const Model = @import("../asset/Model.zig");
 const World = @import("../world/World.zig");
 const Modifications = @import("../world/Modifications.zig");
 const Vegetation = @import("../procedural/Vegetation.zig");
+const SapFlora = @import("../procedural/SapFlora.zig");
 const Noise = @import("../procedural/Noise.zig");
 const Scene = @This();
 const world_prop_distance: f32 = 6000;
 /// Per-axis `stretch` (applied first) and a unit-quaternion `rotation`; the shader corrects
 /// normals for the stretch and rotates them.
 pub const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32, stretch: [4]f32 = .{ 1, 1, 1, 0 }, rotation: [4]f32 = .{ 0, 0, 0, 1 } };
-pub const max_instances = Streamer.render_capacity * Scatter.capacity + 1 + World.max_props * Model.max_submeshes;
+/// Every living-sap object draws twice (body, then glow), so those get a second slot each.
+pub const max_instances = Streamer.render_capacity * (Scatter.capacity + Scatter.sap_candidates) + 1 + World.max_props * Model.max_submeshes;
 /// One instanced draw of a catalog submesh.
 /// `ground` draws (the mountain panorama and cave meshes) are shaded as terrain.
 const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32, ground: bool = false };
@@ -63,6 +65,9 @@ instance_count: u32 = 1,
 relic_count: u32 = 0,
 plant_count: u32 = 0,
 flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @splat(0),
+/// Instances per living-sap species: bodies, then glows (the same plants drawn bright).
+sap_counts: [SapFlora.count]u32 = @splat(0),
+sap_glow_counts: [SapFlora.count]u32 = @splat(0),
 boulder_counts: [@import("../procedural/Vegetation.zig").boulder_count]u32 = @splat(0),
 resident_count: usize = 0,
 peak_resident_count: usize = 0,
@@ -191,6 +196,8 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.relic_count = 0;
         self.plant_count = 0;
         self.flora_counts = @splat(0);
+        self.sap_counts = @splat(0);
+        self.sap_glow_counts = @splat(0);
         self.boulder_counts = @splat(0);
         for (&self.residents) |*resident| resident.visible = false;
         self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
@@ -285,6 +292,8 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         // and salvage out of the visual-only perimeter until Antarctic encounter dressing exists.
         self.relic_count = 0;
         self.flora_counts = @splat(0);
+        self.sap_counts = @splat(0);
+        self.sap_glow_counts = @splat(0);
         self.plant_count = 0;
         self.boulder_counts = @splat(0);
     } else {
@@ -292,6 +301,15 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.plant_count = 0;
         for (&self.flora_counts, 0..) |*count, variant| {
             count.* = self.gather(.vegetation, vp, culling, removed, @intCast(variant));
+            self.plant_count += count.*;
+        }
+        // The living-sap flora: every plant's body, then the same plants' glow drawn bright.
+        for (&self.sap_counts, 0..) |*count, species| {
+            count.* = self.gatherSap(vp, culling, removed, @intCast(species), false);
+            self.plant_count += count.*;
+        }
+        for (&self.sap_glow_counts, 0..) |*count, species| {
+            count.* = self.gatherSap(vp, culling, removed, @intCast(species), true);
             self.plant_count += count.*;
         }
         for (&self.boulder_counts, 0..) |*count, variant| count.* = self.gather(.boulder, vp, culling, removed, @intCast(variant));
@@ -337,6 +355,36 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
     };
     return self.instance_count - first;
 }
+
+/// Instances of one living-sap species, as plain bodies or as glow: the glow copy raises the
+/// tint alpha above 1, which the scene shader turns into lumen that burns brighter at night.
+fn gatherSap(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, species: u8, glow: bool) u32 {
+    const first = self.instance_count;
+    const handle = if (glow) self.catalog.content.sap_glow[species] else self.catalog.content.sap_body[species];
+    const color = self.baseColor(handle);
+    const variant = SapFlora.variantOf(@enumFromInt(species));
+    if (self.flora_review) return 0;
+    for (self.residents) |resident| {
+        if (!resident.visible) continue;
+        const view = resident.view.?;
+        const data = self.stream.payload(view) orelse continue; // stale during a terrain rebuild
+        for (data.objects[0..data.object_count]) |object| {
+            if (object.kind != .vegetation or object.variant != variant) continue;
+            if (removed.len > 0 and removed.contains(.of(view.key, object.local_id))) continue;
+            const t = object.transform.toInstance();
+            if (culling and !Visibility.sphereVisible(vp, .{ t[0], t[1] + t[3] * 0.5, t[2] }, 1.3 * t[3])) continue;
+            if (self.instance_count >= self.instances.len) return self.instance_count - first;
+            var tint = multiply(object.tint, color);
+            if (glow) tint[3] = glow_alpha;
+            self.instances[self.instance_count] = .{ .translation_scale = t, .tint = tint };
+            self.instance_count += 1;
+        }
+    }
+    return self.instance_count - first;
+}
+
+/// Instance tint alpha of a glowing plant part: above 1 is emissive, up to 2 fully so.
+const glow_alpha: f32 = 1.75;
 
 fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
     const xoff: f32 = switch (variant) {
@@ -439,6 +487,14 @@ pub fn submittedTriangles(self: *const Scene) u64 {
             indices += @as(u64, mesh.index_count) * count;
         };
     }
+    for (self.sap_counts, self.sap_glow_counts, 0..) |body, glow, species| {
+        if (body > 0) if (self.gpuMesh(self.catalog.content.sap_body[species])) |mesh| {
+            indices += @as(u64, mesh.index_count) * body;
+        };
+        if (glow > 0) if (self.gpuMesh(self.catalog.content.sap_glow[species])) |mesh| {
+            indices += @as(u64, mesh.index_count) * glow;
+        };
+    }
     for (self.boulder_counts, 0..) |count, variant| if (count > 0) {
         if (self.gpuMesh(self.catalog.content.boulders[variant])) |mesh| indices += @as(u64, mesh.index_count) * count;
     };
@@ -456,6 +512,16 @@ pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
             if (self.gpuMesh(self.catalog.content.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
         }
         if (self.gpuMesh(handle)) |mesh| mesh.draw(pass, count, next);
+        next += count;
+    }
+    for (self.sap_counts, 0..) |count, species| {
+        if (count == 0) continue;
+        if (self.gpuMesh(self.catalog.content.sap_body[species])) |mesh| mesh.draw(pass, count, next);
+        next += count;
+    }
+    for (self.sap_glow_counts, 0..) |count, species| {
+        if (count == 0) continue;
+        if (self.gpuMesh(self.catalog.content.sap_glow[species])) |mesh| mesh.draw(pass, count, next);
         next += count;
     }
 }

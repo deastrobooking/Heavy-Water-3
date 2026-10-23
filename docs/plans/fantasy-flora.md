@@ -48,10 +48,18 @@ About twelve species, so the variant count grows from 18 (and whatever the other
 | --- | --- | --- |
 | FF0 | Wait for the other session's vegetation work to land; re-read `Vegetation`, `Scatter`, `Biome`. | Clean tree and a green suite. |
 | FF1 | **Done 2026-10-22 (standalone geometry and tests).** Species meshes and tables: names, colors, glow parts, heights, triangle budgets for the twelve species, in `procedural/SapFlora.zig`. | Tests: every mesh is valid, inside its height and triangle budget, deterministic; a contact sheet from a throwaway software renderer. The in-engine day and night capture moves to FF2. |
-| FF2 | Hook-in and wild placement (first raise `Catalog.mesh_capacity`, which is 128 and full; two meshes per species add 24): sap-meadow weights, species choice inside existing candidates, generator version bump and migration. | Scatter tests (every species appears, ids unchanged, no placement on roads or the spawn), save migration test, forest captures day and night. |
+| FF2 | **Done 2026-10-22.** Hook-in and wild placement (`Catalog.mesh_capacity` raised from 128 to 256; two meshes per species add 24): sap-meadow weights, species choice inside existing candidates, generator version bump and migration. | Scatter tests (every species appears, ids unchanged, no placement on roads or the spawn), save migration test, forest captures day and night. |
 | FF3 | Night glow and sway in the shader path (an emissive tint lane, a small wind sway), within the WGSL limits. | Capture under `MTL_DEBUG_LAYER=1`; nature benchmark within budget. |
 | FF4 | Decoration: the Plants entry, `Decor` state, cost and refund, save format and fixture, guest building. | Place, remove, save, restore and four-player tests; smoke stage. |
 | FF5 | Polish and measurement: four-player benchmark, combat-readability review, docs and the player guide. | Recorded numbers and a hands-on checklist. |
+
+## What FF2 built (decisions made on the way)
+
+- **A separate list, not new old-style variants.** Living-sap objects use scatter variants 200 to 211 (`SapFlora.variantOf`), outside `Vegetation.variant_count`, so they never collide with the older flora's numbering (another session was adding hill-meadow variants at the same time). Meshes are unit height, an instance's scale is the plant's height in metres.
+- **Its own scatter candidates.** 240 extra candidates per chunk after the boulders (ids `candidates + boulder_candidates` and up); every older id and object is unchanged, so saved removals keep their meaning and `Seed.generator_version` is not bumped (nothing that existed moved; a save made before simply shows new plants).
+- **Where they grow.** `Biome.sapMeadowWeight`: patchy meadow and wet ground on gentle land, full strength up to 150 m above sea level and none above 210 m (the plain around the city sits near 113 m; a first version copied a 30 m cutoff from the older meadow code and grew nothing). Snow thins them by up to half but does not stop them: the ground around the spawn is snow, and lit plants on snow is the look. `SapFlora.choose` picks the species from the meadow and wetland weights; trees keep off roads and the spawn clearing like other trees.
+- **Drawing.** Each species is two catalog meshes; the scene gathers a species' plants twice, the second time with the tint alpha raised to 1.75 so the existing emissive path makes the glow parts burn brighter at night (instances are bounds-checked and the buffer has room for the second copy).
+- **Review views:** `-Dshowcase=110` (day) and `111` (night) stand at `Scatter.sapMeadowSpot`.
 
 ## Open points
 

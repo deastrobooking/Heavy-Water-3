@@ -20,14 +20,15 @@ pub const Traversal = enum { grapple, hover_jet, flight, hoverboard, energy_skat
 pub const Motion = enum { idle, run, sprint, jump, long_jump, backflip, fall, roll, stomp, wall_slide, climb, hang, mantle, jet, hover, glide, dash, board, skate, grapple_zip, grapple_swing, swim };
 pub const eye_height: f32 = 1.62;
 pub const walk_speed: f32 = 5.8;
-pub const sprint_speed: f32 = 10.8;
-/// Launch speed of a standing jump: a peak of about 15 ft (4.6 m).
-pub const jump_speed: f32 = 11.8;
+pub const sprint_speed: f32 = 15.5;
+/// Launch speed of a standing jump: a peak of about 17 ft (5.2 m).
+pub const jump_speed: f32 = 12.6;
 /// Extra launch, as a fraction, a jump gains from running: it grows with ground speed and is full
-/// at normal running speed, for a peak of about 30 ft (9.1 m).
-pub const running_jump_bonus: f32 = 0.42;
+/// at normal running speed. With the sprint long jump on top, a jump at full sprint peaks near
+/// 54 ft (16 m); the test below holds both heights.
+pub const running_jump_bonus: f32 = 0.55;
 /// Launch multiplier of the sprint long jump (on top of the running bonus).
-pub const long_jump_lift: f32 = 1.0;
+pub const long_jump_lift: f32 = 1.14;
 
 /// Launch speed of a ground jump at `ground_speed` (m/s across the ground).
 pub fn runningJumpSpeed(ground_speed: f32) f32 {
@@ -215,8 +216,9 @@ fn jump(self: *Player, speed: f32) void {
     self.motion = .jump;
 }
 fn wallJump(self: *Player) void {
-    self.jump(jump_speed * 0.98);
-    const push = R.scale(self.wall_normal, 8);
+    self.jump(jump_speed * 1.08);
+    const tangent = R.scale(horizontal(self.velocity), 0.38);
+    const push = R.add(R.scale(self.wall_normal, 10), tangent);
     self.velocity[0] = push[0];
     self.velocity[2] = push[2];
     self.wall_lock = 0.16;
@@ -495,7 +497,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             }
             if (long_jump) {
                 const launch = if (strength > 0.1) wish else forward;
-                const launch_speed: f32 = if (input.dodge or input.dodge_held) 23 else 17;
+                const launch_speed: f32 = if (input.dodge or input.dodge_held) 28 else 21;
                 self.velocity[0] = launch[0] * launch_speed;
                 self.velocity[2] = launch[2] * launch_speed;
                 self.motion = .long_jump;
@@ -532,7 +534,7 @@ pub fn stepIn(self: *Player, physics: *Physics, camera: *Camera, input: Input, e
             self.air_assist_engaged = false;
             self.releaseGrapple();
         }
-        const skate_speed: f32 = if (sprinting) 23 else 16;
+        const skate_speed: f32 = if (sprinting) 30 else 18;
         const base_speed = if (skating) skate_speed else if (sprinting) self.suit.sprint else walk_speed;
         const board_scale: f32 = if (board and !skating) 1.65 else 1;
         const boost_scale: f32 = if (self.boost_timer > 0) (if (skating) @as(f32, 1.5) else 2.35) else 1;
@@ -843,7 +845,7 @@ test "walking into a wall is blocked; jumping into it climbs and mantles onto th
     try std.testing.expect(p.grounded and p.feet[1] > 2.95 and p.feet[2] > 1.75);
 }
 
-test "a standing jump peaks near 15 ft and a running jump near 30 ft" {
+test "a standing jump peaks near 17 ft and a full-sprint running jump near 54 ft" {
     var standing_physics: Physics = .init(.{ .sample = flatGroundForJumps });
     defer standing_physics.deinit();
     var camera: Camera = .{};
@@ -864,8 +866,8 @@ test "a standing jump peaks near 15 ft and a running jump near 30 ft" {
     var running_physics: Physics = .init(.{ .sample = flatGroundForJumps });
     defer running_physics.deinit();
     const running = peak(&running_physics, &camera, 90);
-    try std.testing.expectApproxEqAbs(@as(f32, 4.6), standing, 0.25);
-    try std.testing.expectApproxEqAbs(@as(f32, 9.1), running, 0.45);
+    try std.testing.expectApproxEqAbs(@as(f32, 5.2), standing, 0.25);
+    try std.testing.expectApproxEqAbs(@as(f32, 16.35), running, 0.8);
     try std.testing.expect(runningJumpSpeed(walk_speed) > runningJumpSpeed(walk_speed / 2));
     try std.testing.expectEqual(runningJumpSpeed(walk_speed), runningJumpSpeed(sprint_speed));
     try std.testing.expectEqual(jump_speed, runningJumpSpeed(0));
