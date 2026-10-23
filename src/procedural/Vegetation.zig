@@ -415,17 +415,54 @@ fn cone(a: std.mem.Allocator, out: *GenMesh, base: f32, height: f32, radius: f32
     }
 }
 pub fn tree(a: std.mem.Allocator, species: u8) !Mesh {
+    return treeAt(a, species, .near);
+}
+
+/// Crown detail by distance. Farther crowns keep every `tip_stride`-th leaf tip with
+/// `leaf_divisor` times fewer, larger leaves, so the canopy keeps its outline and mass.
+pub const Detail = enum {
+    near,
+    mid,
+    far,
+
+    pub fn tipStride(self: Detail) usize {
+        return switch (self) {
+            .near => 1,
+            .mid => 2,
+            .far => 4,
+        };
+    }
+
+    pub fn leafDivisor(self: Detail) usize {
+        return switch (self) {
+            .near => 1,
+            .mid => 4,
+            .far => 12,
+        };
+    }
+};
+
+pub fn treeAt(a: std.mem.Allocator, species: u8, detail: Detail) !Mesh {
     if (species >= tree_count) return error.InvalidTree;
     var out: GenMesh = .{};
     errdefer out.deinit(a);
     const skeleton = try LSystem.generate(a, species);
     defer skeleton.deinit(a);
+    const grammar = LSystem.grammars[species];
+    // Needles keep twice as many per tip as leaf cards do: a few long needles read as spikes.
+    const divisor = if (grammar.needles) @max(1, detail.leafDivisor() / 2) else detail.leafDivisor();
+    const per_tip = @max(1, grammar.leaves_per_tip / divisor);
+    // Keep the leaf area: cards per tip and tips both shrink, so each card grows. Needles grow
+    // in length, not width, so theirs is capped.
+    const thinning: f32 = @floatFromInt(detail.tipStride() * grammar.leaves_per_tip / per_tip);
+    const growth = if (detail == .near) 1 else @sqrt(thinning) * 0.85;
+    const radius = grammar.leaf_radius * (if (grammar.needles) @min(growth, 1.6) else growth);
     for (skeleton.leaves, 0..) |tip, i| {
-        const grammar = LSystem.grammars[species];
+        if (i % detail.tipStride() != 0) continue;
         if (grammar.needles) {
-            try needleSprays(a, &out, tip.position, tip.direction, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
+            try needleSprays(a, &out, tip.position, tip.direction, radius, per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)));
         } else {
-            try leafCards(a, &out, tip.position, tip.direction, grammar.leaf_radius, grammar.leaves_per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)), grammar.leaf_form);
+            try leafCards(a, &out, tip.position, tip.direction, radius, per_tip, @as(u64, species) * 0x10000 + @as(u64, @intCast(i)), grammar.leaf_form);
         }
     }
     for (out.vertices.items) |*v| v.uv = .init(-10 - @as(f32, @floatFromInt(species)), 0);
@@ -589,5 +626,24 @@ test "tree trunks reach the crown with finite connected stem geometry" {
         try std.testing.expect(highest > 0.90);
         for (m.indices) |index| try std.testing.expect(index < m.vertices.len);
         try std.testing.expect(m.indices.len % 3 == 0);
+    }
+}
+
+test "farther tree crowns are much lighter and span the same height" {
+    const a = std.testing.allocator;
+    for (0..tree_count) |species| {
+        var near = try treeAt(a, @intCast(species), .near);
+        defer near.deinit(a);
+        var mid = try treeAt(a, @intCast(species), .mid);
+        defer mid.deinit(a);
+        var far = try treeAt(a, @intCast(species), .far);
+        defer far.deinit(a);
+        try std.testing.expect(mid.indices.len * 3 < near.indices.len);
+        try std.testing.expect(far.indices.len * 20 < near.indices.len);
+        var near_top: f32 = 0;
+        for (near.vertices) |v| near_top = @max(near_top, v.position[1]);
+        var far_top: f32 = 0;
+        for (far.vertices) |v| far_top = @max(far_top, v.position[1]);
+        try std.testing.expect(far_top > near_top * 0.85 and far_top < near_top * 1.15);
     }
 }

@@ -48,6 +48,9 @@ pub const Content = struct {
     sap_body: [SapFlora.count]MeshHandle,
     sap_glow: [SapFlora.count]MeshHandle,
     tree_trunks: [Vegetation.tree_count]MeshHandle,
+    /// Lighter crowns per tree species for distance: `[species][0]` mid, `[species][1]` far
+    /// (`Vegetation.Detail`); the near crown is `flora[tree_variants[species]]`.
+    tree_crowns: [Vegetation.tree_count][2]MeshHandle,
     /// Puppet parts (pets): a unit sphere and a unit cone.
     orb: MeshHandle,
     spike: MeshHandle,
@@ -278,11 +281,19 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
         handle.* = try self.register(allocator, try Model.fromMesh(allocator, generated_mesh, .named(Vegetation.names[i], Vegetation.colors[i])));
     }
     self.content.plant = self.content.flora[0];
+    for (&self.content.tree_crowns, 0..) |*crowns, species| for (crowns, [_]Vegetation.Detail{ .mid, .far }) |*handle, detail| {
+        const variant = Vegetation.tree_variants[species];
+        handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.treeAt(allocator, @intCast(species), detail), .named(Vegetation.names[variant], Vegetation.colors[variant])));
+    };
     inline for (0..SapFlora.count) |i| {
         const species: SapFlora.Species = @enumFromInt(i);
         const parts = try SapFlora.buildUnit(allocator, species);
+        // The glow mesh is ours until `fromMesh` takes it, even if registering the body fails.
+        var glow_owned = true;
+        errdefer if (glow_owned) parts.glow.deinit(allocator);
         // The vertex colours carry the colours; the material is white so the instance tint is the only multiplier.
         self.content.sap_body[i] = try self.register(allocator, try Model.fromMesh(allocator, parts.body, .named(SapFlora.info(species).name, .{ 1, 1, 1, 1 })));
+        glow_owned = false;
         self.content.sap_glow[i] = try self.register(allocator, try Model.fromMesh(allocator, parts.glow, .named("glow", .{ 1, 1, 1, 1 })));
     }
     for (&self.content.tree_trunks, 0..) |*handle, i| handle.* = try self.register(allocator, try Model.fromMesh(allocator, try Vegetation.trunk(allocator, @intCast(i)), .named("canopy trunk", Vegetation.trunk_colors[i])));

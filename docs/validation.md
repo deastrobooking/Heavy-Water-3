@@ -2,6 +2,34 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Forest level of detail: lighter mid and far tree crowns — 2026-10-23
+
+- **Problem:** every tree crown was drawn at full detail at any distance. Crowns are 36,864–169,312 triangles each, plus 2,232–4,330 for the trunk, and they made up nearly all of the nature route's 5.74 million submitted triangles. The four-player frontier view was GPU-bound (21.8 ms at p99).
+- **Added:** `Vegetation.treeAt` builds mid and far crowns from the same skeleton. They keep every second or fourth leaf tip, with fewer and larger leaves. Needles keep twice as many per tip and are capped in length; the first version turned them into spiky stars in captures. The catalog registers both levels for each of the 8 species (16 meshes). `StreamingScene.treeDetail` picks one per tree by distance in tree heights (full within 1, mid to 2.5, far beyond), and each level draws with the full trunk.
+  - **Triangles per crown, near / mid / far:** broadleaf 36,864 / 4,608 / 576; redwood 169,312 / 21,208 / 2,904; needleleaf 53,504 / 13,376 / 2,112; pine 67,584 / 16,896 / 2,816; the others about 84,500 / 9,600 / 960.
+- **Results:**
+  - **Nature route:** submitted triangles fell from 5,737,105 to 3,449,213 (−40%) with the same 83 visible trees.
+  - **Four-player frontier, GPU p50/p95/p99** (spikier first needle version, measured before other load started): 17.1/21.7/21.8 → 16.4/17.7/17.9 ms. CPU p99 was 6.98 ms (was 6.05).
+- **Not valid:** the nature-route timings after the change. They ran while Ableton Live used about 1.4 cores and the game window was throttled (frame interval p99 about 1,043 ms, `presentation_unthrottled` failed). Terrain chunk fill also slowed fourfold, and this change does not touch it. Rerun `--nature` and `--frontier` on an idle machine.
+- **Why the nature benchmark first "timed out":** its 180 s timeout includes compiling. Each attempt was killed mid-build, so the build never got cached; `--timeout 1200` ran it.
+- **Fixed on the way:**
+  - `submittedTriangles` summed every draw slot rather than only this frame's draws.
+  - The catalog leaked a living-sap glow mesh when registering its body failed. The allocation-failure test found it once the new crowns moved a sampled failure point there.
+- **Tests:**
+  - Mid crowns have at least 3× and far crowns at least 20× fewer triangles, at the same height.
+  - Detail is chosen by distance over height: the same 200 m keeps a giant at mid detail and sends a pine to far.
+  - The scatter sort test now covers the new buckets.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 640/640 in 391 s;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, no validation messages; 6,295 simulation ticks for 300 frames, because frames were slow under the load above);
+  - captures of showcases 73 and 30 beside captures from the previous commit. Crowns keep their outline; mid crowns show slightly larger, brighter needle flecks.
+- **Not checked:**
+  - popping when a tree crosses a detail boundary in motion (there is no hysteresis);
+  - the plan's per-level budgets (near 12k, mid 3k, far 300), which are not met;
+  - trunks, which are unchanged;
+  - clean timings for the final needle setting.
+
 ## Performance: one-pass flora gather, faster collider builds — 2026-10-23
 
 - **Flora gather:** `StreamingScene` used to scan every resident chunk's scattered objects once per draw bucket: 46 scans and 46 payload locks per chunk per view. It now tags and counts in one scan and places in a second (`gatherScatter`), keeping the same instance order.

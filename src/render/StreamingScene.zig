@@ -65,6 +65,8 @@ instance_count: u32 = 1,
 relic_count: u32 = 0,
 plant_count: u32 = 0,
 flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @splat(0),
+/// Trees drawn with a lighter crown: `[0]` mid, `[1]` far, by species (`treeDetail`).
+tree_lod_counts: [2][Vegetation.tree_count]u32 = @splat(@splat(0)),
 /// Instances per living-sap species: bodies, then glows (the same plants drawn bright).
 sap_counts: [SapFlora.count]u32 = @splat(0),
 sap_glow_counts: [SapFlora.count]u32 = @splat(0),
@@ -199,6 +201,7 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.relic_count = 0;
         self.plant_count = 0;
         self.flora_counts = @splat(0);
+        self.tree_lod_counts = @splat(@splat(0));
         self.sap_counts = @splat(0);
         self.sap_glow_counts = @splat(0);
         self.boulder_counts = @splat(0);
@@ -295,22 +298,41 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         // and salvage out of the visual-only perimeter until Antarctic encounter dressing exists.
         self.relic_count = 0;
         self.flora_counts = @splat(0);
+        self.tree_lod_counts = @splat(@splat(0));
         self.sap_counts = @splat(0);
         self.sap_glow_counts = @splat(0);
         self.plant_count = 0;
         self.boulder_counts = @splat(0);
     } else {
         self.refreshBucketColors();
-        self.gatherScatter(vp, culling, removed);
+        self.gatherScatter(vp, culling, removed, .{ camera.position.x(), camera.position.y(), camera.position.z() });
     }
     self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
 
-/// Draw buckets for scattered objects, in instance order: relics, flora by variant, living-sap
+/// How far, in tree heights, a tree keeps its full crown, then its mid crown; beyond, the far one.
+const near_crown_heights: f32 = 1.0;
+const mid_crown_heights: f32 = 2.5;
+
+/// Crown detail for a tree seen from `eye`: by distance to its middle over its height, so tall
+/// trees keep detail farther out than short ones.
+pub fn treeDetail(eye: [3]f32, transform: @import("../world/Transform.zig")) Vegetation.Detail {
+    const p = transform.position;
+    const d: [3]f32 = .{ p[0] - eye[0], p[1] + transform.scale * 0.5 - eye[1], p[2] - eye[2] };
+    const reach = @sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (reach < near_crown_heights * transform.scale) return .near;
+    if (reach < mid_crown_heights * transform.scale) return .mid;
+    return .far;
+}
+
+/// Draw buckets for scattered objects, in instance order: relics, flora by variant, lighter tree
+/// crowns (mid, then far) by species, living-sap
 /// bodies then glows by species, boulders by variant. `drawFlora` and `drawSolids` read them back
 /// in this order.
 const flora_bucket: u8 = 1;
-const sap_body_bucket: u8 = flora_bucket + Vegetation.variant_count;
+const tree_mid_bucket: u8 = flora_bucket + Vegetation.variant_count;
+const tree_far_bucket: u8 = tree_mid_bucket + Vegetation.tree_count;
+const sap_body_bucket: u8 = tree_far_bucket + Vegetation.tree_count;
 const sap_glow_bucket: u8 = sap_body_bucket + SapFlora.count;
 const boulder_bucket: u8 = sap_glow_bucket + SapFlora.count;
 const bucket_count = boulder_bucket + Vegetation.boulder_count;
@@ -320,7 +342,7 @@ const no_bucket: u8 = 0xff;
 /// Sorts every visible scattered object into its draw bucket with two scans of the residents
 /// (tag and count, then place), instead of one scan per bucket. Instances keep resident-then-
 /// object order within a bucket, exactly as a scan per bucket would emit them.
-fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) void {
+fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) void {
     var sources: [Streamer.render_capacity]Source = undefined;
     var source_count: usize = 0;
     for (self.residents) |resident| {
@@ -330,18 +352,18 @@ fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *co
         sources[source_count] = .{ .key = view.key, .objects = data.objects[0..data.object_count] };
         source_count += 1;
     }
-    self.sortScatter(sources[0..source_count], vp, culling, removed);
+    self.sortScatter(sources[0..source_count], vp, culling, removed, eye);
 }
 
 /// One visible chunk's scattered objects.
 const Source = struct { key: Key, objects: []const Scatter.Object };
 
-fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) void {
+fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) void {
     var counts: [bucket_count]u32 = @splat(0);
     for (sources, 0..) |source, r| {
         const tags = &self.scatter_tags[r];
         for (source.objects, 0..) |object, o| {
-            tags[o] = self.bucketOf(source.key, object, vp, culling, removed);
+            tags[o] = self.bucketOf(source.key, object, vp, culling, removed, eye);
             if (tags[o] == no_bucket) continue;
             counts[tags[o]] += 1;
             if (tags[o] >= sap_body_bucket and tags[o] < sap_glow_bucket) counts[tags[o] + SapFlora.count] += 1;
@@ -386,7 +408,9 @@ fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, cull
     };
     self.instance_count = next;
     self.relic_count = counts[0];
-    @memcpy(&self.flora_counts, counts[flora_bucket..sap_body_bucket]);
+    @memcpy(&self.flora_counts, counts[flora_bucket..tree_mid_bucket]);
+    @memcpy(&self.tree_lod_counts[0], counts[tree_mid_bucket..tree_far_bucket]);
+    @memcpy(&self.tree_lod_counts[1], counts[tree_far_bucket..sap_body_bucket]);
     @memcpy(&self.sap_counts, counts[sap_body_bucket..sap_glow_bucket]);
     @memcpy(&self.sap_glow_counts, counts[sap_glow_bucket..boulder_bucket]);
     @memcpy(&self.boulder_counts, counts[boulder_bucket..]);
@@ -395,7 +419,7 @@ fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, cull
 }
 
 /// The draw bucket of one scattered object this frame, or `no_bucket` when it is not drawn.
-fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) u8 {
+fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) u8 {
     const bucket: u8 = switch (object.kind) {
         .relic => 0,
         .boulder => if (object.variant < Vegetation.boulder_count) boulder_bucket + object.variant else return no_bucket,
@@ -408,6 +432,11 @@ fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.
             if (Region.k2.contains(key.x, key.z) and !Cloudwater.isSheltered(object.transform.position[0], object.transform.position[2])) return no_bucket;
             // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
             if (self.flora_review) return no_bucket;
+            if (Vegetation.treeIndex(object.variant)) |species| switch (treeDetail(eye, object.transform)) {
+                .near => {},
+                .mid => break :blk tree_mid_bucket + species,
+                .far => break :blk tree_far_bucket + species,
+            };
             break :blk flora_bucket + object.variant;
         },
     };
@@ -427,6 +456,10 @@ fn refreshBucketColors(self: *Scene) void {
     const c = &self.catalog.content;
     self.bucket_colors[0] = self.baseColor(c.relic);
     for (0..Vegetation.variant_count) |v| self.bucket_colors[flora_bucket + v] = self.baseColor(c.flora[v]);
+    for (0..Vegetation.tree_count) |t| {
+        self.bucket_colors[tree_mid_bucket + t] = self.baseColor(c.tree_crowns[t][0]);
+        self.bucket_colors[tree_far_bucket + t] = self.baseColor(c.tree_crowns[t][1]);
+    }
     for (0..SapFlora.count) |s| {
         self.bucket_colors[sap_body_bucket + s] = self.baseColor(c.sap_body[s]);
         self.bucket_colors[sap_glow_bucket + s] = self.baseColor(c.sap_glow[s]);
@@ -538,6 +571,10 @@ pub fn submittedTriangles(self: *const Scene) u64 {
             indices += @as(u64, mesh.index_count) * count;
         };
     }
+    for (self.tree_lod_counts, 0..) |counts, lod| for (counts, 0..) |count, species| if (count > 0) {
+        if (self.gpuMesh(self.catalog.content.tree_crowns[species][lod])) |mesh| indices += @as(u64, mesh.index_count) * count;
+        if (self.gpuMesh(self.catalog.content.tree_trunks[species])) |mesh| indices += @as(u64, mesh.index_count) * count;
+    };
     for (self.sap_counts, self.sap_glow_counts, 0..) |body, glow, species| {
         if (body > 0) if (self.gpuMesh(self.catalog.content.sap_body[species])) |mesh| {
             indices += @as(u64, mesh.index_count) * body;
@@ -549,7 +586,7 @@ pub fn submittedTriangles(self: *const Scene) u64 {
     for (self.boulder_counts, 0..) |count, variant| if (count > 0) {
         if (self.gpuMesh(self.catalog.content.boulders[variant])) |mesh| indices += @as(u64, mesh.index_count) * count;
     };
-    for (self.draws) |draw| indices += @as(u64, draw.index_count) * draw.instances;
+    for (self.draws[0..self.draw_count]) |draw| indices += @as(u64, draw.index_count) * draw.instances;
     return indices / 3;
 }
 
@@ -565,6 +602,12 @@ pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
         if (self.gpuMesh(handle)) |mesh| mesh.draw(pass, count, next);
         next += count;
     }
+    for (self.tree_lod_counts, 0..) |counts, lod| for (counts, 0..) |count, species| {
+        if (count == 0) continue;
+        if (self.gpuMesh(self.catalog.content.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
+        if (self.gpuMesh(self.catalog.content.tree_crowns[species][lod])) |mesh| mesh.draw(pass, count, next);
+        next += count;
+    };
     for (self.sap_counts, 0..) |count, species| {
         if (count == 0) continue;
         if (self.gpuMesh(self.catalog.content.sap_body[species])) |mesh| mesh.draw(pass, count, next);
@@ -617,14 +660,16 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     const sources = [_]Source{ .{ .key = .{ .x = 0, .z = 0 }, .objects = &chunks[0] }, .{ .key = .{ .x = 1, .z = 0 }, .objects = &chunks[1] } };
     var removed: Modifications = .{};
     _ = try removed.remove(.of(sources[1].key, 2));
+    // Objects sit within 8 m of the origin; a unit-scale tree there is far from this eye.
+    const eye: [3]f32 = .{ 0, 0, 40 };
     scene.instance_count = 1;
-    scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed);
+    scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, eye);
 
     // The reference: one full scan per bucket, as the renderer used to do.
     var expected: [64][4]f32 = undefined;
     var n: usize = 0;
     for (0..bucket_count) |bucket| for (sources) |source| for (source.objects) |object| {
-        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed);
+        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed, eye);
         const glow_of_body = bucket >= sap_glow_bucket and bucket < boulder_bucket and tag == bucket - SapFlora.count;
         if (tag != bucket and !glow_of_body) continue;
         expected[n] = object.transform.toInstance();
@@ -634,7 +679,7 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     for (expected[0..n], scene.instances[1 .. 1 + n]) |want, got| try std.testing.expectEqual(want, got.translation_scale);
     // Two relics per chunk; the removed object and the unknown variant are left out.
     try std.testing.expectEqual(@as(u32, 4), scene.relic_count);
-    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed));
+    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed, eye));
     var sap_bodies: u32 = 0;
     var sap_glows: u32 = 0;
     for (scene.sap_counts, scene.sap_glow_counts) |body, glow| {
@@ -642,11 +687,23 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
         sap_glows += glow;
     }
     try std.testing.expect(sap_bodies > 0 and sap_glows == sap_bodies);
-    try std.testing.expectEqual(glow_alpha, scene.instances[1 + scene.relic_count + sumOf(&scene.flora_counts) + sap_bodies].tint[3]);
+    const lighter = sumOf(&scene.tree_lod_counts[0]) + sumOf(&scene.tree_lod_counts[1]);
+    try std.testing.expect(lighter > 0);
+    try std.testing.expectEqual(glow_alpha, scene.instances[1 + scene.relic_count + sumOf(&scene.flora_counts) + lighter + sap_bodies].tint[3]);
 }
 
 fn sumOf(counts: []const u32) u32 {
     var total: u32 = 0;
     for (counts) |count| total += count;
     return total;
+}
+
+test "tree crowns lighten with distance measured in tree heights" {
+    const tall: @import("../world/Transform.zig") = .{ .position = .{ 0, 0, 0 }, .scale = 120 };
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 80 }, tall));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 200 }, tall));
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall));
+    // The same 200 m keeps a giant at mid detail but sends a small pine far.
+    const pine: @import("../world/Transform.zig") = .{ .position = .{ 0, 0, 0 }, .scale = 12 };
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 6, 200 }, pine));
 }
