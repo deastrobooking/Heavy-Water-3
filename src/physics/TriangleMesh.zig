@@ -82,18 +82,42 @@ fn split(tris: []Triangle, nodes: []Node, index: usize, first: u32, count: u32, 
     for (1..3) |k| if (hi[k] - lo[k] > hi[axis] - lo[axis]) {
         axis = k;
     };
-    const slice = tris[first..][0..count];
-    std.mem.sort(Triangle, slice, axis, struct {
-        fn less(a: usize, x: Triangle, y: Triangle) bool {
-            return centroid(x)[a] < centroid(y)[a];
-        }
-    }.less);
+    const half = count / 2;
+    selectSmallest(tris[first..][0..count], axis, half);
     const left: u32 = @intCast(used.*);
     used.* += 2;
     nodes[index] = .{ .lo = lo, .hi = hi, .first = left, .count = 0 };
-    const half = count / 2;
     split(tris, nodes, left, first, half, used);
     split(tris, nodes, left + 1, first + half, count - half, used);
+}
+
+/// Reorders `tris` so its first `k` have the smallest centroids on `axis` (quickselect). The
+/// median split needs only that; a full sort at every level made a 5,000-triangle block chunk
+/// take 15 ms to build. The three-way partition keeps a grid's many equal centroids linear.
+fn selectSmallest(tris: []Triangle, axis: usize, k: usize) void {
+    var lo: usize = 0;
+    var hi: usize = tris.len;
+    while (hi - lo > 1) {
+        const a = centroid(tris[lo])[axis];
+        const b = centroid(tris[lo + (hi - lo) / 2])[axis];
+        const c = centroid(tris[hi - 1])[axis];
+        const pivot = @max(@min(a, b), @min(@max(a, b), c));
+        var less = lo;
+        var i = lo;
+        var more = hi;
+        while (i < more) {
+            const v = centroid(tris[i])[axis];
+            if (v < pivot) {
+                std.mem.swap(Triangle, &tris[less], &tris[i]);
+                less += 1;
+                i += 1;
+            } else if (v > pivot) {
+                more -= 1;
+                std.mem.swap(Triangle, &tris[i], &tris[more]);
+            } else i += 1;
+        }
+        if (k < less) hi = less else if (k >= more) lo = more else return;
+    }
 }
 
 fn rayBox(origin: Vec3, inverse: Vec3, lo: Vec3, hi: Vec3, max: f32) bool {
@@ -265,6 +289,23 @@ test "BVH ray casts match brute force and boxes face outward" {
     for (box.triangles) |t| try std.testing.expect(R.dot(t.normal, R.sub(centroid(t), .{ 1, 2, 3 })) > 0);
     const closest = closestPoint(box.triangles[0], .{ -10, 2, 3 });
     try std.testing.expectApproxEqAbs(@as(f32, 0), closest[0], 1e-5);
+}
+
+test "the median split keeps the smaller half first, even across many equal centroids" {
+    // Block-like geometry: rows of unit quads with identical centroids on two axes.
+    var tris: [96]Triangle = undefined;
+    var prng = std.Random.DefaultPrng.init(3);
+    const random = prng.random();
+    for (&tris) |*t| {
+        const x: f32 = @floatFromInt(random.intRangeAtMost(u8, 0, 5));
+        t.* = .{ .a = .{ x, 0, 0 }, .b = .{ x + 1, 0, 0 }, .c = .{ x, 1, 0 }, .normal = .{ 0, 0, 1 } };
+    }
+    for ([_]usize{ 1, 13, 48, 95 }) |k| {
+        selectSmallest(&tris, 0, k);
+        var left_max: f32 = -std.math.inf(f32);
+        for (tris[0..k]) |t| left_max = @max(left_max, centroid(t)[0]);
+        for (tris[k..]) |t| try std.testing.expect(centroid(t)[0] >= left_max);
+    }
 }
 
 fn buildProbe(allocator: std.mem.Allocator) !void {

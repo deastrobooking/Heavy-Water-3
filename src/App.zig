@@ -1434,6 +1434,8 @@ pub fn update(self: *App, core: *mach.Core) void {
         // Menus never advance gameplay. The title can still render the city, but combat, pickups
         // and the day cycle wait until a player enters the world.
         if (!paused and !title) {
+            self.sandbox.impact.shake_scale = @as(f32, @floatFromInt(self.menu.settings.screen_shake)) / 100;
+            self.sandbox.impact.show_numbers = self.menu.settings.damage_numbers;
             const warmup: u64 = @import("engine/Flythrough.zig").frontier_warmup_frames;
             const measuring = options.benchmark_frontier and self.rendered_frames_seen >= warmup and self.rendered_frames_seen < warmup + options.benchmark_frames;
             if (measuring) {
@@ -1443,6 +1445,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             } else {
                 self.sandbox.step(&self.engine.camera, if (title) .{} else self.engine.input, if (title) .{} else self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
             }
+            self.sendRumble();
         }
         // A structure the team just saved gets its shareable data file.
         if (self.sandbox.outpost.export_index) |index| {
@@ -1469,6 +1472,17 @@ pub fn update(self: *App, core: *mach.Core) void {
     if (self.sandbox.exported) |index| {
         self.sandbox.exported = null;
         self.exportPrefab(index);
+    }
+}
+
+/// Sends each player's queued buzz to every controller that player holds.
+fn sendRumble(self: *App) void {
+    for (0..4) |p| {
+        const pulse = self.sandbox.impact.takePulse(p);
+        if (pulse.strength <= 0 or !self.menu.settings.rumble) continue;
+        for (self.menu.controller_players, 0..) |owner, c| {
+            if (owner == p and self.pad_connected[c]) Gamepads.rumble(c, pulse.strength, pulse.seconds);
+        }
     }
 }
 
@@ -2614,6 +2628,36 @@ fn Frontier_board(sb: *Sandbox, camera: *@import("world/Camera.zig")) void {
     const yaw = std.math.atan2(plaza[0] - car.body.pos.x, plaza[2] - car.body.pos.z);
     car.body.rot = @import("character/math.zig").Quat.fromAxisAngle(@import("character/math.zig").Vec3.unit_y, yaw);
     @import("game/Frontier.zig").board(sb, 0, camera);
+}
+
+/// Moves a view's camera by its player's shake offset (render only; the simulation's camera
+/// and aim are untouched).
+fn shakeView(camera: *@import("world/Camera.zig"), offset: [3]f32) void {
+    if (offset[0] == 0 and offset[1] == 0 and offset[2] == 0) return;
+    camera.position = mach.math.vec3(camera.position.x() + offset[0], camera.position.y() + offset[1], camera.position.z() + offset[2]);
+}
+
+/// Floating damage numbers over each view, each projected through that view's own camera. White
+/// for a hit, gold and larger for the killing blow; they rise and fade.
+fn drawDamageNumbers(self: *App, renderer: *Renderer) void {
+    const impact = &self.sandbox.impact;
+    if (!impact.show_numbers or impact.number_count == 0) return;
+    const ui = &renderer.ui;
+    for (renderer.views[0..renderer.view_count], 0..) |view, v| {
+        const r = Renderer.viewRect(v, renderer.view_count);
+        const rect: Screens.Rect = .{ .x = r.x * ui.width, .y = r.y * ui.height, .w = r.w * ui.width, .h = r.h * ui.height };
+        for (impact.numbers[0..impact.number_count]) |n| {
+            const placed = @import("game/Impact.zig").State.place(n);
+            const p = project(view.camera, rect, placed.at) orelse continue;
+            const scale: f32 = if (n.killed) 2.6 else 2;
+            const color: [4]f32 = if (n.killed) .{ 1, 0.8, 0.25, placed.alpha } else .{ 1, 0.97, 0.88, placed.alpha };
+            var buffer: [16]u8 = undefined;
+            const label = std.fmt.bufPrint(&buffer, "{d:.0}", .{@max(1, @round(n.amount))}) catch continue;
+            // A dark outline keeps the number readable against sky, snow and saber glow.
+            for ([_][2]f32{ .{ -2, 0 }, .{ 2, 0 }, .{ 0, -2 }, .{ 0, 2 } }) |o| ui.centered(p[0] + o[0], p[1] + o[1], label, scale, .{ 0.05, 0.04, 0.08, placed.alpha * 0.85 });
+            ui.centered(p[0], p[1], label, scale, color);
+        }
+    }
 }
 
 /// Screen position (canvas units within `view`) of a world point, or null behind the camera.
@@ -4472,11 +4516,13 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     const sandbox = &self.sandbox;
     renderer.views[0].crosshair = options.showcase != 62 and options.showcase != 63 and options.showcase != 66 and options.showcase != 67 and options.showcase != 78 and options.showcase != 89 and options.showcase != 94 and options.showcase != 97 and options.showcase != 98 and options.showcase != 103 and sandbox.seated == null and !self.uiActive() and (self.captured or sandbox.player.mode == .walk or sandbox.player.mode == .fly);
     renderer.views[0].hide_owner = if (options.showcase == 66 or options.showcase == 103 or options.showcase == 94 or options.showcase == 97 or options.showcase == 98 or (options.showcase == 67 or options.showcase == 76) or !sandbox.bodyShown()) 1 else 0;
+    shakeView(&renderer.views[0].camera, sandbox.impact.offset(0));
     renderer.view_count = 1;
     // City showcases use P1's view only, even when guests stand in the shot.
     if (options.showcase == 0 or options.showcase >= 18) for (&sandbox.guests, 0..) |*g, i| if (g.active) {
         const view = &renderer.views[renderer.view_count];
         view.* = .{ .camera = g.camera, .hide_owner = if (g.view == .first) @intCast(i + 2) else 0, .crosshair = true, .accent = Profile.accent_colors[g.profile.accent] };
+        shakeView(&view.camera, sandbox.impact.offset(i + 1));
         // The GUI draws the guest's vitals and stall panel; this is its aimed prompt.
         if (g.target == .stall) {
             view.lines[1].set("{s}'S STALL  X TRADE", .{Screens.keeperName(sandbox, g.target.stall)});
@@ -5279,6 +5325,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
             @import("game/Bindings.zig").keyName(self.menu.settings.bindings.key(.special_3), &special_keys[2]),
         },
     });
+    if (!self.uiActive()) self.drawDamageNumbers(renderer);
     self.hit_len = ui.hit_len;
     @memcpy(self.hits[0..ui.hit_len], ui.hits[0..ui.hit_len]);
     self.scrollGui(ui);

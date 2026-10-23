@@ -20,6 +20,7 @@ pub const Sample = extern struct {
 /// `held` is the D-pad as held right now (up, down, left, right), for menu repeat.
 pub const Command = struct { input: Input = .{}, connected: bool = false, join: bool = false, view: bool = false, interact: bool = false, respawn: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, fire: bool = false, alt: bool = false, held: [4]bool = @splat(false) };
 extern fn hw_gamepads(out: [*]Sample) void;
+extern fn hw_rumble(slot: c_int, strength: f32, seconds: f32) void;
 previous: [4]u32 = @splat(0),
 button_edges: [4]u32 = @splat(0),
 commands: [4]Command = @splat(.{}),
@@ -29,6 +30,10 @@ pub fn poll(self: *Gamepads) void {
     var samples: [4]Sample = @splat(.{});
     if (@import("builtin").os.tag == .macos) hw_gamepads(&samples);
     self.sample(samples);
+}
+/// Buzzes one controller (0 to 1 strength); pads without haptics ignore it.
+pub fn rumble(controller: usize, strength: f32, seconds: f32) void {
+    if (@import("builtin").os.tag == .macos and controller < 4) hw_rumble(@intCast(controller), strength, seconds);
 }
 fn stick(x: f32, y: f32, deadzone: f32) [2]f32 {
     const length = @sqrt(x * x + y * y);

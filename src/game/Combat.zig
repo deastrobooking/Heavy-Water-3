@@ -129,7 +129,14 @@ pub const Melee = struct {
     queued: bool = false,
     /// Seconds the guard has been up, while the alternate is held.
     guard: ?f32 = null,
+    /// Seconds the current swing holds still after its blade bit (see `hitstopFor`).
+    hitstop: f32 = 0,
 };
+
+/// How long a cut holds where it lands: 40 ms for a light cut up to 90 ms for a heavy one.
+pub fn hitstopFor(damage: f32) f32 {
+    return std.math.clamp(0.04 + damage / 600, 0.04, 0.09);
+}
 
 pub const Martial = struct {
     timer: f32 = 0,
@@ -550,6 +557,12 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
 
     if (mel.swing == null) return;
     const sw = &mel.swing.?;
+    // Hitstop: the blade holds for a beat where it bit, so a hit lands with weight. Only this
+    // player's swing pauses; the world and the other players carry on.
+    if (mel.hitstop > 0) {
+        mel.hitstop = @max(0, mel.hitstop - dt);
+        return;
+    }
     const before = sw.t;
     sw.t = @min(1, sw.t + dt / sw.duration);
     const fwd = flat(aim);
@@ -562,6 +575,7 @@ fn stepSaber(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, pres
         const tip = R.add(b.base, R.scale(b.dir, blade_length));
         if (enemies.strikeBlade(b.base, b.dir, blade_length, blade_radius, sw.damage, knock, sw.stun, &sw.units_hit, &sw.nests_hit, hive, hn) > 0) {
             push(out, n, .{ .cut = tip });
+            mel.hitstop = hitstopFor(sw.damage);
             self.effect(.{ .kind = .spark, .position = tip, .life = 0.2, .size = 0.9, .color = .{ 1, 0.85, 0.4 } });
         }
         if (enemies.cutBolts(b.base, b.dir, blade_length, blade_radius + 0.15) > 0) push(out, n, .{ .cut = tip });

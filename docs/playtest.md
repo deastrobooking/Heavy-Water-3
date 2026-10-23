@@ -27,11 +27,11 @@ Walk out of the city to the nearest Hive nest (the quest log or the world map sh
 
 | # | Do | Expect | Pass | Fail | Note |
 | --- | --- | --- | --- | --- | --- |
-| 2.1 | Key 5, saber combo (click, click, click) | Cuts connect; you can tell when you hit | ☐ | ☐ | Rate impact 1–5: |
+| 2.1 | Key 5, saber combo (click, click, click) | Cuts connect with a short pause, damage numbers and a little shake; the pad rumbles | ☐ | ☐ | Rate impact 1–5: |
 | 2.2 | Right click to guard as a bolt arrives, then just in time to parry | Guard blocks most; a parry sends it back | ☐ | ☐ | |
 | 2.3 | Tab to the blaster; hold click to charge, then release | Charged shot clearly stronger | ☐ | ☐ | |
 | 2.4 | Z, C, H specials | Grenade, turret and shield all useful; recharge times feel right | ☐ | ☐ | |
-| 2.5 | Fight a trooper up close | You can see its melee coming in time to dodge or parry | ☐ | ☐ | |
+| 2.5 | Fight a trooper up close; parry when the orange gem appears over it | You can see its melee coming in time; a parry staggers it | ☐ | ☐ | |
 | 2.6 | Destroy the nest | Satisfying payoff: sound, burst, loot message with scrap and parts | ☐ | ☐ | |
 | 2.7 | Get knocked out once on purpose | You recover sensibly; it doesn't feel punishing or confusing | ☐ | ☐ | |
 | 2.8 | Overall | Is combat fun? What is missing most? | ☐ | ☐ | |

@@ -35,6 +35,8 @@ pub const Stats = struct {
     melee_damage: f32 = 0,
     guarded_melee_damage: f32 = 0,
     melee_cooldown: f32 = 1.15,
+    /// Seconds a melee strike is telegraphed before it lands (longer than the parry window).
+    melee_windup: f32 = 0.4,
     grenade_damage: f32 = 24,
     grenade_radius: f32 = 4.2,
     grenade_fuse: f32 = 1.25,
@@ -59,11 +61,11 @@ pub const tuning = .{
         .{ .health = 60, .speed = 11, .accel = 14, .radius = 0.7, .standoff = 13, .sight = 48, .cooldown = 1.3, .burst = 1, .damage = 5, .bolt_speed = 34 },
         .{ .health = 260, .speed = 6, .accel = 6, .radius = 1.6, .standoff = 22, .sight = 60, .cooldown = 2.8, .burst = 3, .damage = 8, .bolt_speed = 28 },
         .{ .health = 120, .speed = 4.5, .accel = 12, .radius = 0.7, .standoff = 16, .sight = 45, .cooldown = 1.8, .burst = 2, .damage = 6, .bolt_speed = 32, .melee_damage = 18, .guarded_melee_damage = 9, .grenade_enabled = true },
-        .{ .health = 72, .speed = 8.2, .accel = 19, .radius = 0.62, .standoff = 10, .sight = 42, .cooldown = 1.5, .burst = 1, .damage = 3, .bolt_speed = 37, .melee_damage = 12, .guarded_melee_damage = 6, .melee_cooldown = 0.82 },
-        .{ .health = 250, .speed = 3.2, .accel = 7, .radius = 1.0, .standoff = 15, .sight = 42, .cooldown = 2.4, .burst = 1, .damage = 6, .bolt_speed = 28, .melee_damage = 26, .guarded_melee_damage = 13, .melee_cooldown = 1.65 },
+        .{ .health = 72, .speed = 8.2, .accel = 19, .radius = 0.62, .standoff = 10, .sight = 42, .cooldown = 1.5, .burst = 1, .damage = 3, .bolt_speed = 37, .melee_damage = 12, .guarded_melee_damage = 6, .melee_cooldown = 0.82, .melee_windup = 0.34 },
+        .{ .health = 250, .speed = 3.2, .accel = 7, .radius = 1.0, .standoff = 15, .sight = 42, .cooldown = 2.4, .burst = 1, .damage = 6, .bolt_speed = 28, .melee_damage = 26, .guarded_melee_damage = 13, .melee_cooldown = 1.65, .melee_windup = 0.55 },
         .{ .health = 34, .speed = 4.1, .accel = 13, .radius = 0.42, .standoff = 8, .sight = 30, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 5, .guarded_melee_damage = 2, .melee_cooldown = 1.8, .height = 0.9 },
         .{ .health = 58, .speed = 9.5, .accel = 22, .radius = 0.55, .standoff = 9, .sight = 38, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 11, .guarded_melee_damage = 5, .melee_cooldown = 1.05, .height = 1.4 },
-        .{ .health = 1850, .speed = 4.8, .accel = 8, .radius = 3.2, .standoff = 3, .sight = 54, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 42, .guarded_melee_damage = 28, .melee_cooldown = 2.2, .height = 8.5 },
+        .{ .health = 1850, .speed = 4.8, .accel = 8, .radius = 3.2, .standoff = 3, .sight = 54, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 42, .guarded_melee_damage = 28, .melee_cooldown = 2.2, .melee_windup = 0.75, .height = 8.5 },
         .{ .health = 45, .speed = 2.8, .accel = 8, .radius = 0.7, .standoff = 8, .sight = 30, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 2, .guarded_melee_damage = 1, .melee_cooldown = 2.4, .height = 1.5 },
         .{ .health = 92, .speed = 6.8, .accel = 18, .radius = 0.72, .standoff = 9, .sight = 38, .cooldown = 100, .burst = 0, .damage = 0, .bolt_speed = 0, .melee_damage = 15, .guarded_melee_damage = 7, .melee_cooldown = 1.1, .height = 1.7 },
     },
@@ -150,6 +152,8 @@ pub const Unit = struct {
     state_timer: f32 = 0,
     melee_cooldown: f32 = 0,
     melee_anim: f32 = 0,
+    /// Seconds until a committed melee strike lands; the body glows meanwhile (`telegraph`).
+    windup: f32 = 0,
     grenade_cooldown: f32 = 2,
     throw_anim: f32 = 0,
     cover_goal: ?V = null,
@@ -170,6 +174,32 @@ pub const Unit = struct {
 /// `cave`: a nest in a cave's heart chamber (smaller; fields troopers only).
 pub const Nest = struct { position: V, health: f32 = nest_health, alive: bool = true, spawn_timer: f32 = tuning.first_spawn_delay, flash: f32 = 0, cave: bool = false, seeded: bool = false, arena: bool = false, rare_spawn_rolled: bool = false };
 pub const Bolt = struct { position: V, velocity: V, damage: f32, life: f32 };
+pub const Hit = struct { position: V, damage: f32, killed: bool, nest: bool = false };
+pub const max_hits = 24;
+/// A hit this heavy makes the struck unit flinch for `flinch_time` (no thinking, no shooting).
+pub const flinch_damage: f32 = 10;
+pub const flinch_time: f32 = 0.06;
+/// Units this heavy shrug off flinches, so their wind-ups must be parried or dodged.
+pub const flinch_mass: f32 = 3;
+/// Seconds of warning before a blaster burst's first bolt.
+pub const burst_windup: f32 = 0.3;
+/// Seconds an attacker reels after a parried melee strike.
+pub const parry_stagger: f32 = 0.9;
+
+/// How close (0 to 1) a unit is to attacking: rises through a melee wind-up or a burst's warning,
+/// for the renderer's glow.
+pub fn telegraph(u: Unit) f32 {
+    const s = stats(u.kind);
+    if (u.windup > 0) return 1 - u.windup / s.melee_windup;
+    if (u.burst_left > 0 and u.burst_left == s.burst and u.burst_timer > 0) return 1 - u.burst_timer / burst_windup;
+    return 0;
+}
+
+fn recordHit(self: *Enemies, hit: Hit) void {
+    if (self.hit_count == max_hits) return;
+    self.hits[self.hit_count] = hit;
+    self.hit_count += 1;
+}
 pub const Grenade = struct { position: V, velocity: V = @splat(0), fuse: f32 = 1.25, damage: f32 = 24, radius: f32 = 4.2 };
 
 /// A player the Hive can see and shoot. A raised guard (saber or shield) facing the bolt takes a
@@ -181,6 +211,8 @@ pub const Event = union(enum) {
     player_hit: struct { player: u8, damage: f32, from: V },
     unit_down: struct { kind: Kind, nest: u8, position: V },
     nest_down: struct { nest: u8, position: V },
+    /// A parried melee strike: no damage, and the attacker staggers.
+    melee_parried: struct { player: u8, position: V },
     /// A parried bolt flies back (the caller turns it into a player shot).
     deflected: struct { player: u8, position: V, velocity: V },
     grenade_thrown: V,
@@ -188,6 +220,10 @@ pub const Event = union(enum) {
 };
 
 seed: u64 = 0,
+/// Damage taken since the feedback layer last read it (`Impact.consume`): where, how much, and
+/// whether it was the killing blow. Fixed size; hits beyond it in one step are not recorded.
+hits: [max_hits]Hit = undefined,
+hit_count: u8 = 0,
 nests: [max_nests]Nest = undefined,
 nest_count: usize = 0,
 units: [max_units]?Unit = @splat(null),
@@ -450,6 +486,9 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
             // Reeling: carried by the knockback, slowing, no thought or fire.
             u.stun = @max(0, u.stun - dt);
             u.burst_left = 0;
+            // A flinch only pauses a wind-up, so a steady combo cannot lock a fighter out of
+            // swinging; a real stun (a finisher, a grenade, a parry) breaks it.
+            if (u.stun > flinch_time) u.windup = 0;
             u.position = R.add(u.position, R.scale(u.velocity, dt));
             u.velocity = R.scale(u.velocity, 1 / (1 + 3 * dt));
             if (isGround(u.kind)) {
@@ -519,16 +558,32 @@ pub fn step(self: *Enemies, physics: *const Physics, players: []const Target, dt
                     u.tactic = .melee;
                     u.cover_goal = null;
                     goal = target.chest;
-                    if (u.melee_cooldown == 0) {
-                        const toward = R.normalize(R.sub(target.chest, u.center()));
-                        const faces_attacker = R.dot(target.facing, R.scale(toward, -1)) > 0.2;
-                        const damage = if (target.guard != .none and faces_attacker) s.guarded_melee_damage else s.melee_damage;
-                        push(out, &n, .{ .player_hit = .{ .player = u.target, .damage = damage, .from = u.center() } });
-                        u.melee_cooldown = s.melee_cooldown;
-                        u.melee_anim = 0.62;
+                    if (u.windup > 0) {
+                        u.windup = @max(0, u.windup - dt);
+                        if (u.windup == 0) {
+                            const toward = R.normalize(R.sub(target.chest, u.center()));
+                            const faces_attacker = R.dot(target.facing, R.scale(toward, -1)) > 0.2;
+                            u.melee_cooldown = s.melee_cooldown;
+                            u.melee_anim = 0.62;
+                            if (target.guard == .parry and faces_attacker) {
+                                u.stun = parry_stagger;
+                                u.velocity = R.scale(toward, -4);
+                                push(out, &n, .{ .melee_parried = .{ .player = u.target, .position = u.center() } });
+                            } else {
+                                const damage = if (target.guard != .none and faces_attacker) s.guarded_melee_damage else s.melee_damage;
+                                push(out, &n, .{ .player_hit = .{ .player = u.target, .damage = damage, .from = u.center() } });
+                            }
+                        }
+                    } else if (u.melee_cooldown == 0) {
+                        u.windup = s.melee_windup;
                     }
                 } else {
                     u.tactic = .advance;
+                    // Stepping out of reach makes a wind-up whiff.
+                    if (u.windup > 0) {
+                        u.windup = 0;
+                        u.melee_cooldown = s.melee_cooldown;
+                    }
                     // Wounded troopers take a moment to find a real obstruction, then hold
                     // that position while they recover their ranged attack.
                     if (u.health < s.health * 0.65 and (u.cover_goal == null or u.cover_timer == 0)) {
@@ -726,7 +781,7 @@ fn shoot(self: *Enemies, u: *Unit, s: Stats, players: []const Target, seen: ?u8,
     if (u.state == .hunt and seen != null and seen.? == u.target and seen_distance < s.sight) {
         if (u.burst_left == 0 and u.cooldown == 0) {
             u.burst_left = s.burst;
-            u.burst_timer = 0;
+            u.burst_timer = burst_windup;
             u.cooldown = s.cooldown;
         }
     }
@@ -939,6 +994,8 @@ fn damageUnit(self: *Enemies, i: usize, damage: f32, out: []Event, n: *usize) vo
     const u = &(self.units[i] orelse return);
     u.health -= damage;
     u.flash = 0.15;
+    if (damage >= flinch_damage and mass(u.kind) < flinch_mass) u.stun = @max(u.stun, flinch_time);
+    self.recordHit(.{ .position = u.center(), .damage = damage, .killed = u.health <= 0 });
     // Being shot reveals the shooter.
     if (u.state == .patrol) {
         u.state = .hunt;
@@ -956,6 +1013,7 @@ fn damageNest(self: *Enemies, i: u8, damage: f32, out: []Event, n: *usize) void 
     if (!nest.alive) return;
     nest.health -= damage;
     nest.flash = 0.15;
+    self.recordHit(.{ .position = R.add(nest.position, .{ 0, 3, 0 }), .damage = damage, .killed = nest.health <= 0, .nest = true });
     if (nest.health <= 0) {
         nest.alive = false;
         if (n.* < out.len) out[n.*] = .{ .nest_down = .{ .nest = i, .position = nest.position } };
@@ -1164,16 +1222,98 @@ test "wounded troopers select blocked ground as cover and rush players who close
     const cover = trooper.cover_goal.?;
     try std.testing.expect(!sees(&physics, R.add(cover, .{ 0, 1.2, 0 }), player.chest));
 
-    // A trooper inside the saber's reach chooses melee and deals a single committed strike.
+    // A trooper inside the saber's reach chooses melee and, after its wind-up, deals a single
+    // committed strike.
     e.units[0] = .{ .kind = .trooper, .nest = 0, .position = .{ 0, 0, 0 }, .health = 120, .orbit = 0, .state = .hunt, .target = 0, .melee_cooldown = 0 };
     const close: Target = .{ .chest = .{ 1.5, 1.4, 0 }, .velocity = @splat(0) };
-    const count = e.step(&physics, &.{close}, 1.0 / 60.0, &events);
-    try std.testing.expectEqual(Tactic.melee, e.units[0].?.tactic);
     var hits: usize = 0;
-    for (events[0..@min(count, events.len)]) |event| {
-        if (event == .player_hit) hits += 1;
+    for (0..50) |_| {
+        const count = e.step(&physics, &.{close}, 1.0 / 60.0, &events);
+        try std.testing.expectEqual(Tactic.melee, e.units[0].?.tactic);
+        for (events[0..@min(count, events.len)]) |event| {
+            if (event == .player_hit) hits += 1;
+        }
     }
     try std.testing.expectEqual(@as(usize, 1), hits);
+}
+
+/// Steps a lone unit beside `target` until its first melee result; returns the seconds it took
+/// and whether it was a hit or a parry.
+fn firstStrike(kind: Kind, target: Target) !struct { seconds: f32, hit: bool, warned: bool } {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{ .seed = 9, .rng = .init(9) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    const s = stats(kind);
+    e.units[0] = .{ .kind = kind, .nest = 0, .position = .{ 0, 0, 0 }, .health = s.health, .orbit = 0, .state = .hunt, .target = 0, .melee_cooldown = 0, .cooldown = 100 };
+    var events: [16]Event = undefined;
+    var warned = false;
+    for (0..120) |frame| {
+        const count = e.step(&physics, &.{target}, 1.0 / 60.0, &events);
+        for (events[0..@min(count, events.len)]) |event| switch (event) {
+            .player_hit => return .{ .seconds = @as(f32, @floatFromInt(frame + 1)) / 60, .hit = true, .warned = warned },
+            .melee_parried => return .{ .seconds = @as(f32, @floatFromInt(frame + 1)) / 60, .hit = false, .warned = warned },
+            else => {},
+        };
+        if (e.units[0]) |u| warned = warned or telegraph(u) > 0;
+    }
+    return error.NoStrike;
+}
+
+test "no melee strike lands without a wind-up, the parry window fits inside it, and a parry staggers" {
+    const parry_window = @import("Combat.zig").parry_window;
+    const chest: V = .{ 1.5, 1.4, 0 };
+    for (0..tuning.units.len) |i| {
+        const kind: Kind = @enumFromInt(i);
+        const s = stats(kind);
+        if (s.melee_damage == 0 or !isGround(kind)) continue;
+        // A player has the whole parry window, plus a frame, to react to the glow.
+        try std.testing.expect(s.melee_windup > parry_window + 1.0 / 60.0);
+        const at: V = .{ chest[0] + s.radius * 0.5, chest[1], chest[2] };
+        const struck = try firstStrike(kind, .{ .chest = at, .velocity = @splat(0) });
+        try std.testing.expect(struck.hit and struck.warned);
+        try std.testing.expect(struck.seconds >= s.melee_windup - 1e-3);
+        // Facing the attacker with a fresh guard turns the strike away.
+        const parried = try firstStrike(kind, .{ .chest = at, .velocity = @splat(0), .guard = .parry, .facing = .{ -1, 0, 0 } });
+        try std.testing.expect(!parried.hit);
+    }
+}
+
+test "a blaster burst warns before its first bolt, and only light units flinch" {
+    var physics = testPhysics();
+    defer physics.deinit();
+    var e: Enemies = .{ .seed = 3, .rng = .init(3) };
+    e.nests[0] = .{ .position = .{ 0, 0, 0 } };
+    e.nest_count = 1;
+    e.units[0] = .{ .kind = .drone, .nest = 0, .position = .{ 0, 10, 0 }, .health = 60, .orbit = 0, .state = .hunt, .target = 0, .cooldown = 0 };
+    const far: Target = .{ .chest = .{ 0, 1.4, 20 }, .velocity = @splat(0) };
+    var events: [16]Event = undefined;
+    var first_shot: ?usize = null;
+    var warned = false;
+    for (0..60) |frame| {
+        const count = e.step(&physics, &.{far}, 1.0 / 60.0, &events);
+        for (events[0..@min(count, events.len)]) |event| if (event == .shot and first_shot == null) {
+            first_shot = frame;
+        };
+        if (first_shot == null) if (e.units[0]) |u| {
+            warned = warned or telegraph(u) > 0;
+        };
+    }
+    try std.testing.expect(warned);
+    try std.testing.expect(@as(f32, @floatFromInt(first_shot.?)) / 60 >= burst_windup - 1.0 / 60.0);
+
+    var n: usize = 0;
+    e.units[1] = .{ .kind = .bulwark, .nest = 0, .position = .{ 5, 0, 0 }, .health = 250, .orbit = 0 };
+    e.units[2] = .{ .kind = .skirmisher, .nest = 0, .position = .{ -5, 0, 0 }, .health = 72, .orbit = 0 };
+    e.units[2].?.windup = 0.2;
+    e.damageUnit(1, 20, &events, &n);
+    e.damageUnit(2, 20, &events, &n);
+    try std.testing.expectEqual(@as(f32, 0), e.units[1].?.stun);
+    try std.testing.expect(e.units[2].?.stun > 0);
+    // The flinch pauses the skirmisher's wind-up rather than cancelling it.
+    _ = e.step(&physics, &.{far}, 1.0 / 60.0, &events);
+    try std.testing.expectEqual(@as(f32, 0.2), e.units[2].?.windup);
 }
 
 test "trooper grenades have a readable fuse and a blast that moving players can dodge" {

@@ -447,6 +447,8 @@ block_world: BlockWorld = undefined,
 platform: Platformer.State = .{},
 /// Crops growing on tilled soil (shared, saved).
 farm: Farm.State = .{},
+/// Combat feel: floating damage numbers and each player's camera shake (`Impact.zig`).
+impact: @import("Impact.zig").State = .{},
 /// Player-placed living-sap plants (shared world content; placement costs remain per-kit).
 decor: Decor.State = .{},
 /// Structure designs (the starters and the team's captures) and every structure built from them.
@@ -1332,6 +1334,13 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (timing) |profile| profile.metrics.record(.city_life, stage_timer.lap() * 1000);
     if (timing != null) stage_timer.reset();
     Frontier.step(self, camera, input, actions, frozen, dt, timing);
+    // Every hit the Hive took this step becomes feedback: a number, and shake for players near it.
+    var chests: @import("Impact.zig").Chests = @splat(null);
+    for (0..max_players) |p| if (self.present(p)) {
+        chests[p] = Physics.Rotation.add(self.feetOf(p), .{ 0, 1.2, 0 });
+    };
+    @import("Impact.zig").consume(&self.impact, &self.enemies, chests);
+    self.impact.step(dt);
     if (self.block_world.pending()) self.syncBlocks() catch |err| self.say("blocks not rebuilt: {s}", .{@errorName(err)});
     self.syncFoundryGate();
     Platformer.step(self, camera, dt) catch |err| self.say("blocks failed: {s}", .{@errorName(err)});

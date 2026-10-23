@@ -1160,6 +1160,7 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
         .player_hit => |hit| {
             // A hit on a placed structure (a target past the players) goes to the structure.
             if (Defense.structureOf(sb, hit.player, Sandbox.max_players)) |s| return Defense.hurt(sb, s, hit.damage);
+            sb.impact.hurt(hit.player, hit.damage);
             var events: [4]Combat.Event = undefined;
             var n: usize = 0;
             sb.cue(.hurt, if (hit.player == 0) null else R.add(sb.guests[hit.player - 1].player.feet, .{ 0, 1, 0 }));
@@ -1239,6 +1240,12 @@ fn hive(sb: *Sandbox, e: Enemies.Event, camera: *Camera) void {
                     sb.cue(.vault, FoundryCase.gatePosition(&sb.catalog.district));
                 }
             }
+        },
+        .melee_parried => |d| {
+            sb.cuePitch(.slash, d.position, 1.3);
+            sb.impact.shake(d.player, 0.18);
+            sb.impact.buzz(d.player, 0.6, 0.1);
+            if (d.player == 0) sb.say("parried!", .{});
         },
         .deflected => |d| {
             sb.combat.deflect(d.player, d.position, d.velocity);
@@ -1855,6 +1862,18 @@ fn yawQuat(yaw: f32) [4]f32 {
     return quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw));
 }
 
+/// A spinning orange gem over a unit about to attack, growing as its wind-up runs out; it reads
+/// at any distance and against any body material.
+fn warningMarker(marker: @import("../asset/Catalog.zig").MeshHandle, at: V, warn: f32, t: f32) World.Prop {
+    return .{ .mesh = marker, .transform = .{ .position = at }, .tint = Material.emissive(.{ 1, 0.5, 0.08, 1 }, 1), .size = @splat(0.4 + 0.45 * warn), .rotation = yawQuat(t * 7) };
+}
+
+/// A unit about to attack heats toward a flickering orange as its wind-up (`warn`, 0 to 1) runs out.
+fn warningTint(warn: f32, t: f32) [4]f32 {
+    const pulse = 0.8 + 0.2 * @sin(t * 34);
+    return .{ 1 + 0.9 * warn * pulse, 0.95 + 0.15 * warn, 0.85 - 0.55 * warn, 1 };
+}
+
 pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     var n = start;
     const c = &sb.catalog.content;
@@ -1962,7 +1981,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         if (u.kind == .scalari_scout or u.kind == .scalari_miner) continue;
         if (u.kind == .scalari_titan) {
             if (!room(out, n, 40)) break;
-            n += scalariTitan(out[n..], c.block, c.orb, c.spike, c.gem, u.position, u.yaw, t, u.flash, sb.creator.enemy_design);
+            n += scalariTitan(out[n..], c.block, c.orb, c.spike, c.gem, u.position, u.yaw, t, u.flash, Enemies.telegraph(u), sb.creator.enemy_design);
             continue;
         }
         const d = R.sub(u.position, sb.player.feet);
@@ -1988,7 +2007,8 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             else => trooper_profile,
         };
         const role_design = EnemyDesign.encounter(sb.seed, u.generation, null);
-        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else if (Enemies.isScalari(u.kind)) EnemyDesign.colors[@intFromEnum(role_design.palette)].accent else .{ 1, 1, 1, 1 };
+        const warn = Enemies.telegraph(u);
+        const tint: [4]f32 = if (u.flash > 0) .{ 1.6, 1.2, 1.2, 1 } else if (warn > 0) warningTint(warn, t) else if (Enemies.isScalari(u.kind)) EnemyDesign.colors[@intFromEnum(role_design.palette)].accent else .{ 1, 1, 1, 1 };
         out[n] = .{ .mesh = .none, .transform = .{ .position = u.position }, .tint = tint, .character = .{
             .profile = profile,
             .pose = .{ .feet = u.position, .yaw = u.yaw, .walk_phase = u.walk_phase, .walk_amount = u.walk_amount, .motion = if (u.walk_amount > 0.2) .run else .idle, .time = t, .action = action, .action_t = action_t },
@@ -1996,6 +2016,10 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         } };
         trooper_id += 1;
         n += 1;
+        if (warn > 0 and room(out, n, 1)) {
+            out[n] = warningMarker(c.gem, R.add(u.position, .{ 0, Enemies.stats(u.kind).height + 0.7, 0 }), warn, t);
+            n += 1;
+        }
     };
     // Prospector droids use a compact, readable drill silhouette rather than the ranger rig.
     for (sb.enemies.units) |slot| if (slot) |u| if (u.kind == .scalari_miner and room(out, n, 6)) {
@@ -2024,11 +2048,17 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
         if (!room(out, n, 2)) break;
         const shell = if (u.kind == .drone) c.drone else c.sentinel;
         const glow = if (u.kind == .drone) c.drone_glow else c.sentinel_glow;
-        const hot: f32 = if (u.flash > 0) 1 else if (u.state == .hunt) 0.9 else 0.45;
+        const warn = Enemies.telegraph(u);
+        const hot: f32 = if (u.flash > 0 or warn > 0) 1 else if (u.state == .hunt) 0.9 else 0.45;
         const bank = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, u.yaw).mul(m.Quat.fromAxisAngle(m.Vec3.unit_z, std.math.clamp(-u.velocity[0] * 0.02, -0.3, 0.3))));
         out[n] = .{ .mesh = shell, .transform = .{ .position = u.position }, .tint = if (u.flash > 0) .{ 1.6, 1.4, 1.4, 1 } else .{ 1, 1, 1, 1 }, .rotation = bank };
-        out[n + 1] = .{ .mesh = glow, .transform = .{ .position = u.position }, .tint = Material.emissive(.{ 1, 1, 1, 1 }, hot), .rotation = bank };
+        // A burst's warning turns the glow from white to orange.
+        out[n + 1] = .{ .mesh = glow, .transform = .{ .position = u.position }, .tint = Material.emissive(.{ 1, 1 - 0.45 * warn, 1 - 0.85 * warn, 1 }, hot), .rotation = bank };
         n += 2;
+        if (warn > 0 and room(out, n, 1)) {
+            out[n] = warningMarker(c.gem, R.add(u.position, .{ 0, if (u.kind == .sentinel) @as(f32, 2.6) else 1.4, 0 }), warn, t);
+            n += 1;
+        }
     };
     for (sb.enemies.bolts) |slot| if (slot) |b| if (room(out, n, 1)) {
         out[n] = .{ .mesh = c.block, .transform = .{ .position = b.position }, .tint = Material.emissive(.{ 1, 0.15, 0.1, 1 }, 1), .size = .{ 0.07, 0.07, 0.6 }, .rotation = facing(b.velocity) };
@@ -3279,7 +3309,7 @@ const scalari_hybrid_profile: @import("Profile.zig") = .{ .outfit = 6, .clothing
 
 /// Transformer-scale Scalari siege frame assembled from independent armor modules. Its palette
 /// and part selections are shared with the Character Designer's Hive Forge panel.
-fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, orb: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, at: V, yaw: f32, t: f32, flash: f32, design: EnemyDesign.Design) usize {
+fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHandle, orb: @import("../asset/Catalog.zig").MeshHandle, spike: @import("../asset/Catalog.zig").MeshHandle, gem_mesh: @import("../asset/Catalog.zig").MeshHandle, at: V, yaw: f32, t: f32, flash: f32, warn: f32, design: EnemyDesign.Design) usize {
     const palette = EnemyDesign.colors[@intFromEnum(design.palette)];
     const frame = EnemyDesign.module(.frame, design.frame);
     const shoulders = EnemyDesign.module(.shoulders, design.shoulders);
@@ -3288,7 +3318,7 @@ fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHa
     const back = EnemyDesign.module(.back_unit, design.back_unit);
     const head = EnemyDesign.module(.head, design.head);
     const weapon = EnemyDesign.module(.weapon, design.weapon);
-    const hot = 0.65 + 0.35 * @sin(t * 3.2);
+    const hot = 0.65 + 0.35 * @sin(t * 3.2) + warn;
     const armor = if (flash > 0) [4]f32{ 1.7, 1.3, 1.3, 1 } else palette.armor;
     const accent_color = if (flash > 0) [4]f32{ 1.7, 1.3, 1.3, 1 } else palette.accent;
     const orientation = yawQuat(yaw);
@@ -3299,7 +3329,9 @@ fn scalariTitan(out: []World.Prop, block: @import("../asset/Catalog.zig").MeshHa
     // Heavy armor plates around the shared powered core.
     out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 3.35, 0.76 }) }, .tint = accent_color, .size = .{ 2.1 * scale, 1.05, 0.18 }, .rotation = orientation };
     n += 1;
-    out[n] = .{ .mesh = gem_mesh, .transform = .{ .position = R.add(at, .{ 0, 3.45, 0.91 }) }, .tint = Material.emissive(palette.glow, hot), .size = .{ 0.58, 0.7, 0.16 }, .rotation = orientation };
+    // The core swells and turns orange through a wind-up, so the slam reads from across the arena.
+    const core = R.add(R.scale(palette.glow[0..3].*, 1 - warn), R.scale(.{ 1, 0.55, 0.12 }, warn));
+    out[n] = .{ .mesh = gem_mesh, .transform = .{ .position = R.add(at, .{ 0, 3.45, 0.91 }) }, .tint = Material.emissive(.{ core[0], core[1], core[2], 1 }, hot), .size = R.scale(.{ 0.58, 0.7, 0.16 }, 1 + 0.8 * warn), .rotation = orientation };
     n += 1;
     out[n] = .{ .mesh = block, .transform = .{ .position = R.add(at, .{ 0, 1.35, 0 }) }, .tint = armor, .size = .{ 1.65 * scale, 0.95, 1.25 }, .rotation = orientation };
     n += 1;

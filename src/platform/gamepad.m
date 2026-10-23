@@ -3,6 +3,7 @@
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
 #import <GameController/GameController.h>
+#import <CoreHaptics/CoreHaptics.h>
 #import <IOKit/hid/IOHIDManager.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -18,6 +19,8 @@ static void copy_name(char *out, size_t capacity, NSString *name) {
 
 static IOHIDManagerRef hid_manager;
 static IOHIDDeviceRef hid_slots[4];
+// GameController pads by output slot, kept across polls so slots stay stable (and rumble finds them).
+static GCController *pad_slots[4];
 
 static CFDictionaryRef usage_match(uint32_t usage) {
     uint32_t page_value = kHIDPage_GenericDesktop;
@@ -146,7 +149,7 @@ static void read_hid(IOHIDDeviceRef device, HWPad *out) {
 
 void hw_gamepads(HWPad *out) {
     @autoreleasepool {
-        static GCController *slots[4];
+        GCController **slots = pad_slots;
         NSArray<GCController *> *live = [GCController controllers];
         memset(out, 0, sizeof(HWPad) * 4);
         open_hid_manager();
@@ -293,5 +296,38 @@ static int open_glb_on_main(char *buffer, size_t capacity, size_t *length, char 
         memcpy(buffer, data.bytes, data.length);
         *length = data.length;
         return 1;
+    }
+}
+
+// Rumble: one haptic engine per GameController slot, made on first use and remade when the slot's
+// pad changes. Raw HID pads have no haptics and are skipped, as are failures (rumble is a nicety).
+static CHHapticEngine *haptic_engines[4] API_AVAILABLE(macos(11.0));
+static GCController *haptic_owners[4];
+
+void hw_rumble(int slot, float strength, float seconds) {
+    if (slot < 0 || slot > 3 || strength <= 0 || seconds <= 0) return;
+    if (@available(macOS 11.0, *)) {
+        @autoreleasepool {
+            GCController *device = pad_slots[slot];
+            if (!device || !device.haptics) return;
+            if (haptic_owners[slot] != device || !haptic_engines[slot]) {
+                if (haptic_engines[slot]) { [haptic_engines[slot] stopWithCompletionHandler:nil]; [haptic_engines[slot] release]; }
+                haptic_engines[slot] = [[device.haptics createEngineWithLocality:GCHapticsLocalityDefault] retain];
+                haptic_owners[slot] = device;
+                if (!haptic_engines[slot]) return;
+                haptic_engines[slot].autoShutdownEnabled = YES;
+            }
+            CHHapticEngine *engine = haptic_engines[slot];
+            NSError *error = nil;
+            // Starting a running engine is cheap, and restarts one the system stopped.
+            if (![engine startAndReturnError:&error]) return;
+            CHHapticEventParameter *intensity = [[[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity value:fminf(strength, 1)] autorelease];
+            CHHapticEventParameter *sharpness = [[[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness value:0.35f] autorelease];
+            CHHapticEvent *event = [[[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticContinuous parameters:@[intensity, sharpness] relativeTime:0 duration:seconds] autorelease];
+            CHHapticPattern *pattern = [[[CHHapticPattern alloc] initWithEvents:@[event] parameters:@[] error:&error] autorelease];
+            if (!pattern) return;
+            id<CHHapticPatternPlayer> player = [engine createPlayerWithPattern:pattern error:&error];
+            if (player) [player startAtTime:CHHapticTimeImmediate error:&error];
+        }
     }
 }

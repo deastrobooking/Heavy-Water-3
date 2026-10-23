@@ -69,6 +69,9 @@ flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @spla
 sap_counts: [SapFlora.count]u32 = @splat(0),
 sap_glow_counts: [SapFlora.count]u32 = @splat(0),
 boulder_counts: [@import("../procedural/Vegetation.zig").boulder_count]u32 = @splat(0),
+/// Each resident's scattered objects tagged with their draw bucket this frame (`gatherScatter`).
+scatter_tags: [Streamer.render_capacity][Scatter.capacity]u8 = undefined,
+bucket_colors: [bucket_count][4]f32 = undefined,
 resident_count: usize = 0,
 peak_resident_count: usize = 0,
 active_missing: usize = 0,
@@ -297,90 +300,138 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.plant_count = 0;
         self.boulder_counts = @splat(0);
     } else {
-        self.relic_count = self.gather(.relic, vp, culling, removed, null);
-        self.plant_count = 0;
-        for (&self.flora_counts, 0..) |*count, variant| {
-            count.* = self.gather(.vegetation, vp, culling, removed, @intCast(variant));
-            self.plant_count += count.*;
-        }
-        // The living-sap flora: every plant's body, then the same plants' glow drawn bright.
-        for (&self.sap_counts, 0..) |*count, species| {
-            count.* = self.gatherSap(vp, culling, removed, @intCast(species), false);
-            self.plant_count += count.*;
-        }
-        for (&self.sap_glow_counts, 0..) |*count, species| {
-            count.* = self.gatherSap(vp, culling, removed, @intCast(species), true);
-            self.plant_count += count.*;
-        }
-        for (&self.boulder_counts, 0..) |*count, variant| count.* = self.gather(.boulder, vp, culling, removed, @intCast(variant));
+        self.refreshBucketColors();
+        self.gatherScatter(vp, culling, removed);
     }
     self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
 
-fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, variant: ?u8) u32 {
-    const first = self.instance_count;
-    const handle = switch (kind) {
-        .relic => self.catalog.content.relic,
-        .vegetation => self.catalog.content.flora[variant.?],
-        .boulder => self.catalog.content.boulders[variant.?],
-    };
-    const color = self.baseColor(handle);
+/// Draw buckets for scattered objects, in instance order: relics, flora by variant, living-sap
+/// bodies then glows by species, boulders by variant. `drawFlora` and `drawSolids` read them back
+/// in this order.
+const flora_bucket: u8 = 1;
+const sap_body_bucket: u8 = flora_bucket + Vegetation.variant_count;
+const sap_glow_bucket: u8 = sap_body_bucket + SapFlora.count;
+const boulder_bucket: u8 = sap_glow_bucket + SapFlora.count;
+const bucket_count = boulder_bucket + Vegetation.boulder_count;
+/// A scattered object left out this frame (filtered, culled or removed).
+const no_bucket: u8 = 0xff;
+
+/// Sorts every visible scattered object into its draw bucket with two scans of the residents
+/// (tag and count, then place), instead of one scan per bucket. Instances keep resident-then-
+/// object order within a bucket, exactly as a scan per bucket would emit them.
+fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) void {
+    var sources: [Streamer.render_capacity]Source = undefined;
+    var source_count: usize = 0;
     for (self.residents) |resident| {
         if (!resident.visible) continue;
         const view = resident.view.?;
         const data = self.stream.payload(view) orelse continue; // stale during a terrain rebuild
-        for (data.objects[0..data.object_count]) |object| {
-            if (object.kind != kind) continue;
-            // K2 stays bare except for the authored sheltered Cloudwater pockets.
-            if (kind == .vegetation and Region.k2.contains(view.key.x, view.key.z) and !Cloudwater.isSheltered(object.transform.position[0], object.transform.position[2])) continue;
-            // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
-            if (self.flora_review and kind == .vegetation) continue;
-            if (variant) |v| if (object.variant != v) continue;
-            // Saved removals apply to regenerated content by stable (chunk, local_id) identity.
-            if (removed.len > 0 and removed.contains(.of(view.key, object.local_id))) continue;
-            const t = object.transform.toInstance();
-            if (culling and !Visibility.sphereVisible(vp, .{ t[0], t[1] + t[3], t[2] }, 1.3 * t[3])) continue;
-            self.instances[self.instance_count] = .{ .translation_scale = t, .tint = multiply(object.tint, color) };
-            self.instance_count += 1;
-        }
+        sources[source_count] = .{ .key = view.key, .objects = data.objects[0..data.object_count] };
+        source_count += 1;
     }
-    if (kind == .vegetation and self.flora_review) if (variant) |v| {
-        if (self.flora_review_variant) |review_variant| if (v != review_variant) return self.instance_count - first;
-        if (self.instance_count < self.instances.len) {
-            const position = floraReviewPosition(self.flora_review_seed, self.flora_review_origin, v);
-            const scale: f32 = if (Vegetation.isRedwood(v)) 150 else if (Vegetation.isTree(v)) 132 else if (v == 7) 2.5 else 2.2;
-            self.instances[self.instance_count] = .{ .translation_scale = .{ position[0], position[1], position[2], scale }, .tint = multiply(.{ 1, 1, 1, 1 }, color) };
-            self.instance_count += 1;
-        }
-    };
-    return self.instance_count - first;
+    self.sortScatter(sources[0..source_count], vp, culling, removed);
 }
 
-/// Instances of one living-sap species, as plain bodies or as glow. Alpha 2.5 tags the glow
-/// pass so the shared shader can reserve it for night; the ordinary alpha lane stays unchanged.
-fn gatherSap(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, species: u8, glow: bool) u32 {
-    const first = self.instance_count;
-    const handle = if (glow) self.catalog.content.sap_glow[species] else self.catalog.content.sap_body[species];
-    const color = self.baseColor(handle);
-    const variant = SapFlora.variantOf(@enumFromInt(species));
-    if (self.flora_review) return 0;
-    for (self.residents) |resident| {
-        if (!resident.visible) continue;
-        const view = resident.view.?;
-        const data = self.stream.payload(view) orelse continue; // stale during a terrain rebuild
-        for (data.objects[0..data.object_count]) |object| {
-            if (object.kind != .vegetation or object.variant != variant) continue;
-            if (removed.len > 0 and removed.contains(.of(view.key, object.local_id))) continue;
-            const t = object.transform.toInstance();
-            if (culling and !Visibility.sphereVisible(vp, .{ t[0], t[1] + t[3] * 0.5, t[2] }, 1.3 * t[3])) continue;
-            if (self.instance_count >= self.instances.len) return self.instance_count - first;
-            var tint = multiply(object.tint, color);
-            if (glow) tint[3] = glow_alpha;
-            self.instances[self.instance_count] = .{ .translation_scale = t, .tint = tint };
-            self.instance_count += 1;
+/// One visible chunk's scattered objects.
+const Source = struct { key: Key, objects: []const Scatter.Object };
+
+fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) void {
+    var counts: [bucket_count]u32 = @splat(0);
+    for (sources, 0..) |source, r| {
+        const tags = &self.scatter_tags[r];
+        for (source.objects, 0..) |object, o| {
+            tags[o] = self.bucketOf(source.key, object, vp, culling, removed);
+            if (tags[o] == no_bucket) continue;
+            counts[tags[o]] += 1;
+            if (tags[o] >= sap_body_bucket and tags[o] < sap_glow_bucket) counts[tags[o] + SapFlora.count] += 1;
         }
     }
-    return self.instance_count - first;
+    // The flora review appends one fixed specimen to each reviewed variant.
+    if (self.flora_review) for (0..Vegetation.variant_count) |v| {
+        if (self.flora_review_variant) |only| if (v != only) continue;
+        counts[flora_bucket + v] += 1;
+    };
+    var cursors: [bucket_count]u32 = undefined;
+    var next = self.instance_count;
+    for (counts, &cursors) |count, *cursor| {
+        cursor.* = next;
+        next += count;
+    }
+    std.debug.assert(next <= self.instances.len);
+    for (sources, 0..) |source, r| {
+        const tags = &self.scatter_tags[r];
+        for (source.objects, 0..) |object, o| {
+            const bucket = tags[o];
+            if (bucket == no_bucket) continue;
+            const t = object.transform.toInstance();
+            self.instances[cursors[bucket]] = .{ .translation_scale = t, .tint = multiply(object.tint, self.bucket_colors[bucket]) };
+            cursors[bucket] += 1;
+            if (bucket >= sap_body_bucket and bucket < sap_glow_bucket) {
+                // The same plant again, drawn bright; alpha tags the glow for the night pass.
+                const glow = bucket + SapFlora.count;
+                var tint = multiply(object.tint, self.bucket_colors[glow]);
+                tint[3] = glow_alpha;
+                self.instances[cursors[glow]] = .{ .translation_scale = t, .tint = tint };
+                cursors[glow] += 1;
+            }
+        }
+    }
+    if (self.flora_review) for (0..Vegetation.variant_count) |v| {
+        if (self.flora_review_variant) |only| if (v != only) continue;
+        const position = floraReviewPosition(self.flora_review_seed, self.flora_review_origin, @intCast(v));
+        const scale: f32 = if (Vegetation.isRedwood(@intCast(v))) 150 else if (Vegetation.isTree(@intCast(v))) 132 else if (v == 7) 2.5 else 2.2;
+        self.instances[cursors[flora_bucket + v]] = .{ .translation_scale = .{ position[0], position[1], position[2], scale }, .tint = self.bucket_colors[flora_bucket + v] };
+        cursors[flora_bucket + v] += 1;
+    };
+    self.instance_count = next;
+    self.relic_count = counts[0];
+    @memcpy(&self.flora_counts, counts[flora_bucket..sap_body_bucket]);
+    @memcpy(&self.sap_counts, counts[sap_body_bucket..sap_glow_bucket]);
+    @memcpy(&self.sap_glow_counts, counts[sap_glow_bucket..boulder_bucket]);
+    @memcpy(&self.boulder_counts, counts[boulder_bucket..]);
+    self.plant_count = 0;
+    for (counts[flora_bucket..boulder_bucket]) |count| self.plant_count += count;
+}
+
+/// The draw bucket of one scattered object this frame, or `no_bucket` when it is not drawn.
+fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications) u8 {
+    const bucket: u8 = switch (object.kind) {
+        .relic => 0,
+        .boulder => if (object.variant < Vegetation.boulder_count) boulder_bucket + object.variant else return no_bucket,
+        .vegetation => if (SapFlora.speciesOf(object.variant)) |species| blk: {
+            if (self.flora_review) return no_bucket;
+            break :blk sap_body_bucket + @as(u8, @intCast(@intFromEnum(species)));
+        } else blk: {
+            if (object.variant >= Vegetation.variant_count) return no_bucket;
+            // K2 stays bare except for the authored sheltered Cloudwater pockets.
+            if (Region.k2.contains(key.x, key.z) and !Cloudwater.isSheltered(object.transform.position[0], object.transform.position[2])) return no_bucket;
+            // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
+            if (self.flora_review) return no_bucket;
+            break :blk flora_bucket + object.variant;
+        },
+    };
+    // Saved removals apply to regenerated content by stable (chunk, local_id) identity.
+    if (removed.len > 0 and removed.contains(.of(key, object.local_id))) return no_bucket;
+    if (culling) {
+        const t = object.transform.toInstance();
+        // Living-sap plants are culled about their middle, everything else about its top.
+        const lift: f32 = if (bucket >= sap_body_bucket and bucket < sap_glow_bucket) 0.5 else 1;
+        if (!Visibility.sphereVisible(vp, .{ t[0], t[1] + t[3] * lift, t[2] }, 1.3 * t[3])) return no_bucket;
+    }
+    return bucket;
+}
+
+/// Base colours of each bucket's mesh, refreshed each frame (catalog meshes can be replaced).
+fn refreshBucketColors(self: *Scene) void {
+    const c = &self.catalog.content;
+    self.bucket_colors[0] = self.baseColor(c.relic);
+    for (0..Vegetation.variant_count) |v| self.bucket_colors[flora_bucket + v] = self.baseColor(c.flora[v]);
+    for (0..SapFlora.count) |s| {
+        self.bucket_colors[sap_body_bucket + s] = self.baseColor(c.sap_body[s]);
+        self.bucket_colors[sap_glow_bucket + s] = self.baseColor(c.sap_glow[s]);
+    }
+    for (0..Vegetation.boulder_count) |b| self.bucket_colors[boulder_bucket + b] = self.baseColor(c.boulders[b]);
 }
 
 /// Instance tint alpha of a glowing plant part: above 1 is emissive, up to 2 fully so.
@@ -547,4 +598,55 @@ pub fn destroy(self: *Scene) void {
     self.stream.destroy();
     if (self.initialized) for (self.residents) |resident| resident.mesh.deinit();
     if (self.owns_meshes) for (self.meshes) |mesh| if (mesh) |m| m.deinit();
+}
+
+test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap glows and honours removals" {
+    const allocator = std.testing.allocator;
+    const scene = try allocator.create(Scene);
+    defer allocator.destroy(scene);
+    scene.* = .{ .stream = undefined, .catalog = undefined };
+    for (&scene.bucket_colors, 0..) |*color, b| color.* = .{ 1, 1, 1, @as(f32, @floatFromInt(b)) };
+    const sap = SapFlora.variantOf(@enumFromInt(1));
+    // A deliberately interleaved mix across two chunks, including an unknown variant.
+    const kinds = [_]Scatter.Kind{ .vegetation, .boulder, .relic, .vegetation, .vegetation, .boulder, .vegetation, .relic };
+    const variants = [_]u8{ 4, 2, 0, sap, 0, 0, 120, 0 };
+    var chunks: [2][kinds.len]Scatter.Object = undefined;
+    for (&chunks, 0..) |*chunk, c| for (chunk, 0..) |*object, i| {
+        object.* = .{ .local_id = @intCast(i), .kind = kinds[(i + c) % kinds.len], .variant = variants[(i + 3 * c) % variants.len], .transform = .{ .position = .{ @floatFromInt(c), @floatFromInt(i), 0 } }, .tint = .{ 1, 1, 1, 1 } };
+    };
+    const sources = [_]Source{ .{ .key = .{ .x = 0, .z = 0 }, .objects = &chunks[0] }, .{ .key = .{ .x = 1, .z = 0 }, .objects = &chunks[1] } };
+    var removed: Modifications = .{};
+    _ = try removed.remove(.of(sources[1].key, 2));
+    scene.instance_count = 1;
+    scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed);
+
+    // The reference: one full scan per bucket, as the renderer used to do.
+    var expected: [64][4]f32 = undefined;
+    var n: usize = 0;
+    for (0..bucket_count) |bucket| for (sources) |source| for (source.objects) |object| {
+        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed);
+        const glow_of_body = bucket >= sap_glow_bucket and bucket < boulder_bucket and tag == bucket - SapFlora.count;
+        if (tag != bucket and !glow_of_body) continue;
+        expected[n] = object.transform.toInstance();
+        n += 1;
+    };
+    try std.testing.expectEqual(@as(u32, @intCast(1 + n)), scene.instance_count);
+    for (expected[0..n], scene.instances[1 .. 1 + n]) |want, got| try std.testing.expectEqual(want, got.translation_scale);
+    // Two relics per chunk; the removed object and the unknown variant are left out.
+    try std.testing.expectEqual(@as(u32, 4), scene.relic_count);
+    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed));
+    var sap_bodies: u32 = 0;
+    var sap_glows: u32 = 0;
+    for (scene.sap_counts, scene.sap_glow_counts) |body, glow| {
+        sap_bodies += body;
+        sap_glows += glow;
+    }
+    try std.testing.expect(sap_bodies > 0 and sap_glows == sap_bodies);
+    try std.testing.expectEqual(glow_alpha, scene.instances[1 + scene.relic_count + sumOf(&scene.flora_counts) + sap_bodies].tint[3]);
+}
+
+fn sumOf(counts: []const u32) u32 {
+    var total: u32 = 0;
+    for (counts) |count| total += count;
+    return total;
 }

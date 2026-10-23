@@ -24,6 +24,7 @@ test {
     _ = @import("mod/Mod.zig");
     _ = @import("game/CharacterContent.zig");
     _ = @import("render/Field.zig");
+    _ = @import("render/StreamingScene.zig");
     _ = @import("engine/Memory.zig");
     _ = @import("procedural/Bridges.zig");
     _ = @import("procedural/Skyline.zig");
@@ -108,6 +109,7 @@ test {
     _ = @import("build/Structures.zig");
     _ = @import("game/Outpost.zig");
     _ = @import("game/Defense.zig");
+    _ = @import("game/Impact.zig");
     _ = @import("game/Profile.zig");
     _ = @import("game/Avatar.zig");
     _ = @import("game/Player.zig");

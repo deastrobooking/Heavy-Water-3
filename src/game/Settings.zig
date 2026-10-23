@@ -7,7 +7,7 @@ const Bindings = @import("Bindings.zig");
 const PadBindings = @import("../engine/PadBindings.zig");
 
 pub const path = "saves/settings.json";
-pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, metrics, max_progression_test };
+pub const Field = enum { master_volume, effects_volume, ambience_volume, interface_volume, sensitivity, invert_y, fov, ui_scale, third_person, screen_shake, damage_numbers, rumble, metrics, max_progression_test };
 pub const field_count = enum_compat.fields(Field).len;
 
 /// Volumes in percent: everything, then the effects, ambience and interface buses.
@@ -24,6 +24,12 @@ fov: u8 = 60,
 ui_scale: f32 = 1,
 /// Start in third person.
 third_person: bool = false,
+/// Camera shake strength in percent (0 turns it off).
+screen_shake: u8 = 100,
+/// Floating damage numbers over struck enemies.
+damage_numbers: bool = true,
+/// Controller rumble on hits, kills and parries.
+rumble: bool = true,
 /// Performance overlay (F1).
 metrics: bool = false,
 /// Temporary maximum-progression test session. Changes are never written to campaign or ranger saves.
@@ -45,6 +51,9 @@ pub fn adjust(self: *Settings, field: Field, delta: i32) void {
         .fov => self.fov = @intCast(std.math.clamp(@as(i32, self.fov) + 5 * delta, 50, 100)),
         .ui_scale => self.ui_scale = std.math.clamp(self.ui_scale + 0.125 * d, 0.75, 1.5),
         .third_person => self.third_person = !self.third_person,
+        .screen_shake => self.screen_shake = volumeStep(self.screen_shake, delta),
+        .damage_numbers => self.damage_numbers = !self.damage_numbers,
+        .rumble => self.rumble = !self.rumble,
         .metrics => self.metrics = !self.metrics,
         .max_progression_test => self.max_progression_test = !self.max_progression_test,
     }
@@ -65,6 +74,9 @@ pub fn label(field: Field) []const u8 {
         .fov => "FIELD OF VIEW",
         .ui_scale => "INTERFACE SIZE",
         .third_person => "START IN THIRD PERSON",
+        .screen_shake => "SCREEN SHAKE",
+        .damage_numbers => "DAMAGE NUMBERS",
+        .rumble => "CONTROLLER RUMBLE",
         .metrics => "PERFORMANCE OVERLAY",
         .max_progression_test => "MAX PROGRESSION TEST MODE",
     };
@@ -81,6 +93,9 @@ pub fn value(self: Settings, field: Field, buffer: []u8) []const u8 {
         .fov => std.fmt.bufPrint(buffer, "{d} DEG", .{self.fov}) catch buffer,
         .ui_scale => std.fmt.bufPrint(buffer, "{d:.0}%", .{self.ui_scale * 100}) catch buffer,
         .third_person => if (self.third_person) "ON" else "OFF",
+        .screen_shake => std.fmt.bufPrint(buffer, "{d}%", .{self.screen_shake}) catch buffer,
+        .damage_numbers => if (self.damage_numbers) "ON" else "OFF",
+        .rumble => if (self.rumble) "ON" else "OFF",
         .metrics => if (self.metrics) "ON" else "OFF",
         .max_progression_test => if (self.max_progression_test) "ON / NO SAVE" else "OFF",
     };
@@ -102,6 +117,9 @@ const Raw = struct {
     fov: i64 = 60,
     ui_scale: f64 = 1,
     third_person: bool = false,
+    screen_shake: i64 = 100,
+    damage_numbers: bool = true,
+    rumble: bool = true,
     metrics: bool = false,
     max_progression_test: bool = false,
     bindings: []const Bindings.Entry = &.{},
@@ -124,6 +142,9 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
         .fov = @intCast(std.math.clamp(r.fov, 50, 100)),
         .ui_scale = if (std.math.isFinite(r.ui_scale)) @floatCast(std.math.clamp(r.ui_scale, 0.75, 1.5)) else defaults.ui_scale,
         .third_person = r.third_person,
+        .screen_shake = @intCast(std.math.clamp(r.screen_shake, 0, 100)),
+        .damage_numbers = r.damage_numbers,
+        .rumble = r.rumble,
         .metrics = r.metrics,
         .max_progression_test = r.max_progression_test,
         .bindings = Bindings.fromEntries(r.bindings),
@@ -134,7 +155,7 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) error{InvalidSetti
 /// The settings file's JSON (bindings by action and key name).
 pub fn toJson(self: Settings, allocator: std.mem.Allocator) ![]u8 {
     var entries: [Bindings.count]Bindings.Entry = undefined;
-    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .metrics = self.metrics, .max_progression_test = self.max_progression_test, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
+    const doc: Raw = .{ .master_volume = self.master_volume, .effects_volume = self.effects_volume, .ambience_volume = self.ambience_volume, .interface_volume = self.interface_volume, .sensitivity = self.sensitivity, .invert_y = self.invert_y, .fov = self.fov, .ui_scale = self.ui_scale, .third_person = self.third_person, .screen_shake = self.screen_shake, .damage_numbers = self.damage_numbers, .rumble = self.rumble, .metrics = self.metrics, .max_progression_test = self.max_progression_test, .bindings = self.bindings.toEntries(&entries), .pad_mapping = self.pad_mapping };
     return std.json.Stringify.valueAlloc(allocator, doc, .{ .whitespace = .indent_2 });
 }
 
@@ -164,6 +185,9 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     try std.testing.expectEqual(@as(u8, 50), s.master_volume);
     for (0..20) |_| s.adjust(.effects_volume, 1);
     try std.testing.expectEqual(@as(u8, 100), s.effects_volume);
+    for (0..4) |_| s.adjust(.screen_shake, -1);
+    s.adjust(.damage_numbers, 1);
+    s.adjust(.rumble, 1);
     _ = try s.bindings.bind(.stomp, .k);
     s.pad_mapping.buttons[@intFromEnum(PadBindings.Action.fire)] = 5;
     s.pad_mapping.axes = .{ 2, 3, 0, 1 };
@@ -176,6 +200,7 @@ test "settings stay in range and round-trip, and damaged files fall back" {
     // One wild value clamps; the other settings survive.
     const wild = try parse(std.testing.allocator, "{\"fov\":400,\"invert_y\":true}");
     try std.testing.expect(wild.fov == 100 and wild.invert_y);
+    try std.testing.expectEqual(@as(u8, 0), (try parse(std.testing.allocator, "{\"screen_shake\":-5}")).screen_shake);
     const bad_pad = try parse(std.testing.allocator, "{\"pad_mapping\":{\"deadzone\":99}}");
     try std.testing.expectEqual(PadBindings.Mapping{}, bad_pad.pad_mapping);
     try std.testing.expectError(error.InvalidSettings, parse(std.testing.allocator, "{\"fov\":"));

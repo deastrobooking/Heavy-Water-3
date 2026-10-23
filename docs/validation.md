@@ -2,6 +2,52 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Performance: one-pass flora gather, faster collider builds — 2026-10-23
+
+- **Flora gather:** `StreamingScene` used to scan every resident chunk's scattered objects once per draw bucket: 46 scans and 46 payload locks per chunk per view. It now tags and counts in one scan and places in a second (`gatherScatter`), keeping the same instance order.
+  - **Result:** no measurable change. Submitted triangles (5,737,105) and visible counts are identical, and a showcase 62 capture is byte-identical to one from the previous commit.
+  - **CPU p50/p99, before → after:** `--nature` 2.75/4.10 → 2.77/5.28 ms; four-player `--frontier` 5.59/6.40 → 5.51/6.05 ms. Both are within run-to-run noise.
+  - **The real limit:** the four-player frontier view is GPU-bound, at 16.9 → 17.1 ms p50 and 21.9 → 21.8 ms p99 GPU time.
+  - **Test:** the sort matches a scan per bucket, duplicates sap glows and honours removals. It fails when a bucket is misfiled.
+- **Block edits:** a single edit cost 15.6 ms on the main thread. Timing each stage showed meshing at 0.2 ms per pass and the physics collider build (`TriangleMesh.build`) at 14.7 ms, because it fully sorted the triangles at every tree level. It now selects the median with a three-way quickselect.
+  - **Result:** one edit takes 2.27 ms (was 15.6); 3,584 blocks build in 3.35 ms (was 23.5). Every other collider build (city, caves, bridges) uses the same code.
+  - **Test:** the split keeps the smaller half first across many equal centroids, and fails when the partition's swap is removed. The existing ray-versus-brute-force test still passes.
+  - A first guess (caching section lookups in the mesher) changed nothing and was taken back out.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 638/638 in 338 s including compilation;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, no validation messages);
+  - before-and-after `--nature` and `--frontier` benchmarks.
+- **Pre-existing failure:** the frontier benchmark's `active_ring_covered` check fails both before and after (18 underfilled frames).
+- **Not checked:** the 2.27 ms edit is still above the plan's 1 ms target; what remains of it was not broken down. Moving remeshing to a worker is deferred.
+
+## Combat feel: hitstop, shake, damage numbers, rumble, wind-ups and melee parries — 2026-10-23
+
+- **Added (all per player, so co-op stays fair):**
+  - **Hit record:** `Enemies` records every hit on a unit or nest in a fixed ring of 24. Light units (mass under 3) flinch for 0.06 s from a hit of 10 or more. A flinch pauses a wind-up rather than cancelling it, so a steady combo cannot stop a fighter from ever swinging.
+  - **Hitstop:** the saber pauses its own swing for 40–90 ms when it connects, scaled by damage (`Combat.hitstopFor`). The world never pauses.
+  - **Feedback layer:** `game/Impact.zig` adds damage numbers (up to 24, rising and fading over 0.9 s, gold for a kill, spread sideways so a combo does not stack them) and per-player camera shake. Only players within 6 m of a hit shake, or within 25 m of a 60-damage blast; a player's own hurt shakes their own view.
+  - **Rumble:** a pad buzz per player for hits, kills, blasts, hurts and parries, sent through a new `hw_rumble` in `platform/gamepad.m` (GameController haptics, CoreHaptics now linked).
+  - **Telegraphs:** ground fighters wind up before a melee strike, 0.34–0.75 s by kind (skirmisher shortest, Titan longest, 0.4 s default). Blaster bursts warn for 0.3 s. Both show an orange gem growing over the unit. Stepping out of reach makes a wind-up whiff. A parry facing the attacker turns the strike away and staggers the attacker for 0.9 s.
+  - **Settings:** SCREEN SHAKE (0–100%), DAMAGE NUMBERS and CONTROLLER RUMBLE. Older settings files load with all three on.
+- **Tests added:**
+  - Impact: hits become numbers and shake only nearby players; both fade; pulses are bounded; the switches turn everything off.
+  - No melee strike lands before its wind-up, every wind-up is longer than the parry window plus a frame, and a parry yields no damage. Confirmed failing with a 0.2 s wind-up.
+  - A burst warns before its first bolt (confirmed failing with no warning). Heavy units do not flinch. A flinch pauses a wind-up.
+  - The settings round trip now covers the three new fields.
+- **Checked:**
+  - default `build check` and the 0.17 check;
+  - the full suite (636/636);
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, no validation messages);
+  - showcase 37 captures, which show outlined damage numbers over the trooper (the first pass was too small and grey, so they were enlarged and outlined);
+  - a showcase 30 capture with wind-ups forced by a temporary edit (not kept), which shows the markers over troopers and drones. On its own, the tint was too faint to read at range, and the drones' red glow mesh hides any tint change; that is why the marker was added.
+- **Not checked:**
+  - rumble on a real controller (no pad was connected; the bridge builds, links and runs, but no buzz was felt);
+  - shake and hitstop in motion (captures are stills);
+  - whether the wind-up lengths feel fair in play.
+
+  These go to the owner's playtest (sections 2.1, 2.5 and 8).
+
 ## Project organized: docs aligned, playtest checklist, smoke warnings closed — 2026-10-23
 
 - **Docs:** stale statuses and counts brought in line with the code. Test counts now say 632 on the default compiler, and the 0.17 suite was last run at 440 on 2026-10-14 (`AGENTS.md`, `building-and-testing.md`). Status lines updated: automation BS1–BS4 done, block building BT0–BT8, the ten Detroit discoveries implemented, the pet "next" list deduplicated. The 2026-10-14 known-gaps list in `next-steps.md` now records saves v34, guest fabrication and the green suite. This log was reordered newest first; about 230 dated entries had been split between a newest-first top and an oldest-first appendix. Only order changed: a script checked every non-empty line survived exactly once.

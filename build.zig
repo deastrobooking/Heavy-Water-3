@@ -146,6 +146,7 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addCSourceFile(.{ .file = b.path("src/platform/gamepad.m"), .flags = &.{ "-fno-objc-arc", "-Wno-deprecated-declarations" } });
         exe.root_module.linkFramework("AppKit", .{});
         exe.root_module.linkFramework("GameController", .{});
+        exe.root_module.linkFramework("CoreHaptics", .{});
         exe.root_module.linkFramework("Foundation", .{});
         exe.root_module.linkFramework("IOKit", .{});
     }
