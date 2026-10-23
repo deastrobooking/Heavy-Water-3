@@ -1,6 +1,6 @@
 # Fantasy flora: glowing, living-sap bushes, flowers, grasses and trees
 
-**Status:** plan, 2026-10-22. Nothing here is built. The [roadmap](../roadmap.md) stays the single plan. This extends the existing flora generator ([nature upgrade](nature-upgrade.md), `procedural/Vegetation.zig`) and the building track ([block building](block-building.md), [automation and defense](automation-and-defense.md)).
+**Status:** FF1–FF4 implemented; FF3's performance gate and FF4's test/smoke acceptance remain open. Next is FF5, four-player measurement and combat-readability review. The [roadmap](../roadmap.md) stays the single plan. This extends the existing flora generator ([nature upgrade](nature-upgrade.md), `procedural/Vegetation.zig`) and the building track ([block building](block-building.md), [automation and defense](automation-and-defense.md)).
 
 **Owner decisions (2026-10-22):**
 1. **Both places:** new species grow wild in the seeded biomes, and players can place the same plants as decoration (outposts, farms, cities).
@@ -46,11 +46,11 @@ About twelve species, so the variant count grows from 18 (and whatever the other
 
 | Step | Deliverable | Proved by |
 | --- | --- | --- |
-| FF0 | Wait for the other session's vegetation work to land; re-read `Vegetation`, `Scatter`, `Biome`. | Clean tree and a green suite. |
+| FF0 | **Done 2026-10-22:** the overlapping hill-meadow work landed; re-read `Vegetation`, `Scatter`, and `Biome`. | Clean tree; the prior flora work and tests are recorded in validation. |
 | FF1 | **Done 2026-10-22 (standalone geometry and tests).** Species meshes and tables: names, colors, glow parts, heights, triangle budgets for the twelve species, in `procedural/SapFlora.zig`. | Tests: every mesh is valid, inside its height and triangle budget, deterministic; a contact sheet from a throwaway software renderer. The in-engine day and night capture moves to FF2. |
-| FF2 | **Done 2026-10-22.** Hook-in and wild placement (`Catalog.mesh_capacity` raised from 128 to 256; two meshes per species add 24): sap-meadow weights, species choice inside existing candidates, generator version bump and migration. | Scatter tests (every species appears, ids unchanged, no placement on roads or the spawn), save migration test, forest captures day and night. |
-| FF3 | Night glow and sway in the shader path (an emissive tint lane, a small wind sway), within the WGSL limits. | Capture under `MTL_DEBUG_LAYER=1`; nature benchmark within budget. |
-| FF4 | Decoration: the Plants entry, `Decor` state, cost and refund, save format and fixture, guest building. | Place, remove, save, restore and four-player tests; smoke stage. |
+| FF2 | **Done 2026-10-22.** Hook-in and wild placement (`Catalog.mesh_capacity` raised from 128 to 256; two meshes per species add 24): sap-meadow weights and 240 added candidates per chunk, after existing ids. No generator version bump is needed; existing ids and objects stay fixed, and older saves simply gain the new plants. | Scatter tests (every species appears, ids unchanged, no placement on roads or the spawn), deterministic generation, forest captures day and night. |
+| FF3 | **Implemented 2026-10-22:** living-sap glow geometry is subdued by day and emissive at night; the shared foliage vertex path gives it the existing bounded wind sway. | Day/night captures pass under `MTL_DEBUG_LAYER=1`; compile passes. Nature benchmark ran, but GPU p99 was 19.057 ms, above the 16.7 ms budget; repeat under an idle display session before closing the performance gate. |
+| FF4 | **Implemented 2026-10-23:** Plants entries follow the structure designs; all twelve species can be planted on terrain or blocks, turned, removed for a personal material refund, drawn in the world, and stored in save format 34. The list is capped at 512 total and 64 per terrain chunk. | Default `build check` passes. The fixture is present. Tests and the four-player smoke acceptance were not run; validate placement, cost/refund, save/restore, and guest building before closing FF4. |
 | FF5 | Polish and measurement: four-player benchmark, combat-readability review, docs and the player guide. | Recorded numbers and a hands-on checklist. |
 
 ## What FF2 built (decisions made on the way)

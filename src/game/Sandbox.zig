@@ -22,6 +22,7 @@ const BlockWorld = @import("../build/BlockWorld.zig");
 const BlockTool = @import("BlockTool.zig");
 const Platformer = @import("Platformer.zig");
 const Farm = @import("Farm.zig");
+const Decor = @import("Decor.zig");
 const Outpost = @import("Outpost.zig");
 const Blocks = @import("../build/Blocks.zig");
 const Input = @import("../engine/Input.zig");
@@ -446,6 +447,8 @@ block_world: BlockWorld = undefined,
 platform: Platformer.State = .{},
 /// Crops growing on tilled soil (shared, saved).
 farm: Farm.State = .{},
+/// Player-placed living-sap plants (shared world content; placement costs remain per-kit).
+decor: Decor.State = .{},
 /// Structure designs (the starters and the team's captures) and every structure built from them.
 outpost: Outpost.State = undefined,
 /// Where each player is in the building tips (session only).
@@ -2644,6 +2647,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .terrain = try self.terrainTiles(arena),
         .blocks = try self.blockSections(arena),
         .crops = try self.cropDocs(arena),
+        .decorations = try Decor.toDocs(&self.decor, arena),
         .structures = (try Outpost.toDocs(&self.outpost, arena)).defs,
         .placed = (try Outpost.toDocs(&self.outpost, arena)).placed,
         .machines = machines[0..machine_count],
@@ -2713,6 +2717,25 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     for (doc.crops, 0..) |crop, i| {
         if (!std.math.isFinite(crop.growth) or crop.growth < 0 or crop.growth > 1) return error.InvalidSave;
         for (doc.crops[0..i]) |other| if (other.x == crop.x and other.y == crop.y and other.z == crop.z) return error.InvalidSave;
+    }
+    if (doc.decorations.len > Decor.capacity) return error.InvalidSave;
+    var decor_chunks: [Decor.capacity]Key = undefined;
+    var decor_chunk_counts: [Decor.capacity]u8 = @splat(0);
+    var decor_chunk_len: usize = 0;
+    for (doc.decorations, 0..) |plant, i| {
+        if (@as(usize, plant.builder) >= max_players or @abs(plant.x) > 1 << 20 or @abs(plant.y) > 1 << 12 or @abs(plant.z) > 1 << 20) return error.InvalidSave;
+        for (doc.decorations[0..i]) |other| if (other.x == plant.x and other.y == plant.y and other.z == plant.z) return error.InvalidSave;
+        const key = Blocks.chunkOf(plant.x, plant.z);
+        for (decor_chunks[0..decor_chunk_len], 0..) |existing, j| {
+            if (existing.x != key.x or existing.z != key.z) continue;
+            if (decor_chunk_counts[j] == @as(u8, Decor.per_chunk)) return error.InvalidSave;
+            decor_chunk_counts[j] += 1;
+            break;
+        } else {
+            decor_chunks[decor_chunk_len] = key;
+            decor_chunk_counts[decor_chunk_len] = 1;
+            decor_chunk_len += 1;
+        }
     }
     // Structures: valid designs, well-formed instances, within the caps.
     if (!Outpost.validate(doc.structures, doc.placed)) return error.InvalidSave;
@@ -2817,10 +2840,15 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     // complete and is retried on the next step.
     self.syncBlocks() catch {};
     self.farm = .{};
+    self.decor = .{};
     Outpost.restore(&self.outpost, doc.structures, doc.placed);
     for (doc.crops) |crop| {
         self.farm.crops[self.farm.len] = .{ .cell = .{ crop.x, crop.y, crop.z }, .growth = crop.growth };
         self.farm.len += 1;
+    }
+    for (doc.decorations) |plant| {
+        self.decor.plants[self.decor.len] = .{ .cell = .{ plant.x, plant.y, plant.z }, .species = plant.species, .turn = plant.turn, .builder = plant.builder };
+        self.decor.len += 1;
     }
     for (doc.blocks, block_cells, block_filled) |section, *cells, filled| self.block_world.blocks.loadSection(.{ .x = section.x, .y = section.y, .z = section.z }, cells, filled) catch unreachable; // checked above
     _ = @import("Challenges.zig").place(self);

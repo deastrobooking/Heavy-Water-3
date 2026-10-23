@@ -197,6 +197,11 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
         }
         // Lumen: tint alpha above 1 glows, more so at night.
         emissive = clamp(in.tint.a - 1.0, 0.0, 1.0);
+        // Living-sap meshes use a dedicated alpha tag. Keep their separate glow geometry
+        // subdued by day, then let the existing lumen blend bring it forward at night.
+        if (in.tint.a > 2.25) {
+            emissive = frame.horizon.a * 0.92;
+        }
         let glow = base * (0.9 + 0.8 * frame.horizon.a);
         color = mix(color, glow, emissive);
     }

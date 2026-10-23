@@ -8,6 +8,7 @@
 //! the aimed block. On a pad (any player): hold RB and press D-pad left to enter or leave building;
 //! then RT place, LT remove, D-pad up shape, left/right material, down turn, RB + up pick.
 const std = @import("std");
+const Physics = @import("../physics/Physics.zig");
 const Sandbox = @import("Sandbox.zig");
 const World = @import("../world/World.zig");
 const Blocks = @import("../build/Blocks.zig");
@@ -19,6 +20,8 @@ const Farm = @import("Farm.zig");
 const Outpost = @import("Outpost.zig");
 const Structures = @import("../build/Structures.zig");
 const BuildTips = @import("BuildTips.zig");
+const Decor = @import("Decor.zig");
+const SapFlora = @import("../procedural/SapFlora.zig");
 
 pub const reach: f32 = 14;
 /// Largest box one fill may cover.
@@ -83,7 +86,7 @@ pub const Command = struct {
 };
 
 /// The palette position: one of the four shapes, a starter prefab of the style, or the clipboard.
-pub const Entry = union(enum) { shape: Blocks.Shape, seed, prefab: Prefabs.Prefab, structure: usize };
+pub const Entry = union(enum) { shape: Blocks.Shape, seed, prefab: Prefabs.Prefab, structure: usize, plant: SapFlora.Species };
 
 /// The farm style also offers seeds, right after the shapes.
 fn seeds(st: State) usize {
@@ -91,7 +94,7 @@ fn seeds(st: State) usize {
 }
 
 pub fn entryCount(sb: *const Sandbox, slot: usize, st: State) usize {
-    return Blocks.placeable_shapes.len + seeds(st) + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0) + sb.outpost.library.len;
+    return Blocks.placeable_shapes.len + seeds(st) + Prefabs.starters(st.style).len + @intFromBool(sb.block_clips[slot].len > 0) + sb.outpost.library.len + SapFlora.count;
 }
 
 pub fn entry(sb: *const Sandbox, slot: usize, st: State) Entry {
@@ -103,7 +106,9 @@ pub fn entry(sb: *const Sandbox, slot: usize, st: State) Entry {
     if (p < starters.len) return .{ .prefab = starters[p] };
     const clip = @intFromBool(sb.block_clips[slot].len > 0);
     if (p == starters.len and clip == 1) return .{ .prefab = sb.block_clips[slot].prefab() };
-    return .{ .structure = p - starters.len - clip };
+    const structure = p - starters.len - clip;
+    if (structure < sb.outpost.library.len) return .{ .structure = structure };
+    return .{ .plant = @enumFromInt(structure - sb.outpost.library.len) };
 }
 
 pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
@@ -119,6 +124,7 @@ pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
         .seed => "SEEDS",
         .prefab => |p| p.name,
         .structure => |i| sb.outpost.library.get(i).name(),
+        .plant => |species| SapFlora.info(species).name,
     };
 }
 
@@ -206,11 +212,15 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
     st.valid = false;
     if (sb.physics.castRay(eye, forward, reach, .none)) |hit| {
         const n = hit.normal;
-        const outside = floorCell(.{ hit.point[0] + n[0] * 0.25, hit.point[1] + n[1] * 0.25, hit.point[2] + n[2] * 0.25 });
+        var outside = floorCell(.{ hit.point[0] + n[0] * 0.25, hit.point[1] + n[1] * 0.25, hit.point[2] + n[2] * 0.25 });
+        if (entry(sb, slot, st.*) == .plant) outside = Decor.groundedCell(sb, outside);
         const inside = floorCell(.{ hit.point[0] - n[0] * 0.25, hit.point[1] - n[1] * 0.25, hit.point[2] - n[2] * 0.25 });
         if (!sb.block_world.blocks.get(inside[0], inside[1], inside[2]).isEmpty()) st.remove = inside;
         st.place = outside;
-        st.valid = refusalMode(sb, outside, true, st.creative) == null and (st.creative or kit.blocks[cell(st.*).material] > 0);
+        st.valid = switch (entry(sb, slot, st.*)) {
+            .plant => |species| Decor.refusal(sb, slot, species, outside) == null,
+            else => refusalMode(sb, outside, true, st.creative) == null and (st.creative or kit.blocks[cell(st.*).material] > 0),
+        };
     }
     // Box operations: the modifier marks the first corner; the same operation again finishes it.
     const op: ?CornerMode = if (cmd.place) .fill else if (cmd.remove) .clear else if (cmd.rotate and cmd.box) .restyle else if (cmd.pick and cmd.box) .capture else null;
@@ -254,6 +264,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
             .prefab => |p| return stamp(sb, slot, p, st.rot, c),
             .structure => |i| return Outpost.place(sb, slot, i, st.rot, c),
             .seed => return Farm.plant(sb, slot, c),
+            .plant => |species| return Decor.plant(sb, slot, species, st.rot, c),
             .shape => {},
         }
         if (refusalMode(sb, c, true, st.creative)) |why| return sb.sayTo(slot, "blocked: {s}", .{why});
@@ -265,7 +276,9 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         BuildTips.advance(sb, slot, .place);
     }
     if (cmd.remove) {
-        const c = st.remove orelse return;
+        const c = st.remove orelse st.place orelse return;
+        if (Decor.harvest(sb, slot, c)) return;
+        if (st.remove == null) return;
         // Aiming at a field's soil takes the crop growing on it first.
         if (Farm.harvest(sb, slot, .{ c[0], c[1] + 1, c[2] })) return;
         // A block of a placed structure takes the whole structure apart.
@@ -521,6 +534,11 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
         const cost = def.cost();
         return std.fmt.bufPrint(buffer, "{s}  {d} SCRAP {d} PARTS  CLICK BUILD  T TURN  RMB TAKES IT APART  TAB NEXT", .{ def.name(), cost.scrap, cost.parts }) catch buffer;
     }
+    if (entry(sb, 0, st) == .plant) {
+        const species = entry(sb, 0, st).plant;
+        const material = Decor.costMaterial(species);
+        return std.fmt.bufPrint(buffer, "PLANT {s}  {s} x{d}  CLICK PLANT  RMB REMOVE  TAB NEXT  T TURN", .{ SapFlora.info(species).name, Materials.all[material].name, sb.kits[0].blocks[material] }) catch buffer;
+    }
     return std.fmt.bufPrint(buffer, "{s} {s} {s} x{d}  CLICK PLACE  RMB REMOVE  TAB PIECE  SHIFT+TAB STYLE  [ ] MATERIAL  T TURN  P PICK  C CREATIVE", .{ Materials.styleName(st.style), entryName(sb, 0, st), Materials.all[c.material].name, sb.kits[0].blocks[c.material] }) catch buffer;
 }
 
@@ -536,6 +554,17 @@ pub fn ghost(sb: *const Sandbox, slot: usize, st: State, out: []World.Prop, star
             .transform = .{ .position = .{ @as(f32, @floatFromInt(c[0])) + 0.5, @as(f32, @floatFromInt(c[1])) + 0.15, @as(f32, @floatFromInt(c[2])) + 0.5 } },
             .tint = if (Farm.refusal(sb, slot, c) == null) .{ 0.45, 0.95, 0.4, 1 } else .{ 1.0, 0.3, 0.25, 1 },
             .size = .{ 0.3, 0.3, 0.3 },
+        };
+        return n + 1;
+    }
+    if (entry(sb, slot, st) == .plant) {
+        const species = entry(sb, slot, st).plant;
+        const plant_info = SapFlora.info(species);
+        out[n] = .{
+            .mesh = sb.catalog.content.sap_body[@intFromEnum(species)],
+            .transform = .{ .position = .{ @as(f32, @floatFromInt(c[0])) + 0.5, @floatFromInt(c[1]), @as(f32, @floatFromInt(c[2])) + 0.5 }, .scale = plant_info.height },
+            .tint = if (Decor.refusal(sb, slot, species, c) == null) .{ 0.75, 1.0, 0.78, 1 } else .{ 1.0, 0.3, 0.25, 1 },
+            .rotation = Physics.Rotation.axisAngle(.{ 0, 1, 0 }, @as(f32, @floatFromInt(st.rot)) * (@as(f32, std.math.pi) / 2.0)),
         };
         return n + 1;
     }

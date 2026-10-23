@@ -1,3 +1,15 @@
+## Fantasy flora FF4: placeable plants — 2026-10-23
+
+- **Changed:** added `game/Decor.zig` with a shared saved list capped at 512 plants and 64 per terrain chunk. The block palette now lists all twelve species after structures; plants snap to terrain or a block, use leaf or bloom material from the acting player's kit, turn with the placement key, and refund that material to whoever removes them. Both body and night-gated glow meshes publish as world props. Save format 34 adds decorations with species, cell, turn and builder; older saves default to an empty list, and the format-34 fixture is checked in.
+- **Checked:** `python3 tools/zig.py build check` passed; `git diff --check` passed.
+- **Not checked:** no headless tests or real-game smoke were run, including save round trip, guest placement/refunds, preview, and pad controls. The format-34 fixture was not exercised by the headless fixture loop. The earlier flora GPU p99 remeasurement also remains open because a Heavy Water process is still active.
+
+## Fantasy flora FF3: night-gated sap glow — 2026-10-22
+
+- **Changed:** the dedicated living-sap glow mesh is tagged in its instance tint and the shared scene shader makes that pass emissive by the frame's night factor. Its vegetation already uses the shared foliage vertex shader's bounded wind sway; no extra draw or per-frame allocation was added.
+- **Checked:** `python3 tools/zig.py build check` passed; `git diff --check` passed. Metal API Validation captures of showcases 110 (day) and 111 (night) completed at 2560×1600 on Apple M3 Pro with no validation messages. Visual review confirms subdued accents by day and bright sap accents at night. `python3 tools/benchmark.py --nature --frames 600 --silent` passed its benchmark checks and reported 83 visible vegetation instances, 5,600,437 submitted triangles, CPU p99 4.297 ms and GPU p99 19.057 ms.
+- **Not checked:** the 16.7 ms GPU target was not met in this run; the existing heavy-water process was also active during the benchmark, so repeat with an idle display session. Zig 0.17, headless suite, four-player cost, hands-on wind motion, and FF4 placement/save behavior were not checked.
+
 ## Movement retune and hill-meadow fix — 2026-10-22
 
 - **Changed (owner's choice of the stronger tuning):** sprint 15.5 m/s (was 10.8), jump launch 12.6 (11.8), running bonus 0.55 (0.42), long-jump lift 1.14 (1.0), wall jump 8 % stronger with some carried momentum, faster dodge launch and hoverboard. Measured peaks: a standing jump 5.2 m (about 17 ft, was 4.6 m) and a full-sprint long jump 16.35 m (about 54 ft, was 9.2 m); the jump test now holds those heights, and the player guide and the `Player.zig` comments say so.

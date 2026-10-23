@@ -356,8 +356,8 @@ fn gather(self: *Scene, kind: Scatter.Kind, vp: mach.math.Mat4x4, culling: bool,
     return self.instance_count - first;
 }
 
-/// Instances of one living-sap species, as plain bodies or as glow: the glow copy raises the
-/// tint alpha above 1, which the scene shader turns into lumen that burns brighter at night.
+/// Instances of one living-sap species, as plain bodies or as glow. Alpha 2.5 tags the glow
+/// pass so the shared shader can reserve it for night; the ordinary alpha lane stays unchanged.
 fn gatherSap(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, species: u8, glow: bool) u32 {
     const first = self.instance_count;
     const handle = if (glow) self.catalog.content.sap_glow[species] else self.catalog.content.sap_body[species];
@@ -384,7 +384,7 @@ fn gatherSap(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const 
 }
 
 /// Instance tint alpha of a glowing plant part: above 1 is emissive, up to 2 fully so.
-const glow_alpha: f32 = 1.75;
+const glow_alpha: f32 = 2.5;
 
 fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
     const xoff: f32 = switch (variant) {

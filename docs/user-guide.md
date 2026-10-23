@@ -46,7 +46,8 @@ The line above your vitals always shows the held tool's controls.
 ## Block building
 
 - Click places a block beside the surface you aim at; right click removes it (the block returns to you).
-- **Tab** cycles cube, slab, ramp, stair, then ready-made pieces. **[ ]** change material, **T** turns, **P** picks up the aimed block's shape and material.
+- **Tab** cycles cube, slab, ramp, stair, ready-made pieces, structures, then twelve **PLANTS** entries. Aim at terrain or a block and click to plant; **T** turns the plant. Each costs one nature material from your kit (leaf for grasses, bushes and trees; bloom for flowers). Right click removes a plant and refunds that material to whoever removes it. Plants are decorative and do not block movement.
+- **[ ]** change block material, **T** turns blocks, **P** picks up the aimed block's shape and material.
 - **Shift+Tab** changes style: castle, dungeon, eco city, farm, platformer.
 - Hold **Shift** and click two corners to fill a box; right click two corners to clear one. **Shift+T** on two corners restyles a box; **Shift+P** copies one, then Tab to paste.
 - Blocks come from your own stock (the strip at the bottom). A block needs ground or another block beside it. The city's own blocks (discovery courses) cannot be removed.
@@ -96,7 +97,7 @@ Not yet possible: wearing the game's face, hair, helmet or armor on an imported 
 
 ## The wilds' glowing plants
 
-Patchy meadows of **living-sap plants** grow across the lowlands and wet ground: glowing grasses and reeds, lilies, starcups and poppies, lantern bushes hung with pods, crystal shrubs, sapferns, and small glowvine, crystal-leaf and sapwillow trees. They are pale by day and burn lumen-bright at night, even on snow. They are scenery for now; placing them as decoration is planned.
+Patchy meadows of **living-sap plants** grow across the lowlands and wet ground: glowing grasses and reeds, lilies, starcups and poppies, lantern bushes hung with pods, crystal shrubs, sapferns, and small glowvine, crystal-leaf and sapwillow trees. They are pale by day and burn lumen-bright at night, even on snow. You can also plant them as decoration with the block tool; each player's kit pays for their own plants.
 
 ## Saving
 
