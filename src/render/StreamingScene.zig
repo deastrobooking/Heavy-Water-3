@@ -74,6 +74,10 @@ boulder_counts: [@import("../procedural/Vegetation.zig").boulder_count]u32 = @sp
 /// Each resident's scattered objects tagged with their draw bucket this frame (`gatherScatter`).
 scatter_tags: [Streamer.render_capacity][Scatter.capacity]u8 = undefined,
 bucket_colors: [bucket_count][4]f32 = undefined,
+/// Each resident chunk's trees' crown detail last frame (`unknown_detail` when not yet seen), so a
+/// tree near a detail boundary does not flicker between crowns. Reset when the slot's chunk changes.
+detail_keys: [Streamer.render_capacity]?Key = @splat(null),
+tree_details: [Streamer.render_capacity][Scatter.capacity]u8 = undefined,
 resident_count: usize = 0,
 peak_resident_count: usize = 0,
 active_missing: usize = 0,
@@ -316,13 +320,31 @@ const mid_crown_heights: f32 = 2.5;
 
 /// Crown detail for a tree seen from `eye`: by distance to its middle over its height, so tall
 /// trees keep detail farther out than short ones.
-pub fn treeDetail(eye: [3]f32, transform: @import("../world/Transform.zig")) Vegetation.Detail {
+/// `previous` is the tree's detail last frame: it changes by one step only once the tree is
+/// `detail_margin` past the boundary, so standing at a boundary does not flicker.
+pub fn treeDetail(eye: [3]f32, transform: @import("../world/Transform.zig"), previous: ?Vegetation.Detail) Vegetation.Detail {
     const p = transform.position;
     const d: [3]f32 = .{ p[0] - eye[0], p[1] + transform.scale * 0.5 - eye[1], p[2] - eye[2] };
-    const reach = @sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    if (reach < near_crown_heights * transform.scale) return .near;
-    if (reach < mid_crown_heights * transform.scale) return .mid;
-    return .far;
+    const heights = @sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / transform.scale;
+    const plain: Vegetation.Detail = if (heights < near_crown_heights) .near else if (heights < mid_crown_heights) .mid else .far;
+    const last = previous orelse return plain;
+    const a = @intFromEnum(plain);
+    const b = @intFromEnum(last);
+    if (a == b or @max(a, b) - @min(a, b) > 1) return plain;
+    const boundary = if (@min(a, b) == 0) near_crown_heights else mid_crown_heights;
+    return if (@abs(heights - boundary) < boundary * detail_margin) last else plain;
+}
+
+/// How far past a detail boundary, as a fraction of it, a tree must go before switching crowns.
+const detail_margin: f32 = 0.1;
+const unknown_detail: u8 = 0xff;
+
+/// The crown detail a tree bucket draws, or null for buckets that are not trees.
+fn detailOf(bucket: u8) ?Vegetation.Detail {
+    if (bucket >= tree_mid_bucket and bucket < tree_far_bucket) return .mid;
+    if (bucket >= tree_far_bucket and bucket < sap_body_bucket) return .far;
+    if (bucket >= flora_bucket and bucket < tree_mid_bucket and Vegetation.isTree(bucket - flora_bucket)) return .near;
+    return null;
 }
 
 /// Draw buckets for scattered objects, in instance order: relics, flora by variant, lighter tree
@@ -345,25 +367,34 @@ const no_bucket: u8 = 0xff;
 fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) void {
     var sources: [Streamer.render_capacity]Source = undefined;
     var source_count: usize = 0;
-    for (self.residents) |resident| {
+    for (self.residents, 0..) |resident, slot| {
         if (!resident.visible) continue;
         const view = resident.view.?;
         const data = self.stream.payload(view) orelse continue; // stale during a terrain rebuild
-        sources[source_count] = .{ .key = view.key, .objects = data.objects[0..data.object_count] };
+        sources[source_count] = .{ .key = view.key, .objects = data.objects[0..data.object_count], .slot = slot };
         source_count += 1;
     }
     self.sortScatter(sources[0..source_count], vp, culling, removed, eye);
 }
 
 /// One visible chunk's scattered objects.
-const Source = struct { key: Key, objects: []const Scatter.Object };
+/// `slot` is the resident slot, which keys the remembered crown details.
+const Source = struct { key: Key, objects: []const Scatter.Object, slot: usize };
 
 fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) void {
     var counts: [bucket_count]u32 = @splat(0);
     for (sources, 0..) |source, r| {
         const tags = &self.scatter_tags[r];
+        const remembered = self.detail_keys[source.slot];
+        if (remembered == null or !Key.eql(remembered.?, source.key)) {
+            self.detail_keys[source.slot] = source.key;
+            @memset(&self.tree_details[source.slot], unknown_detail);
+        }
+        const details = &self.tree_details[source.slot];
         for (source.objects, 0..) |object, o| {
-            tags[o] = self.bucketOf(source.key, object, vp, culling, removed, eye);
+            const previous: ?Vegetation.Detail = if (details[o] == unknown_detail) null else @enumFromInt(details[o]);
+            tags[o] = self.bucketOf(source.key, object, vp, culling, removed, eye, previous);
+            if (detailOf(tags[o])) |detail| details[o] = @intFromEnum(detail);
             if (tags[o] == no_bucket) continue;
             counts[tags[o]] += 1;
             if (tags[o] >= sap_body_bucket and tags[o] < sap_glow_bucket) counts[tags[o] + SapFlora.count] += 1;
@@ -419,7 +450,7 @@ fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, cull
 }
 
 /// The draw bucket of one scattered object this frame, or `no_bucket` when it is not drawn.
-fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) u8 {
+fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32, previous: ?Vegetation.Detail) u8 {
     const bucket: u8 = switch (object.kind) {
         .relic => 0,
         .boulder => if (object.variant < Vegetation.boulder_count) boulder_bucket + object.variant else return no_bucket,
@@ -432,7 +463,7 @@ fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.
             if (Region.k2.contains(key.x, key.z) and !Cloudwater.isSheltered(object.transform.position[0], object.transform.position[2])) return no_bucket;
             // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
             if (self.flora_review) return no_bucket;
-            if (Vegetation.treeIndex(object.variant)) |species| switch (treeDetail(eye, object.transform)) {
+            if (Vegetation.treeIndex(object.variant)) |species| switch (treeDetail(eye, object.transform, previous)) {
                 .near => {},
                 .mid => break :blk tree_mid_bucket + species,
                 .far => break :blk tree_far_bucket + species,
@@ -657,7 +688,7 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     for (&chunks, 0..) |*chunk, c| for (chunk, 0..) |*object, i| {
         object.* = .{ .local_id = @intCast(i), .kind = kinds[(i + c) % kinds.len], .variant = variants[(i + 3 * c) % variants.len], .transform = .{ .position = .{ @floatFromInt(c), @floatFromInt(i), 0 } }, .tint = .{ 1, 1, 1, 1 } };
     };
-    const sources = [_]Source{ .{ .key = .{ .x = 0, .z = 0 }, .objects = &chunks[0] }, .{ .key = .{ .x = 1, .z = 0 }, .objects = &chunks[1] } };
+    const sources = [_]Source{ .{ .key = .{ .x = 0, .z = 0 }, .objects = &chunks[0], .slot = 0 }, .{ .key = .{ .x = 1, .z = 0 }, .objects = &chunks[1], .slot = 1 } };
     var removed: Modifications = .{};
     _ = try removed.remove(.of(sources[1].key, 2));
     // Objects sit within 8 m of the origin; a unit-scale tree there is far from this eye.
@@ -669,7 +700,7 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     var expected: [64][4]f32 = undefined;
     var n: usize = 0;
     for (0..bucket_count) |bucket| for (sources) |source| for (source.objects) |object| {
-        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed, eye);
+        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed, eye, null);
         const glow_of_body = bucket >= sap_glow_bucket and bucket < boulder_bucket and tag == bucket - SapFlora.count;
         if (tag != bucket and !glow_of_body) continue;
         expected[n] = object.transform.toInstance();
@@ -679,7 +710,7 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     for (expected[0..n], scene.instances[1 .. 1 + n]) |want, got| try std.testing.expectEqual(want, got.translation_scale);
     // Two relics per chunk; the removed object and the unknown variant are left out.
     try std.testing.expectEqual(@as(u32, 4), scene.relic_count);
-    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed, eye));
+    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed, eye, null));
     var sap_bodies: u32 = 0;
     var sap_glows: u32 = 0;
     for (scene.sap_counts, scene.sap_glow_counts) |body, glow| {
@@ -700,10 +731,50 @@ fn sumOf(counts: []const u32) u32 {
 
 test "tree crowns lighten with distance measured in tree heights" {
     const tall: @import("../world/Transform.zig") = .{ .position = .{ 0, 0, 0 }, .scale = 120 };
-    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 80 }, tall));
-    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 200 }, tall));
-    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall));
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 80 }, tall, null));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 200 }, tall, null));
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall, null));
     // The same 200 m keeps a giant at mid detail but sends a small pine far.
     const pine: @import("../world/Transform.zig") = .{ .position = .{ 0, 0, 0 }, .scale = 12 };
-    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 6, 200 }, pine));
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 6, 200 }, pine, null));
+    // Just past the near boundary (1 height = 120 m), the crown it had is kept; well past, it changes.
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 125 }, tall, .near));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 125 }, tall, null));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 140 }, tall, .near));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 115 }, tall, .mid));
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 100 }, tall, .mid));
+    // A jump of two steps (a teleport) takes the plain choice.
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall, .near));
+}
+
+test "a tree walked back and forth across a crown boundary switches once each way" {
+    const allocator = std.testing.allocator;
+    const scene = try allocator.create(Scene);
+    defer allocator.destroy(scene);
+    scene.* = .{ .stream = undefined, .catalog = undefined };
+    scene.bucket_colors = @splat(.{ 1, 1, 1, 1 });
+    const tree = [_]Scatter.Object{.{ .local_id = 0, .kind = .vegetation, .variant = Vegetation.tree_variants[0], .transform = .{ .position = .{ 0, 0, 0 }, .scale = 100 }, .tint = .{ 1, 1, 1, 1 } }};
+    const sources = [_]Source{.{ .key = .{ .x = 0, .z = 0 }, .objects = &tree, .slot = 3 }};
+    const removed: Modifications = .{};
+    // Wobble 3 m either side of the 100 m boundary, the way a player standing there would.
+    var switches: usize = 0;
+    var last: ?bool = null;
+    for (0..40) |step| {
+        const z: f32 = 100 + (if (step % 2 == 0) @as(f32, -3) else 3) + @as(f32, @floatFromInt(step)) * 0.01;
+        scene.instance_count = 1;
+        scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, .{ 0, 50, z });
+        const near = sumOf(&scene.flora_counts) == 1;
+        if (last) |was| switches += @intFromBool(was != near);
+        last = near;
+    }
+    try std.testing.expectEqual(@as(usize, 0), switches);
+    // Walking clearly away and back switches exactly once each way.
+    for ([_]f32{ 130, 130, 80, 80 }) |z| {
+        scene.instance_count = 1;
+        scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, .{ 0, 50, z });
+        const near = sumOf(&scene.flora_counts) == 1;
+        switches += @intFromBool(last.? != near);
+        last = near;
+    }
+    try std.testing.expectEqual(@as(usize, 2), switches);
 }

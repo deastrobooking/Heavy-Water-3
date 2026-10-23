@@ -2,6 +2,19 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Tree crowns stop flickering at detail boundaries — 2026-10-23
+
+- **Added:** each view remembers every resident tree's crown detail from the last frame (`StreamingScene.tree_details`, keyed by resident slot and reset when the slot's chunk changes). `treeDetail` changes by one step only once the tree is 10% past the boundary; a jump of two steps (a teleport) takes the plain choice.
+- **Tests:**
+  - The margin keeps or changes the crown on either side of the 1-height boundary.
+  - A tree with the camera wobbling 3 m either side of its boundary for 40 frames never switches, and walking clearly away and back switches exactly once each way. This test fails with no margin.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 641/641;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all nine stages, no validation messages).
+- **Smoke harness gap:** one earlier smoke run stopped after stage 5 yet exited 0; something closed the window while another app was in front. A smoke that quits before completing should fail. Not fixed yet.
+- **Not checked:** popping in motion by eye.
+
 ## Forest level of detail: lighter mid and far tree crowns — 2026-10-23
 
 - **Problem:** every tree crown was drawn at full detail at any distance. Crowns are 36,864–169,312 triangles each, plus 2,232–4,330 for the trunk, and they made up nearly all of the nature route's 5.74 million submitted triangles. The four-player frontier view was GPU-bound (21.8 ms at p99).
