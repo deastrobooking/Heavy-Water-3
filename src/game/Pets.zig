@@ -81,7 +81,12 @@ pub fn damage(s: Species, level: u8) f32 {
 
 /// Pet experience levels improve survivability alongside attack damage.
 pub fn maxHealth(s: Species, level: u8) f32 {
-    const base: f32 = switch (s) { .hound => 150, .falcon => 105, .golem => 240, .moth => 115 };
+    const base: f32 = switch (s) {
+        .hound => 150,
+        .falcon => 105,
+        .golem => 240,
+        .moth => 115,
+    };
     return base + 12 * @as(f32, @floatFromInt(level -| 1));
 }
 
@@ -121,7 +126,7 @@ pub const Event = union(enum) {
     /// An attack landed or swung, at a point (for a sound and a flash).
     attack: struct { species: Species, at: V },
     /// A nearby Hive flyer was hit, and may have been brought down.
-    air_attack: struct { species: Species, at: V, downed: bool = false, raid_repelled: bool = false },
+    air_attack: struct { species: Species, enemy: Skies.WingKind, at: V, downed: bool = false, raid_repelled: bool = false },
     hurt: struct { species: Species, at: V },
     /// The moth mended rangers within `radius` of `at` by `amount`.
     mend: struct { at: V, radius: f32, amount: f32 },
@@ -313,7 +318,7 @@ pub fn step(self: *Pets, owner: usize, ctx: Context, enemies: *Enemies, dt: f32,
             q.cooldown = i.cooldown;
             q.action = 0.45;
             q.trick = false;
-            if (n < out.len) out[n] = .{ .air_attack = .{ .species = q.species, .at = hit.position, .downed = hit.downed, .raid_repelled = hit.raid_repelled } };
+            if (n < out.len) out[n] = .{ .air_attack = .{ .species = q.species, .enemy = hit.kind, .at = hit.position, .downed = hit.downed, .raid_repelled = hit.raid_repelled } };
             n += 1;
         }
     } else if (q.health > 0) if (target) |t| if (q.cooldown == 0 and R.length(R.sub(t, q.position)) < i.reach + 1.2) {

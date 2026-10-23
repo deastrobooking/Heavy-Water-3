@@ -18,9 +18,9 @@ pub const tab_count = enum_compat.fields(Tab).len;
 pub const WeaponUpgrade = struct { weapon: WeaponKind, tier: u8 };
 pub const Output = union(enum) { vehicle: Designs.Design, fighter, robot_companion, suit: Profile.Clothing, armor: Profile.Armor, weapon: WeaponKind, weapon_upgrade: WeaponUpgrade, kestrel_upgrade: Progress.KestrelUpgrade, kestrel_paint: Progress.Paint, space_frame: Progress.SpaceFrame };
 /// Pickups by kind (lumen, rotor, alloy; vital cells are never spent) plus scrap.
-pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0, parts: u32 = 0 };
+pub const Cost = struct { lumen: u32 = 0, rotor: u32 = 0, alloy: u32 = 0, scrap: u32 = 0, parts: u32 = 0, gold: u32 = 0 };
 pub const Recipe = struct { tab: Tab, output: Output, cost: Cost, about: []const u8 };
-pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, MaxLevel, AlreadyOwned, NotOwned, WeaponRequired, PreviousTierRequired, PreviousFrameRequired, NoFighter, NoBlueprint };
+pub const Error = error{ AlreadyMade, NotEnoughLumen, NotEnoughRotors, NotEnoughAlloy, NotEnoughScrap, NotEnoughParts, NotEnoughGold, NotEnoughExperience, MaxLevel, AlreadyOwned, NotOwned, WeaponRequired, PreviousTierRequired, PreviousFrameRequired, NoFighter, NoBlueprint };
 
 pub const recipes = [_]Recipe{
     .{ .tab = .vehicles, .output = .{ .vehicle = .skimmer }, .cost = .{ .lumen = 8, .rotor = 2, .scrap = 30 }, .about = "Balanced wedge hover car with a downforce wing." },
@@ -142,7 +142,7 @@ pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
 pub fn status(p: *const Progress, k: *const Kit, output: Output) ?[]const u8 {
     return switch (output) {
         .fighter => if (p.fighter) "MADE" else if (!p.hasFlag("kestrel_blueprint")) "BLUEPRINT REQUIRED" else null,
-        .space_frame => |frame| if (!p.fighter) "FABRICATE KESTREL FIRST" else if (p.ownsSpaceFrame(frame)) (if (p.space_frame == frame) "EQUIPPED" else "OWNED") else if ((frame == .void_lance and !p.ownsSpaceFrame(.ember_wyrm)) or (frame == .dreadclaw and !p.ownsSpaceFrame(.void_lance)) or (frame == .starwing and !p.ownsSpaceFrame(.dreadclaw)) or (frame == .bulwark and !p.ownsSpaceFrame(.starwing))) "PREVIOUS FRAME REQUIRED" else null,
+        .space_frame => |frame| if (!p.fighter) "FABRICATE KESTREL FIRST" else if (p.ownsSpaceFrame(frame)) (if (p.space_frame == frame) "EQUIPPED" else "OWNED") else if ((frame == .void_lance and !p.ownsSpaceFrame(.ember_wyrm)) or (frame == .dreadclaw and !p.ownsSpaceFrame(.void_lance)) or (frame == .starwing and !p.ownsSpaceFrame(.dreadclaw)) or (frame == .bulwark and !p.ownsSpaceFrame(.starwing))) "PREVIOUS FRAME REQUIRED" else if (k.combatLevel() < Progress.spaceFrameRank(frame)) "COMBAT LEVEL REQUIRED" else null,
         .robot_companion => if (k.robot_built) "BUILT" else null,
         .weapon_upgrade => |u| if (!k.ownsWeapon(u.weapon)) "FABRICATE WEAPON FIRST" else if (k.weaponLevel(u.weapon) >= u.tier) "INSTALLED" else if (k.weaponLevel(u.weapon) + 1 < u.tier) "PREVIOUS TIER FIRST" else null,
         .kestrel_upgrade, .kestrel_paint => if (!p.fighter) "FABRICATE KESTREL FIRST" else switch (output) {
@@ -169,6 +169,7 @@ pub fn affordable(k: *const Kit, c: Cost) ?Error {
     if (k.count(.hive_alloy) < c.alloy) return error.NotEnoughAlloy;
     if (k.wallet.scrap < c.scrap) return error.NotEnoughScrap;
     if (k.wallet.parts < c.parts) return error.NotEnoughParts;
+    if (k.wallet.gold < c.gold) return error.NotEnoughGold;
     return null;
 }
 
@@ -184,10 +185,12 @@ pub fn make(p: *Progress, k: *Kit, index: usize) Error!Output {
             p.selectSpaceFrame(frame) catch return error.NotOwned;
             return r.output;
         }
+        if (k.combatLevel() < Progress.spaceFrameRank(frame)) return error.NotEnoughExperience;
         p.unlockSpaceFrame(frame, wallet) catch |err| return switch (err) {
             error.AlreadyOwned => error.AlreadyMade,
             error.NotEnoughScrap => error.NotEnoughScrap,
             error.NotEnoughParts => error.NotEnoughParts,
+            error.NotEnoughGold => error.NotEnoughGold,
             error.Prerequisite => error.PreviousFrameRequired,
             error.MaxLevel, error.NotOwned => error.AlreadyMade,
         };
@@ -236,6 +239,7 @@ pub fn make(p: *Progress, k: *Kit, index: usize) Error!Output {
     k.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] -= r.cost.alloy;
     wallet.scrap -= r.cost.scrap;
     wallet.parts -= r.cost.parts;
+    wallet.gold -= r.cost.gold;
     switch (r.output) {
         .vehicle => |d| p.vehicles |= @as(u8, 1) << @intCast(@intFromEnum(d)),
         .fighter => p.fighter = true,
@@ -327,7 +331,9 @@ test "aircraft fabricator tiers change Kestrel upgrades and equip unlocked paint
 
 test "Aircraft fabricator unlocks space frames in order and equips owned frames" {
     var progress: Progress = .{ .fighter = true };
-    var kit: Kit = .{ .wallet = .{ .scrap = 3000, .parts = 70 } };
+    var kit: Kit = .{ .wallet = .{ .scrap = 3000, .parts = 70, .gold = 100 } };
+    // The last frame is gated by combat rank (see `Progress.spaceFrameRank`).
+    _ = kit.awardCombatXP(250 * Progress.spaceFrameRank(.bulwark));
     var rows: [recipes.len]u8 = undefined;
     const aircraft = onTab(.aircraft, &rows);
     const frameRecipe = struct {

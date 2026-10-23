@@ -1,6 +1,6 @@
 # Automation, strategy and defense: modular structures, mining and farming bases, drones, turrets
 
-**Status:** plan with the owner's decisions recorded (below), 2026-10-22. Nothing here is built. The [roadmap](../roadmap.md) stays the single plan. This extends [settlement building](settlement-building.md) (the shared stockpile, the hourly integer economy, claims) and [block building](block-building.md) (blocks, prefabs, platformer parts), and replaces their open "mining" and "light simulation" sketches with a first slice.
+**Status:** BS1–BS3 are implemented as of 2026-10-22; behavior modules, mining, drones and command view remain planned. The [roadmap](../roadmap.md) stays the single plan. This extends [settlement building](settlement-building.md) (the shared stockpile, the hourly integer economy, claims) and [block building](block-building.md) (blocks, prefabs, platformer parts), and replaces their open "mining" and "light simulation" sketches with a first slice.
 
 **Owner request (2026-10-22):** make the existing building tools modular so users can build their own; make parts and scrap easy to get, especially from fighting robots; build mining bases and mining drones, and farming bases and drones, so production is automated; add Civilization-style strategy play in 3D with its own GUI controls; add protective prefabs (turrets, shield generators, missile launchers).
 
@@ -10,11 +10,12 @@
 
 | Need | Existing piece | Gap |
 | --- | --- | --- |
-| Placing things | `Build.zig` (machines, 16 max), `BlockTool.zig` (block grid, styles, prefabs, clipboard), `BridgeTool`, `TerrainTool`, wiring | Each tool is hard-coded: its own palette, its own input, its own limits. No shared "what can be placed" registry. |
+| Placing things | `Build.zig` (machines, 16 max), `BlockTool.zig` (block grid, styles, prefabs, clipboard and structure library), `BridgeTool`, `TerrainTool`, wiring | Structure entries now join the block palette. The legacy tools still have distinct controls and capacity rules; the registry work is a routing refactor, not yet a unified validation/cost/preview contract. |
+| Architectural glazing | `Materials.zig` includes eight glass color swatches; `Blocks.Shape.pane` is a thin, rotatable, colliding panel | The scene pipeline is opaque. Glass is currently tinted architectural color, without view-through transparency, reflections or window frames. A true transparent pass needs separate pane meshes, per-view sorting and depth-write rules before these can be called optically transparent. |
 | User-made pieces | Block prefabs (`build/Prefabs.zig`, `captureBox`), machine blueprints (`Blueprint.Doc`, P to capture) | Blocks and machines cannot be captured together; prefabs have no behaviour and no stats. |
 | Behaviour | Machine devices (generator, sap tap, plate, motor, lamp, logic, script) and signals | No weapon, shield, drill, drone bay or storage device. |
 | Defense | Ranger special `sentry` (20 s zapper), `Combat.hurt`, `Enemies` | No placed, persistent defense; enemies never attack structures. |
-| Materials | Per-player `Wallet` (scrap, parts, kits), pickups, `Fabricator` costs; arena waves pay scrap | Robot kills do not drop scrap or parts reliably; no ore; no shared stockpile. |
+| Materials | Per-player `Wallet` (scrap, parts, gold, kits), loot tables, pickups, `Fabricator` costs; arena waves pay scrap | No ore, shared automated stockpile or powered production yet. |
 | Production | `Farm.zig` (crops on tilled soil, hay to the harvester's kit) | No machines that produce on their own; no drones that haul or harvest. |
 | Strategy UI | Pause menu, `Screens.zig` panels, four-player viewports | No command view, selection or orders. |
 

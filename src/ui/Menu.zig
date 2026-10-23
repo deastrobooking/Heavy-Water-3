@@ -15,7 +15,7 @@ comptime {
 
 pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, heroes, arena, party, player, world_map, music, confirm_quit, guide };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
+pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, start_space_trial, leave_space_trial, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
 pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
@@ -59,7 +59,8 @@ pub const confirm_items = [_]Item{
 };
 pub const party_items = [_]Item{
     .{ .label = "PLAYER 1" },                                               .{ .label = "PLAYER 2" },                                             .{ .label = "PLAYER 3" },                                                   .{ .label = "PLAYER 4" },
-    .{ .label = "JOIN / LEAVE SELECTED PLAYER", .command = .party_toggle }, .{ .label = "ASSIGN NEXT CONTROLLER", .command = .party_controller }, .{ .label = "SWAP WITH NEXT SCREEN POSITION", .command = .party_position }, .{ .label = "LOAD NEXT SAVED RANGER", .command = .party_ranger }, .{ .label = "RESUME", .command = .@"resume" },
+    .{ .label = "JOIN / LEAVE SELECTED PLAYER", .command = .party_toggle }, .{ .label = "ASSIGN NEXT CONTROLLER", .command = .party_controller }, .{ .label = "SWAP WITH NEXT SCREEN POSITION", .command = .party_position }, .{ .label = "LOAD NEXT SAVED RANGER", .command = .party_ranger },
+    .{ .label = "RESUME", .command = .@"resume" },
 };
 pub const player_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
@@ -88,6 +89,8 @@ pub const arena_items = [_]Item{
     .{ .label = "BATTLE LOCATION" },
     .{ .label = "DROP IN AND FIGHT", .command = .start_arena },
     .{ .label = "LEAVE THE ARENA", .command = .leave_arena },
+    .{ .label = "SPACE DOGFIGHT TRIAL", .command = .start_space_trial },
+    .{ .label = "LEAVE SPACE TRIAL", .command = .leave_space_trial },
     .{ .label = "BACK" },
 };
 /// Heroes screen rows: four player tabs, your own ranger, every Wildkin, then BACK. Cards sit in
@@ -160,6 +163,7 @@ pad_preset_label: [64]u8 = @splat(0),
 heroes_unlocked: u32 = 0,
 players_present: u8 = 1,
 arena_active: bool = false,
+space_trial_active: bool = false,
 arena_venue: Arena.Venue = .current_landscape,
 /// The player a hero card is chosen for (Heroes screen tabs).
 hero_player: u8 = 0,
@@ -228,9 +232,11 @@ pub fn enabled(self: *const Menu, row: usize) bool {
     if (self.screen == .title and row == 0) return self.has_save;
     if (self.screen == .pause and pause_items[row].command == .load) return self.has_save;
     if (self.screen == .arena) return switch (arena_items[row].command) {
-        .start_arena => !self.arena_active,
+        .start_arena => !self.arena_active and !self.space_trial_active,
         .leave_arena => self.arena_active,
-        else => row != 0 or !self.arena_active,
+        .start_space_trial => !self.space_trial_active,
+        .leave_space_trial => self.space_trial_active,
+        else => row != 0 or (!self.arena_active and !self.space_trial_active),
     };
     if (self.screen == .heroes) {
         if (row < heroes_tabs) return self.players_present & (@as(u8, 1) << @intCast(row)) != 0;
@@ -279,7 +285,13 @@ pub fn key(self: *Menu, k: Key) Command {
     if (self.screen == .pad_controls) return self.padControlsKey(k);
     if (self.screen == .world_map and self.row < Sandbox.travel_count) self.map_destination = self.row;
     if (self.screen == .world_map and k == .confirm and self.row == frame_row) {
-        self.map_target = switch (self.map_target) { .none => .nest, .nest => .cave, .cave => .wildkin, .wildkin => .wildlife, .wildlife => .none };
+        self.map_target = switch (self.map_target) {
+            .none => .nest,
+            .nest => .cave,
+            .cave => .wildkin,
+            .wildkin => .wildlife,
+            .wildlife => .none,
+        };
         return .none;
     }
     if (self.screen == .world_map and self.row == frame_row and k == .left) {

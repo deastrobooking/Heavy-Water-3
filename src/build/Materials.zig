@@ -1,6 +1,5 @@
-//! Block materials, grouped into styles. A style is data: eight materials in shared roles, so a
-//! selection can be re-skinned from one style to another role by role (a castle's main stone
-//! becomes a dungeon's brick, an eco city's living wood, a farm's planks).
+//! Block materials, grouped into styles. Building styles have eight shared roles, so a selection
+//! can be re-skinned role by role. The glass palette uses the same eight slots for glazing swatches.
 const std = @import("std");
 
 pub const Material = struct {
@@ -14,8 +13,9 @@ pub const Material = struct {
 
 /// `platformer` is the mechanisms: its eight "materials" are springs, boost strips, crumbling
 /// blocks, hazards, checkpoints, pressure plates, gates and movers (see `game/Platformer.zig`).
-pub const Style = enum { castle, dungeon, eco_city, farm, platformer };
-pub const style_count = 5;
+/// `glass` is a swatch palette of architectural glazing and glass blocks.
+pub const Style = enum { castle, dungeon, eco_city, farm, platformer, glass };
+pub const style_count = 6;
 /// What each of a style's eight materials is for; restyling keeps the role.
 pub const Role = enum { main, dark, accent, wood, roof, nature, metal, color };
 
@@ -61,6 +61,14 @@ pub const all = [_]Material{
     .{ .id = "platform.plate", .name = "PRESSURE PLATE", .color = .{ 0.50, 0.58, 0.78 }, .variation = 0 },
     .{ .id = "platform.gate", .name = "GATE", .color = .{ 0.30, 0.30, 0.44 }, .variation = 0.02 },
     .{ .id = "platform.mover", .name = "MOVER", .color = .{ 0.68, 0.40, 0.96 }, .variation = 0 },
+    .{ .id = "glass.clear", .name = "CLEAR GLASS", .color = .{ 0.76, 0.91, 0.93 }, .variation = 0 },
+    .{ .id = "glass.ocean", .name = "OCEAN GLASS", .color = .{ 0.28, 0.67, 0.84 }, .variation = 0.01 },
+    .{ .id = "glass.emerald", .name = "EMERALD GLASS", .color = .{ 0.28, 0.72, 0.58 }, .variation = 0.01 },
+    .{ .id = "glass.amber", .name = "AMBER GLASS", .color = .{ 0.92, 0.61, 0.28 }, .variation = 0.01 },
+    .{ .id = "glass.rose", .name = "ROSE GLASS", .color = .{ 0.88, 0.48, 0.59 }, .variation = 0.01 },
+    .{ .id = "glass.frosted", .name = "FROSTED GLASS", .color = .{ 0.72, 0.84, 0.88 }, .variation = 0.02 },
+    .{ .id = "glass.smoke", .name = "SMOKED GLASS", .color = .{ 0.34, 0.43, 0.51 }, .variation = 0.01 },
+    .{ .id = "glass.mirror", .name = "MIRROR GLASS", .color = .{ 0.63, 0.73, 0.79 }, .variation = 0 },
 };
 pub const count = all.len;
 
@@ -72,6 +80,7 @@ pub fn ofStyle(style: Style) []const u6 {
         .eco_city => &[_]u6{ 16, 17, 18, 19, 20, 21, 22, 23 },
         .farm => &[_]u6{ 24, 25, 26, 27, 28, 29, 30, 31 },
         .platformer => &[_]u6{ 32, 33, 34, 35, 36, 37, 38, 39 },
+        .glass => &[_]u6{ 40, 41, 42, 43, 44, 45, 46, 47 },
     };
 }
 
@@ -82,6 +91,7 @@ pub fn styleName(style: Style) []const u8 {
         .eco_city => "ECO CITY",
         .farm => "FARM",
         .platformer => "PLATFORMER",
+        .glass => "GLASS",
     };
 }
 
@@ -94,6 +104,8 @@ pub fn roleOf(material: u6) struct { style: Style, role: usize } {
 /// they never restyle and nothing restyles into them.
 pub fn restyle(material: u6, to: Style) u6 {
     if (to == .platformer or roleOf(material).style == .platformer) return material;
+    if (to == roleOf(material).style) return material;
+    if (roleOf(material).style == .glass) return ofRole(to, .accent);
     return ofStyle(to)[roleOf(material).role];
 }
 

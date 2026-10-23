@@ -294,9 +294,9 @@ pub fn loadSeededDeferred(self: *Catalog, allocator: std.mem.Allocator, seed: u6
     self.content.wheel = try self.register(allocator, try Model.fromMesh(allocator, try Mesh.wheel(allocator), .named("tire", .{ 0.16, 0.16, 0.17, 1 })));
     for (&self.arbors, 0..) |*asset, i| {
         const genome: Arbor.Genome = if (i == 0)
-            .{ .height = 420, .apical_dominance = 0.8, .vascular_capacity = 150, .lumen = .{ 0.15, 0.85, 0.7 } }
+            .{ .height = 510, .base_radius = 30, .crown_radius = 210, .apical_dominance = 0.8, .vascular_capacity = 150, .lumen = .{ 0.15, 0.85, 0.7 } }
         else
-            .{ .height = 340, .apical_dominance = 0.1, .gravitropism = 0.55, .platform_tendency = 0.9, .vascular_capacity = 300, .bark = .{ 0.42, 0.28, 0.18 }, .lumen = .{ 1, 0.65, 0.15 } };
+            .{ .height = 400, .base_radius = 27, .crown_radius = 195, .apical_dominance = 0.1, .gravitropism = 0.55, .platform_tendency = 0.9, .vascular_capacity = 300, .bark = .{ 0.42, 0.28, 0.18 }, .lumen = .{ 1, 0.65, 0.15 } };
         asset.tree = try Arbor.grow(Seed.mix(seed ^ (0x4152424f52 + @as(u64, @intCast(i)))), genome);
         asset.mesh = try self.reserve();
         self.pending[self.pending_count] = .{ .handle = asset.mesh, .generator = .{ .context = &asset.tree, .build = Build.arborFull } };

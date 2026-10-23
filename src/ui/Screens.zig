@@ -84,6 +84,7 @@ pub const Hud = struct {
     music_track: []const u8 = "",
     music_track_index: usize = 0,
     music_track_count: usize = 0,
+    space_trial: bool = false,
 
     pub const Guest = struct { index: u8, view: Rect, prompt: []const u8 = "" };
     pub const Mark = struct { x: f32, y: f32, kind: enum { nose, lock }, progress: f32 = 0 };
@@ -528,10 +529,10 @@ fn drawHeroes(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
 
 /// The Starbowl: what it is, the party, the best wave, and start / leave.
 fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
-    const r = menuRect(c, 560, 380);
-    panel(c, r, "THE STARBOWL");
+    const r = menuRect(c, 560, 440);
+    panel(c, r, "BATTLE ARENAS");
     var wrapped: [4][]const u8 = undefined;
-    const lines = Canvas.wrap("Drop into a larger battle stage above the current wilds or a city skyline. Up to four heroes hold out against Hive waves; every clear pays loot and scrap, and every third wave brings a Wildkin champion.", 60, &wrapped);
+    const lines = Canvas.wrap("Drop into the Starbowl for Hive waves, co-op loot and Wildkin champions. SPACE DOGFIGHT TRIAL is a bounded orbital flight test: A/D strafe, W accelerate, Q/E rise, Shift boost, S brake. No enemies or rewards yet.", 60, &wrapped);
     for (wrapped[0..lines], 0..) |line, i| c.text(r.x + 22, r.y + 52 + @as(f32, @floatFromInt(i)) * 17, line, 1, ink);
     var y = r.y + 52 + @as(f32, @floatFromInt(lines)) * 17 + 10;
     if (sb) |s| {
@@ -756,11 +757,11 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
     // Below the presets, clear of the panel title it used to run into.
     c.text(r.x + 24, slot_row.y + 40, "STANDARD AND GENERIC HID GAMEPADS CAN BE REMAPPED; SETTINGS SAVE AUTOMATICALLY", 0.86, dim);
 
-    c.text(r.x + 24, r.y + r.h - 138, "BUILD: HOLD LT + D-PAD LEFT TO START OR STOP; RT PLACE  RB REMOVE  D-PAD PIECE / MATERIAL / TURN", 0.78, dim);
-    c.text(r.x + 24, r.y + r.h - 118, "MOVE / AIM: LEFT STICK / RIGHT STICK  LT BOOSTS  B DODGES ON FOOT / BRAKES IN FLIGHT", 0.82, dim);
-    c.text(r.x + 24, r.y + r.h - 98, "FLIGHT: Y CYCLES / EXITS SUIT  A ASCENDS  D-PAD UP / DOWN CLIMBS / DESCENDS  X EXITS KESTREL", 0.78, dim);
-    c.text(r.x + 24, r.y + r.h - 78, "COMBAT: RT FIRES  RB SABER / GUARD; IN KESTREL RT FIRES, RB LOCKS / RELEASES MISSILES", 0.78, dim);
-    c.text(r.x + 24, r.y + r.h - 58, "ENTER CAPTURES  ARROWS CHANGE  AXIS ENTER INVERTS  EXPORT / IMPORT SHAREABLE PRESETS", 0.78, dim);
+    c.text(r.x + 24, r.y + r.h - 138, "BUILD: HOLD LT + D-PAD LEFT TO START / STOP; RT PLACE  RB REMOVE; X CREATIVE FREE-BUILD", 0.78, dim);
+    c.text(r.x + 24, r.y + r.h - 118, "CREATIVE BLOCKS: LT PLACE  RT REMOVE  D-PAD UP PIECE / LEFT-RIGHT MATERIAL / DOWN TURN", 0.78, dim);
+    c.text(r.x + 24, r.y + r.h - 98, "MOVE / AIM: LEFT STICK / RIGHT STICK  LT BOOSTS  B DODGES ON FOOT / BRAKES IN FLIGHT", 0.82, dim);
+    c.text(r.x + 24, r.y + r.h - 78, "FLIGHT: Y CYCLES / EXITS SUIT  A ASCENDS  D-PAD UP / DOWN CLIMBS / DESCENDS  X EXITS KESTREL", 0.78, dim);
+    c.text(r.x + 24, r.y + r.h - 58, "COMBAT: RT FIRES  RB SABER / GUARD; IN KESTREL RT FIRES, RB LOCKS / RELEASES MISSILES", 0.78, dim);
     const y = r.y + r.h - 38;
     const export_button: Rect = .{ .x = r.x + r.w - 445, .y = y, .w = 104, .h = 25 };
     const import_button: Rect = .{ .x = r.x + r.w - 335, .y = y, .w = 104, .h = 25 };
@@ -777,7 +778,7 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
 fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: bool) void {
     const v = hud.view;
     // Vitals, bottom left (hidden under conversation and shop panels).
-    if (sb.seated == null and !panels) {
+    if (sb.seated == null and !panels and !hud.space_trial) {
         vitals(c, v, sb.player, sb.profile, sb.combat.vitals[0]);
         petStatus(c, v, sb, 0);
         specials(c, v, sb, 0, sb.profile, hud.special_keys);
@@ -791,10 +792,11 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
         const r: Rect = .{ .x = v.x + v.w - w - 20, .y = v.y + 20, .w = w, .h = 72 };
         c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
         c.text(r.x + 14, r.y + 10, scrap, 1.3, gold);
-        c.print(r.x + 14, r.y + 32, 1, ink, "{d} PARTS   {d} KITS", .{ sb.kits[0].wallet.parts, kits(sb.kits[0].wallet) });
+        c.print(r.x + 14, r.y + 32, 1, ink, "{d} GOLD   {d} PARTS   {d} KITS", .{ sb.kits[0].wallet.gold, sb.kits[0].wallet.parts, kits(sb.kits[0].wallet) });
         inventoryLine(c, sb, r.x + 14, r.y + 50, 1);
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
     }
+    if (!sb.arena.active and !hud.space_trial and !sb.hangar.space_mode) drawPlayerCoordinates(c, v, sb);
     if (menu.map_target != .none and !panels) {
         if (trackedTarget(menu.map_target, sb, sb.player.feet, 0)) |target| {
             const dx = target.position[0] - sb.player.feet[0];
@@ -952,6 +954,7 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
     const g = &sb.guests[guest.index];
     const v = guest.view;
     const tint = Profile.accent_colors[g.profile.accent];
+    if (!sb.arena.active and !sb.hangar.space_mode) drawPlayerCoordinates(c, v, sb);
     vitals(c, v, g.player, g.profile, sb.combat.vitals[guest.index + 1]);
     petStatus(c, v, sb, guest.index + 1);
     specials(c, v, sb, guest.index + 1, g.profile, .{ "UP", "DN", "R3+UP" });
@@ -979,6 +982,36 @@ fn drawGuest(c: *Canvas, sb: *const Sandbox, guest: Hud.Guest) void {
         y += 26;
     }
     c.text(r.x + 14, r.y + r.h - 22, "D-PAD CHOOSE  X TRADE  B CLOSE", 0.9, dim);
+}
+
+fn drawPlayerCoordinates(c: *Canvas, v: Rect, sb: *const Sandbox) void {
+    var count: usize = 1;
+    for (sb.guests) |g| if (g.active) {
+        count += 1;
+    };
+    const row_h: f32 = 16;
+    const w = @min(v.w - 24, 236);
+    const r: Rect = .{ .x = v.x + 12, .y = v.y + 20, .w = w, .h = 25 + row_h * @as(f32, @floatFromInt(count)) };
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.68 });
+    c.frame(r, 1, alpha(accent, 0.5));
+    c.text(r.x + 8, r.y + 6, "PLAYER COORDINATES", 0.72, accent);
+    var y = r.y + 22;
+    for (0..Sandbox.max_players) |owner| {
+        if (owner > 0 and !sb.guests[owner - 1].active) continue;
+        const position = if (owner == 0) blk: {
+            if (sb.hangar.piloting) {
+                const p = sb.hangar.fighter.?.body.pos;
+                break :blk [3]f32{ p.x, p.y, p.z };
+            }
+            break :blk sb.player.feet;
+        } else sb.guests[owner - 1].player.feet;
+        const coord = CityGeography.atWorld(position[0], position[2]);
+        const lat_dir: []const u8 = if (coord.latitude >= 0) "N" else "S";
+        const lon_dir: []const u8 = if (coord.longitude >= 0) "E" else "W";
+        const color = if (owner == 0) ink else Profile.accent_colors[sb.guests[owner - 1].profile.accent];
+        c.print(r.x + 8, y, 0.78, color, "P{d}  {d:.4} {s}  {d:.4} {s}", .{ owner + 1, @abs(coord.latitude), lat_dir, @abs(coord.longitude), lon_dir });
+        y += row_h;
+    }
 }
 
 fn drawGuestFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, owner: usize, v: Rect, tint: Color) void {
@@ -1349,6 +1382,7 @@ pub fn keeperName(sb: *const Sandbox, stall: usize) []const u8 {
 fn walletLine(c: *Canvas, sb: *const Sandbox, x: f32, y: f32) void {
     c.print(x, y, 1.1, gold, "{d} SCRAP", .{sb.kits[0].wallet.scrap});
     c.print(x + 140, y, 1.1, ink, "{d} PARTS", .{sb.kits[0].wallet.parts});
+    c.print(x + 280, y, 1.1, gold, "{d} GOLD", .{sb.kits[0].wallet.gold});
 }
 
 /// A shop panel on the right of the view, or on the left when the character is on show.
@@ -1412,12 +1446,13 @@ fn pips(c: *Canvas, x: f32, y: f32, level: u8) void {
 }
 
 fn costText(buffer: []u8, cost: Progress.Cost) []const u8 {
+    if (cost.gold > 0) return std.fmt.bufPrint(buffer, "{d} GOLD + {d} SCRAP + {d} PARTS", .{ cost.gold, cost.scrap, cost.parts }) catch "";
     if (cost.parts == 0) return std.fmt.bufPrint(buffer, "{d} SCRAP", .{cost.scrap}) catch "";
     return std.fmt.bufPrint(buffer, "{d} SCRAP + {d} PARTS", .{ cost.scrap, cost.parts }) catch "";
 }
 
 fn affordable(w: Market.Wallet, cost: Progress.Cost) bool {
-    return w.scrap >= cost.scrap and w.parts >= cost.parts;
+    return w.scrap >= cost.scrap and w.parts >= cost.parts and w.gold >= cost.gold;
 }
 
 fn drawUpgrades(c: *Canvas, sb: *const Sandbox, selected: u8, v: Rect) void {
@@ -1527,6 +1562,12 @@ fn drawFabricator(c: *Canvas, sb: *const Sandbox, shop: Sandbox.Shop, v: Rect) v
             const label = std.fmt.bufPrint(&level, "LV {d}/{d}", .{ sb.progress.kestrelLevel(upgrade), Progress.max_level }) catch "";
             c.text(row.x + row.w - 340, row.y + 10, label, 0.9, dim);
         }
+        if (recipe.output == .space_frame and shop.tab == @intFromEnum(Fabricator.Tab.aircraft)) {
+            const rank = Progress.spaceFrameRank(recipe.output.space_frame);
+            var rank_buffer: [32]u8 = undefined;
+            const rank_text = std.fmt.bufPrint(&rank_buffer, "RANK {d}/{d}", .{ sb.kits[0].combatLevel(), rank }) catch "";
+            c.text(row.x + row.w - 590, row.y + 10, rank_text, 0.9, if (sb.kits[0].combatLevel() >= rank) good else dim);
+        }
         if (Fabricator.status(&sb.progress, &sb.kits[0], recipe.output)) |status| {
             const state_color = if (std.mem.eql(u8, status, "FABRICATE KESTREL FIRST")) bad else good;
             c.text(row.x + row.w - 250, row.y + 10, status, 1, state_color);
@@ -1576,7 +1617,7 @@ fn aircraftDetail(c: *Canvas, sb: *const Sandbox, output: Fabricator.Output, x: 
     switch (output) {
         .space_frame => |frame| {
             const cfg = Hangar.configFor(frame, sb.progress.kestrel_levels);
-            c.print(x, y, 0.9, accent, "THRUST {d:.0}   HULL {d:.0}   WING ASPECT {d:.1}", .{ cfg.thrust, cfg.hull_max, cfg.aero.aspect });
+            c.print(x, y, 0.9, accent, "THRUST {d:.0}   HULL {d:.0}   WING ASPECT {d:.1}   REQUIRED RANK {d}", .{ cfg.thrust, cfg.hull_max, cfg.aero.aspect, Progress.spaceFrameRank(frame) });
         },
         .kestrel_upgrade => |upgrade| {
             const level = sb.progress.kestrelLevel(upgrade);

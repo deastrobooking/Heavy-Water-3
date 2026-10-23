@@ -210,6 +210,8 @@ pub const Actions = packed struct {
     open_creator: bool = false,
     /// Held modifier (Shift, or a pad's sprint button): block clicks mark box corners.
     box_modifier: bool = false,
+    /// Toggle free, floating block placement while the block tool is active.
+    toggle_creative: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges, 5 weapon, 6 terrain, 7 blocks.
     select_tool: u3 = 0,
     /// Climb out of the Kestrel (its primary button fires).
@@ -2627,7 +2629,12 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .seed = self.seed,
         .bridges = self.openBridgeEdges(&bridge_edges),
         .tick = self.tick,
-        .player = .{ .feet = self.player.feet, .yaw = camera.yaw, .pitch = camera.pitch, .mode = self.player.mode },
+        .player = .{
+            .feet = if (self.hangar.space_mode) self.hangar.space_return else self.player.feet,
+            .yaw = if (self.hangar.space_mode) self.hangar.space_return_yaw else camera.yaw,
+            .pitch = if (self.hangar.space_mode) self.hangar.space_return_pitch else camera.pitch,
+            .mode = if (self.hangar.space_mode) .walk else self.player.mode,
+        },
         .profile = self.profile.toDoc(),
         .props = crates[0..crate_count],
         .collected = self.modifications.slice(),
@@ -2649,7 +2656,10 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         },
         .progress = try self.progress.toDoc(arena),
         .race_best = self.garage.race.best,
-        .fighter = if (self.hangar.fighter) |f| .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .yaw = f.heading() } else null,
+        .fighter = if (self.hangar.space_mode) blk: {
+            const pad = Hangar.padPosition(self.seed, spawn);
+            break :blk Save.FighterState{ .position = .{ pad[0], pad[1] + Hangar.rest_height, pad[2] }, .yaw = std.math.pi };
+        } else if (self.hangar.fighter) |f| .{ .position = .{ f.body.pos.x, f.body.pos.y, f.body.pos.z }, .yaw = f.heading() } else null,
         .cars = cars: {
             var list: std.ArrayList(Save.CarState) = .empty;
             for (self.garage.cars) |slot| if (slot) |c| {

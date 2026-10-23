@@ -299,9 +299,7 @@ fn stepPet(sb: *Sandbox, camera: *Camera, dt: f32) void {
             .air_attack => |a| {
                 sb.cuePitch(.zap, a.at, 1.3);
                 if (a.downed) {
-                    burst(sb, a.at, 3.5, Pets.info(a.species).glow);
-                    dropBelow(sb, .hive_alloy, a.at);
-                    sb.progress.setFlag("wasp_down");
+                    awardAirKill(sb, owner, a.enemy, a.at);
                     petLearns(sb, a.at);
                     if (a.raid_repelled) {
                         sb.progress.setFlag("bomber_raid_defended");
@@ -1398,7 +1396,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
         .direct = sb.trigger.direct,
         .cycle = armed and actions.next_item,
     }, dt, &out);
-    rangerAirShots(sb, .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() }, .{ f.x(), f.y(), f.z() }, out[0..@min(fought, out.len)]);
+    rangerAirShots(sb, 0, .{ aim_camera.position.x(), aim_camera.position.y(), aim_camera.position.z() }, .{ f.x(), f.y(), f.z() }, out[0..@min(fought, out.len)]);
     arsenalEvents(sb, 0, out[0..@min(fought, out.len)], camera);
     for (&sb.guests, 1..) |*g, p| {
         defer g.next_weapon = false;
@@ -1424,7 +1422,7 @@ pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Action
             .direct = true,
             .cycle = !frozen and g.next_weapon and g.trading == null,
         }, dt, &out);
-        rangerAirShots(sb, .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, out[0..@min(n, out.len)]);
+        rangerAirShots(sb, @intCast(p), .{ eye.x(), eye.y(), eye.z() }, .{ gf.x(), gf.y(), gf.z() }, out[0..@min(n, out.len)]);
         arsenalEvents(sb, @intCast(p), out[0..@min(n, out.len)], camera);
     }
     stepSpecials(sb, camera, actions, frozen, dt);
@@ -1454,15 +1452,34 @@ fn stepDroidCompanions(sb: *Sandbox, camera: *Camera, dt: f32) void {
     }
 }
 
-fn rangerAirShots(sb: *Sandbox, origin: V, direction: V, events: []const Combat.Event) void {
+fn awardAirKill(sb: *Sandbox, owner: usize, kind: Skies.WingKind, at: V) void {
+    if (owner >= Sandbox.max_players) return;
+    const reward = Loot.rollAir(kind, sb.skies.rng.random());
+    const kit = &sb.kits[owner];
+    kit.wallet.scrap +|= reward.scrap;
+    kit.wallet.parts +|= reward.parts;
+    kit.wallet.gold +|= reward.gold;
+    kit.inventory[@intFromEnum(Collectibles.Kind.hive_alloy)] +|= reward.alloy;
+    kit.inventory[@intFromEnum(Collectibles.Kind.rotor_core)] +|= reward.rotor;
+    kit.inventory[@intFromEnum(Collectibles.Kind.lumen_shard)] +|= reward.lumen;
+    const leveled = kit.awardCombatXP(reward.combat_xp);
+    sb.say("P{d}: {s} fighter down — +{d} XP, {d} scrap, {d} gold, {d} parts", .{ owner + 1, @tagName(kind), reward.combat_xp, reward.scrap, reward.gold, reward.parts });
+    if (reward.alloy > 0 or reward.rotor > 0 or reward.lumen > 0) sb.say("P{d} salvage: +{d} Hive alloy, +{d} rotor cores, +{d} lumen", .{ owner + 1, reward.alloy, reward.rotor, reward.lumen });
+    if (leveled) sb.say("P{d} combat level {d}! (+2 max health)", .{ owner + 1, kit.combatLevel() });
+    burst(sb, at, 5, if (kind == .robot_fighter or kind == .robot_lancer) .{ 0.22, 0.72, 1 } else .{ 1, 0.3, 0.15 });
+    sb.cue(.boom, at);
+    sb.progress.setFlag("wasp_down");
+}
+
+fn rangerAirShots(sb: *Sandbox, owner: u8, origin: V, direction: V, events: []const Combat.Event) void {
     for (events) |event| if (event == .fired) switch (event.fired) {
-        .blaster => sb.skies.fireRanger(origin, direction, 22),
-        .sniper_rifle => sb.skies.fireRanger(origin, direction, 95),
-        .machine_gun => sb.skies.fireRanger(origin, direction, 9),
-        .heavy_rifle => sb.skies.fireRanger(origin, direction, 55),
-        .energy_bazooka => sb.skies.fireRanger(origin, direction, 90),
+        .blaster => sb.skies.fireRanger(origin, direction, 22, owner),
+        .sniper_rifle => sb.skies.fireRanger(origin, direction, 95, owner),
+        .machine_gun => sb.skies.fireRanger(origin, direction, 9, owner),
+        .heavy_rifle => sb.skies.fireRanger(origin, direction, 55, owner),
+        .energy_bazooka => sb.skies.fireRanger(origin, direction, 90, owner),
         .energy_net => {
-            sb.skies.fireRangerNet(origin, direction, 38);
+            sb.skies.fireRangerNet(origin, direction, 38, owner);
             if (netWildHit(sb, origin, direction)) |species| sb.say("Net hit {s}: {d}% vitality", .{ Pets.info(species).name, @as(u32, @intFromFloat(sb.pets.wild_health[@intFromEnum(species)])) });
         },
         else => {},
@@ -1619,12 +1636,7 @@ fn stepSkies(sb: *Sandbox, camera: *Camera, frozen: bool, dt: f32, timing: ?Sand
             }
         },
         .player_hit => |hit| hive(sb, .{ .player_hit = .{ .player = hit.player, .damage = hit.damage, .from = sb.player.feet } }, camera),
-        .wasp_down => |at| {
-            burst(sb, at, 5, .{ 1, 0.3, 0.15 });
-            sb.cue(.boom, at);
-            dropBelow(sb, .hive_alloy, at);
-            sb.progress.setFlag("wasp_down");
-        },
+        .wasp_down => |kill| awardAirKill(sb, kill.player, kill.kind, kill.position),
         .raid_started => |raid| {
             cityInvasion(sb, raid.position);
             sb.say("market plaza {d} under Hive air attack — Scalari siege frame detected", .{raid.plaza + 1});
@@ -1811,6 +1823,11 @@ pub fn boardJet(sb: *Sandbox, camera: *Camera) void {
 }
 
 pub fn leaveJet(sb: *Sandbox, camera: *Camera) void {
+    if (sb.hangar.space_mode) {
+        const feet = sb.hangar.leaveSpaceTrial(sb.seed, Sandbox.spawn, sb.progress.kestrel_levels, camera) orelse return;
+        sb.player = .{ .feet = feet, .mode = .walk };
+        return;
+    }
     const feet = sb.hangar.leave(&sb.physics) orelse return;
     sb.player = .{ .feet = feet, .mode = .walk };
     camera.pitch = -0.2;
@@ -1847,6 +1864,15 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             return k + need <= o.len;
         }
     }.ok;
+    if (sb.hangar.space_mode and room(out, n, 5)) {
+        const center = sb.hangar.space_center;
+        out[n] = .{ .mesh = c.orbital_ring, .transform = .{ .position = .{ center.x, center.y, center.z } }, .tint = .{ 1, 1, 1, 1 } };
+        out[n + 1] = .{ .mesh = c.orbital_ring_glow, .transform = .{ .position = .{ center.x, center.y, center.z } }, .tint = .{ 1, 1, 1, 1.8 } };
+        out[n + 2] = .{ .mesh = c.orbital_service_hub, .transform = .{ .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48 }, .tint = .{ 1, 1, 1, 1 } };
+        out[n + 3] = .{ .mesh = c.orbital_service_hub_glow, .transform = .{ .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48 }, .tint = .{ 1, 1, 1, 1.8 } };
+        out[n + 4] = .{ .mesh = c.orbital_planet, .transform = .{ .position = .{ center.x, center.y - 460, center.z + 820 }, .scale = 620 }, .tint = .{ 1, 1, 1, 1 } };
+        n += 5;
+    }
     n += sb.garage.publish(sb.catalog, out[n..]);
     n = publishMountains(sb, out, n, t);
     n = publishWildkin(sb, out, n, t);

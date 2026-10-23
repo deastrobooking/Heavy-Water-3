@@ -11,8 +11,8 @@ pub const section_cells = side * side * side;
 pub const section_capacity = 256;
 pub const dirty_capacity = 32;
 
-pub const Shape = enum(u4) { empty = 0, cube, slab, ramp, stair, _ };
-pub const placeable_shapes = [_]Shape{ .cube, .slab, .ramp, .stair };
+pub const Shape = enum(u4) { empty = 0, cube, slab, ramp, stair, pane, _ };
+pub const placeable_shapes = [_]Shape{ .cube, .slab, .ramp, .stair, .pane };
 
 /// `Cell.flags` bit for blocks that are part of the city (generated challenges): not saved, and
 /// the tools will not remove, restyle or refund them.
@@ -223,7 +223,7 @@ pub fn decodeSection(text: []const u8, material_count: usize, out: *[section_cel
         const cell: Cell = @bitCast(std.mem.readInt(u16, raw[pos + 2 ..][0..2], .little));
         if (run == 0 or at + run > section_cells) return error.InvalidSection;
         if (!cell.isEmpty()) {
-            if (@intFromEnum(cell.shape) > @intFromEnum(Shape.stair) or cell.material >= material_count) return error.InvalidSection;
+            if (@intFromEnum(cell.shape) > @intFromEnum(Shape.pane) or cell.material >= material_count) return error.InvalidSection;
             filled += run;
         }
         @memset(out[at .. at + run], cell);

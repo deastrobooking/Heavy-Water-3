@@ -275,6 +275,7 @@ pub fn starters(style: Materials.Style) []const Prefab {
         .eco_city => &eco_city,
         .farm => &farm,
         .platformer => &platformer,
+        .glass => &.{},
     };
 }
 
@@ -288,6 +289,11 @@ pub fn cost(prefab: Prefab) [Materials.count]u32 {
 test "every starter fits its declared size, uses its own style and has no repeated cell" {
     for (0..Materials.style_count) |s| {
         const style: Materials.Style = @enumFromInt(s);
+        // Glass is a swatch palette of glazing: blocks and panes only, no ready-made pieces.
+        if (style == .glass) {
+            try std.testing.expectEqual(@as(usize, 0), starters(style).len);
+            continue;
+        }
         try std.testing.expect(starters(style).len >= 2);
         for (starters(style)) |p| {
             try std.testing.expect(p.cells.len > 0 and p.cells.len <= max_cells);

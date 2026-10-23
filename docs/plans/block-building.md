@@ -1,6 +1,6 @@
 # Block building and terrain sculpting
 
-**Status:** planned 2026-10-21, owner decisions below. BT0 to BT5, the farming part of BT6 and BT7 are done: terrain sculpting (player 1) and a block grid in four styles plus platformer mechanisms, with starter prefabs, restyling, copy and paste and a course reachability check, that all four players build from their own kits. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
+**Status:** planned 2026-10-21, owner decisions below. BT0 to BT5, the farming part of BT6, BT7, and the creative block mode add-on are implemented: terrain sculpting (player 1) and a block grid in four styles plus platformer mechanisms, with starter prefabs, restyling, copy and paste, a course reachability check, and a free floating creative mode. Survival building still spends each player's own kit. Supersedes the structure and plot parts of [settlement and building](settlement-building.md), and reuses its claims, terrain edit layer (section 8) and economy.
 
 **Owner decisions (2026-10-21):**
 - A chunked block grid (Minecraft/Lego feel), not free-placed props. The existing machine Build tool stays for mechanisms (doors, lifts, logic) that snap into the grid.
@@ -31,6 +31,7 @@
 | BT5 | Platformer blocks and hazards, reachability validator | done 2026-10-21: spring, boost strip, crumble, hazard, checkpoint, pressure plate and gate, mover; `Course.reachable`. Open: key doors and wiring blocks to the machine signal bus (since 2026-10-22 a plate opens the gates within 16 m for 8 s), a kill plane, crumble and gate state are not saved (a load restores them) |
 | BT6 | Crops, spawner, chest, gate, strategy hooks | crops done 2026-10-21: seeds on tilled soil, three growth stages over three minutes, ripe harvest pays the harvester four hay, saved in format 30. Deferred, with reasons: a dungeon spawner and treasure chest only make sense in generated dungeons (a player-built chest that pays loot is an exploit), so they move to the Interiors dungeon work; castle gates are covered by plates and gates (BT5), a drawbridge that swings is not built; room roles and other strategy hooks wait for the settlement layer. Crops ignore seasons, weather and water for now |
 | BT7 | Polish, benchmarks, hands-on checklist | done 2026-10-21: per-player building tips, the measurements and the checklist below |
+| BT8 | Creative block mode | implemented: C on keyboard or X on a pad toggles free placement; LT places, RT removes, D-pad selects and rotates; cells may float without support. It reuses the block preview and material strip. |
 
 ## Measurements (2026-10-21, ReleaseSafe, Metal debug layer on, Apple Silicon)
 
@@ -53,8 +54,9 @@ None of the building has been played by hand. Each line is something a person sh
 6. Platformer: spring height, boost direction after turning it with T, a crumble block falling and returning, hazard damage and recovery at a checkpoint, a plate opening a gate, riding a mover.
 7. Farm: plant seeds on tilled soil, watch three stages, harvest gold crops for hay.
 8. With a second pad: LT + D-pad left starts building, every control above works, the palette is in that player's view and spends their own blocks.
-9. Save, quit, load: terrain, blocks, crops and each player's block stock come back.
-10. Build a large castle and note any hitch per click (expected around one frame on a full chunk).
+9. Creative blocks: press C / X while the block tool is active; place unsupported blocks, rotate them, and remove them. Confirm no blocks are charged while creative mode is on, then turn it off and confirm normal inventory costs resume.
+10. Save, quit, load: terrain, blocks, crops and each player's block stock come back.
+11. Build a large castle and note any hitch per click (expected around one frame on a full chunk).
 
 Risks: terrain edit thread safety (do BT1 alone first); `Physics.max_meshes` of 64; the Canvas cap of 640 commands for palette UI; the 8 MB module-state stack; the 4 MiB save cap.
 

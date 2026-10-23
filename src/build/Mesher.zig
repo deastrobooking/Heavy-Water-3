@@ -86,6 +86,8 @@ fn box(comptime lo: V, comptime hi: V) [6]Polygon {
 
 const cube_polygons = box(.{ 0, 0, 0 }, .{ 1, 1, 1 });
 const slab_polygons = box(.{ 0, 0, 0 }, .{ 1, 0.5, 1 });
+/// A narrow, full-height glazing panel; quarter-turn rotation changes its facing direction.
+const pane_polygons = box(.{ 0, 0, 0.46 }, .{ 1, 1, 0.54 });
 const s2 = 0.70710678;
 /// Rises from the front (z = 0) to the back (z = 1).
 const ramp_polygons = [_]Polygon{
@@ -115,6 +117,7 @@ fn polygons(shape: Blocks.Shape) []const Polygon {
         .slab => &slab_polygons,
         .ramp => &ramp_polygons,
         .stair => &stair_polygons,
+        .pane => &pane_polygons,
         else => &.{},
     };
 }

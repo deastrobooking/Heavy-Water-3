@@ -566,11 +566,11 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     var light = Sky.at(sky_time);
     if (self.scene.space_review) light = .{
         .direction = .{ 0.35, 0.88, -0.31 },
-        .color = .{ 1.15, 1.22, 1.35 },
-        .ambient_sky = .{ 0.52, 0.62, 0.82 },
-        .ambient_ground = .{ 0.22, 0.29, 0.42 },
-        .horizon = .{ 0.012, 0.027, 0.064 },
-        .zenith = .{ 0.004, 0.012, 0.036 },
+        .color = .{ 1.35, 1.42, 1.55 },
+        .ambient_sky = .{ 0.78, 0.88, 1.02 },
+        .ambient_ground = .{ 0.36, 0.45, 0.62 },
+        .horizon = .{ 0.018, 0.038, 0.082 },
+        .zenith = .{ 0.006, 0.018, 0.052 },
         .night = 0,
     };
     self.clock = if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)
@@ -949,9 +949,9 @@ fn reportBenchmark(self: *Renderer) void {
         var visible_boulders: u64 = 0;
         for (self.scene.boulder_counts) |count| visible_boulders += count;
         std.log.info("NATURE {{\"chunk_fill_p50_ms\":{d:.3},\"chunk_fill_p99_ms\":{d:.3},\"scatter_p50_ms\":{d:.3},\"scatter_p99_ms\":{d:.3},\"generated_relics\":{d},\"generated_vegetation\":{d},\"generated_boulders\":{d},\"visible_relics\":{d},\"visible_vegetation\":{d},\"visible_boulders\":{d},\"submitted_triangles\":{d}}}", .{
-            self.scene.stats.chunk_fill_p50_ms, self.scene.stats.chunk_fill_p99_ms, self.scene.stats.scatter_p50_ms, self.scene.stats.scatter_p99_ms,
-            self.scene.stats.generated_relics, self.scene.stats.generated_vegetation, self.scene.stats.generated_boulders,
-            self.scene.relic_count, self.scene.plant_count, visible_boulders, self.scene.submittedTriangles(),
+            self.scene.stats.chunk_fill_p50_ms, self.scene.stats.chunk_fill_p99_ms,    self.scene.stats.scatter_p50_ms,     self.scene.stats.scatter_p99_ms,
+            self.scene.stats.generated_relics,  self.scene.stats.generated_vegetation, self.scene.stats.generated_boulders, self.scene.relic_count,
+            self.scene.plant_count,             visible_boulders,                      self.scene.submittedTriangles(),
         });
     }
 }

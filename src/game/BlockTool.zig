@@ -39,6 +39,8 @@ pub const State = struct {
     corner_mode: CornerMode = .fill,
     /// What a clipboard capture is saved as: 0 a plain build, then each `Structures.Kind`.
     module: u4 = 0,
+    /// Free placement and unsupported blocks, enabled from the build HUD with C / pad X.
+    creative: bool = false,
 };
 
 /// The module a capture is saved with, or null for a plain build.
@@ -77,6 +79,7 @@ pub const Command = struct {
     /// Held: clicks mark box corners (and Tab changes style instead of shape).
     box: bool = false,
     next_style: bool = false,
+    toggle_creative: bool = false,
 };
 
 /// The palette position: one of the four shapes, a starter prefab of the style, or the clipboard.
@@ -110,6 +113,7 @@ pub fn entryName(sb: *const Sandbox, slot: usize, st: State) []const u8 {
             .slab => "SLAB",
             .ramp => "RAMP",
             .stair => "STAIR",
+            .pane => "PANE",
             else => "",
         },
         .seed => "SEEDS",
@@ -131,6 +135,10 @@ fn floorCell(p: [3]f32) [3]i32 {
 
 /// Why `c` cannot take a block, or null when it can. `alone` asks for ground or a neighbour.
 pub fn refusal(sb: *const Sandbox, c: [3]i32, alone: bool) ?[]const u8 {
+    return refusalMode(sb, c, alone, false);
+}
+
+fn refusalMode(sb: *const Sandbox, c: [3]i32, alone: bool, creative: bool) ?[]const u8 {
     const blocks = sb.block_world.blocks;
     if (!blocks.get(c[0], c[1], c[2]).isEmpty()) return "occupied";
     if (sb.farm.find(c) != null) return "a crop grows there";
@@ -146,7 +154,7 @@ pub fn refusal(sb: *const Sandbox, c: [3]i32, alone: bool) ?[]const u8 {
     };
     // Machines, crates and other solid bodies.
     if (sb.physics.overlapsBox(.{ lo[0] + 0.5, lo[1] + 0.5, lo[2] + 0.5 }, .{ 0.45, 0.45, 0.45 })) return "something is in the way";
-    if (!alone) return null;
+    if (!alone or creative) return null;
     // Supported by the ground or by another block (platformer pieces may float later).
     if (supported(sb, c)) return null;
     return "needs ground or another block beside it";
@@ -164,6 +172,11 @@ fn supported(sb: *const Sandbox, c: [3]i32) bool {
 /// Aim, then carry out `cmd` for player `slot` (0 is P1) from `eye` along `forward`.
 pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32, cmd: Command) !void {
     const kit = &sb.kits[slot];
+    if (cmd.toggle_creative) {
+        st.creative = !st.creative;
+        st.corner = null;
+        sb.sayTo(slot, "creative building {s}", .{if (st.creative) "on: free blocks, floating placement" else "off: uses your block kit"});
+    }
     if (cmd.next_style) {
         st.style = @enumFromInt((@as(usize, @intFromEnum(st.style)) + 1) % Materials.style_count);
         if (st.shape >= entryCount(sb, slot, st.*)) st.shape = 0;
@@ -197,7 +210,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         const inside = floorCell(.{ hit.point[0] - n[0] * 0.25, hit.point[1] - n[1] * 0.25, hit.point[2] - n[2] * 0.25 });
         if (!sb.block_world.blocks.get(inside[0], inside[1], inside[2]).isEmpty()) st.remove = inside;
         st.place = outside;
-        st.valid = refusal(sb, outside, true) == null and kit.blocks[cell(st.*).material] > 0;
+        st.valid = refusalMode(sb, outside, true, st.creative) == null and (st.creative or kit.blocks[cell(st.*).material] > 0);
     }
     // Box operations: the modifier marks the first corner; the same operation again finishes it.
     const op: ?CornerMode = if (cmd.place) .fill else if (cmd.remove) .clear else if (cmd.rotate and cmd.box) .restyle else if (cmd.pick and cmd.box) .capture else null;
@@ -243,11 +256,11 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
             .seed => return Farm.plant(sb, slot, c),
             .shape => {},
         }
-        if (refusal(sb, c, true)) |why| return sb.sayTo(slot, "blocked: {s}", .{why});
+        if (refusalMode(sb, c, true, st.creative)) |why| return sb.sayTo(slot, "blocked: {s}", .{why});
         const want = cell(st.*);
-        if (kit.blocks[want.material] == 0) return sb.sayTo(slot, "no {s} blocks left", .{Materials.all[want.material].name});
+        if (!st.creative and kit.blocks[want.material] == 0) return sb.sayTo(slot, "no {s} blocks left", .{Materials.all[want.material].name});
         sb.block_world.blocks.set(c[0], c[1], c[2], want) catch return sb.sayTo(slot, "block budget full", .{});
-        kit.blocks[want.material] -= 1;
+        if (!st.creative) kit.blocks[want.material] -= 1;
         try sb.syncBlocks();
         BuildTips.advance(sb, slot, .place);
     }
@@ -260,7 +273,7 @@ pub fn step(sb: *Sandbox, slot: usize, st: *State, eye: [3]f32, forward: [3]f32,
         if (sb.block_world.blocks.get(c[0], c[1], c[2]).isAuthored()) return sb.sayTo(slot, "that block is part of the city", .{});
         const old = sb.block_world.blocks.get(c[0], c[1], c[2]);
         try sb.block_world.blocks.set(c[0], c[1], c[2], .empty);
-        kit.blocks[old.material] +|= 1;
+        if (!st.creative) kit.blocks[old.material] +|= 1;
         try sb.syncBlocks();
     }
 }
@@ -491,14 +504,16 @@ pub fn update(sb: *Sandbox, aim: @import("../world/Camera.zig"), primary: bool, 
         .material_step = if (actions.channel_up) 1 else if (actions.channel_down) -1 else 0,
         .rotate = actions.rotate,
         .pick = actions.capture,
-        .box = modifier,
+        .box = modifier and !sb.tools.blocks.creative,
         .next_style = actions.next_item and modifier,
+        .toggle_creative = actions.toggle_creative,
     });
 }
 
 pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
     const st = sb.tools.blocks;
     const c = cell(st);
+    if (st.creative) return std.fmt.bufPrint(buffer, "CREATIVE BLOCKS  FREE + FLOATING  LT / CLICK PLACE  RT / RMB REMOVE  D-PAD / TAB PIECE  LEFT/RIGHT MATERIAL  DOWN / T TURN  X / C EXIT", .{}) catch buffer;
     if (st.corner != null) return std.fmt.bufPrint(buffer, "BOX {s}: MARK THE OPPOSITE CORNER THE SAME WAY", .{@tagName(st.corner_mode)}) catch buffer;
     if (onClipboard(sb, 0, st)) return std.fmt.bufPrint(buffer, "CLIPBOARD  CLICK PASTE  P SAVE AS STRUCTURE: {s}  SHIFT+[ ] CHANGE", .{if (moduleKind(st)) |k| @tagName(k) else "plain build"}) catch buffer;
     if (entry(sb, 0, st) == .structure) {
@@ -506,7 +521,7 @@ pub fn hint(sb: *const Sandbox, buffer: []u8) []const u8 {
         const cost = def.cost();
         return std.fmt.bufPrint(buffer, "{s}  {d} SCRAP {d} PARTS  CLICK BUILD  T TURN  RMB TAKES IT APART  TAB NEXT", .{ def.name(), cost.scrap, cost.parts }) catch buffer;
     }
-    return std.fmt.bufPrint(buffer, "{s} {s} {s} x{d}  CLICK PLACE  RMB REMOVE  TAB PIECE  SHIFT+TAB STYLE  [ ] MATERIAL  T TURN  P PICK  SHIFT: BOX FILL/CLEAR, SHIFT+T RESTYLE, SHIFT+P COPY", .{ Materials.styleName(st.style), entryName(sb, 0, st), Materials.all[c.material].name, sb.kits[0].blocks[c.material] }) catch buffer;
+    return std.fmt.bufPrint(buffer, "{s} {s} {s} x{d}  CLICK PLACE  RMB REMOVE  TAB PIECE  SHIFT+TAB STYLE  [ ] MATERIAL  T TURN  P PICK  C CREATIVE", .{ Materials.styleName(st.style), entryName(sb, 0, st), Materials.all[c.material].name, sb.kits[0].blocks[c.material] }) catch buffer;
 }
 
 /// The ghost of the next block: tinted by its material where it fits, red where it does not;
@@ -540,11 +555,12 @@ pub fn ghost(sb: *const Sandbox, slot: usize, st: State, out: []World.Prop, star
     const height: f32 = if (shape == .slab) 0.5 else 1;
     const color = Materials.all[cell(st).material].color;
     const tint: [4]f32 = if (st.valid) .{ color[0] * 0.6 + 0.3, color[1] * 0.6 + 0.4, color[2] * 0.6 + 0.3, 1 } else .{ 1.0, 0.3, 0.25, 1 };
+    const size: [3]f32 = if (shape == .pane and st.rot % 2 == 0) .{ 1.02, height + 0.02, 0.12 } else if (shape == .pane) .{ 0.12, height + 0.02, 1.02 } else .{ 1.02, height + 0.02, 1.02 };
     out[n] = .{
         .mesh = sb.catalog.content.block,
         .transform = .{ .position = .{ @as(f32, @floatFromInt(c[0])) + 0.5, @as(f32, @floatFromInt(c[1])) + height / 2, @as(f32, @floatFromInt(c[2])) + 0.5 } },
         .tint = tint,
-        .size = .{ 1.02, height + 0.02, 1.02 },
+        .size = size,
     };
     n += 1;
     if (st.corner) |a| if (n < out.len) {
@@ -578,39 +594,40 @@ pub fn publishGuests(sb: *const Sandbox, out: []World.Prop, start: usize) usize 
 }
 
 /// One pad's buttons this step (edges for the D-pad, levels for the triggers and modifier).
-pub const Pad = struct { fire: bool = false, alt: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, modifier: bool = false };
+pub const Pad = struct { fire: bool = false, alt: bool = false, up: bool = false, down: bool = false, left: bool = false, right: bool = false, modifier: bool = false, creative: bool = false, interact: bool = false };
 pub const PadRequest = struct { toggle: bool, cmd: Command };
 
 /// Block-tool requests from a pad: the sprint button (the modifier) held with D-pad left toggles
 /// building; while building, RT places, RB removes, D-pad up cycles shape (with the modifier it
 /// picks the aimed block), left and right step the material, down turns, and the modifier held
 /// marks box corners. `before` is last step's fire and alternate, so a held trigger is one click.
-pub fn fromPad(pad: Pad, before: [2]bool) PadRequest {
+pub fn fromPad(pad: Pad, before: [3]bool) PadRequest {
     return .{
         .toggle = pad.modifier and pad.left,
         .cmd = .{
-            .place = pad.fire and !before[0],
-            .remove = pad.alt and !before[1],
+            .place = if (pad.creative) pad.modifier and !before[2] else pad.fire and !before[0],
+            .remove = if (pad.creative) pad.fire and !before[0] else pad.alt and !before[1],
             .next_shape = pad.up and !pad.modifier,
             .pick = pad.up and pad.modifier,
             .material_step = if (pad.right and !pad.modifier) 1 else if (pad.left and !pad.modifier) -1 else 0,
             .next_style = pad.right and pad.modifier,
             .rotate = pad.down,
-            .box = pad.modifier,
+            .box = pad.modifier and !pad.creative,
+            .toggle_creative = pad.interact,
         },
     };
 }
 
 test "the pad chord toggles building, and triggers become one click per press" {
-    try std.testing.expect(fromPad(.{ .left = true, .modifier = true }, .{ false, false }).toggle);
-    const first = fromPad(.{ .fire = true, .alt = true, .up = true }, .{ false, false });
+    try std.testing.expect(fromPad(.{ .left = true, .modifier = true }, .{ false, false, false }).toggle);
+    const first = fromPad(.{ .fire = true, .alt = true, .up = true }, .{ false, false, false });
     try std.testing.expect(first.cmd.place and first.cmd.remove and first.cmd.next_shape and !first.toggle);
-    const held = fromPad(.{ .fire = true, .alt = true }, .{ true, true });
+    const held = fromPad(.{ .fire = true, .alt = true }, .{ true, true, false });
     try std.testing.expect(!held.cmd.place and !held.cmd.remove);
-    const pick = fromPad(.{ .up = true, .modifier = true }, .{ false, false });
+    const pick = fromPad(.{ .up = true, .modifier = true }, .{ false, false, false });
     try std.testing.expect(pick.cmd.pick and pick.cmd.box and !pick.cmd.next_shape);
-    try std.testing.expectEqual(@as(i2, -1), fromPad(.{ .left = true }, .{ false, false }).cmd.material_step);
-    const style = fromPad(.{ .right = true, .modifier = true }, .{ false, false });
+    try std.testing.expectEqual(@as(i2, -1), fromPad(.{ .left = true }, .{ false, false, false }).cmd.material_step);
+    const style = fromPad(.{ .right = true, .modifier = true }, .{ false, false, false });
     try std.testing.expect(style.cmd.next_style and style.cmd.material_step == 0);
 }
 

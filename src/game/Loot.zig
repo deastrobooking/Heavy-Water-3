@@ -6,8 +6,44 @@
 const std = @import("std");
 const enum_compat = @import("enum_compat");
 const Enemies = @import("Enemies.zig");
+const Skies = @import("Skies.zig");
 
-pub const Reward = struct { scrap: u32 = 0, parts: u32 = 0, alloy: u32 = 0, lumen: u32 = 0 };
+pub const Reward = struct { scrap: u32 = 0, parts: u32 = 0, gold: u32 = 0, alloy: u32 = 0, rotor: u32 = 0, lumen: u32 = 0, combat_xp: u32 = 0 };
+
+const AirEntry = struct {
+    scrap: [2]u32,
+    parts: u32,
+    extra_part: f32 = 0,
+    gold: [2]u32,
+    alloy: u32 = 0,
+    rotor: u32 = 0,
+    lumen_chance: f32 = 0,
+    combat_xp: u32,
+};
+
+fn airEntry(kind: Skies.WingKind) AirEntry {
+    return switch (kind) {
+        .wasp => .{ .scrap = .{ 5, 8 }, .parts = 0, .extra_part = 0.3, .gold = .{ 1, 2 }, .alloy = 1, .combat_xp = 30 },
+        .dragonfly => .{ .scrap = .{ 8, 12 }, .parts = 1, .extra_part = 0.3, .gold = .{ 1, 3 }, .alloy = 1, .combat_xp = 45 },
+        .beetle_bomber => .{ .scrap = .{ 18, 28 }, .parts = 3, .extra_part = 0.5, .gold = .{ 5, 8 }, .alloy = 3, .lumen_chance = 0.15, .combat_xp = 100 },
+        .robot_fighter => .{ .scrap = .{ 10, 16 }, .parts = 1, .extra_part = 0.5, .gold = .{ 3, 5 }, .rotor = 1, .combat_xp = 70 },
+        .robot_lancer => .{ .scrap = .{ 12, 18 }, .parts = 2, .extra_part = 0.5, .gold = .{ 4, 6 }, .rotor = 1, .combat_xp = 90 },
+    };
+}
+
+/// Airframe salvage, paid directly to the fighter's player's Kit.
+pub fn rollAir(kind: Skies.WingKind, random: std.Random) Reward {
+    const e = airEntry(kind);
+    return .{
+        .scrap = e.scrap[0] + random.uintLessThan(u32, e.scrap[1] - e.scrap[0] + 1),
+        .parts = e.parts + @intFromBool(e.extra_part > 0 and random.float(f32) < e.extra_part),
+        .gold = e.gold[0] + random.uintLessThan(u32, e.gold[1] - e.gold[0] + 1),
+        .alloy = e.alloy,
+        .rotor = e.rotor,
+        .lumen = @intFromBool(e.lumen_chance > 0 and random.float(f32) < e.lumen_chance),
+        .combat_xp = e.combat_xp,
+    };
+}
 
 const Entry = struct {
     scrap_min: u32,

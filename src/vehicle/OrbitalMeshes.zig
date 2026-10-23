@@ -253,9 +253,9 @@ pub fn interceptionRing(a: Allocator) !Pair {
         try ellipsoid(a, &glow, Vec3.init(x, 18, z), Vec3.init(2.2, 2.2, 2.2), .emissive);
     };
     // Center beacon provides a distant orientation anchor without blocking the combat lane.
-    try ellipsoid(a, &shell, Vec3.init(0, -16, 0), Vec3.init(12, 2, 12), .metal);
-    try prims.strut(a, &shell, Vec3.init(0, -16, 0), Vec3.init(0, -2, 0), Vec3.unit_x, 1.1, 1.1, .paint_accent);
-    try ellipsoid(a, &glow, Vec3.init(0, -1, 0), Vec3.init(2.4, 2.4, 2.4), .emissive);
+    try ellipsoid(a, &shell, Vec3.init(0, -16, 0), Vec3.init(4, 0.8, 4), .metal);
+    try prims.strut(a, &shell, Vec3.init(0, -16, 0), Vec3.init(0, -4, 0), Vec3.unit_x, 0.7, 0.7, .paint_accent);
+    try ellipsoid(a, &glow, Vec3.init(0, -2, 0), Vec3.init(1.2, 1.2, 1.2), .emissive);
     return finish(a, &shell, &glow, arena_palette);
 }
 

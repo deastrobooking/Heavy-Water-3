@@ -113,11 +113,23 @@ pub fn selectSpaceFrame(self: *Progress, frame: SpaceFrame) Kit.Error!void {
 pub fn spaceFrameCost(frame: SpaceFrame) Kit.Cost {
     return switch (frame) {
         .kestrel => .{ .scrap = 0, .parts = 0 },
-        .ember_wyrm => .{ .scrap = 100, .parts = 4 },
-        .void_lance => .{ .scrap = 220, .parts = 8 },
-        .dreadclaw => .{ .scrap = 380, .parts = 12 },
-        .starwing => .{ .scrap = 520, .parts = 16 },
-        .bulwark => .{ .scrap = 700, .parts = 20 },
+        .ember_wyrm => .{ .scrap = 100, .parts = 4, .gold = 4 },
+        .void_lance => .{ .scrap = 220, .parts = 8, .gold = 8 },
+        .dreadclaw => .{ .scrap = 380, .parts = 12, .gold = 12 },
+        .starwing => .{ .scrap = 520, .parts = 16, .gold = 18 },
+        .bulwark => .{ .scrap = 700, .parts = 20, .gold = 24 },
+    };
+}
+
+/// Combat-rank gates keep each new frame tied to experience earned in the air war.
+pub fn spaceFrameRank(frame: SpaceFrame) u32 {
+    return switch (frame) {
+        .kestrel => 1,
+        .ember_wyrm => 2,
+        .void_lance => 3,
+        .dreadclaw => 4,
+        .starwing => 5,
+        .bulwark => 6,
     };
 }
 
@@ -300,7 +312,7 @@ test "Kestrel upgrades change owned loadout and paint selection persists" {
 
 test "space fighter frames unlock in order and persist equipped state" {
     var p: Progress = .{};
-    var wallet: Market.Wallet = .{ .scrap = 3000, .parts = 70 };
+    var wallet: Market.Wallet = .{ .scrap = 3000, .parts = 70, .gold = 100 };
     try std.testing.expectError(error.Prerequisite, p.unlockSpaceFrame(.void_lance, &wallet));
     try p.unlockSpaceFrame(.ember_wyrm, &wallet);
     try p.unlockSpaceFrame(.void_lance, &wallet);

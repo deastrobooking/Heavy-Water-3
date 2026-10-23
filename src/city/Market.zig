@@ -16,7 +16,7 @@ pub const stall_count = 3;
 pub const stall_plazas = [stall_count]u8{ 1, 3, 5 };
 const base_price = [ware_count]u32{ 24, 12, 18 };
 /// Scrap, salvaged parts, and unplaced kits of each ware.
-pub const Wallet = struct { scrap: u32 = 0, parts: u32 = 0, kits: [ware_count]u8 = @splat(0) };
+pub const Wallet = struct { scrap: u32 = 0, parts: u32 = 0, gold: u32 = 0, kits: [ware_count]u8 = @splat(0) };
 pub const Stall = struct { stock: [ware_count]u8 = @splat(0) };
 pub const Error = error{ SoldOut, NotEnoughScrap, NoParts, UnknownStall };
 

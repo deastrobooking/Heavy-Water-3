@@ -97,7 +97,7 @@ smoke_terrain_dirty: u32 = 0,
 /// The catalog mesh drawing each block chunk, and the chunk revision it was built from.
 block_meshes: [BlockWorld.max_chunks]BlockMesh = @splat(.{}),
 /// Each pad's fire and alternate buttons last step, to turn them into block-tool clicks.
-pad_buttons_before: [4][2]bool = @splat(.{ false, false }),
+pad_buttons_before: [4][3]bool = @splat(.{ false, false, false }),
 smoke_mound: ?struct { x: f32, z: f32, height: f32 } = null,
 status: Overlay.Line = .{},
 status_until: u64 = 0,
@@ -761,6 +761,12 @@ fn runCommand(self: *App, command: Menu.Command) void {
         .new_game => self.newGame(),
         .play_hero => self.playHero(),
         .start_arena => self.startArena(),
+        .start_space_trial => self.startSpaceTrial(),
+        .leave_space_trial => {
+            self.leaveSpaceTrial();
+            self.menu.open(.none);
+            self.capture(self.core, true);
+        },
         .leave_arena => {
             @import("game/Frontier.zig").leaveArena(&self.sandbox, &self.engine.camera);
             self.menu.open(.none);
@@ -882,6 +888,34 @@ fn startArena(self: *App) void {
     @import("game/Frontier.zig").enterArena(&self.sandbox, &self.engine.camera);
     self.menu.open(.none);
     self.capture(self.core, true);
+}
+
+fn startSpaceTrial(self: *App) void {
+    if (self.menu.base == .title) {
+        if (self.menu.has_save and self.quickload()) {} else {
+            self.newGame();
+            self.sandbox.profile = Sandbox.Heroes.profile(0);
+            self.sandbox.creator.open = false;
+            self.sandbox.creator.confirmed = true;
+        }
+    }
+    const sb = &self.sandbox;
+    if (sb.hangar.piloting or sb.garage.piloting != null or sb.seated != null) return self.report("EXIT YOUR VEHICLE BEFORE STARTING SPACE TRIAL", .{});
+    const return_to = sb.player.feet;
+    const Terrain = @import("procedural/Terrain.zig");
+    const x = return_to[0];
+    const z = return_to[2];
+    const center: [3]f32 = .{ x, Terrain.surface(sb.seed, x, z).height + 850, z };
+    if (sb.hangar.fighter == null) sb.hangar.placeWithFrame(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels, sb.progress.space_frame);
+    sb.hangar.enterSpaceTrial(center, return_to, &self.engine.camera);
+    sb.say("SPACE TRIAL: A/D strafe, W accelerate, Q/E rise or sink, SHIFT boost, S brake, F return", .{});
+    self.menu.open(.none);
+    self.engine.input = .{};
+    self.capture(self.core, true);
+}
+
+fn leaveSpaceTrial(self: *App) void {
+    @import("game/Frontier.zig").leaveJet(&self.sandbox, &self.engine.camera);
 }
 
 fn newGame(self: *App) void {
@@ -1240,6 +1274,8 @@ pub fn update(self: *App, core: *mach.Core) void {
         } else if (key.key == .escape) {
             self.menu.open(.pause);
             self.menu.hero_player = 0;
+        } else if (key.key == .c and self.sandbox.tools.tool == .blocks) {
+            self.actions.toggle_creative = true;
         } else if (self.menu.settings.bindings.action(key.key)) |action| switch (action) {
             // Held movement keys are sampled each frame; these are the press edges.
             .forward, .back, .left, .right, .sprint, .air_brake, .ascend, .descend => {},
@@ -1355,6 +1391,7 @@ pub fn update(self: *App, core: *mach.Core) void {
     self.menu.seconds = self.seconds;
     self.menu.heroes_unlocked = self.sandbox.progress.heroes;
     self.menu.arena_active = self.sandbox.arena.active;
+    self.menu.space_trial_active = self.sandbox.hangar.space_mode;
     self.syncTravelMenu();
     self.menu.players_present = 1;
     for (self.sandbox.guests, 1..) |g, i| if (g.active) {
@@ -1407,6 +1444,11 @@ pub fn update(self: *App, core: *mach.Core) void {
                 self.sandbox.step(&self.engine.camera, if (title) .{} else self.engine.input, if (title) .{} else self.actions, Time.fixed_dt) catch |err| self.report("ERROR {s}", .{@errorName(err)});
             }
         }
+        // A structure the team just saved gets its shareable data file.
+        if (self.sandbox.outpost.export_index) |index| {
+            self.sandbox.outpost.export_index = null;
+            Outpost.writeFile(self.io, self.allocator, self.sandbox.outpost.library.get(index));
+        }
         self.actions = .{};
         self.engine.input.clearEdges();
         self.pads.consume();
@@ -1442,11 +1484,6 @@ fn pollPads(self: *App) void {
             self.pads.commands[controller] = .{ .connected = self.pads.commands[controller].connected };
             self.runCommand(.settings_changed);
             self.report("{s} BOUND TO {s}", .{ PadBindings.actionName(action), PadBindings.buttonName(physical) });
-        // A structure the team just saved gets its shareable data file.
-        if (self.sandbox.outpost.export_index) |index| {
-            self.sandbox.outpost.export_index = null;
-            Outpost.writeFile(self.io, self.allocator, self.sandbox.outpost.library.get(index));
-        }
             break;
         };
     };
@@ -1480,6 +1517,7 @@ fn pollPads(self: *App) void {
                     input.dodge = false;
                     input.dodge_held = false;
                 }
+                if (self.sandbox.tools.tool == .blocks and self.sandbox.tools.blocks.creative) input.fast = false;
                 self.engine.input.merge(input);
             }
             continue;
@@ -1530,13 +1568,14 @@ fn routePads(self: *App) void {
             continue;
         }
         const before = self.pad_buttons_before[c];
-        self.pad_buttons_before[c] = .{ cmd.fire, cmd.alt };
-        const build = BlockTool.fromPad(.{ .fire = cmd.fire, .alt = cmd.alt, .up = cmd.up, .down = cmd.down, .left = cmd.left, .right = cmd.right, .modifier = cmd.input.fast }, before);
+        self.pad_buttons_before[c] = .{ cmd.fire, cmd.alt, cmd.input.fast };
+        const build = BlockTool.fromPad(.{ .fire = cmd.fire, .alt = cmd.alt, .up = cmd.up, .down = cmd.down, .left = cmd.left, .right = cmd.right, .modifier = cmd.input.fast, .creative = if (p == 0) self.sandbox.tools.blocks.creative else self.sandbox.guests[p - 1].building != null and self.sandbox.guests[p - 1].building.?.creative, .interact = cmd.interact }, before);
         if (p == 0) {
             self.engine.camera.turn(cmd.input.look_x, cmd.input.look_y, Time.fixed_dt);
             if (build.toggle) self.actions.select_tool = Tools.number(if (self.sandbox.tools.tool == .blocks) .hands else .blocks);
             if (self.sandbox.tools.tool == .blocks and !build.toggle) {
-                // Building on a pad: the triggers and D-pad drive the block tool, not weapons.
+                // Creative building takes the pad triggers, and X toggles its free-placement mode.
+                self.actions.toggle_creative = self.actions.toggle_creative or build.cmd.toggle_creative;
                 self.actions.interact = self.actions.interact or build.cmd.place;
                 self.actions.secondary = self.actions.secondary or build.cmd.remove;
                 self.actions.next_item = self.actions.next_item or build.cmd.next_shape;
@@ -1571,6 +1610,9 @@ fn routePads(self: *App) void {
         if (!self.sandbox.guests[p - 1].active) continue;
         const g = &self.sandbox.guests[p - 1];
         g.input = cmd.input;
+        if (g.building) |st| {
+            if (st.creative) g.input.fast = false;
+        }
         const flying = g.player.mode == .fly or g.player.flight_engaged;
         const brake_is_dodge = self.pads.mapping.button(.air_brake) == self.pads.mapping.button(.dodge);
         if (flying and g.input.brake and brake_is_dodge) {
@@ -1595,6 +1637,7 @@ fn routePads(self: *App) void {
         }
         if (g.building != null) {
             const merged = &g.build_cmd;
+            merged.toggle_creative = merged.toggle_creative or build.cmd.toggle_creative;
             merged.place = merged.place or build.cmd.place;
             merged.remove = merged.remove or build.cmd.remove;
             merged.next_shape = merged.next_shape or build.cmd.next_shape;
@@ -1602,6 +1645,7 @@ fn routePads(self: *App) void {
             merged.rotate = merged.rotate or build.cmd.rotate;
             merged.pick = merged.pick or build.cmd.pick;
             merged.box = build.cmd.box;
+            g.interact = false;
             g.fire = false;
             g.alt = false;
             continue;
@@ -2082,6 +2126,16 @@ fn showcase(self: *App) void {
         // Look across the flight lane so the perimeter gates and asteroid cover read together.
         target = .{ 0, 0, 0 };
         eye = .{ 220, 170, -290 };
+    } else if (v == 104) {
+        const Terrain = @import("procedural/Terrain.zig");
+        const return_to = self.sandbox.player.feet;
+        const x = Sandbox.spawn[0];
+        const z = Sandbox.spawn[2];
+        const center: [3]f32 = .{ x, Terrain.surface(self.sandbox.seed, x, z).height + 850, z };
+        if (self.sandbox.hangar.fighter == null) self.sandbox.hangar.placeWithFrame(self.sandbox.seed, Sandbox.spawn, null, 0, self.sandbox.progress.kestrel_levels, self.sandbox.progress.space_frame);
+        self.sandbox.hangar.enterSpaceTrial(center, return_to, &self.engine.camera);
+        target = center;
+        eye = .{ center[0], center[1] + 260, center[2] - 60 };
     } else if (v == 67) {
         // Review the new Wilds architecture as a clean lineup over the seeded terrain.
         const Terrain = @import("procedural/Terrain.zig");
@@ -4230,6 +4284,42 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         if (dirty.all or dirty.keys.len > 0) self.smoke_terrain_dirty += 1;
     }
     self.publishBlocks(renderer);
+    if (self.sandbox.hangar.space_mode) {
+        renderer.prop_count = 0;
+        const c = self.sandbox.catalog.content;
+        const center = self.sandbox.hangar.space_center;
+        const props = [_]struct { mesh: @TypeOf(c.orbital_ring), position: [3]f32, scale: f32, tint: [4]f32 }{
+            .{ .mesh = c.orbital_ring, .position = .{ center.x, center.y, center.z }, .scale = 1, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.orbital_ring_glow, .position = .{ center.x, center.y, center.z }, .scale = 1, .tint = .{ 1, 1, 1, 1.8 } },
+            .{ .mesh = c.orbital_service_hub, .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.orbital_service_hub_glow, .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48, .tint = .{ 1, 1, 1, 1.8 } },
+            .{ .mesh = c.orbital_planet, .position = .{ center.x + 900, center.y - 900, center.z + 80 }, .scale = 450, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.boulders[0], .position = .{ center.x - 70, center.y - 18, center.z - 68 }, .scale = 16, .tint = .{ 0.75, 0.82, 0.9, 1 } },
+            .{ .mesh = c.boulders[1], .position = .{ center.x + 72, center.y + 12, center.z - 56 }, .scale = 14, .tint = .{ 0.75, 0.82, 0.9, 1 } },
+            .{ .mesh = c.boulders[2], .position = .{ center.x - 64, center.y + 18, center.z + 62 }, .scale = 17, .tint = .{ 0.75, 0.82, 0.9, 1 } },
+            .{ .mesh = c.boulders[0], .position = .{ center.x + 74, center.y - 8, center.z + 60 }, .scale = 19, .tint = .{ 0.75, 0.82, 0.9, 1 } },
+        };
+        for (props) |prop| {
+            renderer.props[renderer.prop_count] = .{ .mesh = prop.mesh, .transform = .{ .position = prop.position, .scale = prop.scale }, .tint = prop.tint };
+            renderer.prop_count += 1;
+        }
+        if (self.sandbox.hangar.fighter) |fighter| {
+            const shell, const glow = switch (self.sandbox.hangar.frame) {
+                .kestrel => .{ c.kestrel, c.kestrel_glow },
+                .ember_wyrm => .{ c.scalari_ember_wyrm, c.scalari_ember_wyrm_glow },
+                .void_lance => .{ c.scalari_void_lance, c.scalari_void_lance_glow },
+                .dreadclaw => .{ c.scalari_dreadclaw, c.scalari_dreadclaw_glow },
+                .starwing => .{ c.player_starwing, c.player_starwing_glow },
+                .bulwark => .{ c.player_bulwark, c.player_bulwark_glow },
+            };
+            const at = [3]f32{ fighter.body.pos.x, fighter.body.pos.y, fighter.body.pos.z };
+            const q = fighter.body.rot;
+            const rotation = [4]f32{ q.x, q.y, q.z, q.w };
+            renderer.props[renderer.prop_count] = .{ .mesh = shell, .transform = .{ .position = at }, .rotation = rotation, .tint = .{ 1, 1, 1, 1 } };
+            renderer.props[renderer.prop_count + 1] = .{ .mesh = glow, .transform = .{ .position = at }, .rotation = rotation, .tint = .{ 1, 1, 1, 1.4 } };
+            renderer.prop_count += 2;
+        }
+    }
     if (options.showcase == 66 or (options.showcase == 67 or options.showcase == 76)) renderer.prop_count = 0;
     renderer.scene.flora_review = options.showcase == 62 or options.showcase == 74 or options.showcase == 75;
     renderer.scene.flora_review_variant = if (options.showcase == 74) 14 else if (options.showcase == 75) 12 else null;
@@ -4239,7 +4329,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         origin[0] -= if (options.showcase == 74) 280 else 140;
         break :blk origin;
     } else floraReviewOrigin();
-    renderer.scene.space_review = options.showcase == 66 or options.showcase == 103;
+    renderer.scene.space_review = options.showcase == 66 or options.showcase == 103 or self.sandbox.hangar.space_mode;
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
         const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
             .{ .mesh = self.sandbox.catalog.content.scalari_throne_serpent, .position = .{ -120, 480, 15 }, .scale = 1 },
@@ -4295,24 +4385,28 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         const ships = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32, tint: [4]f32 }{
             .{ .mesh = c.orbital_planet, .position = .{ 0, -460, 820 }, .scale = 620, .tint = .{ 1, 1, 1, 1 } },
             .{ .mesh = c.kestrel, .position = .{ -28, 15, 2 }, .scale = 3.2, .tint = .{ 0.8, 0.95, 1, 1 } },
-            .{ .mesh = c.robot_fighter, .position = .{ 38, -4, 16 }, .scale = 4.2, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.robot_fighter, .position = .{ 38, -4, 16 }, .scale = 4.2, .tint = .{ 1.45, 1.45, 1.65, 1 } },
             .{ .mesh = c.robot_fighter_glow, .position = .{ 38, -4, 16 }, .scale = 4.2, .tint = .{ 1, 1, 1, 1.5 } },
-            .{ .mesh = c.robot_lancer, .position = .{ -76, -6, -6 }, .scale = 4.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.robot_lancer, .position = .{ -76, -6, -6 }, .scale = 4.0, .tint = .{ 1.45, 1.45, 1.65, 1 } },
             .{ .mesh = c.robot_lancer_glow, .position = .{ -76, -6, -6 }, .scale = 4.0, .tint = .{ 1, 1, 1, 1.5 } },
-            .{ .mesh = c.player_starwing, .position = .{ -42, 9, 46 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.player_starwing, .position = .{ -42, 9, 46 }, .scale = 3.0, .tint = .{ 1.5, 1.5, 1.6, 1 } },
             .{ .mesh = c.player_starwing_glow, .position = .{ -42, 9, 46 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1.4 } },
-            .{ .mesh = c.player_bulwark, .position = .{ 54, -7, 62 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.player_bulwark, .position = .{ 54, -7, 62 }, .scale = 3.0, .tint = .{ 1.5, 1.5, 1.6, 1 } },
             .{ .mesh = c.player_bulwark_glow, .position = .{ 54, -7, 62 }, .scale = 3.0, .tint = .{ 1, 1, 1, 1.4 } },
             .{ .mesh = c.carrier, .position = .{ 18, 38, -180 }, .scale = 0.72, .tint = .{ 0.9, 0.95, 1, 1 } },
             .{ .mesh = c.carrier_glow, .position = .{ 18, 38, -180 }, .scale = 0.72, .tint = .{ 0.45, 0.8, 1, 1.5 } },
-            .{ .mesh = c.brood_crown, .position = .{ 210, 120, 330 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1 } },
-            .{ .mesh = c.brood_crown_glow, .position = .{ 210, 120, 330 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1.5 } },
-            .{ .mesh = c.robot_forge_ark, .position = .{ -245, 160, 360 }, .scale = 0.7, .tint = .{ 1, 1, 1, 1 } },
-            .{ .mesh = c.robot_forge_ark_glow, .position = .{ -245, 160, 360 }, .scale = 0.7, .tint = .{ 1, 1, 1, 1.5 } },
-            .{ .mesh = c.orbital_service_hub, .position = .{ 132, 34, -150 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1 } },
-            .{ .mesh = c.orbital_service_hub_glow, .position = .{ 132, 34, -150 }, .scale = 0.72, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.brood_crown, .position = .{ 136, 100, 220 }, .scale = 0.48, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.brood_crown_glow, .position = .{ 136, 100, 220 }, .scale = 0.48, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.robot_forge_ark, .position = .{ -142, 112, 235 }, .scale = 0.43, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.robot_forge_ark_glow, .position = .{ -142, 112, 235 }, .scale = 0.43, .tint = .{ 1, 1, 1, 1.5 } },
+            .{ .mesh = c.orbital_service_hub, .position = .{ -112, 42, 90 }, .scale = 0.39, .tint = .{ 1, 1, 1, 1 } },
+            .{ .mesh = c.orbital_service_hub_glow, .position = .{ -112, 42, 90 }, .scale = 0.39, .tint = .{ 1, 1, 1, 1.5 } },
             .{ .mesh = c.scalari_ember_wyrm, .position = .{ -4, -22, 96 }, .scale = 4.0, .tint = .{ 1, 1, 1, 1 } },
             .{ .mesh = c.scalari_ember_wyrm_glow, .position = .{ -4, -22, 96 }, .scale = 4.0, .tint = .{ 1, 0.55, 0.4, 1.4 } },
+            .{ .mesh = c.scalari_void_lance, .position = .{ -82, 14, 64 }, .scale = 3.7, .tint = .{ 1.2, 1.35, 1.55, 1 } },
+            .{ .mesh = c.scalari_void_lance_glow, .position = .{ -82, 14, 64 }, .scale = 3.7, .tint = .{ 0.4, 0.7, 1, 1.45 } },
+            .{ .mesh = c.scalari_dreadclaw, .position = .{ 78, 14, 72 }, .scale = 3.5, .tint = .{ 1.35, 1.2, 1.0, 1 } },
+            .{ .mesh = c.scalari_dreadclaw_glow, .position = .{ 78, 14, 72 }, .scale = 3.5, .tint = .{ 1, 0.52, 0.28, 1.45 } },
         };
         for (ships) |ship| {
             renderer.props[renderer.prop_count] = .{ .mesh = ship.mesh, .transform = .{ .position = ship.position, .scale = ship.scale }, .tint = ship.tint };
@@ -4372,9 +4466,11 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         view.cave_hue = self.cave_hue[i];
     }
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
-    const motion = if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "SUPER FLIGHT" else @tagName(sandbox.player.motion);
+    const motion = if (sandbox.hangar.space_mode) "SPACE TRIAL" else if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "SUPER FLIGHT" else @tagName(sandbox.player.motion);
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.kits[0].wallet.scrap, sandbox.kits[0].wallet.parts });
-    if (sandbox.hangar.piloting) {
+    if (sandbox.hangar.space_mode) {
+        renderer.hud_lines[1].set("SPACE TRIAL {d:.0}M/S  A/D STRAFE  W ACCELERATE  Q/E ALTITUDE  SHIFT BOOST  S BRAKE  F RETURN", .{sandbox.hangar.fighter.?.body.vel.length()});
+    } else if (sandbox.hangar.piloting) {
         const f = &sandbox.hangar.fighter.?;
         const g = &sandbox.skies.guns;
         renderer.hud_lines[1].set("KESTREL {d:.0}M/S BOOST {d:.0}%{s} HULL {d:.0}/{d:.0} MSL {d}/{d} GUN {s} / CLICK FIRE / RMB LOCK / F OUT", .{ f.airspeed(), f.boost_charge / @max(f.cfg.boost_capacity, 0.01) * 100, if (f.barrel_roll_timer > 0) " ROLL" else if (self.engine.input.fast and f.boost_charge > 0) " BURN" else "", @max(0, f.hull), f.hull_max, g.missile_ammo, g.missile_capacity, if (g.overheated) "HOT" else "OK" });
@@ -4465,7 +4561,7 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     if (sandbox.tools.tool == .wire and Build.pendingWire(sandbox) != null) renderer.hud_lines[1].set("{s}", .{hint});
     renderer.hud_lines[2] = if (self.engine.time.tick < self.status_until) self.status else .{};
     if (renderer.hud_lines[2].len == 0 and sandbox.noticeText().len > 0) renderer.hud_lines[2].set("{s}", .{sandbox.noticeText()});
-    if (renderer.hud_lines[2].len == 0 and sandbox.hangar.piloting) {
+    if (!sandbox.hangar.space_mode and renderer.hud_lines[2].len == 0 and sandbox.hangar.piloting) {
         const f = sandbox.hangar.fighter.?;
         var nearest: ?usize = null;
         var nearest_distance: f32 = 1400;
@@ -5137,6 +5233,7 @@ fn publishGui(self: *App, renderer: *Renderer, minutes: u32) void {
         .music_track = music_track,
         .music_track_index = music_track_index,
         .music_track_count = music_track_count,
+        .space_trial = sandbox.hangar.space_mode,
         .guests = guests[0..guest_count],
         .marks = marks[0..mark_count],
         .scroll = self.ui_scroll,

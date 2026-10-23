@@ -1,4 +1,7 @@
 //! Shared city coordinates and source-raster arrival pixels for terrain and globe UI.
+const std = @import("std");
+const ChunkKey = @import("../world/ChunkKey.zig");
+const Region = @import("../world/Region.zig");
 
 pub const Coordinate = struct {
     latitude: f32,
@@ -56,3 +59,40 @@ pub const antarctica: Coordinate = .{ .latitude = -82.0, .longitude = 0.0 };
 pub const k2: Coordinate = .{ .latitude = 35.8800, .longitude = 76.5151 };
 /// The low-gradient snowfield at source pixel (328, 1784) gives the expedition a safe landing.
 pub const k2_raster_anchor: RasterAnchor = .{ .anchor_u = 0.16023449, .anchor_v = 0.87151930 };
+
+/// Approximate GPS coordinate for a local open-world position. Each playable region's arrival
+/// is its geographic origin; +X is east and -Z is north in the shared terrain frame.
+pub fn atWorld(x: f32, z: f32) Coordinate {
+    const key = ChunkKey.fromPosition(x, z);
+    const region = Region.at(key.x, key.z);
+    var origin = Region.detroit.arrival;
+    var anchor = detroit;
+    if (std.mem.eql(u8, region.title, Region.new_york.title)) {
+        origin = Region.new_york.arrival;
+        anchor = new_york;
+    } else if (std.mem.eql(u8, region.title, Region.chicago.title)) {
+        origin = Region.chicago.arrival;
+        anchor = chicago;
+    } else if (std.mem.eql(u8, region.title, Region.antarctica.title)) {
+        origin = Region.antarctica.arrival;
+        anchor = antarctica;
+    } else if (std.mem.eql(u8, region.title, Region.k2.title)) {
+        origin = Region.k2.arrival;
+        anchor = k2;
+    }
+
+    const radius: f64 = 6_371_000;
+    const radians = std.math.pi / 180.0;
+    const latitude = @as(f64, anchor.latitude) * radians;
+    const longitude = @as(f64, anchor.longitude) * radians;
+    const east = @as(f64, x - origin[0]);
+    const north = @as(f64, origin[1] - z);
+    const distance = @sqrt(east * east + north * north);
+    const angular = distance / radius;
+    const bearing = std.math.atan2(east, north);
+    const out_lat = std.math.asin(@sin(latitude) * @cos(angular) + @cos(latitude) * @sin(angular) * @cos(bearing));
+    var out_lon = longitude + std.math.atan2(@sin(bearing) * @sin(angular) * @cos(latitude), @cos(angular) - @sin(latitude) * @sin(out_lat));
+    if (out_lon > std.math.pi) out_lon -= 2 * std.math.pi;
+    if (out_lon < -std.math.pi) out_lon += 2 * std.math.pi;
+    return .{ .latitude = @floatCast(out_lat / radians), .longitude = @floatCast(out_lon / radians) };
+}

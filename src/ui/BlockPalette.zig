@@ -21,7 +21,7 @@ pub fn draw(c: *Canvas, view: Canvas.Rect, sb: *const Sandbox, slot: usize, st: 
     const text = if (st.corner) |_|
         std.fmt.bufPrint(&label, "{s}  BOX {s}: MARK THE OTHER CORNER", .{ Materials.styleName(st.style), modeName(st.corner_mode) }) catch ""
     else
-        std.fmt.bufPrint(&label, "{s}  {s}  {s}", .{ Materials.styleName(st.style), BlockTool.entryName(sb, slot, st), Materials.all[chosen.material].name }) catch "";
+        std.fmt.bufPrint(&label, "{s}  {s}  {s}  {s}", .{ if (st.creative) "CREATIVE" else "BUILD", Materials.styleName(st.style), BlockTool.entryName(sb, slot, st), Materials.all[chosen.material].name }) catch "";
     c.text(x0, y - 18, text, 1, .{ 0.92, 0.95, 1, 1 });
     for (palette, 0..) |m, i| {
         const x = x0 + @as(f32, @floatFromInt(i)) * (swatch + gap);

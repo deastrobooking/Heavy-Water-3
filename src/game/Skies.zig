@@ -143,7 +143,8 @@ pub const Wasp = struct {
     bomb_timer: f32 = 2.5,
 };
 pub const WaspTarget = struct { index: u8, position: V, distance: f32 };
-pub const PetWaspHit = struct { position: V, downed: bool, raid_repelled: bool = false };
+pub const AirKill = struct { position: V, kind: WingKind, player: u8 };
+pub const PetWaspHit = struct { position: V, kind: WingKind, downed: bool, raid_repelled: bool = false };
 pub const Carrier = struct {
     alive: bool = true,
     /// The second Hive capital ship is an armored synthetic command carrier.
@@ -236,6 +237,8 @@ pub const Shot = struct {
     life: f32,
     /// Missiles: what they home on.
     homing: ?Ref = null,
+    /// Local player whose Kit receives any fighter kill from this shot.
+    owner: u8 = 0,
 };
 /// Something a missile can lock: a wasp, a carrier, or a specific ground Hive unit lifetime.
 pub const Ref = union(enum) {
@@ -253,7 +256,7 @@ pub const Event = union(enum) {
     jet_hit: f32,
     jet_collision: struct { normal: V, penetration: f32, other_velocity: V, damage: f32 },
     player_hit: struct { player: u8, damage: f32 },
-    wasp_down: V,
+    wasp_down: AirKill,
     raid_started: struct { plaza: u8, position: V },
     raid_bomb: struct { plaza: u8, position: V, hit: u8 },
     raid_repelled: u8,
@@ -646,9 +649,9 @@ fn stepInner(self: *Skies, physics: *Physics, enemies: *Enemies, jet: ?Jet, play
         var consumed = false;
         if (player_shot) {
             if (s.kind == .energy_net) {
-                consumed = self.strikeNet(s.position, dir, length, s.damage, out, &n);
+                consumed = self.strikeNet(s.position, dir, length, s.damage, s.owner, out, &n);
             } else {
-                consumed = self.strikeAlong(enemies, s.position, dir, length, if (s.kind == .missile) 2 else 0.6, s.damage, out, &n);
+                consumed = self.strikeAlong(enemies, s.position, dir, length, if (s.kind == .missile) 2 else 0.6, s.damage, s.owner, out, &n);
             }
             if (consumed and s.kind == .missile) push(out, &n, .{ .burst = s.position });
         } else if (s.kind == .flak) {
@@ -744,7 +747,7 @@ fn collideJet(self: *Skies, jet: Jet, dt: f32, out: []Event, n: *usize) void {
                     push(out, n, .{ .raid_repelled = self.raid_plaza });
                 }
                 self.wasps[wi] = null;
-                push(out, n, .{ .wasp_down = at });
+                push(out, n, .{ .wasp_down = .{ .position = at, .kind = w.kind, .player = 0 } });
             }
         };
         if (hit.carrier) |ci| {
@@ -788,7 +791,7 @@ fn refPosition(self: *const Skies, enemies: *const Enemies, r: Ref) ?V {
 }
 
 /// A player shot along a segment: the nearest wasp, carrier part, or ground Hive unit takes it.
-fn strikeAlong(self: *Skies, enemies: *Enemies, origin: V, dir: V, length: f32, pad: f32, damage: f32, out: []Event, n: *usize) bool {
+fn strikeAlong(self: *Skies, enemies: *Enemies, origin: V, dir: V, length: f32, pad: f32, damage: f32, owner: u8, out: []Event, n: *usize) bool {
     var best = length;
     var hit: ?Ref = null;
     var part: ?CarrierPart = null;
@@ -851,7 +854,7 @@ fn strikeAlong(self: *Skies, enemies: *Enemies, origin: V, dir: V, length: f32, 
                     self.raid_active = false;
                     push(out, n, .{ .raid_repelled = self.raid_plaza });
                 }
-                push(out, n, .{ .wasp_down = w.position });
+                push(out, n, .{ .wasp_down = .{ .position = w.position, .kind = w.kind, .player = owner } });
                 self.wasps[i] = null;
             }
         },
@@ -884,13 +887,13 @@ fn strikeAlong(self: *Skies, enemies: *Enemies, origin: V, dir: V, length: f32, 
 }
 
 /// An aimed ground weapon beam can hit a Hive flyer along the ranger's existing aim ray.
-pub fn fireRanger(self: *Skies, origin: V, dir: V, damage: f32) void {
-    self.addShot(.{ .kind = .cannon, .position = origin, .velocity = R.scale(R.normalize(dir), 800), .damage = damage, .life = 0.9 });
+pub fn fireRanger(self: *Skies, origin: V, dir: V, damage: f32, owner: u8) void {
+    self.addShot(.{ .kind = .cannon, .position = origin, .velocity = R.scale(R.normalize(dir), 800), .damage = damage, .life = 0.9, .owner = owner });
 }
 
 /// Wide, fast energy mesh for catching agile flyers; each net hit damages and briefly snares.
-pub fn fireRangerNet(self: *Skies, origin: V, dir: V, damage: f32) void {
-    self.addShot(.{ .kind = .energy_net, .position = origin, .velocity = R.scale(R.normalize(dir), 120), .damage = damage, .life = 1.8 });
+pub fn fireRangerNet(self: *Skies, origin: V, dir: V, damage: f32, owner: u8) void {
+    self.addShot(.{ .kind = .energy_net, .position = origin, .velocity = R.scale(R.normalize(dir), 120), .damage = damage, .life = 1.8, .owner = owner });
 }
 
 pub fn nearestWasp(self: *const Skies, position: V, reach: f32) ?WaspTarget {
@@ -911,14 +914,14 @@ pub fn petStrikeWasp(self: *Skies, index: u8, damage: f32) ?PetWaspHit {
     w.health -= damage;
     w.flash = 0.22;
     w.netted = @max(w.netted, 0.45);
-    if (w.health > 0) return .{ .position = position, .downed = false };
+    if (w.health > 0) return .{ .position = position, .kind = w.kind, .downed = false };
     const repelled = w.kind == .beetle_bomber and self.raid_active;
     if (repelled) self.raid_active = false;
     slot.* = null;
-    return .{ .position = position, .downed = true, .raid_repelled = repelled };
+    return .{ .position = position, .kind = w.kind, .downed = true, .raid_repelled = repelled };
 }
 
-fn strikeNet(self: *Skies, origin: V, dir: V, length: f32, damage: f32, out: []Event, n: *usize) bool {
+fn strikeNet(self: *Skies, origin: V, dir: V, length: f32, damage: f32, owner: u8, out: []Event, n: *usize) bool {
     var hit_any = false;
     for (&self.wasps) |*slot| {
         const w = &(slot.* orelse continue);
@@ -932,7 +935,7 @@ fn strikeNet(self: *Skies, origin: V, dir: V, length: f32, damage: f32, out: []E
                 self.raid_active = false;
                 push(out, n, .{ .raid_repelled = self.raid_plaza });
             }
-            push(out, n, .{ .wasp_down = w.position });
+            push(out, n, .{ .wasp_down = .{ .position = w.position, .kind = w.kind, .player = owner } });
             slot.* = null;
         }
     }
@@ -1134,7 +1137,7 @@ test "carrier assault advances through turrets, bays, core, and a crashing wreck
         const p = c.point(turret);
         const side = m.Quat.fromAxisAngle(m.Vec3.unit_y, c.yaw()).rotate(m.Vec3.unit_x);
         const dir: V = .{ side.x, side.y, side.z };
-        try std.testing.expect(sky.strikeAlong(&enemies, R.sub(p, R.scale(dir, 100)), dir, 200, 0, 200, &events, &n));
+        try std.testing.expect(sky.strikeAlong(&enemies, R.sub(p, R.scale(dir, 100)), dir, 200, 0, 200, 0, &events, &n));
     }
     try std.testing.expectEqual(AssaultStage.bays, c.stage());
     try std.testing.expectEqual(@as(usize, 0), c.activeTurrets());
@@ -1143,13 +1146,13 @@ test "carrier assault advances through turrets, bays, core, and a crashing wreck
         const p = c.point(bay);
         const side = m.Quat.fromAxisAngle(m.Vec3.unit_y, c.yaw()).rotate(m.Vec3.unit_x);
         const dir: V = .{ side.x, side.y, side.z };
-        try std.testing.expect(sky.strikeAlong(&enemies, R.sub(p, R.scale(dir, 100)), dir, 200, 0, 100, &events, &n));
+        try std.testing.expect(sky.strikeAlong(&enemies, R.sub(p, R.scale(dir, 100)), dir, 200, 0, 100, 0, &events, &n));
     }
     try std.testing.expectEqual(AssaultStage.core, c.stage());
     try std.testing.expectEqual(@as(usize, 0), c.activeBays());
 
     const core = c.point(m.Vec3.init(0, -10, -4));
-    try std.testing.expect(sky.strikeAlong(&enemies, .{ core[0], core[1] + 100, core[2] }, .{ 0, -1, 0 }, 200, 0, 2000, &events, &n));
+    try std.testing.expect(sky.strikeAlong(&enemies, .{ core[0], core[1] + 100, core[2] }, .{ 0, -1, 0 }, 200, 0, 2000, 0, &events, &n));
     try std.testing.expectEqual(AssaultStage.crashing, c.stage());
     try std.testing.expect(c.alive);
     for (0..60 * 12) |_| _ = sky.step(&physics, &enemies, null, &.{}, 1.0 / 60.0, &events);
@@ -1240,7 +1243,7 @@ test "a wasp in front of a carrier bay takes the shot" {
     var events: [8]Event = undefined;
     var n: usize = 0;
     const before = sky.carriers[0].health;
-    try std.testing.expect(sky.strikeAlong(&enemies, R.sub(bay, .{ 0, 40, 0 }), .{ 0, 1, 0 }, 60, 0, 10, &events, &n));
+    try std.testing.expect(sky.strikeAlong(&enemies, R.sub(bay, .{ 0, 40, 0 }), .{ 0, 1, 0 }, 60, 0, 10, 0, &events, &n));
     try std.testing.expectEqual(before, sky.carriers[0].health);
     try std.testing.expect(sky.wasps[0].?.health < wasp_health);
 }
@@ -1293,7 +1296,7 @@ test "dragonflies are fragile interceptors and bomber raids can be defended or l
     sky.wasps[0] = .{ .kind = .dragonfly, .position = .{ 0, 100, 100 }, .carrier = 0, .health = wasp_health * 0.55 };
     var events: [16]Event = undefined;
     var n: usize = 0;
-    try std.testing.expect(sky.strikeAlong(&enemies, .{ 0, 100, 0 }, .{ 0, 0, 1 }, 150, 0, 40, &events, &n));
+    try std.testing.expect(sky.strikeAlong(&enemies, .{ 0, 100, 0 }, .{ 0, 0, 1 }, 150, 0, 40, 0, &events, &n));
     try std.testing.expect(sky.wasps[0] == null); // one accurate rifle hit, versus three for a wasp
 
     sky = Skies.init(72, .{ 0, 0, 0 }, &.{});
@@ -1308,7 +1311,7 @@ test "dragonflies are fragile interceptors and bomber raids can be defended or l
     sky.raid_active = true;
     sky.raid_plaza = 1;
     sky.wasps[0] = .{ .kind = .beetle_bomber, .position = R.add(plaza, .{ 0, 24, -5 }), .forward = .{ 0, 0, 1 }, .speed = 0, .carrier = 0, .health = wasp_health * 2.2, .raid_target = plaza, .bomb_timer = 0 };
-    sky.fireRanger(R.add(plaza, .{ 0, 24, -100 }), .{ 0, 0, 1 }, wasp_health * 3);
+    sky.fireRanger(R.add(plaza, .{ 0, 24, -100 }), .{ 0, 0, 1 }, wasp_health * 3, 0);
     n = 0;
     var defended = false;
     for (0..12) |_| {

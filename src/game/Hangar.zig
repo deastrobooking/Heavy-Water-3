@@ -12,6 +12,7 @@ const Camera = @import("../world/Camera.zig");
 const Terrain = @import("../procedural/Terrain.zig");
 const Input = @import("../engine/Input.zig");
 const jet = @import("../vehicle/jet.zig");
+const SpaceFlight = @import("../vehicle/SpaceFlight.zig");
 const airfoil = @import("../vehicle/airfoil.zig");
 const dyn = @import("../vehicle/dynamics.zig");
 const ShipMeshes = @import("../vehicle/ShipMeshes.zig");
@@ -35,6 +36,12 @@ pub const rest_height: f32 = tuning.rest_height;
 fighter: ?jet.Fighter = null,
 piloting: bool = false,
 frame: Progress.SpaceFrame = .kestrel,
+space_mode: bool = false,
+space_center: m.Vec3 = m.Vec3.zero,
+space_return: Physics.Vec3 = .{ 0, 0, 0 },
+space_return_camera: [3]f32 = .{ 0, 27, -58 },
+space_return_yaw: f32 = 0,
+space_return_pitch: f32 = -0.3,
 
 pub fn padPosition(seed: u64, spawn: Physics.Vec3) Physics.Vec3 {
     const pad = Garage.padPosition(seed, spawn, .courier);
@@ -83,8 +90,42 @@ pub fn placeWithFrame(self: *Hangar, seed: u64, spawn: Physics.Vec3, at: ?Physic
     const pad = padPosition(seed, spawn);
     const p = at orelse Physics.Vec3{ pad[0], pad[1] + rest_height, pad[2] };
     self.frame = frame;
+    self.space_mode = false;
     self.fighter = jet.Fighter.init(massProps(), configFor(frame, levels), m.Vec3.init(p[0], p[1], p[2]), if (at != null) yaw else std.math.pi);
     self.piloting = false;
+}
+
+pub fn enterSpaceTrial(self: *Hangar, center: Physics.Vec3, return_to: Physics.Vec3, camera: *Camera) void {
+    const f = &(self.fighter orelse return);
+    self.space_mode = true;
+    self.space_center = m.Vec3.init(center[0], center[1], center[2]);
+    self.space_return = return_to;
+    self.space_return_camera = .{ camera.position.x(), camera.position.y(), camera.position.z() };
+    self.space_return_yaw = camera.yaw;
+    self.space_return_pitch = camera.pitch;
+    self.piloting = true;
+    f.body.pos = self.space_center;
+    f.body.vel = m.Vec3.zero;
+    f.body.omega = m.Vec3.zero;
+    f.body.rot = m.Quat.identity;
+    f.grounded = false;
+    f.throttle = 0;
+    camera.yaw = 0;
+    camera.pitch = -1.35;
+    camera.position = math.vec3(center[0], center[1] + 260, center[2] - 60);
+}
+
+pub fn leaveSpaceTrial(self: *Hangar, seed: u64, spawn: Physics.Vec3, levels: [Progress.kestrel_upgrade_count]u8, camera: *Camera) ?Physics.Vec3 {
+    if (!self.space_mode) return null;
+    const return_to = self.space_return;
+    const return_camera = self.space_return_camera;
+    const return_yaw = self.space_return_yaw;
+    const return_pitch = self.space_return_pitch;
+    self.placeWithFrame(seed, spawn, null, 0, levels, self.frame);
+    camera.yaw = return_yaw;
+    camera.pitch = return_pitch;
+    camera.position = math.vec3(return_camera[0], return_camera[1], return_camera[2]);
+    return return_to;
 }
 
 pub fn equipFrame(self: *Hangar, frame: Progress.SpaceFrame, levels: [Progress.kestrel_upgrade_count]u8) void {
@@ -131,6 +172,10 @@ pub fn controls(input: Input, camera: Camera) jet.Input {
 /// Steps the jet: flown when piloted, otherwise parked (gear holds it, the computer levels).
 pub fn step(self: *Hangar, physics: *const Physics, input: jet.Input, dt: f32) void {
     const f = &(self.fighter orelse return);
+    if (self.space_mode and self.piloting) {
+        SpaceFlight.step(f, self.space_center, .{ .lateral = input.roll, .forward = input.throttle, .vertical = input.climb, .boost = input.afterburner, .brake = input.brake }, dt);
+        return;
+    }
     // Unpiloted, the jet idles: engine off, wings levelled, and the lift jets let it down gently.
     const in: jet.Input = if (self.piloting) input else .{ .aim = f.forward(), .steer = false, .climb = if (f.grounded) 0 else -0.6 };
     if (!self.piloting) f.throttle = 0;
@@ -168,6 +213,12 @@ pub fn follow(self: *const Hangar, seed: u64, camera: *Camera) ?Physics.Vec3 {
     if (!self.piloting) return null;
     const f = self.fighter orelse return null;
     const pos = f.body.pos;
+    if (self.space_mode) {
+        camera.yaw = 0;
+        camera.pitch = -1.35;
+        camera.position = math.vec3(pos.x, pos.y + 260, pos.z - 60);
+        return .{ pos.x, pos.y, pos.z };
+    }
     const fwd = camera.forward();
     var eye = math.vec3(pos.x - fwd.x() * chase_distance, pos.y + 5 - fwd.y() * chase_distance, pos.z - fwd.z() * chase_distance);
     const ground = Terrain.surface(seed, eye.x(), eye.z()).height + 1;

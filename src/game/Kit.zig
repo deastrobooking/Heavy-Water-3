@@ -20,8 +20,8 @@ pub const upgrade_count = enum_compat.fields(Upgrade).len;
 pub const max_level = 3;
 pub const city_discovery_count = 10;
 const city_discovery_mask: u16 = (1 << city_discovery_count) - 1;
-pub const Cost = struct { scrap: u32, parts: u32 };
-pub const Error = error{ MaxLevel, NotEnoughScrap, NotEnoughParts, AlreadyOwned, NotOwned };
+pub const Cost = struct { scrap: u32, parts: u32, gold: u32 = 0 };
+pub const Error = error{ MaxLevel, NotEnoughScrap, NotEnoughParts, NotEnoughGold, AlreadyOwned, NotOwned };
 
 pub const Info = struct { name: []const u8, summary: []const u8 };
 pub const info = [upgrade_count]Info{
@@ -135,8 +135,10 @@ pub fn cost(self: *const Kit, u: Upgrade) Cost {
 pub fn pay(wallet: *Market.Wallet, price: Cost) Error!void {
     if (wallet.scrap < price.scrap) return error.NotEnoughScrap;
     if (wallet.parts < price.parts) return error.NotEnoughParts;
+    if (wallet.gold < price.gold) return error.NotEnoughGold;
     wallet.scrap -= price.scrap;
     wallet.parts -= price.parts;
+    wallet.gold -= price.gold;
 }
 
 pub fn buy(self: *Kit, u: Upgrade) Error!void {
