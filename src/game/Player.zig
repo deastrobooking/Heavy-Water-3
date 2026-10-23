@@ -846,26 +846,8 @@ test "walking into a wall is blocked; jumping into it climbs and mantles onto th
 }
 
 test "a standing jump peaks near 17 ft and a full-sprint running jump near 54 ft" {
-    var standing_physics: Physics = .init(.{ .sample = flatGroundForJumps });
-    defer standing_physics.deinit();
-    var camera: Camera = .{};
-    const peak = struct {
-        fn of(physics: *Physics, cam: *Camera, run_up: usize) f32 {
-            var p: Player = .{ .feet = .{ 0, 0, 0 } };
-            for (0..run_up) |_| p.step(physics, cam, .{ .forward = 1, .fast = true }, 1.0 / 60.0);
-            p.step(physics, cam, .{ .forward = if (run_up > 0) 1 else 0, .fast = run_up > 0, .jump_pressed = true, .jump = true }, 1.0 / 60.0);
-            var top: f32 = p.feet[1];
-            for (0..180) |_| {
-                p.step(physics, cam, .{ .forward = if (run_up > 0) 1 else 0, .fast = run_up > 0, .jump = true }, 1.0 / 60.0);
-                top = @max(top, p.feet[1]);
-            }
-            return top;
-        }
-    }.of;
-    const standing = peak(&standing_physics, &camera, 0);
-    var running_physics: Physics = .init(.{ .sample = flatGroundForJumps });
-    defer running_physics.deinit();
-    const running = peak(&running_physics, &camera, 90);
+    const standing = jumpPeak(0);
+    const running = jumpPeak(90);
     try std.testing.expectApproxEqAbs(@as(f32, 5.2), standing, 0.25);
     try std.testing.expectApproxEqAbs(@as(f32, 16.35), running, 0.8);
     try std.testing.expect(runningJumpSpeed(walk_speed) > runningJumpSpeed(walk_speed / 2));
@@ -875,6 +857,24 @@ test "a standing jump peaks near 17 ft and a full-sprint running jump near 54 ft
 
 fn flatGroundForJumps(_: ?*const anyopaque, _: f32, _: f32) Physics.GroundSample {
     return .{ .height = 0, .normal = .{ 0, 1, 0 } };
+}
+
+/// The real peak height of a jump on flat ground, simulated: standing (`run_up` 0) or after
+/// `run_up` steps of sprinting (a sprint long jump). Tests that keep courses honest use it, so
+/// a movement retune cannot quietly outgrow them.
+pub fn jumpPeak(run_up: usize) f32 {
+    var physics: Physics = .init(.{ .sample = flatGroundForJumps });
+    defer physics.deinit();
+    var camera: Camera = .{};
+    var p: Player = .{ .feet = .{ 0, 0, 0 } };
+    for (0..run_up) |_| p.step(&physics, &camera, .{ .forward = 1, .fast = true }, 1.0 / 60.0);
+    p.step(&physics, &camera, .{ .forward = if (run_up > 0) 1 else 0, .fast = run_up > 0, .jump_pressed = true, .jump = true }, 1.0 / 60.0);
+    var top: f32 = p.feet[1];
+    for (0..180) |_| {
+        p.step(&physics, &camera, .{ .forward = if (run_up > 0) 1 else 0, .fast = run_up > 0, .jump = true }, 1.0 / 60.0);
+        top = @max(top, p.feet[1]);
+    }
+    return top;
 }
 
 test "grapple zips toward a static anchor and releases on arrival; flight glides" {

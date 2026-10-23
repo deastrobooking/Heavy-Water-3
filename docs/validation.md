@@ -1,3 +1,10 @@
+## Discovery courses raised for the stronger jumps — 2026-10-23
+
+- **Problem:** since the 2026-10-22 movement retune a sprint long jump peaks near 16.35 m, so a player could jump from the ground straight onto a discovery course's 16 m plate and skip the course. The test meant to stop this compared against a hard-coded 9.3 m jump, so it kept passing.
+- **Fixed:** `Challenges.plate_height` is 23 m; the spiral tower climbs five 4 m steps around the plate column; the spring course climbs to a 12 m spring that carries you to the plate; `Course.jump_rise` is 4 m (a standing jump now peaks near 5.2 m); `Mesher.Hide.gate_reach` is 28 m so the higher plate still opens every gate of its cage. `Player.jumpPeak` simulates a real jump for tests.
+- **Checked:** the course test now measures the real standing and sprint jumps and fails with the old 16 m plate (restored and rerun to confirm); every archetype fits its piece budget and keeps every cage gate within the plate's reach; the 18 challenge, discovery, course and platformer tests pass, including the Detroit placement and finishability tests.
+- **Not checked:** climbing the new courses by hand, and how the taller towers sit among the plazas in captures.
+
 ## Skyways reconnected; rounded eco towers — 2026-10-23
 
 - **Reported:** the skyscraper bridges no longer connected the towers up top, and the owner asked for some towers with a more modern, rounded eco-city look.

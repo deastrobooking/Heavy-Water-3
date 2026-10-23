@@ -1,5 +1,5 @@
 //! Can a player get from one block to another? A conservative check for built courses: from a
-//! block you stand on you can reach another within a 4.5 m jump that rises at most 3 m (a spring
+//! block you stand on you can reach another within a 4.5 m jump that rises at most 4 m (a spring
 //! lifts you 11 m), and you can always drop. It ignores timing, so crumbling blocks count as
 //! solid, gates count as closed, and a mover is a block you can ride its full run. Allocation-free; refuses searches larger than its capacity.
 const std = @import("std");
@@ -7,7 +7,8 @@ const Blocks = @import("Blocks.zig");
 const Materials = @import("Materials.zig");
 
 pub const max_nodes = 4096;
-pub const jump_rise = 3;
+/// A standing jump peaks near 5.2 m (2026-10-22), so 4 m keeps a margin.
+pub const jump_rise = 4;
 pub const spring_rise = 11;
 pub const jump_reach: f32 = 4.5;
 pub const max_drop = 24;

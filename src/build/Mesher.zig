@@ -138,7 +138,9 @@ pub const Hide = struct {
     plates: []const [3]f32 = &.{},
 
     /// How far a plate's reach extends: gates within this many metres open with it.
-    pub const gate_reach: f32 = 20;
+    /// Gates within this distance of a pressed plate open. Wide enough for a discovery course
+    /// whose plate stands 23 m above its cage (`Challenges.plate_height`).
+    pub const gate_reach: f32 = 28;
 
     pub fn hides(self: Hide, cell: Blocks.Cell, x: i32, y: i32, z: i32) bool {
         if (cell.isEmpty()) return false;

@@ -46,9 +46,12 @@ const Spot = [3]i32;
 const max_pieces = 160;
 /// How far a course may be pushed out from the cage; its plate still reaches every gate.
 const max_shift = 5;
-/// The plate stands this high above the floor: out of reach of a running jump (about 9.2 m)
-/// even from the cage roof (5 m), so the course is the way up.
-pub const plate_height = 16;
+/// The plate stands this high above the floor: out of reach of a sprint long jump (about 16.4 m
+/// since the 2026-10-22 retune) even from the cage roof (5 m), so the course is the way up. A
+/// test measures the real jump, so a later retune that outgrows this fails loudly.
+pub const plate_height = 23;
+/// The cage roof's standing height, from where a jump could also start.
+pub const cage_roof: f32 = 5;
 
 const Layout = struct {
     pieces: [max_pieces]Piece = undefined,
@@ -77,13 +80,14 @@ const Layout = struct {
         self.add(along, side, height - 1, top);
     }
 
-    /// A spiral tower around (`along`, 0): a low first block, four steps rising 3 m around the
-    /// centre, and the centre column `plate_height` tall holding `cap`. Every step is within a
-    /// standing jump of the last; the top only from the fourth step.
+    /// A spiral tower around (`along`, 0): a low first block, five steps rising 4 m around the
+    /// centre (the eight cells around it, alternating sides), and the centre column
+    /// `plate_height` tall holding `cap`. Every step is within a standing jump of the last; the
+    /// top only from the fifth step.
     fn tower(self: *Layout, along: i32, step: Blocks.Cell, cap: Blocks.Cell) void {
         self.pillar(along + 3, 0, 2, stone);
-        const ring = [_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ -1, 0 }, .{ 0, -1 } };
-        for (ring, 0..) |o, k| self.pillar(along + o[0], o[1], 4 + 3 * @as(i32, @intCast(k)), step);
+        const ring = [_][2]i32{ .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 }, .{ -1, 1 }, .{ -1, 0 } };
+        for (ring, 0..) |o, k| self.pillar(along + o[0], o[1], 4 + 4 * @as(i32, @intCast(k)), step);
         self.pillar(along, 0, plate_height, cap);
     }
 };
@@ -106,13 +110,15 @@ fn layout(archetype: Archetype, mover_rot: u2) Layout {
             l.plate = .{ 5, 0, top };
         },
         .spring_ledge => {
-            // A step, a spring on a pillar, and the plate column with a ledge to land on.
-            l.add(11, 0, 0, stone);
-            l.pillar(10, 0, 2, stone);
-            l.pillar(8, 0, 5, mech(.main, 0));
+            // Steps up to a spring on a tall pillar, and the plate column with a ledge to land
+            // on: the spring's 11 m (it gives about 14 m) carries you from 12 m to the plate.
+            l.add(12, 0, 0, stone);
+            l.pillar(11, 0, 4, stone);
+            l.pillar(10, 1, 8, stone);
+            l.pillar(9, 1, plate_height - 11, mech(.main, 0));
             l.pillar(5, 0, plate_height, mech(.nature, 0));
             for ([_][2]i32{ .{ 5, 1 }, .{ 5, -1 }, .{ 4, 0 } }) |o| l.add(o[0], o[1], top, stone);
-            l.start = .{ 11, 0, 0 };
+            l.start = .{ 12, 0, 0 };
             l.plate = .{ 5, 0, top };
         },
         .ferry => {
@@ -323,13 +329,17 @@ pub fn finishable(sb: *const Sandbox, built: Built) bool {
     return Course.reachable(sb.block_world.blocks, built.start, built.plate) catch false;
 }
 
-test "no plate can be reached by a running jump from the floor or the cage roof" {
+test "no plate can be reached by any jump from the floor or the cage roof, but every course step can" {
     const Player = @import("Player.zig");
-    // Peak of a running jump (v^2 / 2g at the rise gravity, with the float near the top) is
-    // about 9.2 m; the plate's standing height minus the cage roof must beat it.
-    const running_peak: f32 = 9.3;
-    try std.testing.expect(@as(f32, plate_height) - 5 > running_peak);
-    try std.testing.expect(Player.runningJumpSpeed(Player.walk_speed) > Player.jump_speed);
+    // The real jumps, simulated: a 2026-10-22 retune once let a sprint jump skip every course.
+    const standing = Player.jumpPeak(0);
+    const sprint = Player.jumpPeak(90);
+    try std.testing.expect(sprint > standing);
+    // From the cage roof, a sprint long jump still falls short of the plate's top.
+    try std.testing.expect(cage_roof + sprint < @as(f32, plate_height) - 0.5);
+    // The course checker's assumptions are no bolder than the player: a step it allows is a
+    // standing jump with room to spare.
+    try std.testing.expect(@as(f32, @floatFromInt(Course.jump_rise)) < standing - 0.5);
 }
 
 test "every method maps to a challenge except the two landmark climbs" {
