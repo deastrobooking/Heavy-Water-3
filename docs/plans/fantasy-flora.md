@@ -47,8 +47,8 @@ About twelve species, so the variant count grows from 18 (and whatever the other
 | Step | Deliverable | Proved by |
 | --- | --- | --- |
 | FF0 | Wait for the other session's vegetation work to land; re-read `Vegetation`, `Scatter`, `Biome`. | Clean tree and a green suite. |
-| FF1 | Species meshes and tables: names, colors, glow flags, heights, triangle budgets for the twelve species. | Tests: every mesh is valid, inside its height and triangle budget, deterministic by seed; a contact-sheet capture of all species by day and by night. |
-| FF2 | Wild placement: sap-meadow weights, species choice inside existing candidates, generator version bump and migration. | Scatter tests (every species appears, ids unchanged, no placement on roads or the spawn), save migration test, forest captures day and night. |
+| FF1 | **Done 2026-10-22 (standalone geometry and tests).** Species meshes and tables: names, colors, glow parts, heights, triangle budgets for the twelve species, in `procedural/SapFlora.zig`. | Tests: every mesh is valid, inside its height and triangle budget, deterministic; a contact sheet from a throwaway software renderer. The in-engine day and night capture moves to FF2. |
+| FF2 | Hook-in and wild placement (first raise `Catalog.mesh_capacity`, which is 128 and full; two meshes per species add 24): sap-meadow weights, species choice inside existing candidates, generator version bump and migration. | Scatter tests (every species appears, ids unchanged, no placement on roads or the spawn), save migration test, forest captures day and night. |
 | FF3 | Night glow and sway in the shader path (an emissive tint lane, a small wind sway), within the WGSL limits. | Capture under `MTL_DEBUG_LAYER=1`; nature benchmark within budget. |
 | FF4 | Decoration: the Plants entry, `Decor` state, cost and refund, save format and fixture, guest building. | Place, remove, save, restore and four-player tests; smoke stage. |
 | FF5 | Polish and measurement: four-player benchmark, combat-readability review, docs and the player guide. | Recorded numbers and a hands-on checklist. |

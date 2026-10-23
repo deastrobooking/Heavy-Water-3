@@ -55,6 +55,7 @@ test {
     _ = @import("procedural/Scatter.zig");
     _ = @import("procedural/LSystem.zig");
     _ = @import("procedural/Vegetation.zig");
+    _ = @import("procedural/SapFlora.zig");
     _ = @import("engine/FrameStats.zig");
     _ = @import("engine/Flythrough.zig");
     _ = @import("engine/Handle.zig");
