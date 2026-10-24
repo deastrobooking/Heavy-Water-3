@@ -67,6 +67,9 @@ plant_count: u32 = 0,
 flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @splat(0),
 /// Trees drawn with a lighter crown: `[0]` mid, `[1]` far, by species (`treeDetail`).
 tree_lod_counts: [2][Vegetation.tree_count]u32 = @splat(@splat(0)),
+/// Trees outside the view that the sun's shadow box still sees, by species: drawn only into
+/// the shadow map, with the far crown (`drawShadowFlora`).
+caster_counts: [Vegetation.tree_count]u32 = @splat(0),
 /// Instances per living-sap species: bodies, then glows (the same plants drawn bright).
 sap_counts: [SapFlora.count]u32 = @splat(0),
 sap_glow_counts: [SapFlora.count]u32 = @splat(0),
@@ -194,7 +197,9 @@ fn baseColor(self: *const Scene, handle: Catalog.MeshHandle) [4]f32 {
 }
 
 /// `hide_owner` (nonzero) skips that player's avatar parts: its own first-person view.
-pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Mat4x4, culling: bool, upload_budget: usize, removed: *const Modifications, props: []const World.Prop, hide_owner: u8) void {
+/// `sun` is the view's shadow-map projection when shadows are on: trees outside the view that
+/// it sees are gathered as shadow-only casters.
+pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Mat4x4, culling: bool, upload_budget: usize, removed: *const Modifications, props: []const World.Prop, hide_owner: u8, sun: ?mach.math.Mat4x4) void {
     if (self.space_review) {
         self.draw_count = 0;
         self.prop_count = 0;
@@ -206,6 +211,7 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.plant_count = 0;
         self.flora_counts = @splat(0);
         self.tree_lod_counts = @splat(@splat(0));
+        self.caster_counts = @splat(0);
         self.sap_counts = @splat(0);
         self.sap_glow_counts = @splat(0);
         self.boulder_counts = @splat(0);
@@ -303,13 +309,14 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.relic_count = 0;
         self.flora_counts = @splat(0);
         self.tree_lod_counts = @splat(@splat(0));
+        self.caster_counts = @splat(0);
         self.sap_counts = @splat(0);
         self.sap_glow_counts = @splat(0);
         self.plant_count = 0;
         self.boulder_counts = @splat(0);
     } else {
         self.refreshBucketColors();
-        self.gatherScatter(vp, culling, removed, .{ camera.position.x(), camera.position.y(), camera.position.z() });
+        self.gatherScatter(vp, culling, removed, .{ camera.position.x(), camera.position.y(), camera.position.z() }, sun);
     }
     self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
 }
@@ -357,14 +364,15 @@ const tree_far_bucket: u8 = tree_mid_bucket + Vegetation.tree_count;
 const sap_body_bucket: u8 = tree_far_bucket + Vegetation.tree_count;
 const sap_glow_bucket: u8 = sap_body_bucket + SapFlora.count;
 const boulder_bucket: u8 = sap_glow_bucket + SapFlora.count;
-const bucket_count = boulder_bucket + Vegetation.boulder_count;
+const caster_bucket: u8 = boulder_bucket + Vegetation.boulder_count;
+const bucket_count = caster_bucket + Vegetation.tree_count;
 /// A scattered object left out this frame (filtered, culled or removed).
 const no_bucket: u8 = 0xff;
 
 /// Sorts every visible scattered object into its draw bucket with two scans of the residents
 /// (tag and count, then place), instead of one scan per bucket. Instances keep resident-then-
 /// object order within a bucket, exactly as a scan per bucket would emit them.
-fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) void {
+fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32, sun: ?mach.math.Mat4x4) void {
     var sources: [Streamer.render_capacity]Source = undefined;
     var source_count: usize = 0;
     for (self.residents, 0..) |resident, slot| {
@@ -374,14 +382,14 @@ fn gatherScatter(self: *Scene, vp: mach.math.Mat4x4, culling: bool, removed: *co
         sources[source_count] = .{ .key = view.key, .objects = data.objects[0..data.object_count], .slot = slot };
         source_count += 1;
     }
-    self.sortScatter(sources[0..source_count], vp, culling, removed, eye);
+    self.sortScatter(sources[0..source_count], vp, culling, removed, eye, sun);
 }
 
 /// One visible chunk's scattered objects.
 /// `slot` is the resident slot, which keys the remembered crown details.
 const Source = struct { key: Key, objects: []const Scatter.Object, slot: usize };
 
-fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32) void {
+fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32, sun: ?mach.math.Mat4x4) void {
     var counts: [bucket_count]u32 = @splat(0);
     for (sources, 0..) |source, r| {
         const tags = &self.scatter_tags[r];
@@ -393,7 +401,7 @@ fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, cull
         const details = &self.tree_details[source.slot];
         for (source.objects, 0..) |object, o| {
             const previous: ?Vegetation.Detail = if (details[o] == unknown_detail) null else @enumFromInt(details[o]);
-            tags[o] = self.bucketOf(source.key, object, vp, culling, removed, eye, previous);
+            tags[o] = self.bucketOf(source.key, object, vp, culling, removed, eye, previous, sun);
             if (detailOf(tags[o])) |detail| details[o] = @intFromEnum(detail);
             if (tags[o] == no_bucket) continue;
             counts[tags[o]] += 1;
@@ -444,13 +452,14 @@ fn sortScatter(self: *Scene, sources: []const Source, vp: mach.math.Mat4x4, cull
     @memcpy(&self.tree_lod_counts[1], counts[tree_far_bucket..sap_body_bucket]);
     @memcpy(&self.sap_counts, counts[sap_body_bucket..sap_glow_bucket]);
     @memcpy(&self.sap_glow_counts, counts[sap_glow_bucket..boulder_bucket]);
-    @memcpy(&self.boulder_counts, counts[boulder_bucket..]);
+    @memcpy(&self.boulder_counts, counts[boulder_bucket..caster_bucket]);
+    @memcpy(&self.caster_counts, counts[caster_bucket..]);
     self.plant_count = 0;
     for (counts[flora_bucket..boulder_bucket]) |count| self.plant_count += count;
 }
 
 /// The draw bucket of one scattered object this frame, or `no_bucket` when it is not drawn.
-fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32, previous: ?Vegetation.Detail) u8 {
+fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.Mat4x4, culling: bool, removed: *const Modifications, eye: [3]f32, previous: ?Vegetation.Detail, sun: ?mach.math.Mat4x4) u8 {
     const bucket: u8 = switch (object.kind) {
         .relic => 0,
         .boulder => if (object.variant < Vegetation.boulder_count) boulder_bucket + object.variant else return no_bucket,
@@ -477,9 +486,24 @@ fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.
         const t = object.transform.toInstance();
         // Living-sap plants are culled about their middle, everything else about its top.
         const lift: f32 = if (bucket >= sap_body_bucket and bucket < sap_glow_bucket) 0.5 else 1;
-        if (!Visibility.sphereVisible(vp, .{ t[0], t[1] + t[3] * lift, t[2] }, 1.3 * t[3])) return no_bucket;
+        const center: [3]f32 = .{ t[0], t[1] + t[3] * lift, t[2] };
+        if (!Visibility.sphereVisible(vp, center, 1.3 * t[3])) {
+            // A tree out of view can still shade what is in view: a shadow-only caster.
+            const box = sun orelse return no_bucket;
+            const species = treeSpecies(bucket) orelse return no_bucket;
+            if (!Visibility.sphereVisible(box, center, 1.3 * t[3])) return no_bucket;
+            return caster_bucket + species;
+        }
     }
     return bucket;
+}
+
+/// The tree species a near, mid or far tree bucket draws, or null for other buckets.
+fn treeSpecies(bucket: u8) ?u8 {
+    if (bucket >= tree_mid_bucket and bucket < tree_far_bucket) return bucket - tree_mid_bucket;
+    if (bucket >= tree_far_bucket and bucket < sap_body_bucket) return bucket - tree_far_bucket;
+    if (bucket >= flora_bucket and bucket < tree_mid_bucket) return Vegetation.treeIndex(bucket - flora_bucket);
+    return null;
 }
 
 /// Base colours of each bucket's mesh, refreshed each frame (catalog meshes can be replaced).
@@ -496,6 +520,7 @@ fn refreshBucketColors(self: *Scene) void {
         self.bucket_colors[sap_glow_bucket + s] = self.baseColor(c.sap_glow[s]);
     }
     for (0..Vegetation.boulder_count) |b| self.bucket_colors[boulder_bucket + b] = self.baseColor(c.boulders[b]);
+    for (0..Vegetation.tree_count) |t| self.bucket_colors[caster_bucket + t] = self.baseColor(c.tree_crowns[t][1]);
 }
 
 /// Instance tint alpha of a glowing plant part: above 1 is emissive, up to 2 fully so.
@@ -621,6 +646,48 @@ pub fn submittedTriangles(self: *const Scene) u64 {
     return indices / 3;
 }
 
+/// Triangles the sun's shadow pass submits for scattered objects and props (characters aside).
+/// `as_drawn` counts the first version instead, which drew the view's own crowns and every
+/// plant: the benchmark reports both.
+pub fn shadowTriangles(self: *const Scene, as_drawn: bool) u64 {
+    const c = &self.catalog.content;
+    var indices: u64 = 0;
+    const Add = struct {
+        fn mesh(scene: *const Scene, total: *u64, handle: Catalog.MeshHandle, count: u32) void {
+            if (count > 0) if (scene.gpuMesh(handle)) |m| {
+                total.* += @as(u64, m.index_count) * count;
+            };
+        }
+    };
+    for (self.flora_counts, 0..) |count, variant| {
+        if (Vegetation.treeIndex(@intCast(variant))) |species| {
+            Add.mesh(self, &indices, c.tree_trunks[species], count);
+            Add.mesh(self, &indices, if (as_drawn) c.flora[variant] else c.tree_crowns[species][0], count);
+        } else if (as_drawn) Add.mesh(self, &indices, c.flora[variant], count);
+    }
+    for (self.tree_lod_counts, 0..) |counts, lod| for (counts, 0..) |count, species| {
+        Add.mesh(self, &indices, c.tree_trunks[species], count);
+        Add.mesh(self, &indices, c.tree_crowns[species][if (as_drawn) lod else 1], count);
+    };
+    if (as_drawn) {
+        for (self.sap_counts, self.sap_glow_counts, 0..) |body, glow, species| {
+            Add.mesh(self, &indices, c.sap_body[species], body);
+            Add.mesh(self, &indices, c.sap_glow[species], glow);
+        }
+    } else {
+        for (self.caster_counts, 0..) |count, species| {
+            Add.mesh(self, &indices, c.tree_trunks[species], count);
+            Add.mesh(self, &indices, c.tree_crowns[species][1], count);
+        }
+    }
+    Add.mesh(self, &indices, c.relic, self.relic_count);
+    for (self.boulder_counts, 0..) |count, variant| Add.mesh(self, &indices, c.boulders[variant], count);
+    for (self.draws[0..self.draw_count]) |d| if (!d.ground) {
+        indices += @as(u64, d.index_count) * d.instances;
+    };
+    return indices / 3;
+}
+
 /// Scattered plants and trees (with their trunks), for the swaying foliage pipeline.
 pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
     var next: u32 = 1 + self.relic_count;
@@ -648,6 +715,35 @@ pub fn drawFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
         if (count == 0) continue;
         if (self.gpuMesh(self.catalog.content.sap_glow[species])) |mesh| mesh.draw(pass, count, next);
         next += count;
+    }
+}
+
+/// Trees for the sun's shadow map, one crown lighter than the view draws them (a shadow needs
+/// the outline, not the leaves), then the shadow-only casters with far crowns. Small plants and
+/// living-sap flora are left out: their shadows are smaller than a shadow texel.
+pub fn drawShadowFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
+    const c = &self.catalog.content;
+    var next: u32 = 1 + self.relic_count;
+    for (self.flora_counts, 0..) |count, variant| {
+        defer next += count;
+        if (count == 0) continue;
+        const species = Vegetation.treeIndex(@intCast(variant)) orelse continue;
+        if (self.gpuMesh(c.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
+        if (self.gpuMesh(c.tree_crowns[species][0])) |crown| crown.draw(pass, count, next);
+    }
+    for (self.tree_lod_counts) |counts| for (counts, 0..) |count, species| {
+        defer next += count;
+        if (count == 0) continue;
+        if (self.gpuMesh(c.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
+        if (self.gpuMesh(c.tree_crowns[species][1])) |crown| crown.draw(pass, count, next);
+    };
+    next = 1 + self.relic_count + self.plant_count;
+    for (self.boulder_counts) |count| next += count;
+    for (self.caster_counts, 0..) |count, species| {
+        defer next += count;
+        if (count == 0) continue;
+        if (self.gpuMesh(c.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
+        if (self.gpuMesh(c.tree_crowns[species][1])) |crown| crown.draw(pass, count, next);
     }
 }
 
@@ -694,13 +790,13 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     // Objects sit within 8 m of the origin; a unit-scale tree there is far from this eye.
     const eye: [3]f32 = .{ 0, 0, 40 };
     scene.instance_count = 1;
-    scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, eye);
+    scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, eye, null);
 
     // The reference: one full scan per bucket, as the renderer used to do.
     var expected: [64][4]f32 = undefined;
     var n: usize = 0;
     for (0..bucket_count) |bucket| for (sources) |source| for (source.objects) |object| {
-        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed, eye, null);
+        const tag = scene.bucketOf(source.key, object, mach.math.Mat4x4.ident, false, &removed, eye, null, null);
         const glow_of_body = bucket >= sap_glow_bucket and bucket < boulder_bucket and tag == bucket - SapFlora.count;
         if (tag != bucket and !glow_of_body) continue;
         expected[n] = object.transform.toInstance();
@@ -710,7 +806,7 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     for (expected[0..n], scene.instances[1 .. 1 + n]) |want, got| try std.testing.expectEqual(want, got.translation_scale);
     // Two relics per chunk; the removed object and the unknown variant are left out.
     try std.testing.expectEqual(@as(u32, 4), scene.relic_count);
-    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed, eye, null));
+    try std.testing.expectEqual(no_bucket, scene.bucketOf(sources[1].key, chunks[1][2], mach.math.Mat4x4.ident, false, &removed, eye, null, null));
     var sap_bodies: u32 = 0;
     var sap_glows: u32 = 0;
     for (scene.sap_counts, scene.sap_glow_counts) |body, glow| {
@@ -762,7 +858,7 @@ test "a tree walked back and forth across a crown boundary switches once each wa
     for (0..40) |step| {
         const z: f32 = 100 + (if (step % 2 == 0) @as(f32, -3) else 3) + @as(f32, @floatFromInt(step)) * 0.01;
         scene.instance_count = 1;
-        scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, .{ 0, 50, z });
+        scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, .{ 0, 50, z }, null);
         const near = sumOf(&scene.flora_counts) == 1;
         if (last) |was| switches += @intFromBool(was != near);
         last = near;
@@ -771,10 +867,39 @@ test "a tree walked back and forth across a crown boundary switches once each wa
     // Walking clearly away and back switches exactly once each way.
     for ([_]f32{ 130, 130, 80, 80 }) |z| {
         scene.instance_count = 1;
-        scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, .{ 0, 50, z });
+        scene.sortScatter(&sources, mach.math.Mat4x4.ident, false, &removed, .{ 0, 50, z }, null);
         const near = sumOf(&scene.flora_counts) == 1;
         switches += @intFromBool(last.? != near);
         last = near;
     }
     try std.testing.expectEqual(@as(usize, 2), switches);
+}
+
+test "a tree out of view that the sun's box sees casts, from a shadow-only range" {
+    const allocator = std.testing.allocator;
+    const scene = try allocator.create(Scene);
+    defer allocator.destroy(scene);
+    scene.* = .{ .stream = undefined, .catalog = undefined };
+    scene.bucket_colors = @splat(.{ 1, 1, 1, 1 });
+    const Shadow = @import("Shadow.zig");
+    const sun = Shadow.viewProjection(.{ 0, 1, 0 }, .{ 0, 0, 0 });
+    // The camera's box sits 2 km away, so it sees neither tree.
+    const camera = Shadow.viewProjection(.{ 0, 1, 0 }, .{ 2000, 0, 0 });
+    const trees = [_]Scatter.Object{
+        .{ .local_id = 0, .kind = .vegetation, .variant = Vegetation.tree_variants[2], .transform = .{ .position = .{ 20, 0, 0 }, .scale = 30 }, .tint = .{ 1, 1, 1, 1 } },
+        .{ .local_id = 1, .kind = .vegetation, .variant = Vegetation.tree_variants[2], .transform = .{ .position = .{ 900, 0, 0 }, .scale = 30 }, .tint = .{ 1, 1, 1, 1 } },
+        .{ .local_id = 2, .kind = .vegetation, .variant = 0, .transform = .{ .position = .{ 10, 0, 0 }, .scale = 1 }, .tint = .{ 1, 1, 1, 1 } },
+    };
+    const sources = [_]Source{.{ .key = .{ .x = 0, .z = 0 }, .objects = &trees, .slot = 0 }};
+    const removed: Modifications = .{};
+    scene.instance_count = 1;
+    scene.sortScatter(&sources, camera, true, &removed, .{ 0, 50, 0 }, sun);
+    // Only the tree inside the sun's box casts; the grass and the far tree are dropped.
+    try std.testing.expectEqual(@as(u32, 1), scene.caster_counts[2]);
+    try std.testing.expectEqual(@as(u32, 1), sumOf(&scene.caster_counts));
+    try std.testing.expectEqual(@as(u32, 0), scene.plant_count);
+    // Without shadows nothing out of view is gathered.
+    scene.instance_count = 1;
+    scene.sortScatter(&sources, camera, true, &removed, .{ 0, 50, 0 }, null);
+    try std.testing.expectEqual(@as(u32, 0), sumOf(&scene.caster_counts));
 }

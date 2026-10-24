@@ -31,7 +31,8 @@ pub const SkinnedMesh = struct {
 };
 /// The skinned pipeline's resources, owned by the renderer: the pipeline, the palette uniform
 /// buffer (one `Ranger.palette_bytes` slot per character id) and its bind group.
-pub const Skinning = struct { pipeline: *gpu.RenderPipeline, hull: *gpu.RenderPipeline, palette: *gpu.Buffer, group: *gpu.BindGroup };
+/// `shadow` is the depth-only skinned pipeline for the sun's shadow maps.
+pub const Skinning = struct { pipeline: *gpu.RenderPipeline, hull: *gpu.RenderPipeline, shadow: *gpu.RenderPipeline, palette: *gpu.Buffer, group: *gpu.BindGroup };
 /// One cel table per character id, at this stride in the cel buffer (dynamic offsets must be
 /// 256-byte aligned). A character with no mod cel style gets the game's selected look.
 pub const cel_stride = std.mem.alignForward(usize, CelStyle.table_bytes, 256);
@@ -251,6 +252,35 @@ pub fn draw(self: *const Characters, pass: *gpu.RenderPassEncoder, hide_owner: u
     pass.setPipeline(scene_pipeline);
     pass.setBindGroup(0, frame_group, &.{});
 }
+/// Every prepared character into a shadow map, `frame_group` carrying the sun's projection.
+/// First-person bodies hidden from their own view still cast. `solid_pipeline` draws characters
+/// that are not skinned (CPU skinning).
+pub fn drawShadows(self: *const Characters, pass: *gpu.RenderPassEncoder, frame_group: *gpu.BindGroup, solid_pipeline: *gpu.RenderPipeline) void {
+    const instances = self.instances orelse return;
+    pass.setPipeline(solid_pipeline);
+    pass.setBindGroup(0, frame_group, &.{});
+    pass.setVertexBuffer(1, instances, 0, Ranger.capacity * @sizeOf(Instance));
+    var any_skinned = false;
+    for (self.slots, self.visible, 0..) |slot, visible, i| {
+        if (!visible) continue;
+        const s = slot orelse continue;
+        if (s.gpu_mesh) |m| m.draw(pass, 1, @intCast(i));
+        any_skinned = any_skinned or s.skinned != null;
+    }
+    const skinning = self.skinning orelse return;
+    if (!any_skinned) return;
+    pass.setPipeline(skinning.shadow);
+    pass.setBindGroup(0, frame_group, &.{});
+    for (self.slots, self.visible, 0..) |slot, visible, i| {
+        if (!visible) continue;
+        const m = (slot orelse continue).skinned orelse continue;
+        pass.setBindGroup(1, skinning.group, &.{ @as(u32, @intCast(i * Ranger.palette_bytes)), @as(u32, @intCast(i * cel_stride)) });
+        pass.setVertexBuffer(0, m.vertices, 0, m.vertex_bytes);
+        pass.setIndexBuffer(m.indices, .uint32, 0, m.index_count * 4);
+        pass.drawIndexed(m.index_count, 1, 0, 0, @intCast(i));
+    }
+}
+
 pub fn deinit(self: *Characters, a: std.mem.Allocator) void {
     for (&self.slots) |*slot| if (slot.*) |*s| {
         s.release(a);

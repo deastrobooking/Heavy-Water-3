@@ -2,6 +2,34 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Sun shadows: characters and out-of-view trees cast; four-player cost cut from 11 to 1.5 ms — 2026-10-23
+
+- **Measured first version** (four players, idle machine, throttling check passed): GPU p50/p99 was 26.9/32.8 ms with shadows against 16.2/18.0 ms without. That is about 11 ms of GPU time, or roughly 30 fps.
+- **Cause:** a new `shadow_triangles` figure in the nature report, plus a temporary breakdown, showed the shadow pass submitting about 3.3 million triangles per view: 1.84 million from salvage saplings, 1.1 million from props and about 0.26 million from the big trees. Each sapling was a full 37k-triangle broadleaf crown on a 6–18 m tree.
+- **Fixed:**
+  - The sapling uses the mid crown (`Vegetation.sapling`; a test keeps it under 12k triangles). Main-pass triangles on the nature route fell from 3.45 to 1.96 million, shadow-pass triangles from 3.35 to 1.76 million.
+  - The shadow pass draws trees one crown lighter than the view does and skips small plants and sap flora (`drawShadowFlora`).
+- **Added:**
+  - Characters cast through a depth-only skinned pipeline, first-person bodies included (`Characters.drawShadows`).
+  - Trees outside the camera's view that the sun's box sees cast with far crowns, from a shadow-only instance range (`caster_counts`).
+- **Measured after** (four players, idle machine, throttling check passed):
+  - **Shadows on:** GPU p50/p95/p99 15.8/16.6/17.1 ms, CPU p50 5.5 ms.
+  - **Shadows off:** GPU 14.3/16.6/18.3 ms, CPU p50 3.8 ms.
+  - Shadows now cost about 1.5 ms at the median; p99 is within noise. `active_ring_covered` fails in both runs, as before this work.
+- **Tests:**
+  - A tree out of view but inside the sun's box becomes a caster, while a far tree and a grass plant do not, and nothing is gathered without shadows. This test fails with casters disabled.
+  - The sapling budget.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 646/646;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all stages, no validation messages);
+  - captures of showcases 73 and 37. Tree shadows are slightly chunkier from the lighter crowns, character shadows join the shelter's, and saplings read slightly sparser.
+- **Not checked:**
+  - terrain casting;
+  - a second cascade;
+  - the 1.1 million prop triangles in the shadow pass (props are not culled to the sun's box);
+  - whether the sparser saplings bother anyone in play.
+
 ## Sun shadows, first version — 2026-10-23
 
 - **Added:** one 2048² sun shadow map per view (`render/Shadow.zig`). It is an orthographic box 320 m across, centred about 100 m ahead of the camera and snapped to whole texels, and it is drawn before the scene pass with depth-only pipelines for flora and solids. The scene, terrain and character shaders multiply their cel light band by `sunlight`: four `textureLoad` taps, blended and sharpened into a crisp edge, fading at the box border. Shadows fade with the key light's height and turn off underground. A SUN SHADOWS setting (default on) turns them off.

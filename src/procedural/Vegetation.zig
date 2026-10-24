@@ -545,9 +545,11 @@ pub fn trunk(a: std.mem.Allocator, species: u8) !Mesh {
 }
 
 /// A young broadleaf tree for salvage sites: crown and trunk in one mesh so it can use the
-/// solid-object pipeline. Its unit height is scaled to a 20–60 ft tree by the scatterer.
+/// solid-object pipeline. Its unit height is scaled to a 20–60 ft tree by the scatterer, so it
+/// takes the mid crown: the full one (37k triangles) was sized for 100 m giants, and saplings
+/// were most of the forest's triangles.
 pub fn sapling(a: std.mem.Allocator) !Mesh {
-    var crown = try tree(a, 0);
+    var crown = try treeAt(a, 0, .mid);
     defer crown.deinit(a);
     var stem = try trunk(a, 0);
     defer stem.deinit(a);
@@ -646,4 +648,11 @@ test "farther tree crowns are much lighter and span the same height" {
         for (far.vertices) |v| far_top = @max(far_top, v.position[1]);
         try std.testing.expect(far_top > near_top * 0.85 and far_top < near_top * 1.15);
     }
+}
+
+test "the salvage sapling stays light" {
+    const a = std.testing.allocator;
+    var mesh = try sapling(a);
+    defer mesh.deinit(a);
+    try std.testing.expect(mesh.indices.len / 3 < 12_000);
 }

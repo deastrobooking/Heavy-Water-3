@@ -138,6 +138,7 @@ clock: f32 = 0,
 /// group (null with `-Dcpu-skinning=true`).
 skin_pipeline: ?*gpu.RenderPipeline = null,
 hull_pipeline: ?*gpu.RenderPipeline = null,
+skin_shadow_pipeline: ?*gpu.RenderPipeline = null,
 /// One packed `CelStyle` uniform per character id (see `Characters.cel_stride`).
 cel_buffer: ?*gpu.Buffer = null,
 /// Look-dev state for character shading: which preset, and debug views. Set by the app.
@@ -499,13 +500,20 @@ fn setupSkinning(self: *Renderer, device: *gpu.Device, format: gpu.Texture.Forma
         .primitive = .{ .cull_mode = .none },
         .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .false, .depth_compare = .greater },
     });
+    self.skin_shadow_pipeline = device.createRenderPipeline(&.{
+        .label = "skinned character shadows",
+        .layout = pipeline_layout,
+        .vertex = gpu.VertexState.init(.{ .module = shader, .entry_point = "vertex_skinned", .buffers = &buffers }),
+        .primitive = .{ .cull_mode = .none },
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .true, .depth_compare = .greater },
+    });
     self.cel_buffer = device.createBuffer(&.{ .label = "character cel styles", .size = Ranger.capacity * Characters.cel_stride, .usage = .{ .uniform = true, .copy_dst = true } });
     self.skin_palette = device.createBuffer(&.{ .label = "character palettes", .size = Ranger.capacity * Ranger.palette_bytes, .usage = .{ .uniform = true, .copy_dst = true } });
     self.skin_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.skin_layout.?, .entries = &.{
         gpu.BindGroup.Entry.initBuffer(0, self.skin_palette.?, 0, Ranger.palette_bytes, Ranger.palette_bytes),
         gpu.BindGroup.Entry.initBuffer(1, self.cel_buffer.?, 0, CelStyle.table_bytes, CelStyle.table_bytes),
     } }));
-    self.characters.skinning = .{ .pipeline = self.skin_pipeline.?, .hull = self.hull_pipeline.?, .palette = self.skin_palette.?, .group = self.skin_group.? };
+    self.characters.skinning = .{ .pipeline = self.skin_pipeline.?, .hull = self.hull_pipeline.?, .shadow = self.skin_shadow_pipeline.?, .palette = self.skin_palette.?, .group = self.skin_group.? };
 }
 
 /// Per-view camera uniform, bind group, and instance buffer.
@@ -738,7 +746,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             }
             self.field_last = f.plan(.{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z() }, vp);
         };
-        scenes[i].prepare(window.queue, view.camera, vp, self.culling, budget, &self.modifications, self.props[0..self.prop_count], view.hide_owner);
+        scenes[i].prepare(window.queue, view.camera, vp, self.culling, budget, &self.modifications, self.props[0..self.prop_count], view.hide_owner, if (shadowed[i]) sun_vp else null);
         budget -= scenes[i].upload_bytes;
         encoder.writeBuffer(self.uniforms[i].?, 0, &[_]Frame{frame});
         encoder.writeBuffer(self.shadow_uniforms[i].?, 0, &[_]Frame{sun_frame});
@@ -748,7 +756,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     self.buildOverlay(objects, window.width, window.height, shown);
     if (self.overlay.len > 0) encoder.writeBuffer(self.overlay_buffer.?, 0, self.overlay.vertices[0..self.overlay.len]);
     for (0..shown) |i| if (shadowed[i]) {
-        // The view's own trees and solids, seen from the sun. Characters do not cast yet.
+        // The view's own trees, solids and characters, seen from the sun.
         const sun_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
             .depth_stencil_attachment = &.{ .view = self.shadow_views[i].?, .depth_load_op = .clear, .depth_store_op = .store, .depth_clear_value = 0 },
         }));
@@ -757,9 +765,10 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         sun_pass.setPipeline(self.shadow_foliage_pipeline.?);
         sun_pass.setBindGroup(0, self.shadow_bind_groups[i].?, &.{});
         sun_pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
-        scenes[i].drawFlora(sun_pass);
+        scenes[i].drawShadowFlora(sun_pass);
         sun_pass.setPipeline(self.shadow_pipeline.?);
         scenes[i].drawSolids(sun_pass);
+        self.characters.drawShadows(sun_pass, self.shadow_bind_groups[i].?, self.shadow_pipeline.?);
         sun_pass.end();
     };
     const pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
@@ -1034,10 +1043,11 @@ fn reportBenchmark(self: *Renderer) void {
     if (options.benchmark_nature) {
         var visible_boulders: u64 = 0;
         for (self.scene.boulder_counts) |count| visible_boulders += count;
-        std.log.info("NATURE {{\"chunk_fill_p50_ms\":{d:.3},\"chunk_fill_p99_ms\":{d:.3},\"scatter_p50_ms\":{d:.3},\"scatter_p99_ms\":{d:.3},\"generated_relics\":{d},\"generated_vegetation\":{d},\"generated_boulders\":{d},\"visible_relics\":{d},\"visible_vegetation\":{d},\"visible_boulders\":{d},\"submitted_triangles\":{d}}}", .{
+        std.log.info("NATURE {{\"chunk_fill_p50_ms\":{d:.3},\"chunk_fill_p99_ms\":{d:.3},\"scatter_p50_ms\":{d:.3},\"scatter_p99_ms\":{d:.3},\"generated_relics\":{d},\"generated_vegetation\":{d},\"generated_boulders\":{d},\"visible_relics\":{d},\"visible_vegetation\":{d},\"visible_boulders\":{d},\"submitted_triangles\":{d},\"shadow_triangles\":{d},\"shadow_triangles_as_drawn\":{d}}}", .{
             self.scene.stats.chunk_fill_p50_ms, self.scene.stats.chunk_fill_p99_ms,    self.scene.stats.scatter_p50_ms,     self.scene.stats.scatter_p99_ms,
             self.scene.stats.generated_relics,  self.scene.stats.generated_vegetation, self.scene.stats.generated_boulders, self.scene.relic_count,
             self.scene.plant_count,             visible_boulders,                      self.scene.submittedTriangles(),
+            self.scene.shadowTriangles(false),  self.scene.shadowTriangles(true),
         });
     }
 }
@@ -1064,6 +1074,7 @@ pub fn deinit(self: *Renderer) void {
     if (self.shadow_stand_in) |p| p.release();
     if (self.skin_group) |p| p.release();
     if (self.hull_pipeline) |p| p.release();
+    if (self.skin_shadow_pipeline) |p| p.release();
     if (self.cel_buffer) |p| p.release();
     if (self.skin_palette) |p| p.release();
     if (self.skin_pipeline) |p| p.release();
