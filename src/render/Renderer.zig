@@ -793,7 +793,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         sun_pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
         scenes[i].drawShadowFlora(sun_pass);
         sun_pass.setPipeline(self.shadow_pipeline.?);
-        scenes[i].drawSolids(sun_pass);
+        scenes[i].drawShadowSolids(sun_pass);
         self.characters.drawShadows(sun_pass, self.shadow_bind_groups[i].?, self.shadow_pipeline.?);
         sun_pass.end();
     };

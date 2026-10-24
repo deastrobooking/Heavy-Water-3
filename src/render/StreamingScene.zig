@@ -28,7 +28,8 @@ pub const Instance = extern struct { translation_scale: [4]f32, tint: [4]f32, st
 pub const max_instances = Streamer.render_capacity * (Scatter.capacity + Scatter.sap_candidates) + 1 + World.max_props * Model.max_submeshes;
 /// One instanced draw of a catalog submesh.
 /// `ground` draws (the mountain panorama and cave meshes) are shaded as terrain.
-const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32, ground: bool = false };
+/// `shadow_instances`: how many of the draw's instances (they come first) lie in the sun's shadow box.
+const Draw = struct { mesh: *const GpuMesh, first_index: u32, index_count: u32, first_instance: u32, instances: u32, shadow_instances: u32 = 0, ground: bool = false };
 const max_draws = Catalog.mesh_capacity * Model.max_submeshes;
 pub const MeshPatch = struct {
     handle: Catalog.MeshHandle,
@@ -216,7 +217,7 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.sap_glow_counts = @splat(0);
         self.boulder_counts = @splat(0);
         for (&self.residents) |*resident| resident.visible = false;
-        self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
+        self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner, null);
         return;
     }
     const center = Key.fromPosition(camera.position.x(), camera.position.z());
@@ -318,7 +319,7 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         self.refreshBucketColors();
         self.gatherScatter(vp, culling, removed, .{ camera.position.x(), camera.position.y(), camera.position.z() }, sun);
     }
-    self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner);
+    self.gatherProps(props, .{ camera.position.x(), camera.position.y(), camera.position.z() }, hide_owner, sun);
 }
 
 /// How far, in tree heights, a tree keeps its full crown, then its mid crown; beyond, the far one.
@@ -551,7 +552,9 @@ fn floraReviewPosition(seed: u64, origin: [3]f32, variant: u8) [3]f32 {
 
 /// Groups props by catalog mesh, then emits one instanced draw per submesh with its material color.
 /// A prop with a distance LOD is grouped under whichever handle `effectiveMesh` picks this frame.
-fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32, hide_owner: u8) void {
+/// With `sun`, each draw lists its props inside the sun's shadow box first, so the shadow pass
+/// draws only those (`drawShadowSolids`).
+fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32, hide_owner: u8, sun: ?mach.math.Mat4x4) void {
     self.draw_count = 0;
     self.prop_count = 0;
     std.debug.assert(props.len <= World.max_props);
@@ -573,19 +576,36 @@ fn gatherProps(self: *Scene, props: []const World.Prop, camera_position: [3]f32,
         for (entry.model.submeshes, 0..) |submesh, s| {
             const first = self.instance_count;
             const color = (self.catalog.material(entry.materials[s]) orelse continue).base_color;
-            for (props, 0..) |prop, prop_index| {
+            const reach = boundsReach(entry.model.bounds_min, entry.model.bounds_max);
+            var shadowed: u32 = 0;
+            // Props in the sun's box first, then the rest.
+            for ([_]bool{ true, false }) |in_box| for (props, 0..) |prop, prop_index| {
                 if (!nearby[prop_index]) continue;
                 if (hide_owner != 0 and prop.owner == hide_owner) continue;
                 if (!prop.effectiveMesh(camera_position).eql(handle)) continue;
+                const casts = if (sun) |box| Visibility.sphereVisible(box, prop.transform.position, reach * prop.transform.scale * @max(prop.size[0], @max(prop.size[1], prop.size[2]))) else false;
+                if (casts != in_box) continue;
                 self.instances[self.instance_count] = .{ .translation_scale = prop.transform.toInstance(), .tint = multiply(prop.tint, color), .stretch = .{ prop.size[0], prop.size[1], prop.size[2], 0 }, .rotation = prop.rotation };
                 self.instance_count += 1;
-            }
+                shadowed += @intFromBool(casts);
+            };
             if (self.instance_count == first) break;
             if (s == 0) self.prop_count += self.instance_count - first;
-            self.draws[self.draw_count] = .{ .mesh = mesh, .first_index = submesh.first_index, .index_count = submesh.index_count, .first_instance = first, .instances = self.instance_count - first, .ground = self.isGround(handle) };
+            self.draws[self.draw_count] = .{ .mesh = mesh, .first_index = submesh.first_index, .index_count = submesh.index_count, .first_instance = first, .instances = self.instance_count - first, .shadow_instances = shadowed, .ground = self.isGround(handle) };
             self.draw_count += 1;
         }
     }
+}
+
+/// The distance from a model's origin to the farthest corner of its bounds: a sphere of this
+/// radius about the origin holds the model under any rotation.
+pub fn boundsReach(lo: [3]f32, hi: [3]f32) f32 {
+    var sum: f32 = 0;
+    for (lo, hi) |a, b| {
+        const m = @max(@abs(a), @abs(b));
+        sum += m * m;
+    }
+    return @sqrt(sum);
 }
 
 /// Generated landscape (the ranges' far panorama, cave shells): coloured like the terrain.
@@ -683,7 +703,7 @@ pub fn shadowTriangles(self: *const Scene, as_drawn: bool) u64 {
     Add.mesh(self, &indices, c.relic, self.relic_count);
     for (self.boulder_counts, 0..) |count, variant| Add.mesh(self, &indices, c.boulders[variant], count);
     for (self.draws[0..self.draw_count]) |d| if (!d.ground) {
-        indices += @as(u64, d.index_count) * d.instances;
+        indices += @as(u64, d.index_count) * (if (as_drawn) d.instances else d.shadow_instances);
     };
     return indices / 3;
 }
@@ -745,6 +765,18 @@ pub fn drawShadowFlora(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
         if (self.gpuMesh(c.tree_trunks[species])) |trunk| trunk.draw(pass, count, next);
         if (self.gpuMesh(c.tree_crowns[species][1])) |crown| crown.draw(pass, count, next);
     }
+}
+
+/// Relics, boulders and the props inside the sun's box, for the shadow map.
+pub fn drawShadowSolids(self: *const Scene, pass: *gpu.RenderPassEncoder) void {
+    if (self.relic_count > 0) if (self.gpuMesh(self.catalog.content.relic)) |mesh| mesh.draw(pass, self.relic_count, 1);
+    var next: u32 = 1 + self.relic_count + self.plant_count;
+    for (self.boulder_counts, 0..) |count, variant| {
+        if (count == 0) continue;
+        if (self.gpuMesh(self.catalog.content.boulders[variant])) |mesh| mesh.draw(pass, count, next);
+        next += count;
+    }
+    for (self.draws[0..self.draw_count]) |d| if (!d.ground and d.shadow_instances > 0) d.mesh.drawRange(pass, d.first_index, d.index_count, d.shadow_instances, d.first_instance);
 }
 
 /// Relics, boulders and props, for the main pipeline.
@@ -902,4 +934,10 @@ test "a tree out of view that the sun's box sees casts, from a shadow-only range
     scene.instance_count = 1;
     scene.sortScatter(&sources, camera, true, &removed, .{ 0, 50, 0 }, null);
     try std.testing.expectEqual(@as(u32, 0), sumOf(&scene.caster_counts));
+}
+
+test "a sphere of the bounds' reach holds the model under any rotation" {
+    try std.testing.expectApproxEqAbs(@as(f32, 3), boundsReach(.{ -1, 0, -2 }, .{ 1, 2, 2 }), 1e-5);
+    // Asymmetric bounds take the farther side on each axis.
+    try std.testing.expectApproxEqAbs(@sqrt(@as(f32, 4 * 4 + 1 + 9)), boundsReach(.{ -4, -1, 0 }, .{ 1, 0.5, 3 }), 1e-5);
 }

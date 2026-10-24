@@ -2,6 +2,18 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Shadow pass skips props outside the sun's box — 2026-10-23
+
+- **Problem:** the shadow pass drew every prop within 6 km (towers, Arbors, the district), about 1.1 million triangles per view on the nature route, although only props inside the sun's box can shade anything in it.
+- **Fixed:** each prop draw lists the props whose bounding sphere (`boundsReach`: the farthest corner of the model's bounds, so it holds under any rotation) touches the sun's box first. The shadow pass draws only that leading part (`drawShadowSolids`). No extra instance memory is used.
+- **Result:** nature-route shadow-pass triangles fell from 1,762,234 to 988,838 (−44%). Main-pass triangles are unchanged at 1,958,281. The nature benchmark passed all its checks.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 647/647;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all stages, no validation messages);
+  - captures of showcases 73 and 30: the forest shadows and the giant tree's shadow over the player are unchanged.
+- **Not measured:** four-player GPU time for this step. The run was throttled (frame interval p99 1,456 ms; `presentation_unthrottled` failed), so its numbers are not used.
+
 ## Sun shadows: characters and out-of-view trees cast; four-player cost cut from 11 to 1.5 ms — 2026-10-23
 
 - **Measured first version** (four players, idle machine, throttling check passed): GPU p50/p99 was 26.9/32.8 ms with shadows against 16.2/18.0 ms without. That is about 11 ms of GPU time, or roughly 30 fps.
