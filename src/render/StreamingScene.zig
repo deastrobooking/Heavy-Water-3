@@ -92,9 +92,17 @@ uploads: u64 = 0,
 evictions: u64 = 0,
 upload_bytes: usize = 0,
 peak_upload_bytes: usize = 0,
+/// Bytes uploaded this frame for the player's own 3×3 ring, outside the byte budget: after a
+/// teleport (fast travel, respawn) the ground under the player arrives at once instead of one
+/// chunk per frame. At most nine chunks.
+ring_upload_bytes: usize = 0,
+peak_ring_upload_bytes: usize = 0,
 total_upload_bytes: u64 = 0,
 center_changes: u64 = 0,
 last_center: ?Key = null,
+/// The view jumped more than the render radius this frame (fast travel, a respawn): its new
+/// ring cannot have been generated yet, so it may be missing for this one frame.
+teleported: bool = false,
 /// Deterministic art-review lineup for the giant flora and night pigment pass.
 flora_review: bool = false,
 flora_review_variant: ?u8 = null,
@@ -221,8 +229,10 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         return;
     }
     const center = Key.fromPosition(camera.position.x(), camera.position.z());
+    self.teleported = false;
     if (self.last_center) |previous| {
         if (!Key.eql(center, previous)) self.center_changes += 1;
+        self.teleported = Key.distance(center, previous) > Streamer.render_radius;
     }
     self.last_center = center;
     self.stream.plan(center);
@@ -240,8 +250,10 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
             }
         }
     }
-    // GPU buffers are persistent and recycled. New chunk data is submitted under a byte budget.
-    while (self.upload_bytes + chunk_bytes <= upload_budget) {
+    // GPU buffers are persistent and recycled. New chunk data is submitted nearest first under a
+    // byte budget, except the player's own ring, which never waits.
+    self.ring_upload_bytes = 0;
+    while (true) {
         var candidate: ?Streamer.View = null;
         var best: u32 = std.math.maxInt(u32);
         for (snapshot.views) |view| {
@@ -257,6 +269,8 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
             }
         }
         const view = candidate orelse break;
+        const ring = best <= Streamer.active_radius;
+        if (!ring and self.upload_bytes + chunk_bytes > upload_budget) break;
         var free: ?usize = null;
         for (self.residents, 0..) |resident, i| if (resident.view) |v| {
             if (Key.eql(v.key, view.key)) free = i; // replace this chunk's stale copy in place
@@ -268,10 +282,11 @@ pub fn prepare(self: *Scene, queue: *gpu.Queue, camera: Camera, vp: mach.math.Ma
         const i = free orelse break;
         self.residents[i].mesh.write(queue, self.stream.payload(view).?.mesh());
         self.residents[i].view = view;
-        self.upload_bytes += chunk_bytes;
+        if (ring) self.ring_upload_bytes += chunk_bytes else self.upload_bytes += chunk_bytes;
         self.uploads += 1;
     }
-    self.total_upload_bytes += self.upload_bytes;
+    self.total_upload_bytes += self.upload_bytes + self.ring_upload_bytes;
+    self.peak_ring_upload_bytes = @max(self.peak_ring_upload_bytes, self.ring_upload_bytes);
     self.peak_upload_bytes = @max(self.peak_upload_bytes, self.upload_bytes);
     self.instances[0] = .{ .translation_scale = .{ 0, 0, 0, 1 }, .tint = .{ 1, 1, 1, 1 } };
     self.instance_count = 1;

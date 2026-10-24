@@ -2,6 +2,21 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Four-player streaming: the player's ring arrives the frame after a teleport — 2026-10-24
+
+- **Problem:** the four-player benchmark failed `active_ring_covered` on every run, with exactly 18 underfilled frames. Logging every ring miss and every jump of a view's centre showed that the count was deterministic, not load. The route teleports player 1 twice (jumps of 6 and 7 chunks between its ground and air setups). After each jump, all 9 chunks of the player's 3×3 ring were missing and arrived one per frame (9, 8 … 1), because one 321 KiB chunk was all the 384 KiB per-frame budget allowed, shared by the four views. Ordinary one-chunk crossings never underfilled, and the other views never missed.
+- **Check gap:** the check counted only view 1 (`self.scene`), so a guest's missing ring went unrecorded.
+- **Fixed:**
+  - Chunks within the player's own ring upload as soon as they are ready, outside the byte budget (`ring_upload_bytes`, at most nine per frame). The budget still governs, and the `upload_budget_respected` check still measures, everything farther out.
+  - The check now counts a frame when any view misses part of its ring, except the frame a view teleports. That frame's new ring cannot have been generated yet, so it is counted separately as `teleport_frames`.
+  - A new `ring_uploads_bounded` check caps ring uploads at nine chunks in a frame.
+- **Measured** (four players, unthrottled):
+  - **With the fix:** 0 underfilled frames, 2 teleport frames, a ring peak of 9 chunks, all checks passing; GPU p50/p99 15.5/17.3 ms with shadows on.
+  - **With the old upload policy and the new check:** 16 underfilled frames and a failed check. This confirms the check catches the bug.
+- **Validity of earlier numbers:** four-player figures recorded before this fix were measured with player 1's ring missing for 18 of 600 frames.
+- **Checked:** default and 0.17 `build check`; the full suite, 647/647; the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all stages, no validation messages); a single-view `--nature` run passing every check except `presentation_unthrottled` (the window was throttled), so its ring checks hold in single view.
+- **Not done:** pre-generating a fast-travel destination before the move, which would remove the one remaining teleport frame.
+
 ## Shadow pass skips props outside the sun's box — 2026-10-23
 
 - **Problem:** the shadow pass drew every prop within 6 km (towers, Arbors, the district), about 1.1 million triangles per view on the nature route, although only props inside the sun's box can shade anything in it.

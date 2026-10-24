@@ -100,6 +100,8 @@ def main():
         "gpu_residency_bounded": result["peak_resident_chunks"] <= 25,
         "pool_allocations_bounded": result["pool_allocations"] == 2 and result["gpu_pool_allocations"] == 50,
         "active_ring_covered": result["underfilled_frames"] == 0,
+        # The player's 3x3 ring uploads outside the byte budget, at most nine chunks in a frame.
+        "ring_uploads_bounded": result.get("peak_ring_upload_chunks", 0) <= 9,
         # macOS throttles occluded or backgrounded windows to ~1 Hz; such runs are not representative.
         "presentation_unthrottled": result["interval_p99_ms"] < 100,
     }

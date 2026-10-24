@@ -187,6 +187,10 @@ timer: mach.time.Timer = undefined,
 frames: u64 = 0,
 frame_ms: f32 = 0,
 underfilled_frames: u64 = 0,
+/// The most bytes any view uploaded for its player's ring in one frame (outside the budget).
+peak_ring_upload_bytes: usize = 0,
+/// Frames on which a view teleported and its new ring was not yet there (not underfilled).
+teleport_frames: u64 = 0,
 arbor_detail_frames: u64 = 0,
 arbor_proxy_frames: u64 = 0,
 /// Scale workload (`-Dscale-objects`), its GPU instance buffer, and per-frame measurements.
@@ -890,7 +894,16 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     if (options.benchmark_frames == 0 or self.frames >= warmup_frames) {
         self.intervals.record(elapsed * 1000);
         self.cpu_times.record(cpu_timer.read() * 1000);
-        if (self.scene.active_missing > 0) self.underfilled_frames += 1;
+        // Any view missing a chunk of its player's ring counts, not only the first, except on
+        // the frame a view teleports (its new ring is generated, then uploaded, next frame).
+        var underfilled = false;
+        var teleport = false;
+        for (scenes[0..shown]) |scene| {
+            if (scene.active_missing > 0 and scene.teleported) teleport = true else underfilled = underfilled or scene.active_missing > 0;
+            self.peak_ring_upload_bytes = @max(self.peak_ring_upload_bytes, scene.ring_upload_bytes);
+        }
+        if (underfilled) self.underfilled_frames += 1;
+        if (teleport) self.teleport_frames += 1;
         if (self.field != null) {
             self.field_submitted.record(@floatFromInt(self.field_last.instances[0] + self.field_last.instances[1]));
             self.field_runs.record(@floatFromInt(self.field_last.run_count));
@@ -1037,7 +1050,7 @@ fn reportBenchmark(self: *Renderer) void {
     const runs = self.field_runs.summary();
     const cells = self.field_cells.summary();
     if (Memory.footprint()) |bytes| self.peak_footprint = @max(self.peak_footprint, bytes);
-    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"asset_upload_budget_bytes\":{d},\"peak_late_upload_bytes\":{d},\"largest_single_late_upload_bytes\":{d},\"late_uploads\":{d},\"pack_assets\":{d},\"pack_bytes\":{d},\"pack_requested_frame\":{d},\"pack_installed\":{d},\"pack_ready_frame\":{d},\"gpu_time_available\":{s},\"gpu_time_samples\":{d},\"gpu_time_p50_ms\":{d:.3},\"gpu_time_p95_ms\":{d:.3},\"gpu_time_p99_ms\":{d:.3}}}", .{
+    std.log.info("REPORT {{\"scale_objects\":{d},\"field_generation_ms\":{d:.1},\"field_gpu_bytes\":{d},\"field_cpu_peak_bytes\":{d},\"field_cpu_bytes_now\":{d},\"field_upload_budget_bytes\":{d},\"field_resident_frame\":{d},\"field_submitted_p50\":{d:.0},\"field_submitted_p99\":{d:.0},\"field_submitted_max\":{d:.0},\"field_runs_p50\":{d:.0},\"field_runs_p99\":{d:.0},\"field_cells_p50\":{d:.0},\"field_cells_p99\":{d:.0},\"peak_footprint_bytes\":{d},\"asset_upload_budget_bytes\":{d},\"peak_late_upload_bytes\":{d},\"largest_single_late_upload_bytes\":{d},\"late_uploads\":{d},\"pack_assets\":{d},\"pack_bytes\":{d},\"pack_requested_frame\":{d},\"pack_installed\":{d},\"pack_ready_frame\":{d},\"gpu_time_available\":{s},\"gpu_time_samples\":{d},\"gpu_time_p50_ms\":{d:.3},\"gpu_time_p95_ms\":{d:.3},\"gpu_time_p99_ms\":{d:.3},\"peak_ring_upload_chunks\":{d},\"teleport_frames\":{d}}}", .{
         options.scale_objects,
         if (self.field) |f| f.generation_ms else 0,
         if (self.field) |f| f.gpuBytes() else 0,
@@ -1067,6 +1080,8 @@ fn reportBenchmark(self: *Renderer) void {
         gpu_time.p50,
         gpu_time.p95,
         gpu_time.p99,
+        self.peak_ring_upload_bytes / Scene.chunk_bytes,
+        self.teleport_frames,
     });
     const character = self.character_prepare_times.summary();
     const skin = self.character_skin_times.summary();
