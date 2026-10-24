@@ -1,0 +1,103 @@
+{
+  "format": 35,
+  "seed": 42,
+  "tick": 0,
+  "player": {
+    "feet": [
+      0,
+      0,
+      0
+    ],
+    "yaw": 0,
+    "pitch": 0,
+    "mode": "walk"
+  },
+  "profile": { "face_mark": "freckles", "eye_color": 4,
+    "name": "FORMAT FIXTURE",
+    "height": 1.0,
+    "build": 1.0,
+    "skin": 0,
+    "hair_style": "short",
+    "hair_color": 0,
+    "outfit": 0,
+    "accent": 0,
+    "body_style": "procedural",
+    "mod": {}
+  },
+  "props": [],
+  "collected": [],
+  "machines": [],
+  "prefabs": [],
+  "members": [
+    {
+      "slot": 0,
+      "profile": { "face_mark": "freckles", "eye_color": 4,
+        "name": "FORMAT FIXTURE",
+        "height": 1.0,
+        "build": 1.0,
+        "skin": 0,
+        "hair_style": "short",
+        "hair_color": 0,
+        "outfit": 0,
+        "accent": 0,
+        "body_style": "procedural",
+        "mod": {}
+      },
+      "kit": {
+        "wallet": {
+          "scrap": 55
+        },
+        "levels": [],
+        "inventory": [],
+        "armors": [],
+        "weapons": [],
+        "weapon_upgrades": [],
+        "suits": [],
+        "pets": [],
+        "combat_xp": 0,
+        "robot_built": false,
+        "robot_xp": 0,
+        "city_discoveries": 0,
+        "ore": [
+          1,
+          0,
+          2
+        ]
+      }
+    }
+  ],
+  "colony": {
+    "stockpile": [
+      12,
+      3,
+      0
+    ],
+    "food": 5,
+    "settlers": 2,
+    "research_points": 7,
+    "researched": [
+      "plasma_cutter"
+    ],
+    "target": "deep_drill",
+    "hours": 9,
+    "clock": 12.5
+  },
+  "market_day": 0,
+  "market_stock": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ]
+  ]
+}

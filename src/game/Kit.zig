@@ -13,6 +13,7 @@ const Player = @import("Player.zig");
 const Collectibles = @import("Collectibles.zig");
 const WeaponKind = @import("../combat/Weapon.zig").WeaponKind;
 const Materials = @import("../build/Materials.zig");
+const Colony = @import("Colony.zig");
 const Kit = @This();
 
 pub const Upgrade = enum { fuel_tank, jet_efficiency, sprint_servos, stamina_weave, grapple_reel, salvage_kit };
@@ -44,6 +45,8 @@ pub const max_blocks: u32 = 1_000_000;
 pub const health_per_cell: f32 = 20;
 
 wallet: Market.Wallet = .{},
+/// Ore this player mined and has not yet deposited at a colony store, by `Colony.Ore`.
+ore: [Colony.ore_count]u32 = @splat(0),
 /// Per-ranger combat experience. It stays in this kit across saves and ranger-file export.
 combat_xp: u32 = 0,
 levels: [upgrade_count]u8 = @splat(0),
@@ -251,6 +254,8 @@ pub const Doc = struct {
     /// Blocks held by material id (format 29). Absent in older saves, and for materials added
     /// after the save was written: the starter stock.
     blocks: ?[]const BlockStack = null,
+    /// Ore held, by `Colony.Ore` (format 35). Absent in older saves: none.
+    ore: []const u32 = &.{},
 };
 
 pub const BlockStack = struct { id: []const u8, count: u32 };
@@ -283,6 +288,7 @@ pub fn toDoc(self: *const Kit, arena: std.mem.Allocator) !Doc {
         .robot_xp = self.robot_xp,
         .city_discoveries = self.city_discoveries,
         .blocks = blocks,
+        .ore = try arena.dupe(u32, &self.ore),
     };
 }
 
@@ -300,6 +306,8 @@ pub fn fromDoc(doc: Doc) error{InvalidKit}!Kit {
     for (doc.levels) |l| if (l > max_level) return error.InvalidKit;
     @memcpy(result.levels[0..doc.levels.len], doc.levels);
     for (doc.suits) |c| result.suits |= bit(c);
+    if (doc.ore.len > Colony.ore_count) return error.InvalidKit;
+    @memcpy(result.ore[0..doc.ore.len], doc.ore);
     if (doc.inventory.len > Collectibles.kind_count) return error.InvalidKit;
     @memcpy(result.inventory[0..doc.inventory.len], doc.inventory);
     for (doc.armors) |a| result.armors |= armorBit(a);

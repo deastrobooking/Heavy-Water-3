@@ -27,6 +27,11 @@ struct Frame {
     shadow_view_projection: mat4x4<f32>,
     // x: strength (0 turns shadows off), y: map size in texels, z: depth bias, w: normal offset (m).
     shadow: vec4<f32>,
+    // Camera angles and projection: yaw, pitch, viewport aspect, tan(fov / 2).
+    camera: vec4<f32>,
+    sky_zenith: vec4<f32>,
+    // x: precipitation, y: overcast, z: fog, w: wind.
+    weather: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var surface_texture: texture_2d<f32>;
@@ -207,14 +212,28 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
 
     // Mature bark gets long grain, shallow fissures, lichen flecks, and a warmer sunward
     // variation. The pattern follows the trunk in world space and fades before distant shimmer.
-    let bark_axis = dot(in.world.xz, vec2<f32>(0.93, 0.37));
-    let bark_broad = vnoise(vec2<f32>(bark_axis * 0.045, in.world.y * 0.012));
-    let bark_grain = vnoise(vec2<f32>(bark_axis * 0.62, in.world.y * 0.075 + bark_broad * 1.8));
-    let bark_fine = vnoise(vec2<f32>(bark_axis * 2.7, in.world.y * 0.19 + bark_grain));
-    let fissure = smoothstep(0.61, 0.78, bark_grain) * (1.0 - smoothstep(0.12, 0.48, bark_fine));
-    let lichen = smoothstep(0.76, 0.92, vnoise(in.world.xz * 0.31 + vec2<f32>(in.world.y * 0.04, -in.world.y * 0.03))) * detail;
-    let bark_gain = 0.72 + bark_broad * 0.34 + bark_fine * 0.22 - fissure * 0.28;
-    let bark_base = in.tint.rgb * bark_gain + vec3<f32>(0.075, 0.105, 0.052) * lichen * 0.48;
+    var bark_base = in.tint.rgb;
+    if (bark > 0.0) {
+        let bark_n = abs(normalize(in.normal));
+        let bark_weights = bark_n / max(bark_n.x + bark_n.y + bark_n.z, 0.001);
+        let bark_side_x = vnoise(vec2<f32>(in.world.z * 0.045, in.world.y * 0.012));
+        let bark_side_y = vnoise(vec2<f32>(in.world.x * 0.045, in.world.y * 0.012));
+        let bark_top = vnoise(in.world.xz * 0.045);
+        let bark_broad = bark_side_x * bark_weights.x + bark_side_y * bark_weights.z + bark_top * bark_weights.y;
+        let grain_x = vnoise(vec2<f32>(in.world.z * 0.62, in.world.y * 0.075 + bark_broad * 1.8));
+        let grain_z = vnoise(vec2<f32>(in.world.x * 0.62, in.world.y * 0.075 + bark_broad * 1.8));
+        let grain_top = vnoise(in.world.xz * 0.62 + vec2<f32>(bark_broad * 1.8, 0.0));
+        let bark_grain = grain_x * bark_weights.x + grain_z * bark_weights.z + grain_top * bark_weights.y;
+        let fine_x = vnoise(vec2<f32>(in.world.z * 2.7, in.world.y * 0.19 + bark_grain));
+        let fine_z = vnoise(vec2<f32>(in.world.x * 2.7, in.world.y * 0.19 + bark_grain));
+        let fine_top = vnoise(in.world.xz * 2.7 + vec2<f32>(bark_grain, 0.0));
+        let bark_fine = fine_x * bark_weights.x + fine_z * bark_weights.z + fine_top * bark_weights.y;
+        let fissure = smoothstep(0.57, 0.74, bark_grain) * (1.0 - smoothstep(0.16, 0.48, bark_fine));
+        let bark_ridge = smoothstep(0.42, 0.76, bark_grain) * detail;
+        let lichen = smoothstep(0.76, 0.92, vnoise(in.world.xz * 0.31 + vec2<f32>(in.world.y * 0.04, -in.world.y * 0.03))) * detail;
+        let bark_gain = 0.78 + bark_broad * 0.3 + bark_fine * 0.3 + bark_ridge * 0.12 - fissure * 0.38;
+        bark_base = in.tint.rgb * bark_gain + vec3<f32>(0.075, 0.105, 0.052) * lichen * 0.62;
+    }
     base = mix(base, leaf_base, canopy);
     base = mix(base, bark_base, bark);
     var color = base;

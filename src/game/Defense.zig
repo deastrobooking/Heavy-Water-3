@@ -25,14 +25,14 @@ pub const missile_refill: f32 = 1.0 / 12.0;
 /// The share of a destroyed structure's scrap and parts its builder gets back.
 pub const wreck_refund_percent = 25;
 
-const Box = struct { lo: V, hi: V };
+pub const Box = struct { lo: V, hi: V };
 
-fn defOf(sb: *const Sandbox, inst: *const Outpost.Instance) ?*const Structures.Def {
+pub fn defOf(sb: *const Sandbox, inst: *const Outpost.Instance) ?*const Structures.Def {
     const found = sb.outpost.library.find(inst.id()) orelse return null;
     return sb.outpost.library.get(found);
 }
 
-fn boxOf(inst: *const Outpost.Instance, def: *const Structures.Def) Box {
+pub fn boxOf(inst: *const Outpost.Instance, def: *const Structures.Def) Box {
     const size = Prefabs.turnedSize(def.size, inst.rot);
     const lo: V = .{ @floatFromInt(inst.origin[0]), @floatFromInt(inst.origin[1]), @floatFromInt(inst.origin[2]) };
     return .{ .lo = lo, .hi = .{ lo[0] + @as(f32, @floatFromInt(size[0])), lo[1] + @as(f32, @floatFromInt(size[1])), lo[2] + @as(f32, @floatFromInt(size[2])) } };
@@ -44,7 +44,7 @@ fn crown(b: Box) V {
     return .{ (b.lo[0] + b.hi[0]) / 2, b.hi[1] + 0.6, (b.lo[2] + b.hi[2]) / 2 };
 }
 
-fn centre(b: Box) V {
+pub fn centre(b: Box) V {
     return .{ (b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2 };
 }
 
@@ -68,6 +68,7 @@ pub fn powerSatisfaction(sb: *const Sandbox) f32 {
         };
     }
     if (demand <= 0) return 1;
+    if (sb.mining.colony.has(.fusion_cells)) supply *= 1.5;
     return std.math.clamp(supply / demand, 0, 1);
 }
 

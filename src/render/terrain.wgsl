@@ -1,10 +1,9 @@
 // Ground: the fragment stage for streamed terrain, spliced after scene.wgsl's `vertex_main`.
 // The chunk mesh bakes the biome colour per vertex (Biome.terrainColor); this stage paints
-// detail into it in world space, so it needs no textures and has no seams between chunks:
-// - grass drifts between warm and cool patches, with lighter tufts close up;
-// - steep faces show banded stone strata with dark cracks;
-// - snow (read back from the bright, grey baked colour) lies on flat ground only, goes blue in
-//   shadow and sparkles where the sun glints toward the eye.
+// detail into it in world space, so patterns continue across chunk seams:
+// - grass gets broad pigment drift, fine blades and sparse tufts close up;
+// - steep faces show layered stone, mineral flecks and dark seams;
+// - snow lies on flat ground with wind-shaped grain, blue shadow creases and sun glints.
 @fragment fn frag_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let w = in.world;
@@ -28,9 +27,23 @@
     let broad = vnoise(w.xz * 0.035);
     let blotch = vnoise(w.xz * 0.21 + vec2<f32>(17.0, 3.0));
     let fine = vnoise(w.xz * 1.3);
+    let grass_mask = smoothstep(0.025, 0.16, base.g - base.r);
     var ground = base * (0.88 + 0.2 * broad);
     ground = mix(ground, ground * vec3<f32>(1.1, 1.08, 0.78), smoothstep(0.66, 0.86, blotch) * 0.3);
     ground = ground * (1.0 + (fine - 0.5) * 0.22 * near);
+    // A broken, directional blade texture keeps meadow colour alive at a few metres without
+    // turning the whole surface into high-frequency noise.
+    if (near * grass_mask > 0.01) {
+        let grass_grain = vnoise(w.xz * 4.2 + vec2<f32>(broad * 3.0, -broad * 2.0));
+        ground = ground * (1.0 + (grass_grain - 0.5) * 0.3 * near * grass_mask);
+        let tuft_grid = wrap(w.xz) * 1.8;
+        let tuft_cell = floor(tuft_grid);
+        let tuft_local = fract(tuft_grid);
+        let tuft_center = vec2<f32>(hash2(tuft_cell + vec2<f32>(11.0, 37.0)), hash2(tuft_cell + vec2<f32>(53.0, 7.0)));
+        let tuft = 1.0 - smoothstep(0.07, 0.22, length(tuft_local - tuft_center));
+        let tuft_sparse = step(0.62, hash2(tuft_cell + vec2<f32>(89.0, 23.0)));
+        ground = ground + vec3<f32>(0.12, 0.16, 0.075) * tuft * tuft_sparse * near * grass_mask;
+    }
 
     // Stone: wobbling horizontal strata, alternating tones, dark cracks along band edges. Bands
     // fade with distance before they can alias, and low banks (river cuts, hollows) stay earthy:
@@ -41,15 +54,31 @@
     let layer = fract(strata);
     // Every layer gets its own tone and thickness of crack, so the bands read as rock beds.
     let bed = hash2(vec2<f32>(floor(strata), 7.0));
-    let tone = 1.0 + ((bed - 0.5) * 0.2 + (vnoise(w.xz * 0.5 + vec2<f32>(0.0, w.y)) - 0.5) * 0.16) * far;
+    let tone = 1.0 + (bed - 0.5) * 0.2 * far;
     let crack = smoothstep(0.93 - 0.06 * bed, 0.98, layer) * near * step(0.35, bed);
     let rock = vec3<f32>(0.47, 0.48, 0.47) * tone * (1.0 - 0.32 * crack);
+    var rock_textured = rock;
+    if (steep * far > 0.01) {
+        let rock_mottle = vnoise(w.xz * 0.72 + vec2<f32>(w.y * 0.31, -w.y * 0.22));
+        let mineral = smoothstep(0.72, 0.9, vnoise(w.xz * 2.1 + vec2<f32>(w.y * 0.65, 13.0)));
+        let mineral_vein = smoothstep(0.83, 0.96, vnoise(vec2<f32>(w.x * 0.38 + w.y * 0.11, w.z * 0.38 - w.y * 0.08)));
+        rock_textured = rock * (0.86 + rock_mottle * 0.25 + mineral * 0.12) + vec3<f32>(0.12, 0.095, 0.055) * mineral_vein;
+    }
     let earth = base * vec3<f32>(0.82, 0.74, 0.62) * (1.0 + (tone - 1.0) * 0.5);
-    var color = mix(ground, mix(earth, rock, 0.25 + 0.6 * alpine), steep);
+    var color = mix(ground, mix(earth, rock_textured, 0.25 + 0.6 * alpine), steep);
 
     // Snow on the flats; rock shows through where it is too steep to hold.
     let snow = snowy * smoothstep(0.52, 0.74, n.y);
-    color = mix(color, vec3<f32>(0.9, 0.94, 0.98) * (0.95 + 0.08 * broad), snow);
+    let wind = normalize(frame.params.zw + vec2<f32>(0.001, 0.0));
+    if (snow > 0.01) {
+        let snow_along = dot(w.xz, wind);
+        let snow_across = dot(w.xz, vec2<f32>(-wind.y, wind.x));
+        let snow_ripple = vnoise(vec2<f32>(snow_along * 0.34 + vnoise(w.xz * 0.09) * 2.4, snow_across * 0.055));
+        let snow_grain = vnoise(w.xz * 2.7 + vec2<f32>(11.0, 41.0));
+        let snow_crease = smoothstep(0.55, 0.82, snow_ripple);
+        let snow_albedo = vec3<f32>(0.62, 0.72, 0.86) * (0.7 + snow_ripple * 0.4 + (snow_grain - 0.5) * 0.44) - vec3<f32>(0.2, 0.13, 0.035) * snow_crease;
+        color = mix(color, snow_albedo, snow);
+    }
 
     // World-space albedo repeats every 256 m (an exact divisor of wrap's 1024 m period),
     // with lower frequency ice strata and snow veils to keep the macro terrain readable.
@@ -62,7 +91,7 @@
     var shaded = lit(color, n, w);
     let light = band(n) * sunlight(w, n);
     // Snow shadows go blue rather than grey.
-    shaded = shaded + vec3<f32>(-0.03, 0.01, 0.07) * snow * (1.0 - light);
+    shaded = shaded + vec3<f32>(-0.025, 0.015, 0.075) * snow * (1.0 - light);
     shaded = shaded + vec3<f32>(-0.015, 0.025, 0.11) * antarctic * (1.0 - light);
     // Glints: a few hashed cells catch the sun toward the eye.
     let cell = floor(wrap(w.xz) * 3.0);

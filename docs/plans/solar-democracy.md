@@ -1,6 +1,6 @@
 # Solar frontier and Galactic Democratic Compact
 
-**Status:** ordered eight-planet, twelve-moon, and Scalari mining-front data plus the campaign framework. One low-threat Scalari Prospector combat unit has been added near the Frontier nests. No planetary travel, transforming Kestrel modes, stations, mining production, or Compact voting is playable yet. Future orbital construction follows the staged capability gates in [Project Helios](space-habitat-network.md); that plan distinguishes the rotating-habitat physics from unverified megastructure engineering.
+**Status:** ordered eight-planet, twelve-moon, and Scalari mining-front data, plus the campaign framework and the level-design pass below. One low-threat Scalari Prospector combat unit has been added near the Frontier nests. No planetary travel, transforming Kestrel modes, stations, mining production, or Compact voting is playable yet. Future orbital construction follows the staged capability gates in [Project Helios](space-habitat-network.md); that plan distinguishes the rotating-habitat physics from unverified megastructure engineering.
 
 ## Campaign frame
 
@@ -29,7 +29,131 @@ The Compact is not a benevolent empire. Its story tests consent, unequal influen
 
 Gaia remains an artificial globe in Saturn space, not a ninth planet. The Hive/Scalari homeworld remains interstellar. Its distance is handled by the same strategic route clock; it is never placed millions of light-years away in f32 simulation coordinates.
 
-Visitable local-flight destinations include Luna; Phobos and Deimos; Io, Europa, Ganymede and Callisto; Titan and Enceladus; Titania and Oberon; and Triton. Each moon gets a bounded local region and a station/docking approach. The player selects a planet or moon from a chart, fast-travels there, then flies locally around its surface, moons, and stations. No continuous interplanetary flight, full orbit propagation, or absolute solar-system renderer is planned.
+Planned local-flight destinations include Luna; Phobos and Deimos; Io, Europa, Ganymede and Callisto; Titan and Enceladus; Titania and Oberon; and Triton. Each moon gets a bounded local region and a station/docking approach. The player selects a planet or moon from a chart, fast-travels there, then flies locally among its orbital landmarks. Surface landings are a separate heightmap-backed handoff. No continuous interplanetary flight, full orbit propagation, or absolute solar-system renderer is planned.
+
+## Solar map and orbital activity before surface landings
+
+Build the travel experience as three separate layers so the first space slice does not depend on planetary terrain:
+
+1. **Solar chart:** choose a named system destination and fast-travel there. Show orbital bands and route lines as a navigable campaign map, not a physically scaled model. Include Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus and Neptune; the main Asteroid Belt; and the Kuiper Belt beyond Neptune. Gaia is a special transfer-site icon near Saturn, while the Hive/Scalari homeworld is a separate interstellar campaign destination. Mars and the Kuiper Belt are explicit fast-travel choices. The current `SolarSystem.zig` catalog has only the eight planets and twelve moons, so the Asteroid Belt and Kuiper Belt need stable region IDs when implementation starts; neither is a new planet.
+2. **Local orbital zone:** arrival loads a bounded flight/combat/mining space with stations, ships, salvage and authored asteroid fields. Planets and moons are illustrated image backdrops visible behind the local zone; they are not terrain or collision surfaces in this slice. Mars orbit can use its moon approaches and captured rubble pockets near Phobos and Deimos for asteroid work. The main belt and Kuiper Belt are larger repeatable mining regions, rather than implying that every orbit around every planet contains a mineable rock field.
+3. **Surface landing:** after the orbital zone is proven, selecting a supported landing site hands off to its named surface level and heightmap. This is a later stage. The current solar-map and orbital design does not claim that Mars, the moons or other surfaces are landable.
+
+| Chart node | Arrival scene | First activity |
+| --- | --- | --- |
+| **Luna orbit — South Pole Relay Orbit** | The polar relay, a small ice-hauling tender and a dock ring sit above Luna's cratered south pole; Earth is a distant landmark. | Escort the tender, scan an orbiting ice-rock pocket, and repel a small Hive drone patrol. This is a moon-side space location, not a surface landing. |
+| **Mars system** | Ares Commons as a painted planetary backdrop; Phobos and Deimos establish near-field scale; Ares Beacon is the safe arrival point. | Survey a captured rubble pocket, recover an abandoned comm buoy, or intercept Hive scouts shadowing a civilian hauler. Selecting Ares Commons for surface landing is reserved for the next terrain step. |
+| **Main Asteroid Belt** | Pallas Array, a compact rock cluster around a disabled tug and working beacon. | Scan and mine bounded deposits, tether the tug, and defend the operation against a Scalari hauler or a Hive raid. This is the first repeatable mining zone. |
+| **Kuiper Belt** | A sparse outer-system zone of dark ice fragments, distant small-body silhouettes, a relay, and a convoy shelter. Neptune/Triton can be shown as a separate distant chart destination; do not imply the whole belt sits in Neptune orbit. | Find a silent prospector, recover its survey core, and hold the relay through a Hive swarm attack. Better mineral variety is balanced by longer extraction routes and fewer safe docking points. |
+| **Planetary orbit nodes** | Each body uses a still or slowly animated illustration behind the playable flight arena, with a nearby station, moon or relay to establish scale. | Optional rescue, patrol, courier escort, or faction encounter. These are reusable encounter templates with local dressing, not a full orbital simulator. |
+
+![Original concept image for the South Pole Relay Orbit moon location](../concepts/moon-south-pole-relay-orbit.png)
+
+### Mining pockets
+
+Generic asteroids are bounded encounter objects with authored resource classes, scan readings, stable site identity, and a small number of breakable seams. Scanning marks stable material and hazards; drilling frees a limited load; players tow or carry it to a local tender. Each pocket has one route challenge—rotating debris, a narrow tether passage, a cracked interior, or a hostile patrol—so repeat visits vary in approach without requiring infinite destruction or unbounded debris simulation. Mars' local examples are explicitly captured rubble near Phobos/Deimos; the plentiful mining loop belongs to the Asteroid Belt and Kuiper Belt.
+
+### Asteroid-base and mining-drone operation
+
+Build the belt base as the space extension of colony CM1 and the planned BS6/BS7 work, not as a parallel economy:
+
+- Use the existing **iron, copper and lumen crystal** stockpile, shared colony clock, research points, power-satisfaction rule, and stable saved colony record. A player's hand-mined load remains personal until it is deposited; automated base output goes directly to shared stock.
+- The first working base is a compact anchored cluster: beacon/landing cradle, power unit, extractor, store, drone bay, and one defensive module. Give each module an asteroid-rated prefab and readable tethers; reuse the existing drill, store, power, bay, shield/turret and launcher roles where their behavior fits. Do not place terrestrial blocks or gravity-dependent farm fields in vacuum.
+- A **miner drone** surveys and drills a marked seam, then returns to the bay. A **hauler drone** transfers its canister to storage or the tender. The first pass uses CM4/BS6's bounded state-machine pool: nearby craft visibly travel and work; remote sites advance by hourly totals. Power, storage capacity, drone availability and damage limit production.
+- The CM5/BS7 **command view** should inspect this same base and issue build, task, rally, repair and defense orders from the player's viewport. The orbital station's existing CM1 hourly yield is the placeholder contract; when a physical station/base is active, its site record becomes the source of that output so it cannot be counted twice.
+- Use `Colony.Ore` for the first operational loop. Ice and volatile samples can appear as mission discoveries/data at first; adding new persistent resource kinds requires a deliberate save-format and economy pass rather than quietly converting them into ore.
+
+Base defense should reuse the existing outpost raid, power, shield, turret, launcher and structure-health rules. Hive attacks can target tethers, stores, drones or the relay. A lost structure pauses output and creates a repair/reclaim mission; it does not erase the shared stockpile or the whole base. Keep one authored asteroid-base site as the proving region before adding free placement across the belt.
+
+### Rising space-skirmish ladder
+
+Each space location can offer replayable skirmishes whose seed fixes a fair enemy composition for that run. The campaign ladder climbs through ten battle levels. Levels 1–9 draw from the available locations and encounter templates with steadily more roles and coordinated objectives; difficulty grows through formations, target priorities and simultaneous tasks, not only by inflating enemy health. Scale attackers to the present local party, and keep a readable route to retreat/extraction.
+
+| Level | Encounter escalation |
+| --- | --- |
+| 1 | Luna relay patrol: a small Hive drone flock tests flight and escort basics. |
+| 2 | Asteroid tender raid: drones attack the mining tow while players hold a tether corridor. |
+| 3 | Mars rubble sweep: scouts and a prospector contest the survey marker; protect the drone and recover its scan. |
+| 4 | Kuiper relay ambush: two drone groups approach from separate vectors; keep the relay powered and extract. |
+| 5 | Transforming-fighter intercept: one Scalari AI switches forms and attacks the convoy, then withdraws when damaged. |
+| 6 | Mining-base defense: a Hive swarm pressures the store and drone bay while a battleship holds the long range. |
+| 7 | Battleship engagement: disable weapon and engine systems under drone cover, or disengage with the cargo. |
+| 8 | Mother Ship vanguard: break or bypass outer drone bays while keeping a civilian convoy intact. |
+| 9 | Mars blockade: coordinate an assault on multiple Hive ships and shield relays to open a temporary corridor. |
+| 10 | **Rescue Mars:** defend evacuation craft, disable the Hive Mother Ship's blockade systems, and secure an orbital rescue corridor. Success frees the planet's orbit and authorizes a Mars landing when the surface heightmap level is supplied; this mission does not fabricate or promise Mars terrain. |
+
+Random skirmishes continue to use the unlocked ladder tier after completion, while level 10 remains a deterministic campaign rescue objective. Store the battle level, seed and outcome with campaign progression; keep individual mining deposits tied to stable site IDs. The current orbital trial has no enemies or rewards, and none of this ladder or Mother Ship behavior is implemented yet.
+
+Mining is interrupted by readable decisions and pressure: a survey may reveal an unstable seam, an abandoned Scalari operation, or a crew member in danger. Players can secure the site, divert the machine, rescue workers, or extract the already-approved sample. A completed pocket returns material and data to a named station or settlement. This orbital loop leads into—not around—the surface survey, local consent and civic-build levels defined below.
+
+### Hive fleet encounters
+
+Space combat takes place in small local arenas around a convoy, relay, mining tender or capital ship. A typical encounter has a warning and approach, a readable drone attack, a larger fleet threat, then a defend/disable/extract objective. Asteroids, station struts and ship wrecks provide silhouettes and temporary cover; they are not a limitless particle field.
+
+| Force | Battlefield role | Readable behavior |
+| --- | --- | --- |
+| Hive swarm drones | Numerous light attackers that pressure the convoy and mining crew | Arrive in small flocks, break formation when damaged, and regroup around a signal ship; individually fragile and easy to read. |
+| Hive battleships | Heavy control ships that anchor the swarm | Hold distance, use broadside weapons, and launch drones. Disable engines or weapon nodes to create an extraction window; their armor remains too heavy for a quick solo kill. |
+| Hive Mother Ships | Rare campaign-scale threats and set-piece bosses | Carry several drone bays and distinct exposed systems. The mission first protects civilians or a relay, then opens a timed boarding/weak-point opportunity, then extracts before the ship's last defense wave. Defeat or retreat changes the local route and salvage state. |
+| Scalari transforming fighter AIs | Skilled autonomous interceptors, visually distinct from Hive swarm craft | Shift between fast flight and a compact humanoid combat mode to change attack range, dodge through debris, or contest a boarding point. Telegraph each change with a silhouette and charge-up; transformation does not grant invulnerability. |
+
+The player Kestrel's planned vacuum form and winged Colossus remain separate progression. Enemy transforming AIs establish the encounter language, but must not imply that the player's transformation or the current Kestrel has been implemented in orbital flight. The existing Hive carrier and Scalari meshes are art/design foundations; Mother Ship encounters and space-battle behavior are not playable yet.
+
+### Build order for the space layer
+
+1. Make the system chart's Mars, Asteroid Belt and Kuiper Belt nodes selectable through fast travel.
+2. Prove one bounded orbital zone with a safe arrival, local flight, extraction and an illustrated planet backdrop.
+3. Add one repeatable asteroid pocket with scan → mine → tow/extract, plus a small persisted site record.
+4. Add a Hive drone patrol and a battleship encounter around the same arena, with a defend or retreat outcome.
+5. Add one Mother Ship set-piece and a Scalari transforming-fighter AI only after the smaller fleet encounter reads clearly.
+6. Add surface-site selection and heightmap landing as the next content step, beginning with Mars. Each landing loads a bounded named region rather than dropping into a planet-scale continuous world.
+
+The map and orbital slice uses illustration assets only for planet backdrops. The owner plans to supply surface heightmaps for the subsequent landing step; no open-source planetary image, scientific texture or heightmap is assumed in this design.
+
+## Level designs: first Solar prospecting arc
+
+These are bounded mission regions reached from the Earth shipyard by strategic travel. Each should feel like a place people live and make decisions, not a resource node with enemies around it. A level targets a 1.3–1.7 km playable region, two or more routes into its central problem, 4–8 readable landmarks, optional discoveries, an extraction/docking point, and a few legal construction sites. Moons are distinct landing zones within their parent planet's campaign chapter; they do not require building an entire globe. The first route establishes the survey → consent → small resource demonstration → useful civic infrastructure pattern before any large industrial expansion.
+
+**Earth is the home hub, not a mining chapter.** After the Detroit liberation arc, Crown Harbor at the Arbor Frontier becomes the shipyard, expedition briefing point, fabrication bay, and first Solar Assembly meeting hall. Players use its existing city and wilds loop to prepare for Luna. Returning expeditions visibly add route beacons, service modules, and representatives to the harbor. The Solar levels do not replace or bypass Earth's city liberation campaign.
+
+| Order and level | Local layout and traversal | Main conflict and mission beats | First civic build and lasting outcome |
+| --- | --- | --- | --- |
+| 0. **Luna — South Pole Relay** | Shackleton crater rim, a shadowed ice trench, a pressurized transit hub, and a short lava-tube service route. A ridge approach is fast but exposed; the tube reaches the relay from below. | Follow a missing water survey crew; scan three ice exposures; shut down a Scalari drill that has breached the reserve perimeter; escort the crew and samples to the public hub. | Repair a shared water/communications relay. The settlement publishes the ice map and its reserve boundary; no extraction starts until local water users set a quota. This teaches the expedition verbs and stakes without making Earth a mining tutorial planet. |
+| 1. **Mercury — Terminator Foundries** | A crater settlement straddles the twilight band. The sunward solar-furnace field, a shaded rail trench, and a buried observatory make three distinct routes. Heat exposure rises toward the furnace field and recedes in the crater shadow. | Investigate a silent automation shift; restore the observatory's safe route; trace a Scalari command key through maintenance machinery; disable the rogue stripping schedule while keeping the power array online. | Build a public power-and-comms mast from salvaged solar glass. Residents retain the furnace controls; recovered machine data unlocks a safer prospector design. |
+| 2. **Venus — Cloudhaven** | A chain of buoyant pressure habitats, maintenance balloons, and a suspended chemistry deck above the cloud layer. Interior pressure locks link the upper route; a lower service gantry is quicker but crosses a storm front. | Rescue a drifting filter barge; survey a rare cloud-chemistry plume; discover that Scalari extractors have diverted habitat filters, worsening a local pressure emergency. Choose a rescue and repair order under time pressure. | Restore a shared filter works and add a storm mooring. Chemistry access stays behind a resident-approved environmental and labor treaty; the mission does not propose surface terraforming as an immediate payoff. |
+| 3. **Mars — Ares Commons** | Canyon farms, a dry aquifer cut, two lava-tube neighborhoods, and an old landing pad. Players can follow the exposed canal or descend through a tube to reach the buried pump station. | Survey three aquifer readings; compare them with the farms' published water ledger; stop a Scalari prospector convoy before it maps the reserve; defend a controlled test pump while residents audit its output. | Build a metered pump, a pressure-safe habitat module, and a landing beacon as one small demonstration. The Commons votes among farm reserve, habitat growth, or a split schedule; the chosen allocation visibly changes canal flow and which district gets power first. This is the first complete survey-to-settlement level. |
+| 4. **Asteroid Belt — Pallas Array** | A loose cluster of fractured rock around a disabled tug and beacon. The anchor rock has a sheltered tunnel through its center; the exposed ridge holds the richest visible seam. Local flight links three small rocks and the tug, keeping the playable space bounded. | Locate the missing tug crew; use a survey charge to distinguish stable seams from fractured, spinning material; repel a Scalari hauler; extract only the marked load. Mining blasts can break authored rock sections and open or close short routes, but do not destroy the whole asteroid or simulate orbital debris. | Establish a beacon, tether points, and a tug repair cradle before a permanent extractor. The crew chooses a conservative seam and logs an exclusion zone around the unstable cluster; later missions can revisit it without resetting its state. |
+| 5. **Jupiter / Galilean League — Europa's Under-Ice Commons** | A heated surface dock, a crevasse lift, a research gallery, and an under-ice water tunnel. The safe route follows shielded stations; a short cut crosses an exposed ice shelf during a plume cycle. | Stop a Scalari drill before it breaks a protected ocean boundary; rescue the local inspection team; divert power from a weaponized cutter to the treaty sensors; expose the forged survey permit. Combat pressure comes from defending routes and disabling equipment, not from treating the ocean as loot. | Build a buffer relay and repair a public sensor line. The League keeps ice access local and funds a separate, small service quarry away from the protected boundary. Mission evidence can later influence the League's shared convoy rules. |
+| 6. **Saturn — Titan's Methane Reach** | A methane-shore port, a low bridge over the sea, a thermal plant, and a hauler route through orange dunes. Surface and platform routes converge at the heat-exchange station. | Keep a hauler convoy moving while Scalari machines divert methane from the habitat grid; investigate why the droids are following an obsolete labor quota; free trapped workers and decide whether to reassign or dismantle the machinery. | Repair a heat relay, then add a worker-controlled landing and repair pad. Residents approve the extraction shift schedule; methane output rises only if the heat and labor plan can support it. Gaia remains a separate protected habitat project in Saturn space, not a mine or a Titan district. |
+| 7. **Uranus — Blueglass Stations** | Two remote stations linked by a surface service road and a short low-gravity exterior route. Titania's Crown Ice Works supplies the thermal relay; Oberon's Outer Crater Port is the optional relief landing and alternate extraction path. | Restore the failing thermal grid before the polar-night reserve runs out; split the group between the relay and a stranded survey crew; find the Scalari cache that has been drawing emergency power. | Connect a redundant thermal relay and repair a public shelter. The stations decide whether the next shipment serves research instruments or habitat reserves; both options preserve life support but change the next expedition's available data and services. |
+| 8. **Neptune — Triton Free Port** | A sheltered crater port, a nitrogen-ice field, a long radio ridge, and a compact courier landing scar. The ridge gives line of sight to the incoming ship; a lower ravine is a safer civilian evacuation route. | Keep the Free Port's vote open while an intercepted Scalari courier approaches; verify whether the message is a threat, a defection request, or both; protect the port and prevent either side from coercing the vote. | Repair the port's independent communications and public assembly hall. Residents choose Compact membership, a defense-only treaty, or continued independence. Each leaves local control intact; a refusal to join remains a successful outcome and does not lock the route. |
+
+### Moon landing zones
+
+The moon locations are authored sub-levels with one defining traversal problem and one resource/civic question. They can branch from their parent chapter after the initial route is proven.
+
+| Moon level | Distinct playable hook |
+| --- | --- |
+| Luna — South Pole Relay | Shared ice reserve and public transit; survey and communications before extraction. |
+| Phobos — Stickney Dockyards | Low-gravity shipyard gantries; protect a repair crew pressured to build Scalari-compatible drills. |
+| Deimos — Far Lantern | Relay outpost; follow a prospector swarm's aquifer map and decide who receives the survey. |
+| Io — Sulfur Arc | Volcanic crawler field; route through cooling shelters to shut down a dangerous extraction shift. |
+| Europa — Under-Ice Commons | Treaty-protected ocean boundary; stop a cutter and build a sensor buffer. |
+| Ganymede — Magnetosphere Works | Shielded port and magnetic research district; defend a convoy while residents vote on shared protection. |
+| Callisto — Quiet Crater | Neutral repair station; uncover a buried Scalari cache without collapsing the occupied service tunnel. |
+| Titan — Methane Reach | Shoreline hauler route and thermal grid; extraction must not starve habitat heat. |
+| Enceladus — Geyser Fields | Plume-side research camp; redirect ice prospectors away from a biosphere exclusion zone. |
+| Titania — Crown Ice Works | Remote quarry and thermal relay; restore power during the Blueglass chapter. |
+| Oberon — Outer Crater Port | Independent port and relief landing; choose whether to accept outside aid without surrendering local authority. |
+| Triton — Free Port | Public membership vote, courier interception, and a safe evacuation ravine. |
+
+### Mining and settlement through the arc
+
+Use one readable operation per level rather than a passive planet-wide production simulation. A survey identifies a resource and its civic or ecological boundary; a local crew authorizes a bounded test; players secure or repair the equipment; the settlement chooses what the first output supports. Physical mission rewards should be specific materials and data, while long-term output belongs to a named, powered site that can be defended and revisited. A successful defense should create a supply or repair opportunity; losing an extractor should create a reclaim mission, not erase the colony.
+
+Keep the Scalari prospector legible as industrial equipment with a job: scan, drill, store a small load, and call for help if attacked. The first set of encounters should ask players to disable, redirect, or negotiate access to a site. Destroying a machine is available when necessary to protect people, but it should not be the only interaction. The settlement's consent, labor safety, reserve limits, and local ecological rules must shape what can be built next.
+
+The asteroid level's destructible seams are authored pieces with bounded debris and stable mission IDs. They open routes and reveal deposits; they do not imply a system-wide fracture simulation. Habitat construction follows [Project Helios](space-habitat-network.md): prove communications, power, thermal control, cargo handling, and repair before adding a permanent crewed habitat. A player-visible structure or service should change at the end of each level so civilization-building reads through the environment, not only through a resource counter.
 
 Candidate settlement arcs grow from prospecting and a landing/communications outpost into a local resource demonstration, a modular station, and then connected city districts where the site's resources, climate and logistics justify them. This is not a promise that every planet or moon has an economical mine or that every settlement becomes a city. Across the campaign, settlements may join into futuristic city-planets: connected urban belts and sealed surface, subsurface or orbital habitats adapted to each world's conditions. Terraformation is staged by regional projects and public votes, not an instant planet-wide toggle. Venus begins with floating pressure habitats; upper-atmosphere processing, sealed surface habitats, and long-term climate intervention remain separate speculative steps with resident consent and ecological consequences as mission choices.
 

@@ -8,6 +8,8 @@ The two destinations added by this plan are the Hive Homeworld and **Gaia**, an 
 
 The initial catalog lives in `src/procedural/Worlds.zig`. It names the destinations, city regions, each world's capital, and arena concepts; it sets local arena bounds and reward targets and derives stable seeds from a campaign seed. The Arbor Frontier catalog now has seven city concepts: its five canopy/river regions plus Pelaglass and Sonorous Reef. The underwater paired-city design is in [the ocean-cities plan](ocean-cities.md). The Scalari ship meshes live in `src/vehicle/ScalariMeshes.zig` and are registered in the asset catalog. This is authored content groundwork: city geometry, ship spawning, travel, missions, and saves are not connected yet.
 
+The separate Solar System level sequence—including bounded moon landing zones, the first mining and settlement arc, and the asteroid-belt mission—is designed in [Solar democracy](solar-democracy.md#level-designs-first-solar-prospecting-arc). It is not runtime content and does not change this three-destination Arbor/Hive/Gaia campaign plan.
+
 ## Session loop
 
 1. Choose a destination and mission from the shipyard's route table.

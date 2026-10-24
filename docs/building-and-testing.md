@@ -59,7 +59,9 @@ To see the bundled rigged GLB driven by the game's pose in the world (third pers
 
 The modifier commands remain useful for batch import and offline GLB preview. The in-game editor saves a local library override rather than editing the checked-in import recipe. Live imported skinning uses the GPU character pipeline; `-Dcpu-skinning=true` does not support imported rigs. Only binary GLB files with embedded buffers are supported by the in-game picker; external-buffer `.gltf` scenes, source-authored animation clips, texture editing, and component text relabeling remain open.
 
-For backend-specific development builds, pass `-Dmach_gpu_backend=metal`, `vulkan`, `opengl`, or `d3d12`. The default selects the platform backend. Each backend requires a supported target and its native platform libraries.
+Backend selection is a compile-time build option, not a runtime switch. The root build accepts `-Dmach_gpu_backend` values `default`, `webgpu`, `d3d12`, `metal`, `vulkan`, and `opengl`, then passes the choice to Mach's `sysgpu_backend`; each choice builds a separate artifact. In this fork, `default` maps Linux to Vulkan, macOS/iOS to Metal, and Windows to D3D12. Other default targets fail at compile time. Although `webgpu` is an enum option, the current `sysgpu` implementation has no WebGPU backend and rejects it at compile time. OpenGL is explicitly selectable where supported; it is not selected as the default fallback.
+
+Optimize first for the platform that runs the game: Metal is the only backend exercised at runtime here. Linux Vulkan/OpenGL and Windows D3D12 are compile-checked only, so maintain correctness there and measure performance if those platforms become shipping targets. Windows OpenGL currently fails to compile. Browser/WebGPU and console APIs are not current targets; WebGPU needs an implementation before it can be evaluated. Do not add backend-specific fast paths until a measured bottleneck warrants them.
 
 The fork carries compatibility paths for newer compilers. The 2026-10-14 validation gate passes `build check` and all 440 headless tests on both the default and Zig 0.17 channels; the default Metal smoke is clean. Zig 0.17's asset build, Metal smoke and Linux (Vulkan, OpenGL) and Windows (D3D12) cross-compiles last passed in the 2026-10-10 candidate matrix and were not rerun in this gate. The 0.18 snapshot passes on macOS and Linux Vulkan. The default stays on the proven Mach compiler until the adoption change lands; see the [Mach and Zig update process](plans/engine-update-process.md) and the candidate matrix in [engine alignment](plans/alignment.md#mach-tracking).
 
@@ -221,6 +223,8 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 73 | Nature review: terrain overview, daylight |
 | 74 | Nature review: a close pine view |
 | 75 | Nature review: a close moon-cascade view |
+| 114 | Rain-shower sky gradient and visible daytime sun |
+| 115 | Night sky gradient and visible moon |
 | 78 | Immediate 3D API review: box, sphere, catalog models, tint, scale, and LOD |
 | 82 | HIVE FORGE UI with the insectoid carapace layer selected |
 | 83, 84 | Insectoid amber-carapace and brushed-silver Scalari siege frames |
@@ -259,7 +263,7 @@ sips -s format png zig-out/capture.bmp --out capture.png
 | 44 | A cave's heart chamber and its Hive nest |
 | 45 | Kestrel missile lock reticle, acquired on a ground drone |
 | 54, 55 | Four-player setup; regional map and fast travel |
-| 48–51 | The Wildkin, eight at a time, on the meadow |
+| 48–51 | Wildkin roster lineups, eight at a time |
 | 52 | The Heroes screen |
 | 53 | The Starbowl arena, wave 1, as Bolt Quill |
 | 56 | The Heroes screen at 150% interface size, scrolled to BACK |
@@ -290,3 +294,13 @@ Captures need a visible, unlocked screen. macOS stops presenting frames to a hid
 - **`file_hash FileNotFound` during a build:** a source asset is missing its `.meta` sidecar. Run `python3 tools/zig.py build import`.
 - **Audio device errors:** the game logs `Audio unavailable (…); running silent` and continues. Use `-Daudio=false` to skip the device.
 - **`git push` fails with HTTP 400 on a large push:** raise the HTTP buffer with `git config http.postBuffer 524288000`.
+
+### Four-view limiter experiment
+
+Run `python3 tools/limiter.py --frames 600 --repeats 2 --output zig-out/limiter` with a visible, unlocked screen and no other benchmarks or test suites running. This experiment uses the production four-player frontier scene: one fixed simulation step per observed render frame captures cameras and props at tick 120, then keeps that render snapshot while normal simulation continues. Audio is disabled and the window uses maximum-throughput presentation. A second variant bypasses simulation after capture. Full-size and half-size windows preserve aspect ratio and the command structure while varying pixel cost. Two rounds reverse the variant order; logs and `report.json` retain raw measurements.
+
+The report uses mean frame interval for throughput because uncapped rendering can alternate between fast command recording and drawable waits; a frame median can hide that pattern. GPU durations are delayed samples from the existing latest-completed-command-buffer API, not a GPU timeline.
+
+A comparison is valid only if source and snapshot fingerprints, four-view counts, draw/triangle counts and actual resolution ratios match, the measured triangles remain constant, every active ring stays covered, and completed GPU duration samples exist. This measures a stationary combat snapshot after warmup; it does not measure travelling/streaming hitches. The fingerprint covers camera and prop draw descriptors, not all character animation data. The variants bypass normal fixed-step wall-time pacing deliberately; they are diagnostics, not gameplay settings.
+
+Interpret frame interval, CPU render duration, simulation duration and whole-command-buffer GPU duration together. A resolution response demonstrates sensitivity to pixel work; a simulation response demonstrates sensitivity to simulation work. Neither experiment isolates CPU command encoding. Improvements in both experiments do not by themselves prove CPU/GPU serialization; shared bandwidth, scheduling, thermal changes and presentation can also affect both. Do not sum CPU and GPU percentiles, or add a GPU pass profiler before this evidence identifies a useful question.

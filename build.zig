@@ -25,13 +25,16 @@ pub fn build(b: *std.Build) void {
     options.addOption(u32, "smoke_frames", b.option(u32, "smoke-frames", "Exit after N rendered frames (0 = interactive)") orelse 0);
     options.addOption(u32, "benchmark_frames", b.option(u32, "benchmark-frames", "Run a measured renderer route for N frames, after 60 warm-up frames") orelse 0);
     options.addOption(bool, "benchmark_frontier", b.option(bool, "benchmark-frontier", "Benchmark four-player split-screen with the live frontier simulation") orelse false);
+    options.addOption(bool, "benchmark_limiter", b.option(bool, "benchmark-limiter", "Replay a fixed four-view snapshot for CPU/GPU limiter experiments") orelse false);
+    options.addOption(bool, "limiter_half_resolution", b.option(bool, "limiter-half-resolution", "Limiter: halve window dimensions (one quarter as many pixels)") orelse false);
+    options.addOption(bool, "limiter_skip_sim", b.option(bool, "limiter-skip-sim", "Limiter: skip simulation after capturing the render snapshot") orelse false);
     options.addOption(bool, "benchmark_nature", b.option(bool, "nature-benchmark", "Include terrain, scatter, visible flora and submitted-triangle metrics in the benchmark report") orelse false);
     const benchmark_arbor = b.option(u8, "benchmark-arbor", "Arbor to view on the canopy route: 0 test, 1 narrow genome, 2 spreading genome") orelse 0;
     if (benchmark_arbor > 2) @panic("benchmark-arbor must be 0, 1, or 2");
     options.addOption(u8, "benchmark_arbor", benchmark_arbor);
     options.addOption(bool, "benchmark_canopy", b.option(bool, "benchmark-canopy", "Aim the benchmark at the test Arbor, from up close to 1 km and back") orelse false);
     options.addOption(u32, "capture_frame", b.option(u32, "capture-frame", "Write rendered frame N to zig-out/capture.bmp, then exit (0 = off)") orelse 0);
-    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a review scene: 1-17 city and armor, 18-57 GUI/combat/flight (31 aircraft fabricator), 58-59 pets, 60-61 Rootdeep and armor, 62 flora, 63 ground flora, 64-65 Arbor interiors, 66 space habitats, 67 wilds structures, 69 homing ki blast, 70 test Arbor, 71 ground cover, 72 forest, 73 dusk terrain, 76 close-up of the cave temple, 77 inside the first Rootdeep shrine, 78 immediate 3D helpers, 80 floating platform builder, 81 rotating planet map, 82 Hive Forge UI, 83 carapace siege frame, 84 brushed-metal siege frame, 85 Antarctic perimeter, 86 Antarctic scorpion sentry, 87 K2 surface landing, 88 K2 mechworks heart, 89 canopy city roof, 90 Cloudwater Basin, 100 Detroit discovery challenge, 101 how to play, 102 keyboard controls, 103 orbital arena and Hive fighters, 104 orbital flight trial, 110 and 111 the living-sap flora meadow by day and by night, 112 on a skyway at deck height, 113 across the skyline and its rounded eco towers") orelse 0);
+    options.addOption(u8, "showcase", b.option(u8, "showcase", "Hold the camera on a review scene: 1-17 city and armor, 18-57 GUI/combat/flight (31 aircraft fabricator), 58-59 pets, 60-61 Rootdeep and armor, 62 flora, 63 ground flora, 64-65 Arbor interiors, 66 space habitats, 67 wilds structures, 69 homing ki blast, 70 test Arbor, 71 ground cover, 72 forest, 73 dusk terrain, 76 close-up of the cave temple, 77 inside the first Rootdeep shrine, 78 immediate 3D helpers, 80 floating platform builder, 81 rotating planet map, 82 Hive Forge UI, 83 carapace siege frame, 84 brushed-metal siege frame, 85 Antarctic perimeter, 86 Antarctic scorpion sentry, 87 K2 surface landing, 88 K2 mechworks heart, 89 canopy city roof, 90 Cloudwater Basin, 100 Detroit discovery challenge, 101 how to play, 102 keyboard controls, 103 orbital arena and Hive fighters, 104 orbital flight trial, 110 and 111 the living-sap flora meadow by day and by night, 112 on a skyway at deck height, 113 across the skyline and its rounded eco towers, 114 rainy sky and sun, 115 moonlit sky, 116 an ore vein and the colony panel") orelse 0);
     options.addOption(u32, "scale_objects", b.option(u32, "scale-objects", "Benchmark scale workload: N field objects (e.g. 10000, 100000, 1000000); 0 = off") orelse 0);
     options.addOption(u32, "pack_stress", b.option(u32, "pack-stress", "Benchmark: write a pack of N meshes (1K-128K vertices) and load it during measurement; 0 = off") orelse 0);
     options.addOption(usize, "asset_upload", (b.option(usize, "asset-upload-kib", "Late catalog mesh upload budget per frame in KiB (deferred and reloaded meshes)") orelse 4096) * 1024);
@@ -89,7 +92,7 @@ pub fn build(b: *std.Build) void {
         .source_dir = b.path("assets/Music"),
         .install_dir = .{ .custom = "assets" },
         .install_subdir = "Music",
-        .include_extensions = &.{ ".mp3" },
+        .include_extensions = &.{".mp3"},
     }).step);
     assets.dependOn(&b.addInstallFileWithDir(crate, .{ .custom = "assets" }, "crate.hwmesh").step);
     assets.dependOn(&b.addInstallFileWithDir(captain_mesh, .{ .custom = "assets" }, "captain.hwmesh").step);

@@ -22,6 +22,8 @@ const BlockWorld = @import("../build/BlockWorld.zig");
 const BlockTool = @import("BlockTool.zig");
 const Platformer = @import("Platformer.zig");
 const Farm = @import("Farm.zig");
+const Mining = @import("Mining.zig");
+const Colony = @import("Colony.zig");
 const Decor = @import("Decor.zig");
 const Outpost = @import("Outpost.zig");
 const Blocks = @import("../build/Blocks.zig");
@@ -214,7 +216,7 @@ pub const Actions = packed struct {
     /// Toggle free, floating block placement while the block tool is active.
     toggle_creative: bool = false,
     /// 0 = unchanged, 1 hands, 2 build, 3 wire, 4 bridges, 5 weapon, 6 terrain, 7 blocks.
-    select_tool: u3 = 0,
+    select_tool: u4 = 0,
     /// Climb out of the Kestrel (its primary button fires).
     leave_jet: bool = false,
     /// Class specials 1–3 (Z, C, H).
@@ -447,6 +449,8 @@ block_world: BlockWorld = undefined,
 platform: Platformer.State = .{},
 /// Crops growing on tilled soil (shared, saved).
 farm: Farm.State = .{},
+/// Ore veins, the cutter and the team's colony (stockpile, settlers, research).
+mining: Mining.State = .{},
 /// Combat feel: floating damage numbers and each player's camera shake (`Impact.zig`).
 impact: @import("Impact.zig").State = .{},
 /// Player-placed living-sap plants (shared world content; placement costs remain per-kit).
@@ -481,6 +485,7 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.bile_sequence = BileCase.sequence(seed);
     CityDiscoveries.positions(&catalog.district, seed, &self.city_discovery_positions);
     self.caves = Caves.layout(seed);
+    Mining.generate(seed, &self.mining.veins);
     self.physics = .init(.{ .context = &self.caves, .sample = groundSample, .hollow = groundHollow });
     errdefer self.physics.deinit();
     self.block_world = try BlockWorld.init(allocator, world_flag);
@@ -1345,6 +1350,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     self.syncFoundryGate();
     Platformer.step(self, camera, dt) catch |err| self.say("blocks failed: {s}", .{@errorName(err)});
     Farm.step(self, dt);
+    Mining.step(self, dt);
     if (timing) |profile| profile.metrics.record(.frontier, stage_timer.lap() * 1000);
     const aim = self.aimCamera(camera.*);
     if (self.held) |i| {
@@ -1441,7 +1447,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     switch (self.tools.tool) {
         .hands => {
             if (primary) {
-                if (self.held != null) self.release() else switch (self.target) {
+                if (self.held != null) self.release() else if (Mining.mineAimed(self, 0, aim)) {} else switch (self.target) {
                     .prop => |i| self.hold(i),
                     .stall => |i| self.startTalk(.{ .keeper = i }),
                     .walker => |i| self.startTalk(.{ .walker = i }),
@@ -1459,6 +1465,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                     .bile_notes => Frontier.readBileNotes(self),
                     .city_discovery => |i| Frontier.collectCityDiscovery(self, 0, i),
                     .relic => |relic| try self.salvageRelic(relic.ref),
+                    .none => _ = Mining.interact(self, 0, aim),
                     .device => |d| switch (self.machines[d.machine].blueprint.devices[d.device].kind) {
                         .button => if (self.machines[d.machine].shrine != null and std.mem.eql(u8, self.machines[d.machine].blueprint.devices[d.device].name(), "reset")) {
                             try self.resetShrine(self.machines[d.machine].shrine.?);
@@ -1476,7 +1483,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
                 else => {},
             };
         },
-        .build, .wire, .bridge, .terrain, .blocks => try Build.update(self, aim, primary, actions),
+        .build, .wire, .bridge, .terrain, .blocks, .cutter => try Build.update(self, aim, primary, actions),
         // The arsenal fires from `Frontier.step`, from the held triggers.
         .weapon => {},
     }
@@ -2640,6 +2647,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         machine_count += 1;
     }
     var bridge_edges: [District.max_bridges]District.Edge = undefined;
+    var tech_names: [Colony.tech_count][]const u8 = undefined;
     return Save.encode(allocator, .{
         .seed = self.seed,
         .bridges = self.openBridgeEdges(&bridge_edges),
@@ -2656,6 +2664,7 @@ pub fn save(self: *const Sandbox, allocator: std.mem.Allocator, camera: Camera) 
         .terrain = try self.terrainTiles(arena),
         .blocks = try self.blockSections(arena),
         .crops = try self.cropDocs(arena),
+        .colony = Colony.toDoc(&self.mining.colony, &tech_names),
         .decorations = try Decor.toDocs(&self.decor, arena),
         .structures = (try Outpost.toDocs(&self.outpost, arena)).defs,
         .placed = (try Outpost.toDocs(&self.outpost, arena)).placed,
@@ -2723,6 +2732,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     }
     // Crops: within the field cap, growth in range, one per cell.
     if (doc.crops.len > Farm.capacity) return error.InvalidSave;
+    const colony = try Colony.fromDoc(doc.colony);
     for (doc.crops, 0..) |crop, i| {
         if (!std.math.isFinite(crop.growth) or crop.growth < 0 or crop.growth > 1) return error.InvalidSave;
         for (doc.crops[0..i]) |other| if (other.x == crop.x and other.y == crop.y and other.z == crop.z) return error.InvalidSave;
@@ -2850,6 +2860,8 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.syncBlocks() catch {};
     self.farm = .{};
     self.decor = .{};
+    const veins = self.mining.veins;
+    self.mining = .{ .veins = veins, .colony = colony };
     Outpost.restore(&self.outpost, doc.structures, doc.placed);
     for (doc.crops) |crop| {
         self.farm.crops[self.farm.len] = .{ .cell = .{ crop.x, crop.y, crop.z }, .growth = crop.growth };
@@ -5535,6 +5547,79 @@ test "a structure is built for blocks, scrap and parts, taken apart for a refund
     sandbox.outpost.library.initStarters();
     try sandbox.restore(std.testing.allocator, bytes2, &camera);
     try std.testing.expect(sandbox.outpost.library.find("user.shield_1") != null);
+}
+
+test "ore is mined by hand and banked, a drill station fills the stockpile, settlers arrive, research unlocks, and the colony survives a save" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sandbox: Sandbox = undefined;
+    try testSandbox(&sandbox, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sandbox.deinit();
+    const spot = [2]f32{ 190.5, -450.5 };
+    const ground: i32 = @intFromFloat(@ceil(Terrain.surface(sandbox.seed, spot[0], spot[1]).height));
+    // A known vein under the spot, so the test does not depend on where the seed put them.
+    sandbox.mining.veins[0] = .{ .position = .{ spot[0], @floatFromInt(ground), spot[1] }, .ore = .iron };
+    const wallet = &sandbox.kits[0].wallet;
+    wallet.scrap = 5000;
+    wallet.parts = 500;
+
+    // By hand: one ore per press, with a cooldown between.
+    camera.position = math.vec3(spot[0], @as(f32, @floatFromInt(ground)) + 0.6, spot[1] - 3);
+    camera.yaw = 0;
+    camera.pitch = 0;
+    try std.testing.expect(Mining.interact(&sandbox, 0, camera));
+    try std.testing.expect(Mining.interact(&sandbox, 0, camera));
+    try std.testing.expectEqual(@as(u32, 1), sandbox.kits[0].ore[0]);
+
+    // A drill station on the vein, a lab, a habitat and a solar array to power them.
+    const at: [3]i32 = .{ @intFromFloat(spot[0]), ground, @intFromFloat(spot[1]) };
+    try Outpost.place(&sandbox, 0, 5, 0, at);
+    try Outpost.place(&sandbox, 0, 8, 0, .{ at[0] + 6, at[1], at[2] });
+    try Outpost.place(&sandbox, 0, 7, 0, .{ at[0] - 6, at[1], at[2] });
+    try Outpost.place(&sandbox, 0, 4, 0, .{ at[0], at[1], at[2] + 6 });
+    try std.testing.expectEqual(@as(usize, 4), sandbox.outpost.len);
+    try std.testing.expectEqual(Colony.Ore.iron, Mining.drillVein(&sandbox, &sandbox.outpost.placed[0]).?.ore);
+    // The launch pad waits for ROCKETRY: refused, nothing built.
+    try Outpost.place(&sandbox, 0, 9, 0, .{ at[0], at[1], at[2] - 10 });
+    try std.testing.expectEqual(@as(usize, 4), sandbox.outpost.len);
+
+    // Standing by the drill station's store banks the ore.
+    sandbox.player.feet = .{ spot[0] + 2, @floatFromInt(ground), spot[1] - 3 };
+    try std.testing.expect(Mining.depositNear(&sandbox, 0));
+    try std.testing.expectEqual(@as(u32, 0), sandbox.kits[0].ore[0]);
+    try std.testing.expectEqual(@as(u32, 1), sandbox.mining.colony.stockpile[0]);
+
+    const in = Mining.colonyInputs(&sandbox);
+    try std.testing.expectEqual(@as(f32, 12), in.drilled[0]);
+    try std.testing.expectEqual(@as(u32, 6), in.beds);
+    try std.testing.expectEqual(@as(f32, 6), in.research);
+
+    // An hour: the drill mines, the lab researches; with food a settler arrives.
+    sandbox.mining.colony.food = 10;
+    Mining.step(&sandbox, Colony.hour_seconds);
+    try std.testing.expectEqual(@as(u32, 13), sandbox.mining.colony.stockpile[0]);
+    try std.testing.expectEqual(@as(u32, 6), sandbox.mining.colony.research_points);
+    try std.testing.expectEqual(@as(u32, 1), sandbox.mining.colony.settlers);
+    // Two more hours finish PLASMA CUTTING (20 points, 10 iron).
+    Mining.step(&sandbox, Colony.hour_seconds);
+    Mining.step(&sandbox, Colony.hour_seconds);
+    Mining.step(&sandbox, Colony.hour_seconds);
+    try std.testing.expect(sandbox.mining.colony.has(.plasma_cutter));
+
+    // The colony and the ore a player holds survive a save and a load.
+    sandbox.kits[0].ore = .{ 2, 3, 4 };
+    const colony = sandbox.mining.colony;
+    const bytes = try sandbox.save(std.testing.allocator, camera);
+    defer std.testing.allocator.free(bytes);
+    sandbox.mining.colony = .{};
+    sandbox.kits[0].ore = @splat(0);
+    try sandbox.restore(std.testing.allocator, bytes, &camera);
+    try std.testing.expectEqual(colony.stockpile, sandbox.mining.colony.stockpile);
+    try std.testing.expectEqual(colony.settlers, sandbox.mining.colony.settlers);
+    try std.testing.expectEqual(colony.researched, sandbox.mining.colony.researched);
+    try std.testing.expectEqual(colony.research_points, sandbox.mining.colony.research_points);
+    try std.testing.expectEqual([Colony.ore_count]u32{ 2, 3, 4 }, sandbox.kits[0].ore);
 }
 
 test "turrets and launchers shoot, shields absorb, structures can be hurt and wrecked, and a raid arrives" {

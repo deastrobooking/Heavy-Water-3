@@ -838,6 +838,26 @@ fn drawPadControls(c: *Canvas, menu: *const Menu) void {
 
 // ---------------------------------------------------------------- HUD
 
+/// Settlers and beds, food, the shared stockpile, P1's unbanked ore and the research in progress.
+/// Hidden until the team has a colony or ore to bring to one.
+fn colonyPanel(c: *Canvas, sb: *const Sandbox, r: Rect) void {
+    const Colony = @import("../game/Colony.zig");
+    const colony = &sb.mining.colony;
+    const held = sb.kits[0].ore;
+    var any = colony.settlers > 0 or (colony.hours > 0 and sb.outpost.len > 0);
+    for (0..Colony.ore_count) |o| any = any or held[o] > 0 or colony.stockpile[o] > 0;
+    if (!any) return;
+    const in = @import("../game/Mining.zig").colonyInputs(sb);
+    c.rect(r, .{ 0.02, 0.035, 0.05, 0.6 });
+    c.print(r.x + 14, r.y + 10, 1, gold, "COLONY  {d}/{d} SETTLERS  FOOD {d}", .{ colony.settlers, colony.beds(in), colony.food });
+    c.print(r.x + 14, r.y + 30, 1, ink, "IRON {d}  COPPER {d}  CRYSTAL {d}", .{ colony.stockpile[0], colony.stockpile[1], colony.stockpile[2] });
+    if (held[0] + held[1] + held[2] > 0) c.print(r.x + r.w - 14 - 90, r.y + 30, 1, dim, "HELD {d}/{d}/{d}", .{ held[0], held[1], held[2] });
+    if (colony.current()) |t| {
+        const need = Colony.info(t);
+        c.print(r.x + 14, r.y + 50, 1, if (in.research > 0) ink else dim, "RESEARCH {s} {d}/{d}", .{ need.name, @min(colony.research_points, need.points), need.points });
+    } else c.text(r.x + 14, r.y + 50, "ALL RESEARCH DONE", 1, dim);
+}
+
 fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: bool) void {
     const v = hud.view;
     // Vitals, bottom left (hidden under conversation and shop panels).
@@ -858,6 +878,7 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
         c.print(r.x + 14, r.y + 32, 1, ink, "{d} GOLD   {d} PARTS   {d} KITS", .{ sb.kits[0].wallet.gold, sb.kits[0].wallet.parts, kits(sb.kits[0].wallet) });
         inventoryLine(c, sb, r.x + 14, r.y + 50, 1);
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
+        colonyPanel(c, sb, .{ .x = r.x, .y = r.y + r.h + 8, .w = w, .h = 72 });
     }
     if (!sb.arena.active and !hud.space_trial and !sb.hangar.space_mode) drawPlayerCoordinates(c, v, sb);
     if (menu.map_target != .none and !panels) {

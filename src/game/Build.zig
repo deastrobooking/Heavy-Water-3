@@ -15,7 +15,7 @@ const Sandbox = @import("Sandbox.zig");
 const Tools = @import("Tools.zig");
 const Vec3 = Physics.Vec3;
 
-pub const Tool = enum { hands, build, wire, bridge, weapon, terrain, blocks };
+pub const Tool = enum { hands, build, wire, bridge, weapon, terrain, blocks, cutter };
 const TerrainTool = @import("TerrainTool.zig");
 const BlockTool = @import("BlockTool.zig");
 pub const Palette = enum { structures, kits, blueprints };

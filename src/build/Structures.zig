@@ -1,5 +1,5 @@
 //! Structure definitions: a block footprint plus behaviour modules (turret, launcher, shield, drill,
-//! drone bay, store, field, power, workshop), with a stable id, a validated JSON form and a cost.
+//! drone bay, store, field, power, workshop, housing, lab, launch pad), with a stable id, a validated JSON form and a cost.
 //! This is the one format for starter turrets and shields, a player's captured creations
 //! (`saves/structures/<id>.json`) and mod-supplied structures. The modules are a closed set of Zig
 //! behaviours configured by numbers, so a data file can never run code. See
@@ -16,7 +16,7 @@ pub const max_id = 32;
 pub const max_name = 24;
 pub const library_capacity = 24;
 
-pub const Kind = enum { turret, launcher, shield, drill, bay, store, field, power, workshop };
+pub const Kind = enum { turret, launcher, shield, drill, bay, store, field, power, workshop, housing, lab, launch };
 pub const kind_count = enum_compat.fields(Kind).len;
 
 /// One behaviour and its numbers. Which fields a kind uses, and their limits, are in `limits`;
@@ -32,6 +32,9 @@ pub const kind_count = enum_compat.fields(Kind).len;
 /// | field | radius m | - | growth multiplier | - | draw W |
 /// | power | - | - | - | - | output W |
 /// | workshop | - | - | conversions per hour | - | draw W |
+/// | housing | - | - | - | beds | draw W |
+/// | lab | - | - | research per hour | - | draw W |
+/// | launch | - | - | - | - | draw W |
 pub const Module = struct {
     kind: Kind,
     range: f32 = 0,
@@ -56,6 +59,9 @@ fn limits(kind: Kind) Limits {
         .field => .{ .range = .{ 3, 24 }, .damage = none, .rate = .{ 0.5, 3 }, .amount = none, .power = .{ 0, 100 } },
         .power => .{ .range = none, .damage = none, .rate = none, .amount = none, .power = .{ 50, 2000 } },
         .workshop => .{ .range = none, .damage = none, .rate = .{ 1, 60 }, .amount = none, .power = .{ 0, 400 } },
+        .housing => .{ .range = none, .damage = none, .rate = none, .amount = .{ 1, 32 }, .power = .{ 0, 200 } },
+        .lab => .{ .range = none, .damage = none, .rate = .{ 1, 60 }, .amount = none, .power = .{ 0, 400 } },
+        .launch => .{ .range = none, .damage = none, .rate = none, .amount = none, .power = .{ 100, 1000 } },
     };
 }
 
@@ -86,10 +92,13 @@ pub fn modulePrice(m: Module) Price {
         .shield => .{ .scrap = 40 + f(m.amount / 8 + m.range * 2 + m.rate), .parts = 3 + f(m.amount / 200 + m.range / 6) },
         .drill => .{ .scrap = 30 + f(m.rate * 1.5), .parts = 2 + f(m.rate / 10) },
         .bay => .{ .scrap = 25 + f(m.amount * 12), .parts = 2 + f(m.amount * 2) },
-        .store => .{ .scrap = 10 + f(m.amount / 100) },
+        .store => .{ .scrap = 10 + f(m.amount / 100), .parts = 1 },
         .field => .{ .scrap = 15 + f(m.range * 3 * m.rate), .parts = 1 },
         .power => .{ .scrap = 20 + f(m.power / 25), .parts = 1 + f(m.power / 400) },
         .workshop => .{ .scrap = 40 + f(m.rate * 2), .parts = 3 + f(m.rate / 8) },
+        .housing => .{ .scrap = 15 + f(m.amount * 4), .parts = 1 },
+        .lab => .{ .scrap = 40 + f(m.rate * 3), .parts = 4 + f(m.rate / 4) },
+        .launch => .{ .scrap = 200 + f(m.power / 5), .parts = 20 },
     };
 }
 
@@ -106,6 +115,9 @@ pub fn defaultModule(kind: Kind) Module {
         .field => .{ .kind = .field, .range = 10, .rate = 1, .power = 20 },
         .power => .{ .kind = .power, .power = 400 },
         .workshop => .{ .kind = .workshop, .rate = 12, .power = 100 },
+        .housing => .{ .kind = .housing, .amount = 6 },
+        .lab => .{ .kind = .lab, .rate = 6, .power = 100 },
+        .launch => .{ .kind = .launch, .power = 300 },
     };
 }
 
@@ -273,9 +285,9 @@ fn module(def: *Def, m: Module) void {
     def.module_len += 1;
 }
 
-pub const starter_count = 5;
+pub const starter_count = 11;
 
-/// The built-in defensive structures. Exact materials, so they look the same in any style.
+/// The built-in defensive and colony structures. Exact materials, so they look the same in any style.
 pub fn starter(index: usize) Def {
     switch (index) {
         0 => {
@@ -321,6 +333,62 @@ pub fn starter(index: usize) Def {
             blockAt(&d, 1, 0, 1, .cube, 0, "castle.dark_stone");
             for (0..3) |x| for (0..3) |z| blockAt(&d, @intCast(x), 1, @intCast(z), .slab, 0, "eco.solar");
             module(&d, .{ .kind = .power, .power = 400 });
+            return d;
+        },
+        // Colony structures (Colony.zig, Mining.zig): a drill must stand on an ore vein.
+        5 => {
+            var d = begin("hw.drill_station", "DRILL STATION", .{ 3, 4, 3 });
+            for (0..3) |x| for (0..3) |z| if (x != 1 or z != 1) blockAt(&d, @intCast(x), 0, @intCast(z), .cube, 0, "castle.iron");
+            for (0..3) |y| blockAt(&d, 1, @intCast(y), 1, .cube, 0, "castle.dark_stone");
+            blockAt(&d, 1, 3, 1, .slab, 0, "eco.solar");
+            blockAt(&d, 0, 1, 0, .cube, 0, "castle.iron");
+            blockAt(&d, 2, 1, 2, .cube, 0, "castle.iron");
+            module(&d, .{ .kind = .drill, .range = 4, .rate = 12, .power = 100 });
+            module(&d, .{ .kind = .store, .amount = 500 });
+            return d;
+        },
+        6 => {
+            var d = begin("hw.supply_depot", "SUPPLY DEPOT", .{ 2, 2, 2 });
+            for (0..2) |x| for (0..2) |z| blockAt(&d, @intCast(x), 0, @intCast(z), .cube, 0, "castle.stone");
+            for (0..2) |x| blockAt(&d, @intCast(x), 1, 0, .cube, 0, "castle.banner");
+            module(&d, .{ .kind = .store, .amount = 1000 });
+            return d;
+        },
+        7 => {
+            var d = begin("hw.habitat", "HABITAT", .{ 3, 3, 3 });
+            for (0..3) |x| for (0..3) |z| blockAt(&d, @intCast(x), 0, @intCast(z), .cube, 0, "castle.sandstone");
+            for (0..3) |x| for (0..3) |z| if (x != 1 or z != 1) blockAt(&d, @intCast(x), 1, @intCast(z), .cube, 0, "eco.glass");
+            for (0..3) |x| for (0..3) |z| blockAt(&d, @intCast(x), 2, @intCast(z), .slab, 0, "eco.green_roof");
+            module(&d, .{ .kind = .housing, .amount = 6 });
+            return d;
+        },
+        8 => {
+            var d = begin("hw.research_lab", "RESEARCH LAB", .{ 3, 4, 3 });
+            for (0..3) |x| for (0..3) |z| blockAt(&d, @intCast(x), 0, @intCast(z), .cube, 0, "castle.sandstone");
+            for (0..3) |x| blockAt(&d, @intCast(x), 1, 0, .cube, 0, "eco.glass");
+            for (0..3) |x| blockAt(&d, @intCast(x), 1, 2, .cube, 0, "eco.glass");
+            blockAt(&d, 1, 1, 1, .cube, 0, "castle.sandstone");
+            blockAt(&d, 1, 2, 1, .cube, 0, "eco.glass");
+            blockAt(&d, 1, 3, 1, .slab, 0, "eco.solar");
+            module(&d, .{ .kind = .lab, .rate = 6, .power = 100 });
+            return d;
+        },
+        9 => {
+            var d = begin("hw.launch_pad", "LAUNCH PAD", .{ 5, 6, 5 });
+            for (0..5) |x| for (0..5) |z| blockAt(&d, @intCast(x), 0, @intCast(z), .cube, 0, "castle.dark_stone");
+            for (1..5) |y| blockAt(&d, 2, @intCast(y), 2, .cube, 0, "castle.sandstone");
+            blockAt(&d, 2, 5, 2, .slab, 0, "eco.glass");
+            for ([_][2]u8{ .{ 0, 0 }, .{ 4, 0 }, .{ 0, 4 }, .{ 4, 4 } }) |c| blockAt(&d, c[0], 1, c[1], .cube, 0, "castle.iron");
+            module(&d, .{ .kind = .launch, .power = 300 });
+            return d;
+        },
+        10 => {
+            var d = begin("hw.farm_field", "FARM FIELD", .{ 4, 2, 4 });
+            for (0..4) |x| for (0..4) |z| blockAt(&d, @intCast(x), 0, @intCast(z), .cube, 0, "farm.soil");
+            for (0..4) |x| blockAt(&d, @intCast(x), 1, 0, .slab, 0, "farm.post");
+            blockAt(&d, 1, 1, 2, .slab, 0, "farm.hay");
+            blockAt(&d, 2, 1, 2, .slab, 0, "farm.hay");
+            module(&d, .{ .kind = .field, .range = 6, .rate = 1 });
             return d;
         },
         else => unreachable,

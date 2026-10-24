@@ -1,6 +1,8 @@
 // Compact 3x3 threshold bloom. The source is the finished 3D scene; outlines and HUD
 // are composited afterward, so the glow never softens text or ink lines.
 @group(0) @binding(0) var source_texture: texture_2d<f32>;
+struct Rain { values: vec4<f32>, };
+@group(0) @binding(1) var<uniform> rain: Rain;
 
 @vertex fn vertex_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     let x = f32((index << 1u) & 2u);
@@ -35,5 +37,13 @@ fn sample_bright(pixel: vec2<i32>, size: vec2<i32>, dx: i32, dy: i32) -> vec3<f3
         + sample_bright(pixel, size, 1, -1)
         + sample_bright(pixel, size, -1, 1)
         + sample_bright(pixel, size, -1, -1);
-    return vec4<f32>(center + glow * 0.022, 1.0);
+    let column = floor(position.x / 32.0);
+    let seed = fract(sin(column * 127.1 + 17.7) * 43758.5453);
+    let streak_x = abs(fract(position.x / 32.0 + position.y * 0.001) - seed * 0.78 - 0.10);
+    let drift = rain.values.y * (0.7 + seed * 0.8);
+    let streak_y = fract(position.y * 0.008 + drift + seed);
+    let streak_length = smoothstep(0.04, 0.12, streak_y) * (1.0 - smoothstep(0.76, 0.86, streak_y));
+    let streak = (1.0 - smoothstep(0.018, 0.045, streak_x)) * streak_length;
+    let rain_glint = vec3<f32>(0.42, 0.62, 0.82) * streak * rain.values.x * 0.055;
+    return vec4<f32>(center + glow * 0.022 + rain_glint, 1.0);
 }

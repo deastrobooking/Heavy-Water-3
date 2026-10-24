@@ -1898,6 +1898,7 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     n = publishPets(sb, out, n, t);
     n = publishArena(sb, out, n, t);
     n = publishShrines(sb, out, n, t);
+    n = publishVeins(sb, out, n, t);
     n = publishObjectiveBeacon(sb, out, n, t);
     n = publishFoundryEvidence(sb, out, n, t);
     n = publishFoundryDock(sb, out, n, t);
@@ -2844,6 +2845,30 @@ fn dressShrineInterior(sb: *const Sandbox, out: []World.Prop, start: usize, t: f
         out[n] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = lamp }, .size = .{ 1.15, 1.15, 1.15 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_y, t * 0.7).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 1.2))), .tint = Material.emissive(glow_color, 1.2) };
         out[n + 1] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = lamp }, .size = .{ 0.85, 0.85, 0.85 }, .rotation = quat(m.Quat.fromAxisAngle(m.Vec3.unit_z, -t * 0.9).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, 0.4))), .tint = Material.emissive(glow_color, 1.0) };
         n += 2;
+    }
+    return n;
+}
+
+/// Ore veins (`Mining.zig`): a dark boulder studded with glowing crystals in the ore's colour.
+fn publishVeins(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    var n = start;
+    const c = &sb.catalog.content;
+    for (sb.mining.veins, 0..) |v, i| {
+        if (n + 4 > out.len) break;
+        const color: [3]f32 = switch (v.ore) {
+            .iron => .{ 1, 0.48, 0.2 },
+            .copper => .{ 0.25, 0.95, 0.62 },
+            .crystal => .{ 0.62, 0.55, 1 },
+        };
+        const phase = @as(f32, @floatFromInt(i)) * 1.7;
+        out[n] = .{ .mesh = c.boulders[i % c.boulders.len], .transform = .{ .position = v.position, .scale = 1.6 }, .tint = .{ 0.22, 0.21, 0.23, 1 }, .rotation = yawQuat(phase) };
+        for (0..3) |k| {
+            const a = phase + @as(f32, @floatFromInt(k)) * (2 * std.math.pi / 3.0);
+            const glow = 1.1 + 0.25 * @sin(t * 2 + a);
+            const at: V = .{ v.position[0] + @cos(a) * 0.55, v.position[1] + 0.9 + @as(f32, @floatFromInt(k)) * 0.18, v.position[2] + @sin(a) * 0.55 };
+            out[n + 1 + k] = .{ .mesh = c.gem, .transform = .{ .position = at }, .tint = Material.emissive(.{ color[0], color[1], color[2], 1 }, glow), .size = .{ 0.32, 0.7, 0.32 }, .rotation = yawQuat(a) };
+        }
+        n += 4;
     }
     return n;
 }

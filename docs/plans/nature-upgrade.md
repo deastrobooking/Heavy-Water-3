@@ -160,7 +160,7 @@ Purpose: ground that reads as soil, grass, moss, scree, sand, rock and snow in b
 7. Tests: weight normalization with four axes, curvature continuity across chunk seams, river carve identical on both sides of a chunk edge, footing kind unchanged where gameplay depends on it (`Biome.Kind` tests).
 8. Save impact: footing may change where biome changes; covered by the Phase 1 generator bump if both phases ship before release. If Phase 2 ships alone, bump again.
 
-Acceptance: capture 73, 36 (river) and 48 (meadow) show visible soil, moss, scree and wet banks; the shader stays within the current terrain fragment cost (report CPU and whole-command-buffer GPU p99, and check the capture frame rate by eye).
+Acceptance: capture 73, 36 (river) and a dedicated green-meadow and exposed-rock review camera show visible soil, moss, scree and wet banks; the shader stays within the current terrain fragment cost (report CPU and whole-command-buffer GPU p99, and check the capture frame rate by eye). Showcases 48–51 are Wildkin roster lineups, not material review cameras.
 
 ### Phase 3. Ecology-driven scatter (M)
 

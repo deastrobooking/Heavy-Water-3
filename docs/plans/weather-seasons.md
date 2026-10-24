@@ -1,6 +1,6 @@
 # Weather and seasons
 
-**Status:** proposed, 2026-10-15. Planning only; nothing here is built. The [roadmap](../roadmap.md) stays the single plan. This is the detailed design behind the nature plan's Phase 8 ("snowfall and rain with the day cycle", [nature upgrade](nature-upgrade.md)) and the "Grow" pillar of [world](../world.md).
+**Status:** partial cosmetic slice implemented, 2026-10-24. A deterministic clear/overcast/rain visual cycle, per-view gradient sky, and visible sun/moon are in `engine/Weather.zig` and `render/sky.wgsl`; showcases 114–115 review rain/day and moon/night. Seasonal climate, snow particles, fog, weather audio, and gameplay effects remain planned. The [roadmap](../roadmap.md) stays the single plan. This is the detailed design behind the nature plan's Phase 8 ("snowfall and rain with the day cycle", [nature upgrade](nature-upgrade.md)) and the "Grow" pillar of [world](../world.md).
 
 **Owner decisions (2026-10-15):**
 - One **global calendar**, with regional effects scaled by biome; one in-game year is about **two hours** of play (432,000 ticks at 60 Hz), so each season is about **thirty minutes** (108,000 ticks, one and a half market days).
@@ -28,11 +28,11 @@
 
 | Area | State | Source |
 | --- | --- | --- |
-| Time | `sandbox.tick` is the only persisted time; a day is `Sky.day_ticks` = 72,000 ticks; `Market.dayOf` turns over at dawn. **No season, year or weather exists.** | `engine/Sky.zig`, `city/Market.zig`, `game/Save.zig` |
-| Sky | `Sky.at(time)` is pure and returns the key light, ambient sky and ground, horizon and zenith colours and a night factor; there is no overcast input. The clear colour is the horizon colour; there is no skybox. | `engine/Sky.zig` |
-| Frame uniform | 272 bytes with compile-time asserts (`planes` at 160, `params` at 256); `ambient_sky.w` and `ambient_ground.w` are unused; all four `params` lanes are used (clock, wind strength, wind direction). | `render/Renderer.zig:30`, `render/scene.wgsl` |
+| Time | `sandbox.tick` is the only persisted time; a day is `Sky.day_ticks` = 72,000 ticks; `Market.dayOf` turns over at dawn. No season/year exists. `Weather.at(seed,tick)` now supplies a deterministic cosmetic weather sample. | `engine/Sky.zig`, `engine/Weather.zig`, `city/Market.zig`, `game/Save.zig` |
+| Sky | `Sky.at(time)` supplies light and palette; a full-screen per-viewport gradient reconstructs the camera ray, blends overcast, and draws a sun or moon disc. | `engine/Sky.zig`, `render/sky.wgsl` |
+| Frame uniform | 400 bytes with compile-time asserts; camera projection, sky zenith and cosmetic weather are included. | `render/Renderer.zig`, `render/scene.wgsl` |
 | Snow and frost | Snow colour is **baked into chunk vertices** by `Biome.terrainColor`; flora frost is baked into instance tints by `Scatter.frosted`. The snowline is a static function of altitude. | `procedural/Biome.zig`, `procedural/Scatter.zig` |
-| Haze | `hazed()` is the only fog, with hard-coded constants shared by every pipeline; `lit()` is the shared toon light. | `render/scene.wgsl` |
+| Haze | `hazed()` is the only fog, with hard-coded constants shared by every pipeline; `lit()` is the shared toon light. Screen-space rain streaks are composited with the existing bloom pass. | `render/scene.wgsl`, `render/bloom.wgsl` |
 | Wind | Cosmetic, computed in one place from the clock; not shared with gameplay or audio. | `render/Renderer.zig:~549`, `render/foliage.wgsl` |
 | Footing | `Biome.Kind` grass, sand, marsh, rock, snow, from `Biome.cover` at the player's position; speed and traction per kind. | `game/Player.zig`, `game/Sandbox.zig:~936` |
 | Water | Blended, drawn last, with ripples scrolled by the clock. | `render/water.wgsl` |

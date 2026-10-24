@@ -1,4 +1,4 @@
-//! The tool registry: every player tool (keys 1 to 7) as one entry with its name, number key,
+//! The tool registry: every player tool (keys 1 to 8) as one entry with its name, number key,
 //! input action, per-step update, HUD hint and select hook. `Build.update`, `Build.hint`,
 //! `Build.selectTool` and the key and pad routing in `App.zig` read this table instead of
 //! switching on the tool, so a new tool (or a structure tool, see
@@ -13,6 +13,7 @@ const BlockTool = @import("BlockTool.zig");
 const BridgeTool = @import("BridgeTool.zig");
 const TerrainTool = @import("TerrainTool.zig");
 const BuildTips = @import("BuildTips.zig");
+const Mining = @import("Mining.zig");
 
 pub const Tool = Build.Tool;
 pub const UpdateFn = *const fn (*Sandbox, Camera, bool, Sandbox.Actions) anyerror!void;
@@ -39,6 +40,7 @@ pub const modules = [_]Module{
     .{ .tool = .weapon, .name = "weapon", .action = .tool_weapon, .hint = Build.weaponHint },
     .{ .tool = .terrain, .name = "terrain", .action = .tool_terrain, .update = terrainUpdate, .hint = TerrainTool.hint },
     .{ .tool = .blocks, .name = "blocks", .action = .tool_blocks, .update = blocksUpdate, .hint = BlockTool.hint, .selected = blocksSelected },
+    .{ .tool = .cutter, .name = "cutter", .action = .tool_cutter, .update = Mining.cutterUpdate, .hint = Mining.cutterHint },
 };
 
 pub fn of(tool: Tool) *const Module {
@@ -52,8 +54,8 @@ pub fn fromNumber(n: u8) ?Tool {
 }
 
 /// The number key of a tool, 1-based.
-pub fn number(tool: Tool) u3 {
-    return @intCast(@intFromEnum(tool) + 1);
+pub fn number(tool: Tool) u4 {
+    return @as(u4, @intFromEnum(tool)) + 1;
 }
 
 /// The tool a key-binding action selects, if it is a tool action.
@@ -94,6 +96,6 @@ test "every tool has exactly one entry, in enum order, with a distinct key actio
     }
     try std.testing.expect(fromNumber(0) == null);
     try std.testing.expect(fromNumber(modules.len + 1) == null);
-    // The number key stays in the three bits `Actions.select_tool` has.
-    try std.testing.expect(modules.len <= 7);
+    // The number key stays in the four bits `Actions.select_tool` has.
+    try std.testing.expect(modules.len <= 15);
 }

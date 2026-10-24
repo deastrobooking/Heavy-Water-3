@@ -38,10 +38,11 @@ const District = @import("../procedural/District.zig");
 /// owned/equipped space fighter frames (older saves keep the Kestrel); v32 adds each profile's
 /// face mark and eye colour (absent means none and the default eyes); v33 adds the team's
 /// structure designs and the structures built (absent means only the starters and none built);
-/// v34 adds player-placed living-sap decorations.
+/// v34 adds player-placed living-sap decorations; v35 adds the team's colony (stockpile, settlers,
+/// research; absent means an empty colony) and each ranger's held ore (absent means none).
 /// Format 13 is the oldest supported save; its four-player kits default combat XP to zero.
 /// Older saves are rejected deliberately. Bumping the current format does not move this floor.
-pub const format_version: u32 = 34;
+pub const format_version: u32 = 35;
 pub const min_supported_format: u32 = 13;
 pub const default_path = "saves/quicksave.json";
 pub const max_bytes = 4 << 20;
@@ -120,6 +121,9 @@ pub const Document = struct {
     placed: []const @import("Outpost.zig").PlacedDoc = &.{},
     /// Player-placed living-sap plants (format 34).
     decorations: []const @import("Decor.zig").Doc = &.{},
+    /// The team's colony: stockpile, settlers and research (format 35). Each player's unbanked
+    /// ore is in their kit.
+    colony: @import("Colony.zig").Doc = .{},
 };
 
 pub fn encode(allocator: std.mem.Allocator, doc: Document) ![]u8 {

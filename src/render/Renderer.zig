@@ -27,8 +27,9 @@ comptime {
     if (options.upload_budget < Scene.chunk_bytes) @compileError("upload-budget-kib must be at least 322");
 }
 const Sky = @import("../engine/Sky.zig");
+const Weather = @import("../engine/Weather.zig");
 /// Matches `Frame` in scene.wgsl.
-const Frame = struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32, shadow_vp: [4][4]f32, shadow: [4]f32 };
+const Frame = struct { vp: mach.math.Mat4x4, eye: [4]f32, light_direction: [4]f32, light_color: [4]f32, ambient_sky: [4]f32, ambient_ground: [4]f32, horizon: [4]f32, planes: [6][4]f32, params: [4]f32, shadow_vp: [4][4]f32, shadow: [4]f32, camera: [4]f32, sky_zenith: [4]f32, weather: [4]f32 };
 
 /// A matrix's columns as plain floats: a second Mach matrix field would be laid out before the
 /// arrays (fields sort by alignment), breaking the uniform layout.
@@ -62,7 +63,7 @@ test "cave light is dark, tinted by the hue and brighter with strength" {
 }
 
 comptime {
-    if (@sizeOf(Frame) != 352 or @offsetOf(Frame, "planes") != 160 or @offsetOf(Frame, "params") != 256 or @offsetOf(Frame, "shadow_vp") != 272 or @offsetOf(Frame, "shadow") != 336) {
+    if (@sizeOf(Frame) != 400 or @offsetOf(Frame, "planes") != 160 or @offsetOf(Frame, "params") != 256 or @offsetOf(Frame, "shadow_vp") != 272 or @offsetOf(Frame, "shadow") != 336 or @offsetOf(Frame, "camera") != 352 or @offsetOf(Frame, "sky_zenith") != 368 or @offsetOf(Frame, "weather") != 384) {
         @compileError("Frame uniform layout changed; update the GPU layout before continuing");
     }
 }
@@ -102,6 +103,7 @@ bloom_layout: ?*gpu.BindGroupLayout = null,
 bloom_bind_group: ?*gpu.BindGroup = null,
 bloom_texture: ?*gpu.Texture = null,
 bloom_view: ?*gpu.TextureView = null,
+rain_uniform: ?*gpu.Buffer = null,
 tick: u64 = 0,
 show_metrics: bool = true,
 culling: bool = false,
@@ -128,10 +130,17 @@ intervals: FrameStats = .{},
 cpu_times: FrameStats = .{},
 gpu_times: FrameStats = .{},
 gpu_samples_seen: u64 = 0,
+benchmark_reported: bool = false,
+limiter_snapshot_tick: u64 = 0,
+limiter_warmup_frame: u64 = std.math.maxInt(u32),
+limiter_min_triangles: u64 = std.math.maxInt(u64),
+limiter_max_triangles: u64 = 0,
+limiter_missing_frames: u64 = 0,
 character_prepare_times: FrameStats = .{},
 character_skin_times: FrameStats = .{},
 percentiles: FrameStats.Summary = .{ .p50 = 0, .p95 = 0, .p99 = 0, .worst = 0, .mean = 0 },
 pipeline: ?*gpu.RenderPipeline = null,
+sky_pipeline: ?*gpu.RenderPipeline = null,
 /// Nature stages over the scene shader: ground detail, swaying flora, and blended water.
 terrain_pipeline: ?*gpu.RenderPipeline = null,
 foliage_pipeline: ?*gpu.RenderPipeline = null,
@@ -328,6 +337,16 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         self.pipeline = null;
     }
     self.terrain_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, terrain_wgsl, "terrain", "vertex_main", false);
+    const sky_shader = device.createShaderModuleWGSL("sky.wgsl", sky_wgsl);
+    defer sky_shader.release();
+    const sky_fragment = gpu.FragmentState.init(.{ .module = sky_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format }} });
+    self.sky_pipeline = device.createRenderPipeline(&.{
+        .label = "cel sky with sun and moon",
+        .layout = pipeline_layout,
+        .vertex = gpu.VertexState.init(.{ .module = sky_shader, .entry_point = "vertex_main" }),
+        .fragment = &sky_fragment,
+        .depth_stencil = &.{ .format = .depth32_float, .depth_write_enabled = .false, .depth_compare = .greater },
+    });
     self.foliage_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, foliage_wgsl, "foliage", "vertex_foliage", false);
     self.water_pipeline = self.naturePipeline(device, pipeline_layout, &buffers, window.framebuffer_format, water_wgsl, "water", "vertex_main", true);
     self.shadow_pipeline = shadowPipeline(device, pipeline_layout, &buffers, @embedFile("scene.wgsl"), "shadow solids", "vertex_main");
@@ -359,7 +378,9 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
     defer bloom_shader.release();
     self.bloom_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
         gpu.BindGroupLayout.Entry.initTexture(0, .{ .fragment = true }, .float, .dimension_2d, false),
+        gpu.BindGroupLayout.Entry.initBuffer(1, .{ .fragment = true }, .uniform, false, 16),
     } }));
+    self.rain_uniform = device.createBuffer(&.{ .label = "cosmetic rain", .size = 16, .usage = .{ .uniform = true, .copy_dst = true } });
     const bloom_pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{self.bloom_layout.?} }));
     defer bloom_pipeline_layout.release();
     const bloom_fragment = gpu.FragmentState.init(.{ .module = bloom_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format }} });
@@ -426,6 +447,7 @@ const scene_parts = blk: {
 const terrain_wgsl = scene_parts.prelude ++ scene_parts.vertex ++ @embedFile("terrain.wgsl");
 const water_wgsl = scene_parts.prelude ++ scene_parts.vertex ++ @embedFile("water.wgsl");
 const foliage_wgsl = scene_parts.prelude ++ @embedFile("foliage.wgsl") ++ scene_parts.fragment;
+const sky_wgsl = scene_parts.prelude ++ @embedFile("sky.wgsl");
 
 /// A scene-layout pipeline over a spliced module. Water blends over the opaque scene and does
 /// not write depth.
@@ -602,7 +624,10 @@ fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32, format:
     if (self.bloom_texture) |t| t.release();
     self.bloom_texture = device.createTexture(&.{ .label = "bloom scene source", .size = .{ .width = width, .height = height }, .format = format, .usage = .{ .render_attachment = true, .texture_binding = true } });
     self.bloom_view = self.bloom_texture.?.createView(&.{});
-    self.bloom_bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.bloom_layout.?, .entries = &.{gpu.BindGroup.Entry.initTextureView(0, self.bloom_view.?)} }));
+    self.bloom_bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.bloom_layout.?, .entries = &.{
+        gpu.BindGroup.Entry.initTextureView(0, self.bloom_view.?),
+        gpu.BindGroup.Entry.initBuffer(1, self.rain_uniform.?, 0, 16, 16),
+    } }));
     // Sampled by the outline pass after the scene pass.
     self.depth = device.createTexture(&.{ .label = "scene depth", .size = .{ .width = width, .height = height }, .format = .depth32_float, .usage = .{ .render_attachment = true, .texture_binding = true } });
     self.depth_view = self.depth.?.createView(&.{});
@@ -618,6 +643,7 @@ fn benchmarkArborMesh(self: *const Renderer) @import("../asset/Catalog.zig").Mes
 }
 
 pub fn render(self: *Renderer, core: *mach.Core) !void {
+    if (self.benchmark_reported) return;
     // A setup failure must not reach Mach's callback dispatch: it panics on any returned error,
     // skipping App.stop/Renderer.deinit and leaking the streaming worker and GPU resources.
     if (self.pipeline == null) self.setup(core) catch |err| {
@@ -626,7 +652,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         return;
     };
     var cpu_timer = mach.time.Timer.start(self.timer.io);
-    const warmup_frames: u64 = if (options.benchmark_frontier) Flythrough.frontier_warmup_frames else Flythrough.warmup_frames;
+    const warmup_frames: u64 = if (options.benchmark_limiter) self.limiter_warmup_frame else if (options.benchmark_frontier) Flythrough.frontier_warmup_frames else Flythrough.warmup_frames;
     if (options.benchmark_frames > 0 and !options.benchmark_frontier) {
         const frame = self.frames -| Flythrough.warmup_frames;
         self.view_count = 1;
@@ -655,11 +681,19 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     // Unattended smoke covers a complete lighting cycle, independent of presentation speed.
     const sky_time = if (options.showcase == 62 or options.showcase == 74 or options.showcase == 75)
         0.5
+    else if (options.showcase == 114)
+        0.5
+    else if (options.showcase == 115)
+        0.0
     else if (options.smoke_frames > 0 and options.benchmark_frames == 0)
         @as(f32, @floatFromInt(self.frames)) / @as(f32, @floatFromInt(options.smoke_frames))
     else
         self.time_of_day;
     var light = Sky.at(sky_time);
+    const weather = if (options.showcase == 114)
+        Weather.State{ .precipitation = 0.88, .cloud = 0.78 }
+    else
+        Weather.at(self.seed, self.tick);
     if (self.scene.space_review) light = .{
         .direction = .{ 0.35, 0.88, -0.31 },
         .color = .{ 1.35, 1.42, 1.55 },
@@ -669,7 +703,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         .zenith = .{ 0.006, 0.018, 0.052 },
         .night = 0,
     };
-    self.clock = if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)
+    self.clock = if (options.benchmark_limiter) 2 else if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)
         @as(f32, @floatFromInt(self.frames % 216_000)) / 60
     else
         @mod(self.clock + @as(f32, @floatCast(@min(elapsed, 0.25))), 3600);
@@ -759,6 +793,9 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             // A quarter-metre depth bias and a texel and a half of normal offset keep lit
             // surfaces from shadowing themselves.
             .shadow = .{ shadow_strength, @floatFromInt(Shadow.size), 0.25 / (2 * Shadow.half_depth), 1.5 * Shadow.texel },
+            .camera = .{ view.camera.yaw, view.camera.pitch, @as(f32, @floatFromInt(pixels[i][2])) / @as(f32, @floatFromInt(pixels[i][3])), @tan(view.camera.fov / 2) },
+            .sky_zenith = mix3(mix3(light.zenith, caveAmbient(view.cave_hue, 0.05), under), .{ 0.28, 0.34, 0.42 }, weather.cloud * 0.58 * (1 - under)) ++ [_]f32{0},
+            .weather = .{ weather.precipitation * (1 - under), weather.cloud, under, params[1] },
         };
         var sun_frame = frame;
         sun_frame.vp = sun_vp;
@@ -807,11 +844,14 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .store, .depth_clear_value = 0 },
     }));
     defer pass.release();
-    pass.setPipeline(self.pipeline.?);
     for (0..shown) |i| {
         const px = pixels[i];
         pass.setViewport(@floatFromInt(px[0]), @floatFromInt(px[1]), @floatFromInt(px[2]), @floatFromInt(px[3]), 0, 1);
         pass.setScissorRect(px[0], px[1], px[2], px[3]);
+        pass.setPipeline(self.sky_pipeline.?);
+        pass.setBindGroup(0, self.bind_groups[i].?, &.{});
+        pass.draw(3, 1, 0, 0);
+        pass.setPipeline(self.pipeline.?);
         pass.setBindGroup(0, self.bind_groups[i].?, &.{});
         pass.setVertexBuffer(1, self.instance_buffers[i].?, 0, Scene.max_instances * @sizeOf(Instance));
         pass.setPipeline(self.terrain_pipeline.?);
@@ -834,6 +874,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pass.setPipeline(self.pipeline.?);
     }
     pass.end();
+    window.queue.writeBuffer(self.rain_uniform.?, 0, &[_]f32{ weather.precipitation, self.clock, @floatFromInt(self.width), @floatFromInt(self.height) });
     {
         const composite = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = light.horizon[0], .g = light.horizon[1], .b = light.horizon[2], .a = 1 } }} }));
         defer composite.release();
@@ -893,6 +934,17 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         }.done);
     }
     if (options.benchmark_frames == 0 or self.frames >= warmup_frames) {
+        if (options.benchmark_limiter) {
+            var triangles: u64 = 0;
+            var missing = false;
+            for (scenes[0..shown]) |scene| {
+                triangles += scene.submittedTriangles();
+                missing = missing or scene.active_missing > 0;
+            }
+            self.limiter_min_triangles = @min(self.limiter_min_triangles, triangles);
+            self.limiter_max_triangles = @max(self.limiter_max_triangles, triangles);
+            self.limiter_missing_frames += @intFromBool(missing);
+        }
         self.intervals.record(elapsed * 1000);
         self.cpu_times.record(cpu_timer.read() * 1000);
         // Any view missing a chunk of its player's ring counts, not only the first, except on
@@ -922,6 +974,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     if (self.frames % 30 == 0) self.percentiles = self.intervals.summary();
     self.frames += 1;
     if (options.benchmark_frames > 0 and self.frames >= options.benchmark_frames + warmup_frames) {
+        self.benchmark_reported = true;
         self.reportBenchmark();
         core.exit();
     }
@@ -1044,6 +1097,31 @@ fn finishCapture(self: *Renderer, core: *mach.Core) void {
 }
 
 fn reportBenchmark(self: *Renderer) void {
+    if (options.benchmark_limiter) {
+        var hash = std.hash.Wyhash.init(0);
+        for (self.props[0..self.prop_count]) |prop| {
+            hash.update(std.mem.asBytes(&prop.mesh.index));
+            hash.update(std.mem.asBytes(&prop.mesh.generation));
+            hash.update(std.mem.asBytes(&prop.transform.position));
+            hash.update(std.mem.asBytes(&prop.transform.scale));
+            hash.update(std.mem.asBytes(&prop.rotation));
+            hash.update(std.mem.asBytes(&prop.size));
+            hash.update(std.mem.asBytes(&prop.tint));
+        }
+        var triangles: u64 = 0;
+        var terrain_draws: u64 = 0;
+        var solid_batches: u64 = 0;
+        for (0..self.view_count) |i| {
+            const c = self.views[i].camera;
+            const camera_data = [_]f32{ c.position.x(), c.position.y(), c.position.z(), c.yaw, c.pitch, c.fov };
+            hash.update(std.mem.asBytes(&camera_data));
+            const scene = if (i == 0) &self.scene else self.extra_scenes[i - 1].?;
+            triangles += scene.submittedTriangles();
+            terrain_draws += scene.terrain_draws;
+            solid_batches += scene.draw_count;
+        }
+        std.log.info("LIMITER {{\"frame_mean_ms\":{d:.3},\"snapshot_tick\":{d},\"snapshot_hash\":{d},\"props\":{d},\"triangles_min\":{d},\"triangles_max\":{d},\"missing_frames_all_views\":{d},\"triangles\":{d},\"terrain_draws\":{d},\"solid_batches\":{d},\"width\":{d},\"height\":{d},\"skip_sim\":{s}}}", .{ self.intervals.summary().mean, self.limiter_snapshot_tick, hash.final(), self.prop_count, self.limiter_min_triangles, self.limiter_max_triangles, self.limiter_missing_frames, triangles, terrain_draws, solid_batches, self.width, self.height, if (options.limiter_skip_sim) "true" else "false" });
+    }
     const interval = self.intervals.summary();
     const cpu = self.cpu_times.summary();
     const gpu_time = self.gpu_times.summary();
@@ -1096,8 +1174,8 @@ fn reportBenchmark(self: *Renderer) void {
         std.log.info("NATURE {{\"chunk_fill_p50_ms\":{d:.3},\"chunk_fill_p99_ms\":{d:.3},\"scatter_p50_ms\":{d:.3},\"scatter_p99_ms\":{d:.3},\"generated_relics\":{d},\"generated_vegetation\":{d},\"generated_boulders\":{d},\"visible_relics\":{d},\"visible_vegetation\":{d},\"visible_boulders\":{d},\"submitted_triangles\":{d},\"shadow_triangles\":{d},\"shadow_triangles_as_drawn\":{d}}}", .{
             self.scene.stats.chunk_fill_p50_ms, self.scene.stats.chunk_fill_p99_ms,    self.scene.stats.scatter_p50_ms,     self.scene.stats.scatter_p99_ms,
             self.scene.stats.generated_relics,  self.scene.stats.generated_vegetation, self.scene.stats.generated_boulders, self.scene.relic_count,
-            self.scene.plant_count,             visible_boulders,                      self.scene.submittedTriangles(),
-            self.scene.shadowTriangles(false),  self.scene.shadowTriangles(true),
+            self.scene.plant_count,             visible_boulders,                      self.scene.submittedTriangles(),     self.scene.shadowTriangles(false),
+            self.scene.shadowTriangles(true),
         });
     }
 }
@@ -1111,6 +1189,7 @@ pub fn deinit(self: *Renderer) void {
     if (self.bloom_view) |p| p.release();
     if (self.bloom_texture) |p| p.release();
     if (self.bloom_layout) |p| p.release();
+    if (self.rain_uniform) |p| p.release();
     if (self.bloom_pipeline) |p| p.release();
     if (self.outline_layout) |p| p.release();
     if (self.outline_pipeline) |p| p.release();
@@ -1124,6 +1203,7 @@ pub fn deinit(self: *Renderer) void {
     for (0..max_views) |i| self.releaseViewResources(i);
     if (self.scene_layout) |p| p.release();
     if (self.pipeline) |p| p.release();
+    if (self.sky_pipeline) |p| p.release();
     for ([_]?*gpu.RenderPipeline{ self.terrain_pipeline, self.foliage_pipeline, self.water_pipeline, self.shadow_pipeline, self.shadow_foliage_pipeline }) |maybe| if (maybe) |p| p.release();
     if (self.shadow_stand_in_view) |p| p.release();
     if (self.shadow_stand_in) |p| p.release();

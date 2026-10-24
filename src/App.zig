@@ -90,6 +90,9 @@ cel_debug: CelStyle.Debug = @bitCast(options.cel_debug),
 culling: bool = true,
 captured: bool = false,
 rendered_frames_seen: u64 = 0,
+limiter_last_step: ?u64 = null,
+limiter_snapshot_captured: bool = false,
+limiter_warmup_frame: u64 = std.math.maxInt(u32),
 smoke_stage: u64 = 0,
 smoke_rover_start: ?[3]f32 = null,
 /// Chunk rebuild requests the renderer received from sculpting, and the mound the smoke raised.
@@ -229,7 +232,9 @@ pub fn init(self: *App, core: *mach.Core, world: *World, app_mod: mach.Mod(App),
     self.* = .{ .timer = mach.time.Timer.start(io), .allocator = allocator, .io = io, .core = core };
     try establishGameWorkingDirectory(io);
     core.on_exit = app_mod.id.deinit;
-    self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = 1280, .height = 800, .on_render = renderer_mod.id.render });
+    if (options.benchmark_limiter and (!options.benchmark_frontier or options.benchmark_frames == 0)) return error.InvalidLimiterOptions;
+    const half = options.benchmark_limiter and options.limiter_half_resolution;
+    self.window = try core.windows.new(.{ .title = "Heavy Water | Procedural Frontier", .width = if (half) 640 else 1280, .height = if (half) 400 else 800, .vsync_mode = if (options.benchmark_limiter) .none_max_throughput else .triple, .on_render = renderer_mod.id.render });
     TestWorld.configure(world, options.seed);
     try self.sandbox.init(allocator, options.seed, &world.catalog, &self.engine.camera);
     self.catalog = &world.catalog;
@@ -443,7 +448,7 @@ fn driveFrontierBenchmark(self: *App) void {
     if (cycle == section) self.setupFrontierAir();
 
     self.engine.input = .{};
-    const warmup: u64 = if (options.benchmark_frontier) @import("engine/Flythrough.zig").frontier_warmup_frames else @import("engine/Flythrough.zig").warmup_frames;
+    const warmup: u64 = if (options.benchmark_limiter) self.limiter_warmup_frame else if (options.benchmark_frontier) @import("engine/Flythrough.zig").frontier_warmup_frames else @import("engine/Flythrough.zig").warmup_frames;
     const measuring = self.rendered_frames_seen >= warmup and self.rendered_frames_seen < warmup + options.benchmark_frames;
     if (cycle < section) {
         const fire = cycle % 36 < 26;
@@ -1291,7 +1296,7 @@ pub fn update(self: *App, core: *mach.Core) void {
             .culling => self.culling = !self.culling,
             .quicksave => self.quicksave(),
             .quickload => _ = self.quickload(),
-            .tool_hands, .tool_build, .tool_wire, .tool_bridge, .tool_weapon, .tool_terrain, .tool_blocks => self.actions.select_tool = Tools.number(Tools.fromAction(action).?),
+            .tool_hands, .tool_build, .tool_wire, .tool_bridge, .tool_weapon, .tool_terrain, .tool_blocks, .tool_cutter => self.actions.select_tool = Tools.number(Tools.fromAction(action).?),
             .next_item => self.actions.next_item = true,
             .rotate => self.actions.rotate = true,
             .capture_prefab => self.actions.capture = true,
@@ -1427,16 +1432,23 @@ pub fn update(self: *App, core: *mach.Core) void {
     if (options.showcase > 0) self.showcase();
     const lap = self.timer.lap();
     self.seconds += lap;
-    const steps = self.engine.advance(lap);
+    const steps = if (options.benchmark_limiter) limiter_steps: {
+        // One production fixed step per observed rendered frame makes all variants reach
+        // the same capture state, independent of wall time and input polling frequency.
+        if (self.limiter_last_step == self.rendered_frames_seen) break :limiter_steps @as(usize, 0);
+        self.limiter_last_step = self.rendered_frames_seen;
+        if (options.limiter_skip_sim and self.benchmark_tick >= 120) break :limiter_steps @as(usize, 0);
+        break :limiter_steps @as(usize, 1);
+    } else self.engine.advance(lap);
     for (0..steps) |_| {
         if (options.benchmark_frontier) self.driveFrontierBenchmark();
-        self.routePads();
+        if (!options.benchmark_limiter) self.routePads();
         // Menus never advance gameplay. The title can still render the city, but combat, pickups
         // and the day cycle wait until a player enters the world.
         if (!paused and !title) {
             self.sandbox.impact.shake_scale = @as(f32, @floatFromInt(self.menu.settings.screen_shake)) / 100;
             self.sandbox.impact.show_numbers = self.menu.settings.damage_numbers;
-            const warmup: u64 = @import("engine/Flythrough.zig").frontier_warmup_frames;
+            const warmup: u64 = if (options.benchmark_limiter) self.limiter_warmup_frame else @import("engine/Flythrough.zig").frontier_warmup_frames;
             const measuring = options.benchmark_frontier and self.rendered_frames_seen >= warmup and self.rendered_frames_seen < warmup + options.benchmark_frames;
             if (measuring) {
                 var timer = mach.time.Timer.start(self.io);
@@ -2198,6 +2210,14 @@ fn showcase(self: *App) void {
         self.sandbox.player.velocity = @splat(0);
         target = .{ spot[0], ground + 0.7, spot[1] };
         eye = .{ spot[0] - 5, ground + 1.8, spot[1] + 9 };
+    } else if (v == 116) {
+        // An iron vein beside a crystal one's colour, with ore in hand so the colony panel shows.
+        const vein = self.sandbox.mining.veins[0];
+        self.sandbox.kits[0].ore = .{ 3, 1, 2 };
+        self.sandbox.player.feet = .{ vein.position[0], vein.position[1], vein.position[2] - 5 };
+        self.sandbox.player.velocity = @splat(0);
+        target = .{ vein.position[0], vein.position[1] + 0.7, vein.position[2] };
+        eye = .{ vein.position[0] - 2.5, vein.position[1] + 2.2, vein.position[2] - 5 };
     } else {
         target = .{ -40, layout.nodes[0].position[1], 140 };
         eye = .{ 260, target[1] + 160, -420 };
@@ -4251,7 +4271,19 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     self.pumpReload(renderer);
     self.pumpStressPack(renderer);
     self.rendered_frames_seen = renderer.frames;
+    if (options.benchmark_limiter and self.limiter_snapshot_captured) return;
+    if (options.benchmark_limiter and self.benchmark_tick >= 120) {
+        self.limiter_snapshot_captured = true;
+        renderer.limiter_snapshot_tick = self.benchmark_tick;
+        self.limiter_warmup_frame = renderer.frames + 120;
+        renderer.limiter_warmup_frame = self.limiter_warmup_frame;
+    }
     renderer.views[0].camera = self.engine.camera;
+    if (options.showcase == 114 or options.showcase == 115) {
+        // Review the sky above the local terrain, aimed toward the deterministic sun or moon.
+        renderer.views[0].camera.yaw = if (options.showcase == 114) std.math.pi else 0;
+        renderer.views[0].camera.pitch = 1.0;
+    }
     if ((options.showcase == 67 or options.showcase == 76)) {
         const Terrain = @import("procedural/Terrain.zig");
         const ground = Terrain.surface(self.sandbox.seed, 0, 0).height;

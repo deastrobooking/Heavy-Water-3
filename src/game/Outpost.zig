@@ -87,6 +87,7 @@ pub fn place(sb: *Sandbox, slot: usize, index: usize, rot: u2, at: [3]i32) !void
     if (index >= out.library.len) return;
     const def = out.library.get(index);
     if (out.len == max_placed) return sb.sayTo(slot, "at most {d} structures", .{max_placed});
+    if (def.find(.launch) != null and !sb.mining.colony.has(.rocketry)) return sb.sayTo(slot, "{s} needs ROCKETRY research", .{def.name()});
     const cost = def.cost();
     const wallet = &sb.kits[slot].wallet;
     if (wallet.scrap < cost.scrap or wallet.parts < cost.parts) {
