@@ -4,6 +4,9 @@ test "module states stay small: Mach keeps them (and init copies) on the main th
     // belong on the heap; these limits catch an inline array creeping back.
     try std.testing.expect(@sizeOf(@import("game/Sandbox.zig")) < 1 << 20);
     try std.testing.expect(@sizeOf(@import("world/World.zig")) < 256 << 10);
+    // The renderer holds a scene inline in Mach's module state; Debug builds overflow the main
+    // thread's stack when it grows (the 3.2 MB instance array lives on the heap).
+    try std.testing.expect(@sizeOf(@import("render/StreamingScene.zig")) < 256 << 10);
     try std.testing.expect(@sizeOf(@import("render/Overlay.zig")) < 8 << 10);
     try std.testing.expect(@sizeOf(@import("ui/Canvas.zig")) < 256 << 10);
 }

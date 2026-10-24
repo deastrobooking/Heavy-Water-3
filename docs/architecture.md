@@ -522,6 +522,7 @@ CPU culling tests chunk bounding spheres, then compacts surviving scatter instan
 | Streamer and 49 chunk payloads (~13.6 MiB) | Renderer's StreamingScene, supplied allocator | Two allocations at startup; freed after the worker joins |
 | Streaming worker thread | Streamer | Started with the scene; canceled and joined in shutdown |
 | 25 GPU chunk vertex/index buffer pairs (~6.8 MiB) | StreamingScene | Created on first render; recycled, never reallocated |
+| Per-view CPU instance array (`max_instances`, ~3.1 MiB per view) | StreamingScene, supplied allocator | Allocated in `Scene.init`, freed in `destroy`; kept off Mach's module state so Debug builds do not overflow the main stack |
 | Asset catalog (CPU models, material table) | World | Loaded in `World.init`; freed in `World.deinit` after the renderer |
 | GPU copies of catalog meshes | StreamingScene | Uploaded on first render; released in shutdown |
 | Physics bodies, player, crates, machines, modifications | App's Sandbox (fixed capacity) | Application |

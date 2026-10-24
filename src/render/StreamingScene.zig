@@ -61,7 +61,11 @@ residents: [Streamer.render_capacity]Resident = undefined,
 initialized: bool = false,
 /// Split-screen views after the first borrow the primary scene's catalog meshes.
 owns_meshes: bool = true,
-instances: [max_instances]Instance = undefined,
+/// `max_instances` entries on the heap (3.2 MB): inline, they overflowed the main thread's
+/// stack when Mach initialised the renderer's module state in Debug builds.
+instances: []Instance = &.{},
+/// Owns `instances` (null when a test supplies them).
+instance_allocator: ?std.mem.Allocator = null,
 instance_count: u32 = 1,
 relic_count: u32 = 0,
 plant_count: u32 = 0,
@@ -114,8 +118,10 @@ space_review: bool = false,
 pub fn init(allocator: std.mem.Allocator, io: std.Io, seed: u64, catalog: *const Catalog) !Scene {
     const stream = try Streamer.create(allocator, io, seed);
     errdefer stream.destroy();
+    const instances = try allocator.alloc(Instance, max_instances);
+    errdefer allocator.free(instances);
     try stream.start();
-    return .{ .stream = stream, .catalog = catalog };
+    return .{ .stream = stream, .catalog = catalog, .instances = instances, .instance_allocator = allocator };
 }
 
 pub fn setup(self: *Scene, device: *gpu.Device, queue: *gpu.Queue) void {
@@ -813,6 +819,7 @@ pub fn invalidateTerrain(self: *Scene, key: ?Key) void {
 
 pub fn destroy(self: *Scene) void {
     self.stream.destroy();
+    if (self.instance_allocator) |a| a.free(self.instances);
     if (self.initialized) for (self.residents) |resident| resident.mesh.deinit();
     if (self.owns_meshes) for (self.meshes) |mesh| if (mesh) |m| m.deinit();
 }
@@ -821,7 +828,8 @@ test "the one-pass scatter sort matches a scan per bucket, duplicates living-sap
     const allocator = std.testing.allocator;
     const scene = try allocator.create(Scene);
     defer allocator.destroy(scene);
-    scene.* = .{ .stream = undefined, .catalog = undefined };
+    var instances: [64]Instance = undefined;
+    scene.* = .{ .stream = undefined, .catalog = undefined, .instances = &instances };
     for (&scene.bucket_colors, 0..) |*color, b| color.* = .{ 1, 1, 1, @as(f32, @floatFromInt(b)) };
     const sap = SapFlora.variantOf(@enumFromInt(1));
     // A deliberately interleaved mix across two chunks, including an unknown variant.
@@ -894,7 +902,8 @@ test "a tree walked back and forth across a crown boundary switches once each wa
     const allocator = std.testing.allocator;
     const scene = try allocator.create(Scene);
     defer allocator.destroy(scene);
-    scene.* = .{ .stream = undefined, .catalog = undefined };
+    var instances: [64]Instance = undefined;
+    scene.* = .{ .stream = undefined, .catalog = undefined, .instances = &instances };
     scene.bucket_colors = @splat(.{ 1, 1, 1, 1 });
     const tree = [_]Scatter.Object{.{ .local_id = 0, .kind = .vegetation, .variant = Vegetation.tree_variants[0], .transform = .{ .position = .{ 0, 0, 0 }, .scale = 100 }, .tint = .{ 1, 1, 1, 1 } }};
     const sources = [_]Source{.{ .key = .{ .x = 0, .z = 0 }, .objects = &tree, .slot = 3 }};
@@ -926,7 +935,8 @@ test "a tree out of view that the sun's box sees casts, from a shadow-only range
     const allocator = std.testing.allocator;
     const scene = try allocator.create(Scene);
     defer allocator.destroy(scene);
-    scene.* = .{ .stream = undefined, .catalog = undefined };
+    var instances: [64]Instance = undefined;
+    scene.* = .{ .stream = undefined, .catalog = undefined, .instances = &instances };
     scene.bucket_colors = @splat(.{ 1, 1, 1, 1 });
     const Shadow = @import("Shadow.zig");
     const sun = Shadow.viewProjection(.{ 0, 1, 0 }, .{ 0, 0, 0 });

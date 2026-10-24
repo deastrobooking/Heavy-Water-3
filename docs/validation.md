@@ -2,6 +2,17 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Debug builds launch again: the scene's instance array moved to the heap — 2026-10-24
+
+- **Problem:** a Debug launch crashed with a stack overflow in `mach.mods.init` before `App.init`. The other session's limiter work found it. It reproduces at `9c4b98f`, before this session's 2026-10-23 work, so it predates the shadow, level-of-detail and streaming changes. Those added about 25 KB of scene state on top.
+- **Cause:** `StreamingScene` carried its `max_instances` CPU instance array inline: 50,569 instances × 64 bytes ≈ 3.2 MB, making the scene 3,405,864 bytes. The renderer holds a scene inline in Mach's module state, and Mach holds every module state twice on the 8 MB main stack during init.
+- **Fixed:** `Scene.init` allocates the array from the supplied allocator and `destroy` frees it. The scene is now about 166 KB. A size guard in `tests.zig` (under 256 KB) joins the existing `Sandbox`, `World`, `Overlay` and `Canvas` limits; it fails for the old 3.4 MB layout.
+- **Checked:**
+  - a Debug launch running the scripted smoke to `Smoke complete` (30 frames, all nine stages);
+  - default and 0.17 `build check`;
+  - the full suite, 647/647;
+  - the ReleaseSafe Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all stages, no validation messages).
+
 ## Four-player streaming: the player's ring arrives the frame after a teleport — 2026-10-24
 
 - **Problem:** the four-player benchmark failed `active_ring_covered` on every run, with exactly 18 underfilled frames. Logging every ring miss and every jump of a view's centre showed that the count was deterministic, not load. The route teleports player 1 twice (jumps of 6 and 7 chunks between its ground and air setups). After each jump, all 9 chunks of the player's 3×3 ring were missing and arrived one per frame (9, 8 … 1), because one 321 KiB chunk was all the 384 KiB per-frame budget allowed, shared by the four views. Ordinary one-chunk crossings never underfilled, and the other views never missed.
