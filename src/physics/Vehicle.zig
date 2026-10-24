@@ -41,7 +41,7 @@ pub const Tuning = struct {
     roll_influence: f32 = 0.25,
 };
 /// Control inputs: drive and steer in −1..1 (steer positive turns right), brake in 0..1.
-pub const Controls = struct { drive: f32 = 0, steer: f32 = 0, brake: f32 = 0 };
+pub const Controls = struct { drive: f32 = 0, steer: f32 = 0, brake: f32 = 0, boost: bool = false };
 pub const WheelState = struct {
     contact: bool = false,
     /// Distance from mount to wheel center.
@@ -57,6 +57,8 @@ wheels: [max_wheels]Wheel = undefined,
 wheel_count: usize = 0,
 state: [max_wheels]WheelState = @splat(.{}),
 steer: f32 = 0,
+boost_charge: f32 = 1,
+boost_active: bool = false,
 
 pub fn init(rigid: Physics.Rigid, tuning: Tuning, wheels: []const Wheel) Vehicle {
     var self: Vehicle = .{ .rigid = rigid, .tuning = tuning, .wheel_count = wheels.len };
@@ -69,6 +71,8 @@ pub fn init(rigid: Physics.Rigid, tuning: Tuning, wheels: []const Wheel) Vehicle
 pub fn step(self: *Vehicle, physics: *Physics, controls: Controls, dt: f32) void {
     const pose = physics.rigidPose(self.rigid) orelse return;
     const mass = physics.rigidMass(self.rigid).?;
+    self.boost_active = controls.boost and controls.drive > 0.1 and self.boost_charge > 0;
+    if (self.boost_active) self.boost_charge = @max(0, self.boost_charge - dt / 2.5) else self.boost_charge = @min(1, self.boost_charge + dt / 6.0);
     const up = R.rotate(pose.orientation, .{ 0, 1, 0 });
     const down = R.scale(up, -1);
     var driven: f32 = 0;
@@ -120,10 +124,11 @@ pub fn step(self: *Vehicle, physics: *Physics, controls: Controls, dt: f32) void
         const m_lat = physics.rigidEffectiveMass(self.rigid, hit.point, side).? / contacts;
 
         const throttle = std.math.clamp(controls.drive, -1, 1);
-        const speed_fade = std.math.clamp(1 - @abs(v_long) / self.tuning.max_speed, 0, 1);
+        const boost_scale: f32 = if (self.boost_active) 1.7 else 1;
+        const speed_fade = std.math.clamp(1 - @abs(v_long) / (self.tuning.max_speed * boost_scale), 0, 1);
         // Full force when braking against motion; faded when accelerating toward top speed.
         const fade = if (throttle * v_long < 0) 1 else speed_fade;
-        var f_long: f32 = if (w.driven and driven > 0) throttle * self.tuning.max_force / driven * fade else 0;
+        var f_long: f32 = if (w.driven and driven > 0) throttle * self.tuning.max_force * boost_scale / driven * fade else 0;
         // Brake and rolling resistance oppose rolling, never reversing it within a step.
         const stop = v_long / dt * m_long + R.dot(gravity, forward) * mass / contacts;
         const resist = std.math.clamp(controls.brake, 0, 1) * self.tuning.max_brake + self.tuning.rolling * s.load;

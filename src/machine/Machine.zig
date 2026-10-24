@@ -30,7 +30,7 @@ pub const Environment = struct {
     songs: []const Bus = &.{},
 };
 pub const Bus = [Device.max_channels]f32;
-pub const Controls = struct { throttle: f32 = 0, steer: f32 = 0, brake: f32 = 0 };
+pub const Controls = struct { throttle: f32 = 0, steer: f32 = 0, brake: f32 = 0, boost: bool = false };
 pub const Network = struct { supply: f32 = 0, demand: f32 = 0, satisfaction: f32 = 1 };
 
 blueprint: *const Blueprint,

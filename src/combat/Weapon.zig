@@ -108,6 +108,7 @@ pub const BeamSaber = struct {
     pub const dash_combo: u8 = 240;
     pub const aerial_combo: u8 = 241;
     pub const charged_combo: u8 = 242;
+    pub const spinning_dash_combo: u8 = 243;
     combo_step: u8 = 0,
     combo_window: f32 = 0,
     charge_time: f32 = 0,
@@ -146,6 +147,10 @@ pub const BeamSaber = struct {
         self.charge_time = 0;
         self.is_charging = false;
 
+        if (is_dashing and is_airborne) {
+            self.combo_step = 0;
+            return .{ .damage = slot.baseDamage() * 2.0, .radius = 4.0, .combo = spinning_dash_combo };
+        }
         if (is_dashing) {
             self.combo_step = 0;
             return .{ .damage = slot.baseDamage() * 1.8, .radius = 3.6, .combo = dash_combo };

@@ -2213,19 +2213,26 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             continue;
         }
         if (p.kind == .homing_energy_blast) {
-            if (!room(out, n, 3)) continue;
+            if (!room(out, n, 6)) continue;
             const tint = p.visual_tint orelse .{ 0.16, 0.64, 1.0 };
             const age = p.max_lifetime - p.lifetime;
-            const pulse = 0.88 + 0.12 * @sin(t * 20 + age * 11);
+            const pulse = 0.92 + 0.08 * @sin(t * 20 + age * 11);
             const charged = @as(f32, @floatFromInt(p.charge_level));
-            const diameter = (1.2 + 0.42 * charged + p.radius * 0.5) * pulse;
+            const diameter = (1.25 + 0.48 * charged + p.radius * 0.5) * pulse;
             const direction = facing(p.velocity);
-            const shell = Material.emissive(.{ tint[0] * 0.52, tint[1] * 0.76, tint[2], 1 }, 0.72);
-            const core = Material.emissive(.{ 0.88, 0.97, 1, 1 }, 1.8 + charged * 0.3);
+            const shell = Material.emissive(.{ tint[0] * 0.62, tint[1] * 0.82, tint[2], 1 }, 0.9);
+            const core = Material.emissive(.{ 0.96, 0.99, 1, 1 }, 2.2 + charged * 0.35);
             out[n] = .{ .mesh = c.orb, .transform = .{ .position = p.position }, .tint = shell, .size = @splat(diameter) };
-            out[n + 1] = .{ .mesh = c.orb, .transform = .{ .position = p.position }, .tint = core, .size = @splat(diameter * 0.46), .rotation = yawQuat(age * 7) };
-            out[n + 2] = .{ .mesh = c.block, .transform = .{ .position = R.add(p.position, R.scale(R.normalize(p.velocity), -diameter * 0.72)) }, .tint = Material.emissive(.{ tint[0] * 0.68, tint[1] * 0.9, tint[2], 1 }, 0.85), .size = .{ diameter * 0.32, diameter * 0.32, diameter * (1.4 + charged * 0.35) }, .rotation = direction };
-            n += 3;
+            out[n + 1] = .{ .mesh = c.orb, .transform = .{ .position = p.position }, .tint = core, .size = @splat(diameter * 0.34), .rotation = yawQuat(age * 7) };
+            // Three colored facets give the shell a turbulent, faceted edge without a
+            // screen-space pass; the narrow tail keeps the shot readable in flight.
+            for (0..3) |facet| {
+                const phase = age * 9 + @as(f32, @floatFromInt(facet)) * (2 * std.math.pi / 3.0);
+                const offset: V = .{ @cos(phase) * diameter * 0.28, @sin(phase * 0.73) * diameter * 0.2, @sin(phase) * diameter * 0.28 };
+                out[n + 2 + facet] = .{ .mesh = c.gem, .transform = .{ .position = R.add(p.position, offset) }, .tint = Material.emissive(.{ tint[0], tint[1], tint[2], 1 }, 1.15), .size = .{ diameter * 0.18, diameter * 0.3, diameter * 0.18 }, .rotation = yawQuat(phase) };
+            }
+            out[n + 5] = .{ .mesh = c.block, .transform = .{ .position = R.add(p.position, R.scale(R.normalize(p.velocity), -diameter * 0.82)) }, .tint = Material.emissive(.{ tint[0] * 0.72, tint[1] * 0.92, tint[2], 1 }, 1.0), .size = .{ diameter * 0.22, diameter * 0.22, diameter * (1.45 + charged * 0.38) }, .rotation = direction };
+            n += 6;
             continue;
         }
         if (!room(out, n, 1)) continue;
@@ -2237,6 +2244,18 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     for (sb.combat.effects) |slot| if (slot) |e| {
         const k = 1 - e.age / e.life;
         const tint = Material.emissive(.{ e.color[0], e.color[1], e.color[2], 1 }, k);
+        if (e.kind == .burst and room(out, n, 5)) {
+            const radius = e.size * (0.28 + 0.72 * (1 - k));
+            out[n] = .{ .mesh = c.orb, .transform = .{ .position = e.position }, .tint = Material.emissive(.{ e.color[0], e.color[1], e.color[2], 1 }, 1.25 * k), .size = .{ radius * 2, radius * 0.16, radius * 2 } };
+            out[n + 1] = .{ .mesh = c.orb, .transform = .{ .position = e.position }, .tint = Material.emissive(.{ 0.95, 0.99, 1, 1 }, 1.6 * k), .size = @splat(radius * 0.34) };
+            for (0..3) |facet| {
+                const phase = @as(f32, @floatFromInt(facet)) * (2 * std.math.pi / 3.0) + e.age * 5;
+                const offset: V = .{ @cos(phase) * radius * 0.48, @sin(phase * 1.3) * radius * 0.14, @sin(phase) * radius * 0.48 };
+                out[n + 2 + facet] = .{ .mesh = c.gem, .transform = .{ .position = R.add(e.position, offset) }, .tint = Material.emissive(.{ e.color[0], e.color[1], e.color[2], 1 }, 1.3 * k), .size = .{ radius * 0.16, radius * 0.24, radius * 0.16 }, .rotation = yawQuat(phase) };
+            }
+            n += 5;
+            continue;
+        }
         if ((e.kind == .slash or e.kind == .trail) and room(out, n, 2)) {
             const scale = @max(0.2, e.size * (1.4 + k));
             const rotation = facing(e.dir);

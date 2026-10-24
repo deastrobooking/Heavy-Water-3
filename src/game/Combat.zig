@@ -608,6 +608,7 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
         .nova_arc => .finisher,
     } else switch (c.combo) {
         Weapon.BeamSaber.dash_combo => .dash,
+        Weapon.BeamSaber.spinning_dash_combo => .cyclone,
         Weapon.BeamSaber.aerial_combo => .aerial,
         else => .forehand,
     };
@@ -636,17 +637,18 @@ fn cut(self: *Combat, arsenal: *Arsenal, enemies: *Enemies, aim: Aim, out: []Eve
         _ = enemies.shock(center, radius, 0.8, 9);
         self.effect(.{ .kind = .burst, .position = center, .life = 0.32, .size = radius, .color = .{ 0.25, 0.9, 1 } });
     }
-    if (arc == .charged or (c.move != null and c.move.? == .nova_arc)) {
+    const triple_wave = c.combo == 3;
+    if (arc == .charged or triple_wave or (c.move != null and c.move.? == .nova_arc)) {
         // A charged edge launches a broad, player-coloured crescent; each upgrade widens and
         // sustains the visual and lets the wave travel farther through the Hive.
         const tier = s.slots[0].level;
         const charged = arc == .charged;
-        const damage_scale: f32 = if (charged and tier >= 3) 0.85 else if (charged) 0.6 else 0.20;
-        const lifetime: f32 = if (charged and tier >= 3) 0.82 else if (charged) 0.6 else 0.42;
-        const speed: f32 = if (charged and tier >= 3) 48 else if (charged) 40 else 34;
+        const damage_scale: f32 = if (triple_wave) 0.34 else if (charged and tier >= 3) 0.85 else if (charged) 0.6 else 0.20;
+        const lifetime: f32 = if (triple_wave) 0.52 else if (charged and tier >= 3) 0.82 else if (charged) 0.6 else 0.42;
+        const speed: f32 = if (triple_wave) 38 else if (charged and tier >= 3) 48 else if (charged) 40 else 34;
         if (s.projectiles.spawn(.saber_wave, R.add(aim.feet, R.add(R.scale(fwd, 1), .{ 0, 1.1, 0 })), fwd, speed, c.damage * damage_scale, s.slots[0].element, lifetime, null)) |i| {
-            s.projectiles.items[i].pierce = if (charged and tier >= 3) 12 else if (charged) 8 else 2;
-            s.projectiles.items[i].radius = if (charged and tier >= 3) 2.0 else if (charged) 1.35 else 0.82;
+            s.projectiles.items[i].pierce = if (triple_wave) 3 else if (charged and tier >= 3) 12 else if (charged) 8 else 2;
+            s.projectiles.items[i].radius = if (triple_wave) 1.0 else if (charged and tier >= 3) 2.0 else if (charged) 1.35 else 0.82;
             const element_color = Weapon.Element.color(s.slots[0].element);
             s.projectiles.items[i].visual_tint = .{
                 aim.weapon_accent[0] * 0.72 + element_color[0] * 0.28,

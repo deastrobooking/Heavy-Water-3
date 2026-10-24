@@ -78,7 +78,10 @@ Builds on `CarSpec` and the planned ship design bay.
 - **Knobs:** length, width, stance, wing span, fan size (section 8).
 - **Derived readouts:** mass, inertia, thrust-to-weight and handling numbers from the part budgets, updated live; the same numbers the flight model uses, so the preview does not lie.
 - **Constraints:** parts only snap to compatible sockets; budgets (mass, power, part count) keep designs flyable.
+
 - **Automation:** colliders from the hull cage, light strips and rotor pivots registered as sockets so the game can spin and light them (as `Designs` does today).
+
+Marine craft use a separate `BoatRecipe` and watercraft evaluator within this vehicle-studio domain. Reuse the recipe validation, history, sockets, preview and player-owned library services, plus the machine vehicle's seat/motor/steering control flow. Do not reuse the hover car's four-fan lift rule or encode boats as the current wheel-only blueprint; add a versioned watercraft chassis representation. A constrained hull cage and buoyancy/propulsion readouts should certify that a boat floats its loaded mass and behaves within the marine model's speed, stability and turning limits. Keep large faction battleships as authored encounter assets, not player-editable boat recipes.
 
 ### 4.3 Nature studio
 

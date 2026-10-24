@@ -97,6 +97,11 @@ time_of_day: f32 = 0.35,
 outline_pipeline: ?*gpu.RenderPipeline = null,
 outline_layout: ?*gpu.BindGroupLayout = null,
 outline_bind_group: ?*gpu.BindGroup = null,
+bloom_pipeline: ?*gpu.RenderPipeline = null,
+bloom_layout: ?*gpu.BindGroupLayout = null,
+bloom_bind_group: ?*gpu.BindGroup = null,
+bloom_texture: ?*gpu.Texture = null,
+bloom_view: ?*gpu.TextureView = null,
 tick: u64 = 0,
 show_metrics: bool = true,
 culling: bool = false,
@@ -346,6 +351,21 @@ fn setup(self: *Renderer, core: *mach.Core) !void {
         .fragment = &outline_fragment,
     });
 
+    const bloom_shader = device.createShaderModuleWGSL("bloom.wgsl", @embedFile("bloom.wgsl"));
+    defer bloom_shader.release();
+    self.bloom_layout = device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{ .entries = &.{
+        gpu.BindGroupLayout.Entry.initTexture(0, .{ .fragment = true }, .float, .dimension_2d, false),
+    } }));
+    const bloom_pipeline_layout = device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = &.{self.bloom_layout.?} }));
+    defer bloom_pipeline_layout.release();
+    const bloom_fragment = gpu.FragmentState.init(.{ .module = bloom_shader, .entry_point = "frag_main", .targets = &.{.{ .format = window.framebuffer_format }} });
+    self.bloom_pipeline = device.createRenderPipeline(&.{
+        .label = "threshold bloom composite",
+        .layout = bloom_pipeline_layout,
+        .vertex = gpu.VertexState.init(.{ .module = bloom_shader, .entry_point = "vertex_main" }),
+        .fragment = &bloom_fragment,
+    });
+
     const hud_shader = device.createShaderModuleWGSL("overlay.wgsl", @embedFile("overlay.wgsl"));
     defer hud_shader.release();
     const atlas = try FontAtlas.rasterize(self.allocator);
@@ -568,11 +588,17 @@ fn viewScene(self: *Renderer, device: *gpu.Device, i: usize) !*Scene {
     return scene;
 }
 
-fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32) void {
+fn resize(self: *Renderer, device: *gpu.Device, width: u32, height: u32, format: gpu.Texture.Format) void {
     if (self.width == width and self.height == height) return;
     if (self.outline_bind_group) |g| g.release();
     if (self.depth_view) |v| v.release();
     if (self.depth) |t| t.release();
+    if (self.bloom_bind_group) |g| g.release();
+    if (self.bloom_view) |v| v.release();
+    if (self.bloom_texture) |t| t.release();
+    self.bloom_texture = device.createTexture(&.{ .label = "bloom scene source", .size = .{ .width = width, .height = height }, .format = format, .usage = .{ .render_attachment = true, .texture_binding = true } });
+    self.bloom_view = self.bloom_texture.?.createView(&.{});
+    self.bloom_bind_group = device.createBindGroup(&gpu.BindGroup.Descriptor.init(.{ .layout = self.bloom_layout.?, .entries = &.{gpu.BindGroup.Entry.initTextureView(0, self.bloom_view.?)} }));
     // Sampled by the outline pass after the scene pass.
     self.depth = device.createTexture(&.{ .label = "scene depth", .size = .{ .width = width, .height = height }, .format = .depth32_float, .usage = .{ .render_attachment = true, .texture_binding = true } });
     self.depth_view = self.depth.?.createView(&.{});
@@ -615,7 +641,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     }
     const swap_view = window.swap_chain.getCurrentTextureView() orelse return;
     defer swap_view.release();
-    self.resize(window.device, window.framebuffer_width, window.framebuffer_height);
+    self.resize(window.device, window.framebuffer_width, window.framebuffer_height, window.framebuffer_format);
     if (self.capture_ready.load(.acquire)) return self.finishCapture(core);
     const capturing = options.capture_frame > 0 and self.frames == options.capture_frame and !self.capture_requested;
     if (capturing) self.prepareCapture(window.device, window.framebuffer_format);
@@ -772,7 +798,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         sun_pass.end();
     };
     const pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{
-        .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = light.horizon[0], .g = light.horizon[1], .b = light.horizon[2], .a = 1 } }},
+        .color_attachments = &.{.{ .view = self.bloom_view.?, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = light.horizon[0], .g = light.horizon[1], .b = light.horizon[2], .a = 1 } }},
         .depth_stencil_attachment = &.{ .view = self.depth_view.?, .depth_load_op = .clear, .depth_store_op = .store, .depth_clear_value = 0 },
     }));
     defer pass.release();
@@ -803,6 +829,14 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         pass.setPipeline(self.pipeline.?);
     }
     pass.end();
+    {
+        const composite = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .clear, .store_op = .store, .clear_value = .{ .r = light.horizon[0], .g = light.horizon[1], .b = light.horizon[2], .a = 1 } }} }));
+        defer composite.release();
+        composite.setPipeline(self.bloom_pipeline.?);
+        composite.setBindGroup(0, self.bloom_bind_group.?, &.{});
+        composite.draw(3, 1, 0, 0);
+        composite.end();
+    }
     {
         // Depth is shared across views, so the seams between them draw as ink dividers.
         const outline = encoder.beginRenderPass(&gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{.{ .view = back, .load_op = .load, .store_op = .store, .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 1 } }} }));
@@ -1057,6 +1091,11 @@ pub fn deinit(self: *Renderer) void {
     self.allocator.free(self.overlay.vertices);
     self.overlay.vertices = &.{};
     if (self.outline_bind_group) |p| p.release();
+    if (self.bloom_bind_group) |p| p.release();
+    if (self.bloom_view) |p| p.release();
+    if (self.bloom_texture) |p| p.release();
+    if (self.bloom_layout) |p| p.release();
+    if (self.bloom_pipeline) |p| p.release();
     if (self.outline_layout) |p| p.release();
     if (self.outline_pipeline) |p| p.release();
     if (self.overlay_bind_group) |p| p.release();

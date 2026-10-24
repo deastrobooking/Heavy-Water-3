@@ -1304,7 +1304,7 @@ fn stepTimed(self: *Sandbox, camera: *Camera, raw_input: Input, raw_actions: Act
     if (actions.select_tool != 0 and !riding) if (Tools.fromNumber(actions.select_tool)) |tool| Build.selectTool(self, tool);
     var primary = actions.interact;
     if (self.seated != null) {
-        if (primary) self.exitVehicle(camera) else self.driver_input = .{ .throttle = input.forward, .steer = input.right, .brake = @floatFromInt(@intFromBool(input.jump)) };
+        if (primary) self.exitVehicle(camera) else self.driver_input = .{ .throttle = input.forward, .steer = input.right, .brake = @floatFromInt(@intFromBool(input.jump)), .boost = input.fast };
         primary = false;
     }
     if (self.garage.piloting != null) {
@@ -1664,7 +1664,7 @@ fn stepMachines(self: *Sandbox, dt: f32) void {
             const v = placed.blueprint.vehicle.?;
             const out = placed.machine.outputs;
             const brake = if (driving) out[v.seat][3] else 1;
-            vehicle.step(&self.physics, .{ .drive = out[v.motor][2], .steer = out[v.steering][1], .brake = brake }, dt);
+            vehicle.step(&self.physics, .{ .drive = out[v.motor][2], .steer = out[v.steering][1], .brake = brake, .boost = driving and self.driver_input.boost }, dt);
             continue;
         }
         const bp = &placed.blueprint;

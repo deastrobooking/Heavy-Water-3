@@ -11,7 +11,7 @@ Review pass dated 2026-10-19. Read-only: code and docs were read; nothing was bu
 - New York: arrival foothold only (terrain patch, 5 landmark boxes). No missions, shops, boss, discoveries or occupation.
 
 **Exists only as data or docs (not reachable):**
-- Pelaglass and Sonorous Reef (underwater): catalog records in `src/procedural/Worlds.zig`, design in `docs/plans/ocean-cities.md`. No ocean terrain, water rendering, swim/buoyancy, meshes or travel entry. Only a breath timer exists (`Player.zig`).
+- Pelaglass and Sonorous Reef (underwater): catalog records in `src/procedural/Worlds.zig`, design in `docs/plans/ocean-cities.md`. No ocean terrain, ocean-scale water rendering, deep-water swim, meshes or travel entry. Rivers and the Cloudwater basin render water; river swimming has buoyancy and breath handling, but there is no seafloor-aware ocean volume or wave-driven surf system.
 - Hive Homeworld, Gaia, solar planets, Stormwake siege, other Frontier cities: records in `Worlds.zig`/`SolarSystem.zig`, which nothing in the game imports.
 - Interiors: `Interiors.zig` makes room graphs only. No meshes, doors, colliders or population.
 - City-loop content (3 sub-missions, boss, 10 discoveries, liberation state): documentation only (`docs/plans/city-content.md`).

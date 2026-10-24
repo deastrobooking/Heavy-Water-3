@@ -175,6 +175,10 @@ test "Zero-style beam saber combo chain, dash slash, and charge slash" {
     try std.testing.expectEqual(Weapon.BeamSaber.dash_combo, dash_hit.combo);
     try std.testing.expect(dash_hit.damage > hit1.damage);
 
+    const spinning_dash = combat.attackSaber(true, true);
+    try std.testing.expectEqual(Weapon.BeamSaber.spinning_dash_combo, spinning_dash.combo);
+    try std.testing.expect(spinning_dash.damage > dash_hit.damage);
+
     // Charge slash
     combat.saber.is_charging = true;
     combat.saber.update(1.5);

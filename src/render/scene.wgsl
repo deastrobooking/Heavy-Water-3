@@ -224,10 +224,10 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
     if (in.tint.a >= 0.0 || ice_tag) {
         color = lit(base, normalize(in.normal), in.world);
         if (ice_tag) {
-            let view = normalize(frame.eye.xyz - in.world);
-            let mirror = reflected(view * -1.0, normalize(in.normal));
+            let ice_view = normalize(frame.eye.xyz - in.world);
+            let mirror = reflected(ice_view * -1.0, normalize(in.normal));
             let sheen = smoothstep(0.89, 0.99, dot(mirror, frame.light_direction.xyz));
-            let facing = 1.0 - max(dot(normalize(in.normal), view), 0.0);
+            let facing = 1.0 - max(dot(normalize(in.normal), ice_view), 0.0);
             color = color + frame.light_color.rgb * sheen * sheen * 0.58 + vec3<f32>(0.10, 0.34, 0.62) * facing * facing * 0.16;
         }
         // Lumen: tint alpha above 1 glows, more so at night.
@@ -237,7 +237,13 @@ fn hazed(color: vec3<f32>, world: vec3<f32>, emissive: f32) -> vec3<f32> {
         if (in.tint.a > 2.25) {
             emissive = frame.horizon.a * 0.92;
         }
-        let glow = base * (0.9 + 0.8 * frame.horizon.a);
+        // Preserve the cel-lit body, then add a saturated neon response. The facing
+        // term makes emissive edges read as tubes and insets instead of flat bright paint.
+        let neon_view = normalize(frame.eye.xyz - in.world);
+        let neon_edge = (1.0 - max(dot(normalize(in.normal), neon_view), 0.0));
+        let neon_rim = neon_edge * neon_edge * neon_edge;
+        let glow_gain = 1.45 + 0.45 * frame.horizon.a;
+        let glow = base * glow_gain + base * neon_rim * (0.8 + 0.5 * frame.horizon.a);
         color = mix(color, glow, emissive);
     }
     return vec4<f32>(hazed(color, in.world, emissive), 1.0);

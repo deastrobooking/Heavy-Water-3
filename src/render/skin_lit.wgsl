@@ -289,7 +289,11 @@ fn draw_anime_eyes(
     }
     // Lumen strips and visors glow; instance tint alpha above 1 glows the whole body.
     let glow_amount = clamp(max(e.y, in.tint.a - 1.0), 0.0, 1.0);
-    let glow = base * (0.9 + 0.8 * frame.horizon.a);
+    let neon_view = normalize(frame.eye.xyz - in.world);
+    let neon_edge = 1.0 - max(dot(normalize(in.normal), neon_view), 0.0);
+    let neon_rim = neon_edge * neon_edge * neon_edge;
+    let glow_gain = 1.45 + 0.45 * frame.horizon.a;
+    let glow = base * glow_gain + base * neon_rim * (0.8 + 0.5 * frame.horizon.a);
     color = mix(color, glow, glow_amount);
     return vec4<f32>(hazed(color, in.world, glow_amount), 1.0);
 }
