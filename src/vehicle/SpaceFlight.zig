@@ -6,6 +6,9 @@ const Jet = @import("jet.zig");
 pub const half_extent: f32 = 112;
 pub const max_speed: f32 = 150;
 pub const boost_speed: f32 = 245;
+/// A frame's handling: thrust as acceleration, cruise and boost top speeds (`SpaceArsenal`).
+pub const Handling = struct { accel: f32 = 92, top: f32 = max_speed, boost: f32 = boost_speed };
+
 pub const Input = struct {
     lateral: f32 = 0,
     forward: f32 = 0,
@@ -14,15 +17,17 @@ pub const Input = struct {
     brake: bool = false,
 };
 
-/// Moves a fighter inside a square orbital arena with no gravity, lift or terrain probes.
-pub fn step(fighter: *Jet.Fighter, center: m.Vec3, input: Input, dt: f32) void {
+/// Moves a fighter inside a square orbital arena with no gravity, lift or terrain probes. Movement
+/// is in screen axes (the camera looks straight down, +Z up the screen). With `aim` the nose
+/// follows it, so the pilot can strafe one way and shoot another; without, it follows the motion.
+pub fn step(fighter: *Jet.Fighter, center: m.Vec3, input: Input, handling: Handling, aim: ?f32, dt: f32) void {
     const b = &fighter.body;
     const demand = m.Vec3.init(input.lateral, input.vertical, input.forward);
     const magnitude = @min(1, demand.length());
-    const drive = if (input.boost and !input.brake) @as(f32, 190) else 92;
+    const drive = if (input.boost and !input.brake) handling.accel * 2.06 else handling.accel;
     if (!input.brake) b.vel = b.vel.add(demand.normalizeOr(m.Vec3.zero).scale(drive * magnitude * dt));
     b.vel = b.vel.scale(if (input.brake) @max(0, 1 - dt * 4.8) else @max(0, 1 - dt * 0.26));
-    const speed_limit = if (input.boost and !input.brake) boost_speed else max_speed;
+    const speed_limit = if (input.boost and !input.brake) handling.boost else handling.top;
     const speed = b.vel.length();
     if (speed > speed_limit) b.vel = b.vel.scale(speed_limit / speed);
     b.pos = b.pos.add(b.vel.scale(dt));
@@ -53,7 +58,9 @@ pub fn step(fighter: *Jet.Fighter, center: m.Vec3, input: Input, dt: f32) void {
     fighter.grounded = false;
     fighter.throttle = if (input.brake) 0 else @max(input.forward, 0);
     fighter.burn = if (input.boost and !input.brake and magnitude > 0) 1 else 0;
-    if (@abs(v.x) + @abs(v.z) > 0.4) {
+    if (aim) |yaw| {
+        b.rot = m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw);
+    } else if (@abs(v.x) + @abs(v.z) > 0.4) {
         const yaw = std.math.atan2(v.x, v.z);
         b.rot = m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw);
     }

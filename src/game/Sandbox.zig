@@ -24,6 +24,7 @@ const Platformer = @import("Platformer.zig");
 const Farm = @import("Farm.zig");
 const Mining = @import("Mining.zig");
 const Colony = @import("Colony.zig");
+const SpaceBattle = @import("SpaceBattle.zig");
 const Decor = @import("Decor.zig");
 const Outpost = @import("Outpost.zig");
 const Blocks = @import("../build/Blocks.zig");
@@ -399,6 +400,7 @@ shop: ?Shop = null,
 garage: Garage = .{},
 /// The Kestrel fighter and the air war (see `Hangar.zig`, `Skies.zig`).
 hangar: Hangar = .{},
+space_battle: SpaceBattle.State = .{},
 skies: Skies = .{},
 collectibles: Collectibles = .{},
 enemies: Enemies = .{},
@@ -485,7 +487,7 @@ pub fn init(self: *Sandbox, allocator: std.mem.Allocator, seed: u64, catalog: *c
     self.bile_sequence = BileCase.sequence(seed);
     CityDiscoveries.positions(&catalog.district, seed, &self.city_discovery_positions);
     self.caves = Caves.layout(seed);
-    Mining.generate(seed, &self.mining.veins);
+    Mining.generate(seed, self.mining.veins[0..Mining.vein_count]);
     self.physics = .init(.{ .context = &self.caves, .sample = groundSample, .hollow = groundHollow });
     errdefer self.physics.deinit();
     self.block_world = try BlockWorld.init(allocator, world_flag);
@@ -1957,6 +1959,15 @@ fn guestShopKey(self: *Sandbox, slot: usize, key: ShopKey) void {
     }
 }
 
+/// The fighter designer's choice for P1: equip an owned frame, or unlock the next one through the
+/// fabricator's rules (prerequisite frame, combat rank, P1's wallet).
+pub fn chooseSpaceFrame(self: *Sandbox, frame: Progress.SpaceFrame) void {
+    if (Fabricator.frameRecipe(frame)) |index| return self.fabricateFor(0, index);
+    self.progress.selectSpaceFrame(frame) catch return;
+    self.hangar.equipFrame(frame, self.progress.kestrel_levels);
+    self.say("P1: space fighter frame set to {s}", .{@tagName(frame)});
+}
+
 fn fabricateFor(self: *Sandbox, owner: usize, index: usize) void {
     const made = Fabricator.make(&self.progress, &self.kits[owner], index) catch |err| return self.say("P{d}: cannot fabricate: {s}", .{ owner + 1, reason(err) });
     var name_buffer: [24]u8 = undefined;
@@ -2877,6 +2888,7 @@ pub fn restore(self: *Sandbox, allocator: std.mem.Allocator, bytes: []const u8, 
     self.profile = profile;
     self.creator = .{ .confirmed = true };
     self.player = .{ .feet = doc.player.feet, .mode = doc.player.mode };
+    self.mining.land(self.seed, .{ doc.player.feet[0], doc.player.feet[2] });
     self.body_yaw = doc.player.yaw;
     camera.yaw = doc.player.yaw;
     camera.pitch = std.math.clamp(doc.player.pitch, -1.5, 1.5);
@@ -5088,6 +5100,10 @@ pub fn travelDestinationUnlocked(self: *const Sandbox, destination: usize) bool 
     if (destination >= travel_count) return false;
     return switch (travel_destinations[destination].kind) {
         .windsor => self.progress.hasFlag(WindsorCase.exposed_flag),
+        .region => blk: {
+            const region = Region.all[travel_destinations[destination].index];
+            break :blk !std.mem.eql(u8, region.title, Region.moon.title) or self.progress.hasFlag("luna_rescued");
+        },
         else => true,
     };
 }
@@ -5210,6 +5226,7 @@ pub fn fastTravel(self: *Sandbox, p: usize, destination: usize, camera: *Camera)
         g.trading = null;
         g.target = .none;
     }
+    if (p == 0) self.mining.land(self.seed, .{ point[0], point[2] });
     return true;
 }
 
@@ -5307,6 +5324,7 @@ test "every travel destination has a safe arrival a player can be placed on" {
     defer sb.deinit();
     // This test verifies all arrival coordinates after the campaign has earned both Windsor stops.
     sb.progress.setFlag(WindsorCase.exposed_flag);
+    sb.progress.setFlag("luna_rescued");
     for (0..travel_count) |destination| {
         // A destination with no arrival is refused in the game ("no safe arrival"), so every row
         // of the map must resolve to a spot on walkable ground.
@@ -5319,6 +5337,34 @@ test "every travel destination has a safe arrival a player can be placed on" {
         const want = sb.travelPoint(destination);
         try std.testing.expect(@sqrt((point[0] - want[0]) * (point[0] - want[0]) + (point[2] - want[2]) * (point[2] - want[2])) <= 70);
         try std.testing.expect(sb.fastTravel(0, destination, &camera));
+    }
+}
+
+test "Moon landing waits for the Luna rescue and puts mining at the Selene Relay" {
+    var catalog: Catalog = undefined;
+    var camera: Camera = .{};
+    var sb: Sandbox = undefined;
+    try testSandbox(&sb, &catalog, &camera);
+    defer catalog.deinit(std.testing.allocator);
+    defer sb.deinit();
+
+    var destination: ?usize = null;
+    for (travel_destinations, 0..) |entry, i| if (std.mem.eql(u8, entry.label, "LAND ON THE MOON")) {
+        destination = i;
+        break;
+    };
+    try std.testing.expect(destination != null);
+    try std.testing.expect(!sb.travelDestinationUnlocked(destination.?));
+    try std.testing.expect(!sb.fastTravel(0, destination.?, &camera));
+    sb.progress.setFlag("luna_rescued");
+    try std.testing.expect(sb.travelDestinationUnlocked(destination.?));
+    try std.testing.expect(sb.fastTravel(0, destination.?, &camera));
+    try std.testing.expect(R.length(R.sub(sb.player.feet, sb.travelPoint(destination.?))) < 25);
+    try std.testing.expect(sb.mining.local);
+    for (sb.mining.active()[Mining.vein_count..]) |vein| {
+        const dx = vein.position[0] - Region.moon.arrival[0];
+        const dz = vein.position[2] - Region.moon.arrival[1];
+        try std.testing.expect(@sqrt(dx * dx + dz * dz) <= Mining.ring_outer + 70);
     }
 }
 

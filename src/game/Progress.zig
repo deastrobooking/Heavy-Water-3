@@ -22,10 +22,9 @@ pub const info = Kit.info;
 pub const bit = Kit.bit;
 pub const armorBit = Kit.armorBit;
 pub const suitPrice = Kit.suitPrice;
-/// Nests, carriers, caves, conversations and quests each set flags; 48 overflowed once caves
-/// arrived (later flags were silently dropped and not saved), and 96 left no room for a city's
-/// roughly 25 liberation flags beside them. Old saves load unchanged (they hold fewer).
-pub const max_flags = 128;
+/// Nests, carriers, caves, conversations, quests and the 30 solar battle clears share this list.
+/// The capacity is generous so later campaign progress cannot silently disappear at the limit.
+pub const max_flags = 256;
 pub const flag_capacity = 24;
 pub const KestrelUpgrade = enum { armor, missile_rack, engine, gun_cooling };
 pub const kestrel_upgrade_count = enum_compat.fields(KestrelUpgrade).len;

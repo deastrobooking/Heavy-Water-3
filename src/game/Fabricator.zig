@@ -124,6 +124,12 @@ pub fn onTab(tab: Tab, out: *[recipes.len]u8) []const u8 {
     return out[0..n];
 }
 
+/// The recipe that unlocks or equips `frame` (the Kestrel has none: it comes with the fighter).
+pub fn frameRecipe(frame: Progress.SpaceFrame) ?usize {
+    for (recipes, 0..) |r, i| if (r.output == .space_frame and r.output.space_frame == frame) return i;
+    return null;
+}
+
 pub fn made(p: *const Progress, k: *const Kit, output: Output) bool {
     return switch (output) {
         .vehicle => |d| p.ownsVehicle(d),
@@ -336,17 +342,17 @@ test "Aircraft fabricator unlocks space frames in order and equips owned frames"
     _ = kit.awardCombatXP(250 * Progress.spaceFrameRank(.bulwark));
     var rows: [recipes.len]u8 = undefined;
     const aircraft = onTab(.aircraft, &rows);
-    const frameRecipe = struct {
+    const findFrameRecipe = struct {
         fn find(indices: []const u8, frame: Progress.SpaceFrame) usize {
             for (indices) |index| if (recipes[index].output == .space_frame and recipes[index].output.space_frame == frame) return index;
             unreachable;
         }
     }.find;
-    const ember = frameRecipe(aircraft, .ember_wyrm);
-    const lance = frameRecipe(aircraft, .void_lance);
-    const heavy = frameRecipe(aircraft, .dreadclaw);
-    const starwing = frameRecipe(aircraft, .starwing);
-    const bulwark = frameRecipe(aircraft, .bulwark);
+    const ember = findFrameRecipe(aircraft, .ember_wyrm);
+    const lance = findFrameRecipe(aircraft, .void_lance);
+    const heavy = findFrameRecipe(aircraft, .dreadclaw);
+    const starwing = findFrameRecipe(aircraft, .starwing);
+    const bulwark = findFrameRecipe(aircraft, .bulwark);
     try std.testing.expectEqualStrings("PREVIOUS FRAME REQUIRED", status(&progress, &kit, recipes[lance].output).?);
     try std.testing.expectError(error.PreviousFrameRequired, make(&progress, &kit, lance));
     _ = try make(&progress, &kit, ember);

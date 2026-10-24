@@ -500,7 +500,7 @@ test "graph compiles to a flat program, shares sub-expressions, and rejects cycl
 1. Define a sequence as a JSON asset (referenced by GUID once phase 15 lands): a duration and tracks of keys. Track kinds: camera (position and look target), event (audio cue, dialogue line, story flag, spawn, fade), and a float property track.
 2. Drive it from the fixed step so playback is deterministic and the same on every machine. Events fire exactly once however the step lands, and seeking is silent, so a scrub or a save restore does not replay the past.
 3. Make every sequence skippable and make skipping apply its end-state events (flags, spawns) once.
-4. Store a sequence's played flag in the shared progress. Note that `Progress.max_flags` is 96 and quests and caves have already overflowed a smaller cap once; budget the new flags or raise the cap with a save bump.
+4. Store a sequence's played flag in shared progress. `Progress.max_flags` is now 256 to cover the campaign, caves and solar battle clears.
 5. Use it first for one story beat from [Story.md](../Story.md) in the Frontier city, replacing hard-coded camera moves.
 6. Editing UI comes last: a scrubbable timeline over the same data.
 

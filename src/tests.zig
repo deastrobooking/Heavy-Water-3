@@ -79,6 +79,9 @@ test {
     _ = @import("game/Farm.zig");
     _ = @import("game/Colony.zig");
     _ = @import("game/Mining.zig");
+    _ = @import("game/SpaceBattle.zig");
+    _ = @import("game/SpaceLevels.zig");
+    _ = @import("game/SpaceArsenal.zig");
     _ = @import("game/BuildTips.zig");
     _ = @import("game/Challenges.zig");
     _ = @import("ui/BlockPalette.zig");

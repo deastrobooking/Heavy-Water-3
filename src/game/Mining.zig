@@ -38,7 +38,11 @@ pub const deposit_reach: f32 = 7;
 pub const Vein = struct { position: V, ore: Colony.Ore };
 
 pub const State = struct {
-    veins: [vein_count]Vein = undefined,
+    /// The home field around the spawn, then the field of the landing the team is visiting
+    /// (`local`). The home field never moves, so drill stations built on it keep their veins
+    /// wherever the players are.
+    veins: [2 * vein_count]Vein = undefined,
+    local: bool = false,
     colony: Colony.State = .{},
     cooldown: [Sandbox.max_players]f32 = @splat(0),
     heat: [Sandbox.max_players]f32 = @splat(0),
@@ -47,19 +51,46 @@ pub const State = struct {
     /// Whether the cutter fired this step (for the beam and the hint).
     firing: [Sandbox.max_players]bool = @splat(false),
     beam_tick: u32 = 0,
+
+    /// The veins in play: home, then the visited landing's.
+    pub fn active(self: *const State) []const Vein {
+        return self.veins[0 .. if (self.local) 2 * vein_count else vein_count];
+    }
+
+    /// Players arrived at `center`: far from home, its landing gets its own field beside home's.
+    pub fn land(self: *State, seed: u64, center: [2]f32) void {
+        const dx = center[0] - Sandbox.spawn[0];
+        const dz = center[1] - Sandbox.spawn[2];
+        self.local = dx * dx + dz * dz > 4 * ring_outer * ring_outer;
+        if (self.local) generateAround(seed, center, self.veins[vein_count..]);
+    }
 };
 
 /// The seeded veins: half iron, a third copper, the rest lumen crystal, which lies farther out.
+/// The home field keeps the seeding it shipped with: saved drill stations stand on these veins.
 pub fn generate(seed: u64, out: *[vein_count]Vein) void {
-    var prng = std.Random.DefaultPrng.init(seed ^ 0x6f72_6576_6569_6e73);
+    field(seed, seed ^ 0x6f72_6576_6569_6e73, .{ Sandbox.spawn[0], Sandbox.spawn[2] }, out);
+}
+
+/// Stable local ore field for a landing region. Each visit produces the same deposits so
+/// fast travel can keep the ore in the player's immediate terrain rather than at Earth's base.
+pub fn generateAround(seed: u64, center: [2]f32, out: *[vein_count]Vein) void {
+    const center_x: u32 = @bitCast(center[0]);
+    const center_z: u32 = @bitCast(center[1]);
+    const location_seed = seed ^ @as(u64, center_x) ^ (@as(u64, center_z) << 32);
+    field(seed, location_seed ^ 0x6f72_6576_6569_6e73, center, out);
+}
+
+fn field(seed: u64, field_seed: u64, center: [2]f32, out: *[vein_count]Vein) void {
+    var prng = std.Random.DefaultPrng.init(field_seed);
     const rand = prng.random();
     for (out, 0..) |*v, i| {
         const ore: Colony.Ore = if (i % 6 < 3) .iron else if (i % 6 < 5) .copper else .crystal;
         const lo: f32 = if (ore == .crystal) 180 else ring_inner;
         const angle = (@as(f32, @floatFromInt(i)) + rand.float(f32) * 0.8) * (2 * std.math.pi / @as(f32, vein_count));
         const dist = lo + rand.float(f32) * (ring_outer - lo);
-        const x = Sandbox.spawn[0] + @cos(angle) * dist;
-        const z = Sandbox.spawn[2] + @sin(angle) * dist;
+        const x = center[0] + @cos(angle) * dist;
+        const z = center[1] + @sin(angle) * dist;
         v.* = .{ .position = .{ x, Terrain.surface(seed, x, z).height, z }, .ore = ore };
     }
 }
@@ -101,7 +132,7 @@ pub fn interact(sb: *Sandbox, slot: usize, camera: Camera) bool {
 pub fn mineAimed(sb: *Sandbox, slot: usize, camera: Camera) bool {
     const s = &sb.mining;
     const ray = eyeRay(camera);
-    const i = aimed(&s.veins, ray[0], ray[1], hand_reach) orelse return false;
+    const i = aimed(s.active(), ray[0], ray[1], hand_reach) orelse return false;
     if (s.cooldown[slot] > 0) return true;
     s.cooldown[slot] = hand_cooldown;
     give(sb, slot, s.veins[i]);
@@ -170,7 +201,7 @@ pub fn cutterUpdate(sb: *Sandbox, camera: Camera, _: bool, _: Sandbox.Actions) a
     const ray = eyeRay(camera);
     const muzzle = R.add(ray[0], R.add(R.scale(ray[1], 0.6), .{ 0, -0.25, 0 }));
     var length = cutter_reach;
-    if (aimed(&s.veins, ray[0], ray[1], cutter_reach)) |i| {
+    if (aimed(s.active(), ray[0], ray[1], cutter_reach)) |i| {
         const v = s.veins[i];
         length = R.length(R.sub(R.add(v.position, .{ 0, 0.6, 0 }), muzzle));
         s.cutting[slot] += Time.fixed_dt * cutter_rate;
@@ -237,7 +268,7 @@ pub fn colonyInputs(sb: *const Sandbox) Colony.Inputs {
                 .drill => {
                     const base: V = .{ (box.lo[0] + box.hi[0]) / 2, box.lo[1], (box.lo[2] + box.hi[2]) / 2 };
                     const reach = m.range + @max(box.hi[0] - box.lo[0], box.hi[2] - box.lo[2]) / 2;
-                    if (veinUnder(&sb.mining.veins, base, reach)) |i| in.drilled[@intFromEnum(sb.mining.veins[i].ore)] += m.rate * work;
+                    if (veinUnder(sb.mining.active(), base, reach)) |i| in.drilled[@intFromEnum(sb.mining.veins[i].ore)] += m.rate * work;
                 },
                 .field => in.food += m.range * m.rate * field_food_per * work,
                 .housing => in.beds += @intFromFloat(m.amount),
@@ -259,7 +290,7 @@ pub fn drillVein(sb: *const Sandbox, inst: *const @import("Outpost.zig").Instanc
     const box = Defense.boxOf(inst, def);
     const base: V = .{ (box.lo[0] + box.hi[0]) / 2, box.lo[1], (box.lo[2] + box.hi[2]) / 2 };
     const reach = m.range + @max(box.hi[0] - box.lo[0], box.hi[2] - box.lo[2]) / 2;
-    const i = veinUnder(&sb.mining.veins, base, reach) orelse return null;
+    const i = veinUnder(sb.mining.active(), base, reach) orelse return null;
     return sb.mining.veins[i];
 }
 
@@ -288,6 +319,40 @@ test "veins are seeded, deterministic, inside the ring, and crystal lies farther
         kinds[@intFromEnum(va.ore)] += 1;
     }
     try std.testing.expectEqual([Colony.ore_count]u32{ 12, 8, 4 }, kinds);
+}
+
+test "each landing gets a stable local ore field centered on its terrain" {
+    const Region = @import("../world/Region.zig");
+    var a: [vein_count]Vein = undefined;
+    var b: [vein_count]Vein = undefined;
+    generateAround(42, Region.moon.arrival, &a);
+    generateAround(42, Region.moon.arrival, &b);
+    for (a, b) |va, vb| {
+        try std.testing.expectEqual(va.position, vb.position);
+        const dx = va.position[0] - Region.moon.arrival[0];
+        const dz = va.position[2] - Region.moon.arrival[1];
+        const distance = @sqrt(dx * dx + dz * dz);
+        try std.testing.expect(distance >= ring_inner and distance <= ring_outer);
+        try std.testing.expectApproxEqAbs(Terrain.surface(42, va.position[0], va.position[2]).height, va.position[1], 0.001);
+    }
+}
+
+test "landing far away adds a local field and leaves the home veins, and their drills, where they were" {
+    const Region = @import("../world/Region.zig");
+    var s: State = .{};
+    generate(42, s.veins[0..vein_count]);
+    const home = s.veins[0..vein_count].*;
+    try std.testing.expectEqual(@as(usize, vein_count), s.active().len);
+    s.land(42, Region.moon.arrival);
+    try std.testing.expect(s.local);
+    try std.testing.expectEqual(@as(usize, 2 * vein_count), s.active().len);
+    try std.testing.expectEqualSlices(Vein, &home, s.active()[0..vein_count]);
+    // A drill on a home vein still reaches it while the team is on the Moon.
+    try std.testing.expectEqual(@as(?usize, 3), veinUnder(s.active(), home[3].position, 2));
+    // Back home (or a load near the spawn): only the home field.
+    s.land(42, .{ Sandbox.spawn[0] + 50, Sandbox.spawn[2] });
+    try std.testing.expect(!s.local);
+    try std.testing.expectEqualSlices(Vein, &home, s.active());
 }
 
 test "a ray picks the nearest vein it passes close to, within reach" {

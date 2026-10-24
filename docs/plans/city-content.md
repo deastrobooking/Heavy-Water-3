@@ -114,7 +114,7 @@ The New York hooks are campaign direction only; its mission names, boss encounte
 ### 5.1 What exists to build on
 
 - **Quest log.** `game/QuestLog.zig` derives the current objective from saved story flags and live war state with one chain of conditions (Tavi, the first spire, Ines, the carrier, Maro's Kestrel, the nests).
-- **Flags.** `Progress` stores story flags as names with a hard cap of 96 (`max_flags`); about 30 literal flag names exist today plus indexed families such as `nest_N_down`. A city by this design needs roughly 20 to 25 more (three missions with a few flags each, two boss flags, liberation), so the first city fits, but the third would not.
+- **Flags.** `Progress` stores story flags as names with a hard cap of 256 (`max_flags`); indexed families such as `nest_N_down` and the ten-level solar routes use this shared list.
 - **Collected objects.** `Modifications` tracks collected and removed object ids (capacity 4,096), keyed by chunk and local id, which suits discoveries.
 - **Conversations.** `conversations.json` has speakers (`maro`, `ines`, `tavi`, `local`) and conversations (three keepers and four walkers).
 - **Collectibles.** `Collectibles.Kind` is `lumen_shard`, `rotor_core`, `hive_alloy`, `vital_cell`; discoveries are a new kind of object, not these.

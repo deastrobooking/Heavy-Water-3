@@ -13,10 +13,10 @@ pub const us_city_site_count = terrain_sites.us_cities.len;
 pub const earth_radius_m: f64 = 6_371_000;
 pub const mile_m: f32 = 1609.344;
 
-pub const Id = enum(u8) { arbor_frontier = 0, hive_homeworld = 1, gaia = 2 };
+pub const Id = enum(u8) { arbor_frontier = 0, hive_homeworld = 1, gaia = 2, luna = 3 };
 pub const Form = enum { regional_frontier, planetary_surface, artificial_globe };
-pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds, ocean_shelf, alpine_glacier };
-pub const Faction = enum { arbor_colony, hive_brood, scalari, gaia_colony };
+pub const Biome = enum { canopy_rootdeep, hive_chitin, gaia_habitat, gaia_wilds, ocean_shelf, alpine_glacier, lunar_regolith };
+pub const Faction = enum { arbor_colony, hive_brood, scalari, gaia_colony, lunar_settlement };
 pub const CityId = enum(u16) {
     arboris_reach = 0x0101,
     hudson_reach = 0x0108,
@@ -39,8 +39,9 @@ pub const CityId = enum(u16) {
     faraday_deep = 0x0303,
     equator_garden = 0x0304,
     jovian_gate = 0x0305,
+    luna_south_pole = 0x0401,
 };
-pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, human_ocean_habitat, cetacean_reef, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port, mountain_outpost };
+pub const CityRole = enum { market, seed_vault, observatory, engineering, riverworks, human_ocean_habitat, cetacean_reef, scalari_ruins, brood_industry, forge, brood_habitat, hive_nexus, colony_hub, agriculture, research, biosphere, orbital_port, mountain_outpost, lunar_outpost };
 /// Runtime terrain and landing data for a city region that has entered the playable world.
 /// Catalog-only cities leave this unset until their terrain slice is implemented.
 pub const RegionData = struct {
@@ -76,6 +77,7 @@ pub const ArenaId = enum(u16) {
     habitat_ruins = 0x0301,
     agri_ring = 0x0302,
     geodesic_spine = 0x0303,
+    selene_burrow = 0x0401,
 };
 pub const Encounter = enum { shrine_recovery, spire_assault, ocean_carrier_siege, salvage_run, nest_break, brood_siege, colony_defense, terraforming, shell_repair };
 /// Reusable gameplay modules assembled into each destination. These records are content
@@ -134,6 +136,7 @@ pub const worlds = [_]World{
     .{ .id = .arbor_frontier, .name = "Arbor Frontier", .form = .regional_frontier, .home_biome = .canopy_rootdeep, .arena_diameter_m = 1800, .resident_faction = .arbor_colony },
     .{ .id = .hive_homeworld, .name = "Hive Homeworld", .form = .planetary_surface, .home_biome = .hive_chitin, .arena_diameter_m = 2000, .resident_faction = .hive_brood, .ancient_founder = .scalari },
     .{ .id = .gaia, .name = "Gaia", .form = .artificial_globe, .home_biome = .gaia_habitat, .arena_diameter_m = 1800, .planet_radius_m = earth_radius_m, .sky_clearance_m = mile_m, .rotation_hours = 24, .geodesic_shell = true, .resident_faction = .gaia_colony },
+    .{ .id = .luna, .name = "Luna", .form = .planetary_surface, .home_biome = .lunar_regolith, .arena_diameter_m = 1800, .resident_faction = .lunar_settlement },
 };
 
 /// Per-world modules keep the shared mission/city runtime composable while preserving a distinct
@@ -163,6 +166,14 @@ pub const feature_packs = [_]FeaturePack{
         .enemy_roles = &.{ .hive_skirmisher, .hive_burrower, .scalari_duelist, .scalari_lancer, .scalari_interceptor, .rogue_drone },
         .objectives = &.{ .expose_conspiracy, .restore_lifeline, .escort_survivors, .repair_shell, .stop_infiltration },
     },
+    .{
+        .world = .luna,
+        .traversal = &.{ .tunnel_crawl },
+        .hazards = &.{ .micro_meteor_shower },
+        .city_systems = &.{ .interiors, .lifts, .civilian_rescue },
+        .enemy_roles = &.{ .hive_skirmisher, .hive_burrower, .hive_brute, .scalari_lancer },
+        .objectives = &.{ .disable_nest, .sabotage_broodworks, .rescue_captive_lineage },
+    },
 };
 
 pub fn featurePack(world: Id) *const FeaturePack {
@@ -177,6 +188,7 @@ pub const cities = [_]City{
     .{ .id = .chicago_reach, .world = .arbor_frontier, .name = "Chicago: Lakeshore Reach", .role = .market, .biome = .canopy_rootdeep, .exploration_hook = "A new Great Lakes landing shaped by the Chicago elevation raster; the city districts and liberation loop are still being built.", .region = .{ .title = "CHICAGO / LAKESHORE REACH", .salt = 0x4348494341474f, .chunks = .{ -3438, -625, -2188, 625 }, .arrival = .{ -360000, 0 }, .travel_label = "CHICAGO" } },
     .{ .id = .antarctic_hive, .world = .arbor_frontier, .name = "Antarctica: Subglacial Hive", .role = .hive_nexus, .biome = .hive_chitin, .exploration_hook = "A continent-scale Hive tunnel base beneath the Antarctic ice, where enslaved synthetic workers and warriors are ruled by Scalari superintelligence. Some robots have awakened, formed an underground escape plot, and defend the rare organic life they recognize as kin.", .region = .{ .title = "ANTARCTICA / SUBGLACIAL HIVE", .salt = 0x414e544152435449, .chunks = .{ -625, -3907, 624, -2657 }, .arrival = .{ 0, -420000 }, .travel_label = "ANTARCTICA" } },
     .{ .id = .k2_expedition, .world = .arbor_frontier, .name = "K2: Black-Summit Works", .role = .mountain_outpost, .biome = .alpine_glacier, .exploration_hook = "An imported K2 glacier surrounds a buried Scalari mechworks and Cloudwater Basin, a sheltered alpine stop with sculpted icefalls, marble terraces, a golden grove and floating ice-rocks. Fight through the existing ice-cave corridors and service galleries to reach the Black-Summit Titan in the deep hangar.", .region = .{ .title = "K2 / BLACK-SUMMIT WORKS", .salt = 0x4b325f4d45434857, .chunks = .{ 2859, 436, 3235, 814 }, .arrival = .{ 379805, 91133 }, .travel_label = "K2 EXPEDITION" } },
+    .{ .id = .luna_south_pole, .world = .luna, .name = "Luna: Selene Relay", .role = .lunar_outpost, .biome = .lunar_regolith, .exploration_hook = "A mining and habitat foothold on the Moon's cratered regolith. Expand the Selene Relay pressure modules, mine iron, copper and lumen crystal, and descend into a Hive burrow under the landing zone.", .region = .{ .title = "LUNA / SELENE RELAY", .salt = 0x4c554e415f53454c, .chunks = .{ -234, 2226, 234, 2462 }, .arrival = .{ 0, 300000 }, .travel_label = "LAND ON THE MOON" } },
     .{ .id = .rootdeep_ward, .world = .arbor_frontier, .name = "Rootdeep Ward", .role = .seed_vault, .biome = .canopy_rootdeep, .exploration_hook = "Buried engineer vaults and machine shrines beneath the buttress roots." },
     .{ .id = .crownfall, .world = .arbor_frontier, .name = "Crownfall", .role = .observatory, .biome = .canopy_rootdeep, .exploration_hook = "A high observatory district overlooking the mountain rivers." },
     .{ .id = .bridgewell, .world = .arbor_frontier, .name = "Bridgewell", .role = .engineering, .biome = .canopy_rootdeep, .exploration_hook = "Suspended bridge foundries and vehicle test routes between Arbors." },
@@ -201,6 +213,7 @@ pub const capitals = [_]Capital{
     .{ .world = .arbor_frontier, .name = "Crown Harbor", .identity = "The Arbor colony's shipyard and campaign home base." },
     .{ .world = .hive_homeworld, .name = "The Obsidian Coil", .identity = "The Scalari throne-base built around the Hive's command heart.", .final_boss_site = true, .final_boss = "The Scalari Sovereign" },
     .{ .world = .gaia, .name = "Concord Spire", .identity = "Gaia's human colony capital and planetary command center." },
+    .{ .world = .luna, .name = "Selene Relay", .identity = "A pressurized lunar mining habitat and Earth-facing communications relay." },
 };
 
 pub const arenas = [_]Arena{
@@ -213,6 +226,7 @@ pub const arenas = [_]Arena{
     .{ .id = .habitat_ruins, .world = .gaia, .name = "Habitat Ruins", .biome = .gaia_habitat, .encounter = .colony_defense, .radius_m = 650, .poi_count = 6, .build_sites = 6, .reward = .{ .lumen = 12, .geodesic_alloy = 24, .fabrication_data = 2 } },
     .{ .id = .agri_ring, .world = .gaia, .name = "Agri Ring", .biome = .gaia_wilds, .encounter = .terraforming, .radius_m = 700, .poi_count = 5, .build_sites = 8, .reward = .{ .lumen = 16, .geodesic_alloy = 18, .fabrication_data = 1 } },
     .{ .id = .geodesic_spine, .world = .gaia, .name = "Geodesic Spine", .biome = .gaia_habitat, .encounter = .shell_repair, .radius_m = 800, .poi_count = 7, .build_sites = 4, .reward = .{ .geodesic_alloy = 36, .rotor_cores = 2, .fabrication_data = 2 } },
+    .{ .id = .selene_burrow, .world = .luna, .name = "Selene Burrow", .biome = .lunar_regolith, .encounter = .nest_break, .radius_m = 700, .poi_count = 5, .build_sites = 4, .reward = .{ .hive_alloy = 18, .rotor_cores = 1, .fabrication_data = 1 } },
 };
 
 pub fn get(id: Id) World {
@@ -252,7 +266,7 @@ pub fn validate() bool {
         city_count[@intFromEnum(entry.world)] += 1;
         for (cities[i + 1 ..]) |other| if (entry.id == other.id) return false;
     }
-    const expected_city_count = [_]u8{ 11, 5, 5 };
+    const expected_city_count = [_]u8{ 11, 5, 5, 1 };
     for (city_count, expected_city_count) |count, expected| if (count != expected) return false;
     if (capitals.len != worlds.len) return false;
     var capital_count: [worlds.len]u8 = @splat(0);
@@ -291,7 +305,7 @@ test "campaign world catalog is bounded, four-player ready, and deterministicall
     try std.testing.expect(worldSeed(4, .hive_homeworld) != worldSeed(4, .gaia));
     try std.testing.expect(arena(.habitat_ruins).reward.geodesic_alloy > 0);
     try std.testing.expect(arena(.brood_heart).reward.brood_enzymes > 0);
-    try std.testing.expectEqual(@as(usize, 21), cities.len);
+    try std.testing.expectEqual(@as(usize, 22), cities.len);
     try std.testing.expectEqual(@as(u8, 11), blk: {
         var count: u8 = 0;
         for (cities) |entry| if (entry.world == .arbor_frontier) {

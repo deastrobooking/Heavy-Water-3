@@ -30,7 +30,9 @@ pub const per_range = 2;
 /// about 1.33 (normal.y 0.6), so this leaves a margin.
 const max_approach_slope: f32 = 0.8;
 
-pub const max_systems = Mountains.count * per_range + 1;
+pub const k2_range: u8 = Mountains.count;
+pub const moon_range: u8 = Mountains.count + 1;
+pub const max_systems = Mountains.count * per_range + 2;
 pub const max_rooms = 7;
 /// Lattice spacing of the cave mesh.
 pub const cell: f32 = 1;
@@ -151,7 +153,56 @@ pub fn layout(seed: u64) Layout {
         result.systems[result.count] = system;
         result.count += 1;
     }
+    if (planMoon(seed)) |system| {
+        result.systems[result.count] = system;
+        result.count += 1;
+    }
     return result;
+}
+
+/// The lunar Hive dug into a low crater rim and lined its deeper chambers with resin machinery.
+fn planMoon(seed: u64) ?System {
+    const landing = Region.moon.arrival;
+    const entrance_x = landing[0] + 560;
+    const entrance_z = landing[1] + 120;
+    const entry: V = .{ entrance_x, terrain(seed, entrance_x, entrance_z), entrance_z };
+    const inward: V = .{ 0, 0, 1 };
+    var sys: System = .{ .range = moon_range, .entrance = entry, .inward = inward, .noise = Seed.mix(seed ^ 0x4d4f4f4e5f485653) };
+    const mouth_at = add(entry, scale(inward, 20));
+    const mouth_floor = entry[1] - 1;
+    const mouth_radii: V = .{ 10, 6, 10 };
+    sys.rooms[0] = .{ .center = .{ mouth_at[0], mouth_floor + mouth_radii[1] * 0.45, mouth_at[2] }, .radii = mouth_radii, .floor = mouth_floor, .role = .mouth };
+    sys.room_count = 1;
+    const mouth_radius: f32 = 3.2;
+    sys.tunnels[0] = .{ .a = add(.{ entry[0], entry[1] + mouth_radius * floor_drop, entry[2] }, scale(inward, -7)), .b = .{ mouth_at[0], mouth_floor + mouth_radius * floor_drop, mouth_at[2] }, .radius = mouth_radius };
+    sys.tunnel_count = 1;
+    const specs = [_]struct { distance: f32, rx: f32, rz: f32, depth: f32, role: Role, parent: u8 }{
+        .{ .distance = 82, .rx = 12, .rz = 11, .depth = 20, .role = .hall, .parent = 0 },
+        .{ .distance = 155, .rx = 12, .rz = 12, .depth = 22, .role = .cache, .parent = 1 },
+        .{ .distance = 235, .rx = 17, .rz = 16, .depth = 28, .role = .heart, .parent = 2 },
+    };
+    for (specs) |spec| {
+        const x = entry[0];
+        const z = entry[2] + spec.distance;
+        const ground = minGround(seed, x, z, spec.rx, spec.rz);
+        const radii: V = .{ spec.rx, if (spec.role == .heart) 8 else 5.5, spec.rz };
+        const cover = radii[1] * 1.45 + min_cover + 2;
+        const desired = sys.rooms[spec.parent].floor - spec.depth;
+        const floor = @min(desired, ground - cover);
+        const room: Room = .{ .center = .{ x, floor + radii[1] * 0.45, z }, .radii = radii, .floor = floor, .parent = spec.parent, .role = spec.role };
+        if (!fits(seed, &sys, room)) return null;
+        const parent = sys.rooms[spec.parent];
+        sys.rooms[sys.room_count] = room;
+        sys.tunnels[sys.tunnel_count] = .{
+            .a = .{ parent.center[0], parent.floor + mouth_radius * floor_drop, parent.center[2] },
+            .b = .{ room.center[0], room.floor + mouth_radius * floor_drop, room.center[2] },
+            .radius = mouth_radius,
+        };
+        sys.room_count += 1;
+        sys.tunnel_count += 1;
+    }
+    bounds(&sys);
+    return sys;
 }
 
 /// The K2 expedition's Scalari mechworks: a sheltered entry chamber feeds through service
@@ -162,7 +213,7 @@ fn planK2(seed: u64) ?System {
     const inward_z: f32 = -0.738;
     const inward: V = .{ inward_x, 0, inward_z };
     const entry: V = .{ landing[0], terrain(seed, landing[0], landing[1]), landing[1] };
-    var sys: System = .{ .range = Mountains.count, .entrance = entry, .inward = inward, .noise = Seed.mix(seed ^ 0x4b325f524f434b) };
+    var sys: System = .{ .range = k2_range, .entrance = entry, .inward = inward, .noise = Seed.mix(seed ^ 0x4b325f524f434b) };
 
     const mouth_at = add(entry, scale(inward, 22));
     const mouth_floor = entry[1] - 1.5;
@@ -473,14 +524,15 @@ fn occlusion(sys: *const System, p: V, normal: V) f32 {
 fn rockColor(sys: *const System, hue: [3]f32, p: V, normal: V) [3]f32 {
     const strata_noise = noise3(sys.noise ^ 0x535452, p[0] * 0.05, p[1] * 0.12, p[2] * 0.05);
     const band = 0.5 + 0.5 * @sin(p[1] * 0.85 + strata_noise * 5.0);
-    const k2 = sys.range == Mountains.count;
-    const warm: [3]f32 = if (k2) .{ 0.23, 0.34, 0.42 } else .{ 0.36, 0.3, 0.24 };
-    const slate: [3]f32 = if (k2) .{ 0.08, 0.15, 0.22 } else .{ 0.16, 0.17, 0.2 };
+    const k2 = sys.range == k2_range;
+    const lunar = sys.range == moon_range;
+    const warm: [3]f32 = if (k2) .{ 0.23, 0.34, 0.42 } else if (lunar) .{ 0.46, 0.42, 0.4 } else .{ 0.36, 0.3, 0.24 };
+    const slate: [3]f32 = if (k2) .{ 0.08, 0.15, 0.22 } else if (lunar) .{ 0.16, 0.15, 0.16 } else .{ 0.16, 0.17, 0.2 };
     var color: V = .{ slate[0] + (warm[0] - slate[0]) * band, slate[1] + (warm[1] - slate[1]) * band, slate[2] + (warm[2] - slate[2]) * band };
     // Floors gather pale dust, with a mottled edge.
     const dust_noise = noise3(sys.noise ^ 0x445553, p[0] * 0.3, p[1] * 0.3, p[2] * 0.3);
     const floor = std.math.clamp((normal[1] - 0.55) * 2.2, 0, 1) * (0.55 + 0.45 * dust_noise);
-    const dust: [3]f32 = if (k2) .{ 0.36, 0.55, 0.68 } else .{ 0.46, 0.4, 0.31 };
+    const dust: [3]f32 = if (k2) .{ 0.36, 0.55, 0.68 } else if (lunar) .{ 0.56, 0.54, 0.52 } else .{ 0.46, 0.4, 0.31 };
     for (0..3) |a| color[a] += (dust[a] - color[a]) * floor;
     // Crevices and corners are darker; open faces keep their colour.
     const shade = 1 - 0.55 * occlusion(sys, p, normal);
@@ -675,7 +727,8 @@ pub fn name(index: u8) []const u8 {
 }
 
 pub fn systemName(caves: *const Layout, index: u8) []const u8 {
-    if (index < caves.count and caves.systems[index].range == Mountains.count) return "Black-Summit Works";
+    if (index < caves.count and caves.systems[index].range == k2_range) return "Black-Summit Works";
+    if (index < caves.count and caves.systems[index].range == moon_range) return "Selene Burrow";
     return name(index);
 }
 
@@ -683,7 +736,9 @@ test "every range opens cave systems with a mouth, chambers under rock, and a he
     const seed: u64 = 0x4845415659;
     const caves = layout(seed);
     try std.testing.expect(caves.count >= Mountains.count);
+    var lunar_burrow_found = false;
     for (caves.systems[0..caves.count]) |*sys| {
+        lunar_burrow_found = lunar_burrow_found or sys.range == moon_range;
         try std.testing.expect(sys.room_count >= 4);
         // The mouth is open: just outside it is air, and the tunnel inside is cave.
         const inside = add(sys.entrance, add(scale(sys.inward, 4), .{ 0, 1.5, 0 }));
@@ -697,6 +752,13 @@ test "every range opens cave systems with a mouth, chambers under rock, and a he
         }
         try std.testing.expect(sys.heart().floor <= sys.rooms[0].floor);
     }
+    try std.testing.expect(lunar_burrow_found);
+    var lunar_index: ?u8 = null;
+    for (caves.systems[0..caves.count], 0..) |sys, i| if (sys.range == moon_range) {
+        lunar_index = @intCast(i);
+        break;
+    };
+    try std.testing.expectEqualStrings("Selene Burrow", systemName(&caves, lunar_index.?));
     // Same seed, same caves.
     const again = layout(seed);
     try std.testing.expectEqualDeep(caves.systems[0].rooms[0], again.systems[0].rooms[0]);

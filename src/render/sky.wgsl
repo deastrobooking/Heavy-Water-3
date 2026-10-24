@@ -48,5 +48,12 @@ struct SkyOut {
 
     // Rain is drawn as a consistent cool veil; individual streaks are composited at display resolution.
     color = mix(color, color * vec3<f32>(0.72, 0.82, 0.94), frame.weather.x * 0.24);
+    if (frame.weather.w < 0.0) {
+        let cell = floor(ray * 720.0);
+        let hash = fract(sin(dot(cell, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+        let stars = step(0.99955, hash);
+        let twinkle = 0.65 + 0.35 * sin(frame.params.x * 2.4 + hash * 700.0);
+        color += vec3<f32>(0.58, 0.74, 1.0) * stars * twinkle;
+    }
     return vec4<f32>(color, 1.0);
 }

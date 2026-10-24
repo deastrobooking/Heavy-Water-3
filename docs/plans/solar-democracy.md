@@ -1,6 +1,6 @@
 # Solar frontier and Galactic Democratic Compact
 
-**Status:** ordered eight-planet, twelve-moon, and Scalari mining-front data, plus the campaign framework and the level-design pass below. One low-threat Scalari Prospector combat unit has been added near the Frontier nests. No planetary travel, transforming Kestrel modes, stations, mining production, or Compact voting is playable yet. Future orbital construction follows the staged capability gates in [Project Helios](space-habitat-network.md); that plan distinguishes the rotating-habitat physics from unverified megastructure engineering.
+**Status (2026-10-24):** the title and pause menus open a compact Luna/Mars/Asteroid Belt/Kuiper Belt route chart. Each battle route runs ten saved, seeded space-battle levels; each battle contains three designed waves, Hive craft, Scalari fighter AI that changes flight behavior and silhouette, and heavy ships, with a level-10 Mother Ship and rescue/secure flag. Clearing Luna level 10 opens a surface landing on the supplied 16-bit lunar elevation map. The playable Selene Relay slice includes a buildable landing area, local iron/copper/lumen veins, a designed pressure-habitat and solar-array foothold, and a Hive cave network with a nest and loot. The same map and travel system make the Moon available from the local destination map after rescue. The asteroid mining route remains a playable space run; a persistent drone-supported asteroid base, Mars surface landing, full humanoid transformer animation, ship subsystem targeting and Compact voting remain future work. Future orbital construction follows the staged capability gates in [Project Helios](space-habitat-network.md); that plan distinguishes the rotating-habitat physics from unverified megastructure engineering.
 
 ## Campaign frame
 
@@ -82,7 +82,7 @@ Each space location can offer replayable skirmishes whose seed fixes a fair enem
 | 9 | Mars blockade: coordinate an assault on multiple Hive ships and shield relays to open a temporary corridor. |
 | 10 | **Rescue Mars:** defend evacuation craft, disable the Hive Mother Ship's blockade systems, and secure an orbital rescue corridor. Success frees the planet's orbit and authorizes a Mars landing when the surface heightmap level is supplied; this mission does not fabricate or promise Mars terrain. |
 
-Random skirmishes continue to use the unlocked ladder tier after completion, while level 10 remains a deterministic campaign rescue objective. Store the battle level, seed and outcome with campaign progression; keep individual mining deposits tied to stable site IDs. The current orbital trial has no enemies or rewards, and none of this ladder or Mother Ship behavior is implemented yet.
+Current behavior (2026-10-24; full design in [space combat](space-combat.md#space-battles-the-design-as-built-2026-10-24)): the four sectors form one route, and each opens when the previous sector's level 5 battleship falls. Each level is three authored waves of formations, harder by sector tier; level 10 is a three-phase Mother Ship. The fighter flies twin-stick (move and aim separately) with energy machine guns, a charge blast, tracking missiles and tracking energy bombs; enemies telegraph every attack and fire slow, dodgeable shots. Kills pay the pilot's own kit, a clear pays every present player and sets a shared flag, and level 10 sets the sector's rescue/secure flag; Luna's opens the Selene Relay landing. The asteroid mining run is played: the pilot shoots ore rocks into their own held ore, deposited at a colony store like any mined ore. It is not yet a placed, damaged, upgradeable base or a remote hourly drone simulation.
 
 Mining is interrupted by readable decisions and pressure: a survey may reveal an unstable seam, an abandoned Scalari operation, or a crew member in danger. Players can secure the site, divert the machine, rescue workers, or extract the already-approved sample. A completed pocket returns material and data to a named station or settlement. This orbital loop leads into—not around—the surface survey, local consent and civic-build levels defined below.
 
@@ -97,16 +97,16 @@ Space combat takes place in small local arenas around a convoy, relay, mining te
 | Hive Mother Ships | Rare campaign-scale threats and set-piece bosses | Carry several drone bays and distinct exposed systems. The mission first protects civilians or a relay, then opens a timed boarding/weak-point opportunity, then extracts before the ship's last defense wave. Defeat or retreat changes the local route and salvage state. |
 | Scalari transforming fighter AIs | Skilled autonomous interceptors, visually distinct from Hive swarm craft | Shift between fast flight and a compact humanoid combat mode to change attack range, dodge through debris, or contest a boarding point. Telegraph each change with a silhouette and charge-up; transformation does not grant invulnerability. |
 
-The player Kestrel's planned vacuum form and winged Colossus remain separate progression. Enemy transforming AIs establish the encounter language, but must not imply that the player's transformation or the current Kestrel has been implemented in orbital flight. The existing Hive carrier and Scalari meshes are art/design foundations; Mother Ship encounters and space-battle behavior are not playable yet.
+The player Kestrel's planned vacuum form and winged Colossus remain separate progression. In orbit, all six native frames fly the bounded twin-stick model with their own handling and weapon profile (the fighter designer on the solar map). Armada transformers switch between robot fighter and lancer silhouettes, winding up and dashing in lancer form; they do not transform to a humanoid mesh. Ship subsystems, convoy objectives and retreat extraction remain planned.
 
 ### Build order for the space layer
 
-1. Make the system chart's Mars, Asteroid Belt and Kuiper Belt nodes selectable through fast travel.
-2. Prove one bounded orbital zone with a safe arrival, local flight, extraction and an illustrated planet backdrop.
-3. Add one repeatable asteroid pocket with scan → mine → tow/extract, plus a small persisted site record.
-4. Add a Hive drone patrol and a battleship encounter around the same arena, with a defend or retreat outcome.
-5. Add one Mother Ship set-piece and a Scalari transforming-fighter AI only after the smaller fleet encounter reads clearly.
-6. Add surface-site selection and heightmap landing as the next content step, beginning with Mars. Each landing loads a bounded named region rather than dropping into a planet-scale continuous world.
+1. **In place:** title/pause route chart; bounded orbital launch; four sectors of ten saved levels with route gates, telegraphed enemy fire, four weapon systems, six designer frames and a three-phase Mother Ship; a played asteroid mining run into each pilot's held ore; the Selene Relay landing after Luna.
+2. Add the broader chart destinations, including Kuiper Belt travel, and connect the orbit-secured flags to an explicit landing-site selection.
+3. Turn the prototype mine into a persistent asteroid base with survey seams, miner/hauler tasks, storage capacity, power, damage and player commands, reusing colony research and site records.
+4. Add active enemy fire, convoy/relay defense and retreat/extraction outcomes; give battleships and Mother Ships readable subsystems before adding larger fleets.
+5. Add Scalari fighter transformation behavior only after the current orbital targeting and combat reads clearly.
+6. Add surface-site selection and heightmap landing, beginning with Mars. Each landing loads a bounded named region rather than dropping into a planet-scale continuous world.
 
 The map and orbital slice uses illustration assets only for planet backdrops. The owner plans to supply surface heightmaps for the subsequent landing step; no open-source planetary image, scientific texture or heightmap is assumed in this design.
 

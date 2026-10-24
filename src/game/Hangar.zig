@@ -32,6 +32,10 @@ pub const tuning = .{
 pub const chase_distance: f32 = tuning.chase_distance;
 /// The Kestrel stands this far above its pad on its gear (COM height).
 pub const rest_height: f32 = tuning.rest_height;
+/// The space camera looks almost straight down from this high, a little behind the fighter, so
+/// a fighter and the arena around it both read.
+pub const space_camera_height: f32 = 200;
+pub const space_camera_back: f32 = 46;
 
 fighter: ?jet.Fighter = null,
 piloting: bool = false,
@@ -112,7 +116,7 @@ pub fn enterSpaceTrial(self: *Hangar, center: Physics.Vec3, return_to: Physics.V
     f.throttle = 0;
     camera.yaw = 0;
     camera.pitch = -1.35;
-    camera.position = math.vec3(center[0], center[1] + 260, center[2] - 60);
+    camera.position = math.vec3(center[0], center[1] + space_camera_height, center[2] - space_camera_back);
 }
 
 pub fn leaveSpaceTrial(self: *Hangar, seed: u64, spawn: Physics.Vec3, levels: [Progress.kestrel_upgrade_count]u8, camera: *Camera) ?Physics.Vec3 {
@@ -173,7 +177,7 @@ pub fn controls(input: Input, camera: Camera) jet.Input {
 pub fn step(self: *Hangar, physics: *const Physics, input: jet.Input, dt: f32) void {
     const f = &(self.fighter orelse return);
     if (self.space_mode and self.piloting) {
-        SpaceFlight.step(f, self.space_center, .{ .lateral = input.roll, .forward = input.throttle, .vertical = input.climb, .boost = input.afterburner, .brake = input.brake }, dt);
+        SpaceFlight.step(f, self.space_center, .{ .lateral = input.roll, .forward = input.throttle, .vertical = input.climb, .boost = input.afterburner, .brake = input.brake }, .{}, null, dt);
         return;
     }
     // Unpiloted, the jet idles: engine off, wings levelled, and the lift jets let it down gently.
@@ -216,7 +220,7 @@ pub fn follow(self: *const Hangar, seed: u64, camera: *Camera) ?Physics.Vec3 {
     if (self.space_mode) {
         camera.yaw = 0;
         camera.pitch = -1.35;
-        camera.position = math.vec3(pos.x, pos.y + 260, pos.z - 60);
+        camera.position = math.vec3(pos.x, pos.y + space_camera_height, pos.z - space_camera_back);
         return .{ pos.x, pos.y, pos.z };
     }
     const fwd = camera.forward();

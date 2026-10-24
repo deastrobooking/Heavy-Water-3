@@ -26,9 +26,12 @@ const Specials = @import("../game/Specials.zig");
 const Pets = @import("../game/Pets.zig");
 const Encounters = @import("../game/Encounters.zig");
 const Arena = @import("../game/Arena.zig");
+const SpaceBattle = @import("../game/SpaceBattle.zig");
 const Market = @import("../city/Market.zig");
 const District = @import("../procedural/District.zig");
 const CityGeography = @import("../procedural/CityGeography.zig");
+const ChunkKey = @import("../world/ChunkKey.zig");
+const Region = @import("../world/Region.zig");
 const TerrainSites = @import("../procedural/TerrainSites.zig");
 const Enemies = @import("../game/Enemies.zig");
 const EnemyDesign = @import("../game/EnemyDesign.zig");
@@ -133,7 +136,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
     if (menu.screen == .title or (menu.base == .title and menu.screen != .none)) {
         c.beginScroll(hud.scroll);
         defer c.endScroll();
-        return drawTitle(c, menu, hud);
+        return drawTitle(c, menu, sb, hud);
     }
     for (hud.guests) |g| drawGuest(c, sb, g);
     @import("BlockPalette.zig").drawAll(c, sb, hud.view, hud.guests);
@@ -185,7 +188,7 @@ pub fn draw(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud) void {
 
 // ---------------------------------------------------------------- title and menus
 
-fn drawTitle(c: *Canvas, menu: *const Menu, hud: Hud) void {
+fn drawTitle(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
     const w = @min(c.width * 0.46, 560);
     c.rect(.{ .x = 0, .y = 0, .w = w, .h = c.height }, .{ 0.01, 0.025, 0.035, 0.78 });
     c.rect(.{ .x = w, .y = 0, .w = 2, .h = c.height }, alpha(accent, 0.6));
@@ -206,7 +209,7 @@ fn drawTitle(c: *Canvas, menu: *const Menu, hud: Hud) void {
             if (on) c.hit(r, hitId(.menu, i));
             y += 40;
         }
-    } else drawMenu(c, menu, null, hud);
+    } else drawMenu(c, menu, sb, hud);
     const music_width = @min(408, @max(220, c.width * 0.32));
     drawMusicPlayer(c, hud, .{ .x = c.width - music_width - 24, .y = c.height - 134, .w = music_width, .h = 84 }, music_width < 340);
     // Load failures and other notices still need to reach the player here.
@@ -255,7 +258,7 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
         .pause, .confirm_quit, .party, .player, .music => {
             const list = menu.items();
             // The party setup is wider: each seat shows its pad, its character and their scrap.
-            const r = menuRect(c, if (menu.screen == .party) @min(560, c.width - 24) else 400, 92 + @as(f32, @floatFromInt(list.len)) * 36 + (if (sb != null) @as(f32, 34) else 0));
+            const r = menuRect(c, if (menu.screen == .party) @min(560, c.width - 24) else 400, 92 + @as(f32, @floatFromInt(list.len)) * 34 + (if (sb != null) @as(f32, 34) else 0));
             panel(c, r, switch (menu.screen) {
                 .party => "FOUR PLAYER SETUP",
                 .player => "PLAYER MENU",
@@ -298,13 +301,15 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
                     } else c.text(row.x + 105, row.y + 9, if (joined) "JOINED" else "EMPTY", 1, dim);
                     c.print(row.x + row.w - 120, row.y + 9, 1, if (joined) accent else dim, "PAD {d}{s} {s}", .{ controller, if (controller > 0 and menu.controllers_connected[controller - 1]) " ON" else " OFF", if (menu.hero_player == i) "<" else "" });
                 }
-                y += 36;
+                y += 34;
             }
             if (sb) |s| if (menu.screen == .pause) {
                 c.print(r.x + 18, r.y + r.h - 28, 1, dim, "DAY {d}   SCRAP {d}   PARTS {d}   UNSAVED PROGRESS IS LOST ON QUIT", .{ s.market.day, s.kits[0].wallet.scrap, s.kits[0].wallet.parts });
             };
         },
         .world_map => if (sb) |s| drawWorldMap(c, menu, s),
+        .solar_system => if (sb) |s| drawSolarSystem(c, menu, s),
+        .fighter_designer => if (sb) |s| drawFighterDesigner(c, menu, s),
         .build => if (sb) |s| drawBuildMenu(c, menu, s),
         .settings => drawSettings(c, menu),
         .controls => drawControls(c, menu),
@@ -316,6 +321,132 @@ fn drawMenu(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox, hud: Hud) void {
         .arena => drawArena(c, menu, sb),
         else => {},
     }
+}
+
+/// The solar route: the four sectors in order from the Sun with their progress and locks, the
+/// mining run, the fighter designer and BACK. A sector opens when the one before it falls to
+/// its level 5 midboss.
+fn drawSolarSystem(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const SpaceLevels = @import("../game/SpaceLevels.zig");
+    const Arsenal = @import("../game/SpaceArsenal.zig");
+    const r = menuRect(c, @min(860, c.width - 24), @min(600, c.height - 24));
+    panel(c, r, "SOLAR SYSTEM  SPACE BATTLES");
+    c.text(r.x + 22, r.y + 44, "CLEAR A SECTOR'S LEVEL 5 MIDBOSS TO OPEN THE NEXT ON THE ROUTE", 0.92, dim);
+    const map: Rect = .{ .x = r.x + 26, .y = r.y + 76, .w = 250, .h = r.h - 150 };
+    c.rect(map, .{ 0.015, 0.04, 0.085, 0.9 });
+    c.frame(map, 1, alpha(accent, 0.5));
+    const sun: Rect = .{ .x = map.x + map.w / 2 - 20, .y = map.y + 14, .w = 40, .h = 40 };
+    c.rect(sun, .{ 1, 0.67, 0.18, 1 });
+    c.centered(sun.x + 20, sun.y + 14, "SUN", 0.8, .{ 0.12, 0.08, 0.02, 1 });
+    const step = (map.h - 90) / 4;
+    for (0..SpaceLevels.location_count) |i| {
+        const loc: SpaceLevels.Location = @enumFromInt(i);
+        const y = map.y + 74 + @as(f32, @floatFromInt(i)) * step;
+        const open = SpaceLevels.unlocked(&sb.progress, loc);
+        const done = SpaceLevels.cleared(&sb.progress, loc, SpaceLevels.boss_level);
+        // The route line from the previous stop.
+        c.rect(.{ .x = map.x + 40, .y = y - step + 22, .w = 2, .h = step - 22 }, if (open) alpha(accent, 0.7) else alpha(dim, 0.35));
+        const node: Rect = .{ .x = map.x + 30, .y = y, .w = 22, .h = 22 };
+        c.rect(node, if (menu.row == i) gold else if (done) good else if (open) accent else alpha(dim, 0.5));
+        c.text(map.x + 64, y, SpaceLevels.name(loc), 0.88, if (!open) dim else if (menu.row == i) gold else ink);
+        if (open) {
+            c.print(map.x + 64, y + 18, 0.75, if (done) good else dim, "{d}/10{s}", .{ SpaceLevels.clearedCount(&sb.progress, loc), if (done) "  SECURED" else "" });
+        } else c.text(map.x + 64, y + 18, "LOCKED", 0.75, dim);
+    }
+    const list_x = r.x + 300;
+    var y = r.y + 76;
+    for (Menu.solar_items, 0..) |item, i| {
+        const row: Rect = .{ .x = list_x, .y = y, .w = r.w - 320, .h = 44 };
+        rowBack(c, row, menu.row == i);
+        const on = menu.enabled(i);
+        const color = if (!on) alpha(dim, 0.55) else if (menu.row == i) accent else ink;
+        c.text(row.x + 12, row.y + 6, item.label, 0.98, color);
+        var line: [96]u8 = undefined;
+        const detail: []const u8 = if (i < Menu.solar_sectors) blk: {
+            const loc: SpaceLevels.Location = @enumFromInt(i);
+            if (!SpaceLevels.unlocked(&sb.progress, loc)) break :blk std.fmt.bufPrint(&line, "LOCKED: CLEAR {s} LEVEL 5", .{SpaceLevels.name(@enumFromInt(i - 1))}) catch "";
+            const next = SpaceLevels.nextLevel(&sb.progress, loc);
+            const what: []const u8 = if (next == SpaceLevels.boss_level) "MOTHER SHIP BOSS" else if (next == SpaceLevels.gate_level) "BATTLESHIP MIDBOSS" else "THREE WAVES";
+            const who: []const u8 = switch (SpaceLevels.faction(loc)) {
+                .brood => "BROOD",
+                .armada => "ROBOT ARMADA",
+                .mixed => "BROOD AND ARMADA",
+            };
+            break :blk std.fmt.bufPrint(&line, "NEXT: LEVEL {d}/10, {s}  {s}", .{ next, what, who }) catch "";
+        } else if (i == Menu.solar_mining) "SHOOT ORE ROCKS; THE ORE IS YOURS UNTIL DEPOSITED" else if (i == Menu.solar_landing) (if (on) "SELENE RELAY: LUNAR VEINS, A STARTER BASE AND A HIVE BURROW" else "OPENS WHEN LUNA ORBIT LEVEL 10 IS CLEARED") else if (i == Menu.solar_designer) blk: {
+            const p = Arsenal.base(sb.progress.space_frame);
+            break :blk std.fmt.bufPrint(&line, "FLYING: {s}, {s}", .{ p.name, p.role }) catch "";
+        } else "";
+        c.text(row.x + 12, row.y + 25, detail, 0.78, if (on) dim else alpha(dim, 0.55));
+        c.hit(row, hitId(.menu, i));
+        y += 50;
+    }
+    c.text(list_x + 4, r.y + r.h - 50, "WASD MOVE  MOUSE / RIGHT STICK AIM  CLICK GUNS", 0.8, dim);
+    c.text(list_x + 4, r.y + r.h - 32, "HOLD RIGHT CLICK CHARGE  Z MISSILE  C BOMB  F RETURN", 0.8, dim);
+}
+
+/// The six native fighter frames side by side: what each is for, how it flies and what it
+/// carries, with its unlock state. Choosing an owned frame equips it; the next one is unlocked
+/// here through the fabricator's rules. Team upgrades apply to every frame.
+fn drawFighterDesigner(c: *Canvas, menu: *const Menu, sb: *const Sandbox) void {
+    const Arsenal = @import("../game/SpaceArsenal.zig");
+    const r = menuRect(c, @min(900, c.width - 24), @min(600, c.height - 24));
+    panel(c, r, "FIGHTER DESIGNER");
+    const levels = sb.progress.kestrel_levels;
+    var y = r.y + 56;
+    for (Menu.designer_items, 0..) |item, i| {
+        const row: Rect = .{ .x = r.x + 20, .y = y, .w = 300, .h = 58 };
+        rowBack(c, row, menu.row == i);
+        const on = menu.enabled(i);
+        c.text(row.x + 12, row.y + 8, item.label, 1, if (!on) alpha(dim, 0.55) else if (menu.row == i) accent else ink);
+        if (i < Progress.space_frame_count) {
+            const frame: Progress.SpaceFrame = @enumFromInt(i);
+            var line: [64]u8 = undefined;
+            const owned = sb.progress.ownsSpaceFrame(frame);
+            const state: []const u8 = if (owned)
+                (if (sb.progress.space_frame == frame) "EQUIPPED" else "OWNED: CHOOSE TO EQUIP")
+            else if (@import("../game/Fabricator.zig").status(&sb.progress, &sb.kits[0], .{ .space_frame = frame })) |why|
+                why
+            else blk: {
+                const cost = Progress.spaceFrameCost(frame);
+                break :blk std.fmt.bufPrint(&line, "{d} SCRAP  {d} PARTS  {d} GOLD", .{ cost.scrap, cost.parts, cost.gold }) catch "";
+            };
+            c.text(row.x + 12, row.y + 30, state, 0.8, if (sb.progress.space_frame == frame) good else if (owned) dim else gold);
+        }
+        c.hit(row, hitId(.menu, i));
+        y += if (i + 1 < Progress.space_frame_count) 64 else 52;
+    }
+    const shown: Progress.SpaceFrame = if (menu.row < Progress.space_frame_count) @enumFromInt(menu.row) else sb.progress.space_frame;
+    const p = Arsenal.profile(shown, levels);
+    const card: Rect = .{ .x = r.x + 340, .y = r.y + 56, .w = r.w - 360, .h = r.h - 76 };
+    c.rect(card, .{ 0.015, 0.04, 0.085, 0.9 });
+    c.frame(card, 1, alpha(accent, 0.5));
+    c.text(card.x + 18, card.y + 14, p.name, 1.4, accent);
+    c.text(card.x + 18, card.y + 42, p.role, 0.95, gold);
+    var wrapped: [3][]const u8 = undefined;
+    const lines = Canvas.wrap(p.about, 52, &wrapped);
+    for (wrapped[0..lines], 0..) |line, k| c.text(card.x + 18, card.y + 66 + @as(f32, @floatFromInt(k)) * 17, line, 0.9, ink);
+    const hull = Hangar.configFor(shown, levels).hull_max;
+    const Stat = struct { label: []const u8, value: f32, max: f32 };
+    const stats = [_]Stat{
+        .{ .label = "TOP SPEED", .value = p.top, .max = 220 },
+        .{ .label = "AGILITY", .value = p.accel, .max = 150 },
+        .{ .label = "HULL", .value = hull, .max = 840 },
+        .{ .label = "ENERGY GUNS", .value = p.gun_damage / p.gun_interval, .max = 200 },
+        .{ .label = "CHARGE BLAST", .value = p.charge_damage / p.charge_time, .max = 300 },
+        .{ .label = "TRACKING MISSILES", .value = @floatFromInt(p.missiles), .max = 14 },
+        .{ .label = "ENERGY BOMBS", .value = @floatFromInt(p.bombs), .max = 4 },
+    };
+    var sy = card.y + 70 + @as(f32, @floatFromInt(lines)) * 17 + 8;
+    for (stats) |s| {
+        c.text(card.x + 18, sy, s.label, 0.82, dim);
+        bar(c, .{ .x = card.x + 190, .y = sy + 3, .w = card.w - 290, .h = 10 }, s.value / s.max, accent);
+        c.print(card.x + card.w - 86, sy, 0.82, ink, "{d:.0}", .{s.value});
+        sy += 26;
+    }
+    c.print(card.x + 18, sy + 8, 0.8, dim, "TEAM UPGRADES  ENGINE {d}  RACK {d}  COOLING {d}  ARMOR {d}", .{ levels[@intFromEnum(Progress.KestrelUpgrade.engine)], levels[@intFromEnum(Progress.KestrelUpgrade.missile_rack)], levels[@intFromEnum(Progress.KestrelUpgrade.gun_cooling)], levels[@intFromEnum(Progress.KestrelUpgrade.armor)] });
+    c.text(card.x + 18, sy + 28, "UPGRADES AND PAINT: FABRICATOR, AIRCRAFT TAB", 0.8, dim);
+    if (menu.space_trial_active) c.text(card.x + 18, sy + 48, "LEAVE THE BATTLE TO CHANGE FRAMES", 0.8, bad);
 }
 
 /// A compact, Minecraft-style inventory: category tabs and a fixed four-by-four card grid.
@@ -533,7 +664,7 @@ fn drawArena(c: *Canvas, menu: *const Menu, sb: ?*const Sandbox) void {
     const r = menuRect(c, 560, 440);
     panel(c, r, "BATTLE ARENAS");
     var wrapped: [4][]const u8 = undefined;
-    const lines = Canvas.wrap("Drop into the Starbowl for Hive waves, co-op loot and Wildkin champions. SPACE DOGFIGHT TRIAL is a bounded orbital flight test: A/D strafe, W accelerate, Q/E rise, Shift boost, S brake. No enemies or rewards yet.", 60, &wrapped);
+    const lines = Canvas.wrap("Drop into the Starbowl for Hive waves and Wildkin champions. The Solar System chart starts rising three-wave battles at Luna, Mars, the Asteroid Belt and Kuiper Belt; level 10 brings a Hive Mother Ship. The separate asteroid mining operation sends drone-harvested ore to the shared colony stockpile. Orbital flight: A/D strafe, W accelerate, Q/E rise, Shift boost, S brake, click / RT fire, F return.", 60, &wrapped);
     for (wrapped[0..lines], 0..) |line, i| c.text(r.x + 22, r.y + 52 + @as(f32, @floatFromInt(i)) * 17, line, 1, ink);
     var y = r.y + 52 + @as(f32, @floatFromInt(lines)) * 17 + 10;
     if (sb) |s| {
@@ -858,6 +989,56 @@ fn colonyPanel(c: *Canvas, sb: *const Sandbox, r: Rect) void {
     } else c.text(r.x + 14, r.y + 50, "ALL RESEARCH DONE", 1, dim);
 }
 
+/// The orbital battle's HUD: mission and score across the top, the boss's health under it, and
+/// the fighter's hull and four weapon systems bottom left.
+fn spaceHud(c: *Canvas, v: Rect, sb: *const Sandbox) void {
+    const SpaceLevels = @import("../game/SpaceLevels.zig");
+    const Arsenal = @import("../game/SpaceArsenal.zig");
+    const battle = &sb.space_battle;
+    const w: f32 = @min(v.w - 32, 520);
+    const banner: Rect = .{ .x = v.x + (v.w - w) / 2, .y = v.y + 18, .w = w, .h = 58 };
+    c.rect(banner, .{ 0.015, 0.035, 0.07, 0.82 });
+    c.frame(banner, 1.5, if (battle.warning or battle.hit_flash > 0) bad else alpha(accent, 0.8));
+    if (battle.mining) {
+        c.text(banner.x + 12, banner.y + 8, "ASTEROID MINING RUN", 1, accent);
+        c.print(banner.x + 12, banner.y + 32, 0.92, ink, "THIS RUN  IRON {d}  COPPER {d}  CRYSTAL {d}   F RETURN", .{ battle.ore[0], battle.ore[1], battle.ore[2] });
+    } else if (battle.result == .won) {
+        c.print(banner.x + 12, banner.y + 8, 1, good, "{s} LEVEL {d} CLEAR  SCORE {d}", .{ SpaceLevels.name(battle.location), battle.level, battle.score });
+        c.print(banner.x + 12, banner.y + 32, 0.92, ink, "+{d} SCRAP  +{d} XP FROM KILLS   H NEXT LEVEL   F RETURN", .{ battle.earned_scrap, battle.earned_xp });
+    } else {
+        c.print(banner.x + 12, banner.y + 8, 1, accent, "{s}  LEVEL {d}/10  WAVE {d}/3", .{ SpaceLevels.name(battle.location), battle.level, battle.wave });
+        c.print(banner.x + 12, banner.y + 32, 0.92, if (battle.warning) bad else ink, "HOSTILES {d}  SCORE {d}  CHAIN X{d}{s}", .{ battle.liveEnemies(), battle.score, battle.chain, if (battle.warning) "  EDGE OF THE ARENA" else "" });
+    }
+    if (battle.heavy()) |boss| {
+        const bw = w;
+        const r: Rect = .{ .x = banner.x, .y = banner.y + banner.h + 6, .w = bw, .h = 12 };
+        bar(c, r, boss.health / boss.max_health, bad);
+        const label = if (boss.kind == .mother_ship) "MOTHER SHIP" else "BATTLESHIP";
+        if (boss.kind == .mother_ship) {
+            c.print(r.x, r.y + 16, 0.8, ink, "{s}  PHASE {d} OF 3", .{ label, boss.mode });
+        } else c.text(r.x, r.y + 16, label, 0.8, ink);
+    }
+    const f = sb.hangar.fighter orelse return;
+    const p = battle.profile;
+    const wpn = battle.weapons;
+    // Above the controls line at the bottom of the view.
+    const panel_r: Rect = .{ .x = v.x + 20, .y = v.y + v.h - 236, .w = 300, .h = 148 };
+    c.rect(panel_r, .{ 0.015, 0.035, 0.07, 0.82 });
+    c.text(panel_r.x + 12, panel_r.y + 8, Arsenal.base(battle.frame).name, 1, accent);
+    const rows = [_]struct { label: []const u8, value: f32, color: Color }{
+        .{ .label = "HULL", .value = f.hull / f.hull_max, .color = if (f.hull < f.hull_max * 0.3) bad else good },
+        .{ .label = if (wpn.overheated) "GUNS VENTING" else "GUN HEAT", .value = wpn.heat, .color = if (wpn.overheated) bad else gold },
+        .{ .label = "CHARGE", .value = wpn.chargeShare(p), .color = if (wpn.chargeShare(p) >= Arsenal.min_charge) accent else dim },
+    };
+    for (rows, 0..) |row, k| {
+        const y = panel_r.y + 32 + @as(f32, @floatFromInt(k)) * 20;
+        c.text(panel_r.x + 12, y, row.label, 0.78, dim);
+        bar(c, .{ .x = panel_r.x + 120, .y = y + 2, .w = 166, .h = 9 }, row.value, row.color);
+    }
+    c.print(panel_r.x + 12, panel_r.y + 96, 0.82, ink, "Z MISSILES {d}/{d}{s}", .{ wpn.missiles, p.missiles, if (battle.lock != null and wpn.missiles > 0) "  LOCKED" else "" });
+    c.print(panel_r.x + 12, panel_r.y + 118, 0.82, ink, "C ENERGY BOMBS {d}/{d}", .{ wpn.bombs, p.bombs });
+}
+
 fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: bool) void {
     const v = hud.view;
     // Vitals, bottom left (hidden under conversation and shop panels).
@@ -867,8 +1048,8 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
         specials(c, v, sb, 0, sb.profile, hud.special_keys);
         if (sb.tools.tool == .weapon) weaponLine(c, v, sb, 0);
     }
-    // Wallet and clock, top right.
-    {
+    // Wallet and colony clock, top right. Orbital missions use the same space for mission state.
+    if (!sb.hangar.space_mode) {
         var buffer: [48]u8 = undefined;
         const scrap = std.fmt.bufPrint(&buffer, "{d} SCRAP", .{sb.kits[0].wallet.scrap}) catch "";
         const w: f32 = 290;
@@ -880,6 +1061,7 @@ fn drawHud(c: *Canvas, menu: *const Menu, sb: *const Sandbox, hud: Hud, panels: 
         c.text(r.x + w - 14 - Canvas.textWidth(hud.clock, 1), r.y + 12, hud.clock, 1, dim);
         colonyPanel(c, sb, .{ .x = r.x, .y = r.y + r.h + 8, .w = w, .h = 72 });
     }
+    if (sb.space_battle.active) spaceHud(c, v, sb);
     if (!sb.arena.active and !hud.space_trial and !sb.hangar.space_mode) drawPlayerCoordinates(c, v, sb);
     if (menu.map_target != .none and !panels) {
         if (trackedTarget(menu.map_target, sb, sb.player.feet, 0)) |target| {
@@ -1089,11 +1271,18 @@ fn drawPlayerCoordinates(c: *Canvas, v: Rect, sb: *const Sandbox) void {
             }
             break :blk sb.player.feet;
         } else sb.guests[owner - 1].player.feet;
-        const coord = CityGeography.atWorld(position[0], position[2]);
-        const lat_dir: []const u8 = if (coord.latitude >= 0) "N" else "S";
-        const lon_dir: []const u8 = if (coord.longitude >= 0) "E" else "W";
         const color = if (owner == 0) ink else Profile.accent_colors[sb.guests[owner - 1].profile.accent];
-        c.print(r.x + 8, y, 0.78, color, "P{d}  {d:.4} {s}  {d:.4} {s}", .{ owner + 1, @abs(coord.latitude), lat_dir, @abs(coord.longitude), lon_dir });
+        const key = ChunkKey.fromPosition(position[0], position[2]);
+        if (Region.moon.contains(key.x, key.z)) {
+            const dx = position[0] - Region.moon.arrival[0];
+            const dz = position[2] - Region.moon.arrival[1];
+            c.print(r.x + 8, y, 0.78, color, "P{d}  LUNA  {d:.0}m  {d:.0}m", .{ owner + 1, dx, dz });
+        } else {
+            const coord = CityGeography.atWorld(position[0], position[2]);
+            const lat_dir: []const u8 = if (coord.latitude >= 0) "N" else "S";
+            const lon_dir: []const u8 = if (coord.longitude >= 0) "E" else "W";
+            c.print(r.x + 8, y, 0.78, color, "P{d}  {d:.4} {s}  {d:.4} {s}", .{ owner + 1, @abs(coord.latitude), lat_dir, @abs(coord.longitude), lon_dir });
+        }
         y += row_h;
     }
 }

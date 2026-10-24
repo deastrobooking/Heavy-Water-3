@@ -31,6 +31,7 @@ const Fabricator = @import("Fabricator.zig");
 const Progress = @import("Progress.zig");
 const Designs = @import("../vehicle/Designs.zig");
 const Hangar = @import("Hangar.zig");
+const SpaceFlight = @import("../vehicle/SpaceFlight.zig");
 const Skies = @import("Skies.zig");
 const ShipMeshes = @import("../vehicle/ShipMeshes.zig");
 const HiveMeshes = @import("../vehicle/HiveMeshes.zig");
@@ -1317,6 +1318,30 @@ fn down(sb: *Sandbox, player: u8, camera: *Camera) void {
 
 /// The frontier part of a fixed step. `frozen` (menus, talks) pauses triggers, not the world.
 pub fn step(sb: *Sandbox, camera: *Camera, input: Input, actions: Sandbox.Actions, frozen: bool, dt: f32, timing: ?Sandbox.BenchmarkTiming) void {
+    if (sb.space_battle.active) {
+        const battle = &sb.space_battle;
+        const flying = sb.hangar.piloting and !frozen;
+        if (flying) {
+            // Space holds the camera still overhead, so any look input since the last step
+            // (mouse or right stick) turns the fighter's aim instead.
+            var turn = camera.yaw;
+            if (turn > std.math.pi) turn -= 2 * std.math.pi;
+            battle.aim = @mod(battle.aim + turn + std.math.pi, 2 * std.math.pi) - std.math.pi;
+            if (sb.hangar.fighter) |*f| SpaceFlight.step(f, sb.hangar.space_center, .{
+                .lateral = input.right,
+                .forward = input.forward,
+                .vertical = std.math.clamp(input.up + @as(f32, if (input.jump) 1 else 0), -1, 1),
+                .boost = input.fast,
+                .brake = input.brake,
+            }, .{ .accel = battle.profile.accel, .top = battle.profile.top, .boost = battle.profile.boost }, battle.aim, dt);
+        }
+        battle.step(sb, if (flying) .{ .fire = sb.trigger.fire, .alt = sb.trigger.alt, .missile = actions.special_1, .bomb = actions.special_2, .next = actions.special_3 } else .{}, dt);
+        if (sb.hangar.follow(sb.seed, camera)) |feet| {
+            sb.player.feet = feet;
+            sb.player.velocity = .{ 0, 0, 0 };
+        }
+        return;
+    }
     var phase_timer = if (timing) |profile| mach.time.Timer.start(profile.io) else undefined;
     stepCaves(sb);
     stepArena(sb, camera, dt);
@@ -1831,6 +1856,7 @@ pub fn boardJet(sb: *Sandbox, camera: *Camera) void {
 
 pub fn leaveJet(sb: *Sandbox, camera: *Camera) void {
     if (sb.hangar.space_mode) {
+        sb.space_battle.active = false;
         const feet = sb.hangar.leaveSpaceTrial(sb.seed, Sandbox.spawn, sb.progress.kestrel_levels, camera) orelse return;
         sb.player = .{ .feet = feet, .mode = .walk };
         return;
@@ -1874,6 +1900,39 @@ fn warningTint(warn: f32, t: f32) [4]f32 {
     return .{ 1 + 0.9 * warn * pulse, 0.95 + 0.15 * warn, 0.85 - 0.55 * warn, 1 };
 }
 
+/// Everything drawn in orbit (the app draws only this and the fighter while in space): the
+/// boundary ring and service hub, the sector's backdrop, and the battle or mining run.
+pub fn publishSpace(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
+    var n = start;
+    const c = &sb.catalog.content;
+    const t: f32 = @as(f32, @floatFromInt(sb.tick)) / 60;
+    const center = sb.hangar.space_center;
+    if (n + 4 > out.len) return n;
+    out[n] = .{ .mesh = c.orbital_ring, .transform = .{ .position = .{ center.x, center.y, center.z } }, .tint = .{ 1, 1, 1, 1 } };
+    out[n + 1] = .{ .mesh = c.orbital_ring_glow, .transform = .{ .position = .{ center.x, center.y, center.z } }, .tint = .{ 1, 1, 1, 1.8 } };
+    out[n + 2] = .{ .mesh = c.orbital_service_hub, .transform = .{ .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48 }, .tint = .{ 1, 1, 1, 1 } };
+    out[n + 3] = .{ .mesh = c.orbital_service_hub_glow, .transform = .{ .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48 }, .tint = .{ 1, 1, 1, 1.8 } };
+    n += 4;
+    const location = sb.space_battle.location;
+    switch (location) {
+        .moon, .mars => if (n < out.len) {
+            const planet_tint: [4]f32 = if (location == .moon) .{ 0.86, 0.88, 0.92, 1 } else .{ 1, 0.48, 0.32, 1 };
+            out[n] = .{ .mesh = c.orbital_planet, .transform = .{ .position = .{ center.x + 900, center.y - 900, center.z + 80 }, .scale = 450 }, .tint = planet_tint };
+            n += 1;
+        },
+        // The belts drift well below the arena, so they read as backdrop rather than cover.
+        .asteroid_belt, .kuiper_belt => for (0..8) |i| {
+            if (n == out.len) break;
+            const a = @as(f32, @floatFromInt(i)) * 0.785 + 0.3;
+            const r: f32 = 150 + @as(f32, @floatFromInt(i % 3)) * 40;
+            const frost: [4]f32 = if (location == .kuiper_belt) .{ 0.54, 0.69, 0.84, 1 } else .{ 0.63, 0.57, 0.5, 1 };
+            out[n] = .{ .mesh = c.boulders[i % c.boulders.len], .transform = .{ .position = .{ center.x + @cos(a) * r, center.y - 70 - @as(f32, @floatFromInt(i % 2)) * 30, center.z + @sin(a) * r }, .scale = 16 + @as(f32, @floatFromInt(i % 4)) * 4 }, .tint = frost, .rotation = yawQuat(a + t * 0.02) };
+            n += 1;
+        },
+    }
+    return sb.space_battle.publish(.{ center.x, center.y, center.z }, c, out, n, t);
+}
+
 pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
     var n = start;
     const c = &sb.catalog.content;
@@ -1883,15 +1942,6 @@ pub fn publish(sb: *const Sandbox, out: []World.Prop, start: usize) usize {
             return k + need <= o.len;
         }
     }.ok;
-    if (sb.hangar.space_mode and room(out, n, 5)) {
-        const center = sb.hangar.space_center;
-        out[n] = .{ .mesh = c.orbital_ring, .transform = .{ .position = .{ center.x, center.y, center.z } }, .tint = .{ 1, 1, 1, 1 } };
-        out[n + 1] = .{ .mesh = c.orbital_ring_glow, .transform = .{ .position = .{ center.x, center.y, center.z } }, .tint = .{ 1, 1, 1, 1.8 } };
-        out[n + 2] = .{ .mesh = c.orbital_service_hub, .transform = .{ .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48 }, .tint = .{ 1, 1, 1, 1 } };
-        out[n + 3] = .{ .mesh = c.orbital_service_hub_glow, .transform = .{ .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48 }, .tint = .{ 1, 1, 1, 1.8 } };
-        out[n + 4] = .{ .mesh = c.orbital_planet, .transform = .{ .position = .{ center.x, center.y - 460, center.z + 820 }, .scale = 620 }, .tint = .{ 1, 1, 1, 1 } };
-        n += 5;
-    }
     n += sb.garage.publish(sb.catalog, out[n..]);
     n = publishMountains(sb, out, n, t);
     n = publishWildkin(sb, out, n, t);
@@ -2853,7 +2903,7 @@ fn dressShrineInterior(sb: *const Sandbox, out: []World.Prop, start: usize, t: f
 fn publishVeins(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
     var n = start;
     const c = &sb.catalog.content;
-    for (sb.mining.veins, 0..) |v, i| {
+    for (sb.mining.active(), 0..) |v, i| {
         if (n + 4 > out.len) break;
         const color: [3]f32 = switch (v.ore) {
             .iron => .{ 1, 0.48, 0.2 },
@@ -3196,11 +3246,14 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
     for (sb.guests, 1..) |g, i| if (g.active and sb.cave_inside[i] != null) {
         underground = true;
     };
-    if (!underground and n < out.len and !sb.catalog.ranges.eql(.none)) {
+    const eye = sb.player.feet;
+    const moon_region = @import("../world/Region.zig").moon;
+    const player_key = @import("../world/ChunkKey.zig").fromPosition(eye[0], eye[2]);
+    const on_moon = moon_region.contains(player_key.x, player_key.z);
+    if (!on_moon and !underground and n < out.len and !sb.catalog.ranges.eql(.none)) {
         out[n] = .{ .mesh = sb.catalog.ranges, .transform = .{ .position = .{ 0, 0, 0 } }, .tint = .{ 1, 1, 1, 1 } };
         n += 1;
     }
-    const eye = sb.player.feet;
     // Four working-looking farmsteads sit on the cityward approach to the mountain paths.
     // Their simple field geometry and outbuildings make the transition from metro to Wilds legible.
     const mountain_count = @import("../procedural/Mountains.zig").count;
@@ -3256,8 +3309,9 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
             const uphill = Terrain.surface(sb.seed, gate_at[0] + sys.inward[0] * 6, gate_at[2] + sys.inward[2] * 6).height - Terrain.surface(sb.seed, gate_at[0], gate_at[2]).height;
             const lean = std.math.clamp(std.math.atan2(uphill, 6.0) * 0.3, 0, 0.25);
             const gate_facing = m.Quat.fromAxisAngle(m.Vec3.unit_y, yaw).mul(m.Quat.fromAxisAngle(m.Vec3.unit_x, lean));
-            const k2 = sys.range == mountain_count;
-            out[n] = .{ .mesh = sb.catalog.content.cave_gate, .transform = .{ .position = .{ gate_at[0], gate_at[1] - 0.5, gate_at[2] } }, .rotation = quat(gate_facing), .tint = if (k2) .{ 0.28, 0.46, 0.57, 1 } else .{ 1, 1, 1, 1 } };
+            const k2 = sys.range == Caves.k2_range;
+            const lunar_burrow = sys.range == Caves.moon_range;
+            out[n] = .{ .mesh = sb.catalog.content.cave_gate, .transform = .{ .position = .{ gate_at[0], gate_at[1] - 0.5, gate_at[2] } }, .rotation = quat(gate_facing), .tint = if (k2) .{ 0.28, 0.46, 0.57, 1 } else if (lunar_burrow) .{ 0.68, 0.34, 0.27, 1 } else .{ 1, 1, 1, 1 } };
             n += 1;
             if (k2 and n + 6 <= out.len) {
                 const dark_metal: [4]f32 = .{ 0.12, 0.22, 0.3, 1 };
@@ -3275,8 +3329,9 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
         if (d > 160) continue;
         // Crystals cluster around each chamber's walls, in the system's hue.
         const hue = Caves.veinHue(@intCast(i));
+        const k2 = sys.range == Caves.k2_range;
         for (sys.rooms[0..sys.room_count], 0..) |room, r| {
-            if (sys.range == mountain_count and r > 0 and n + 5 <= out.len) {
+            if (k2 and r > 0 and n + 5 <= out.len) {
                 const beam_y = room.floor + room.radii[1] * 1.45 - 0.9;
                 const post_h = beam_y - room.floor;
                 const post_tint: [4]f32 = .{ 0.12, 0.23, 0.31, 1 };
@@ -3338,7 +3393,71 @@ fn publishMountains(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32)
             }
         }
     }
+    n = publishMoonRelay(sb, out, n, t);
     return publishCloudwater(sb, out, n, t);
+}
+
+/// Selene Relay is a buildable foothold: a landing deck, linked pressure pods, and elevated solar
+/// wings. Its blue lamps make the safe route readable against the Moon's neutral regolith.
+fn publishMoonRelay(sb: *const Sandbox, out: []World.Prop, start: usize, t: f32) usize {
+    const center = Region.moon.arrival;
+    const dx = sb.player.feet[0] - center[0];
+    const dz = sb.player.feet[2] - center[1];
+    if (dx * dx + dz * dz > 1800 * 1800) return start;
+    const c = &sb.catalog.content;
+    var n = start;
+    const base_y = Terrain.surface(sb.seed, center[0], center[1]).height;
+    const Add = struct {
+        fn box(props: []World.Prop, count: *usize, mesh: @TypeOf(c.block), x: f32, y: f32, z: f32, size: V, tint: [4]f32) bool {
+            if (count.* >= props.len) return false;
+            props[count.*] = .{ .mesh = mesh, .transform = .{ .position = .{ x, y, z } }, .size = size, .tint = tint };
+            count.* += 1;
+            return true;
+        }
+    }.box;
+    const shell: [4]f32 = .{ 0.47, 0.54, 0.6, 1 };
+    const dark: [4]f32 = .{ 0.11, 0.16, 0.21, 1 };
+    const blue = Material.emissive(.{ 0.17, 0.76, 1, 1 }, 0.65 + 0.18 * @sin(t * 1.8));
+    const gold: [4]f32 = .{ 0.83, 0.57, 0.23, 1 };
+    // A broad touchdown deck and three crisp perimeter lights.
+    _ = Add(out, &n, c.block, center[0] - 28, base_y + 0.24, center[1] - 12, .{ 82, 0.48, 64 }, dark);
+    _ = Add(out, &n, c.block, center[0] - 28, base_y + 0.5, center[1] - 12, .{ 70, 0.16, 52 }, shell);
+    for ([_][2]f32{ .{ -58, -42 }, .{ 2, -42 }, .{ -58, 18 }, .{ 2, 18 } }) |o| {
+        _ = Add(out, &n, c.block, center[0] + o[0], base_y + 0.66, center[1] + o[1], .{ 0.8, 0.2, 1.6 }, blue);
+    }
+    // Three pressure pods tied together by low, shielded service corridors.
+    for ([_][3]f32{ .{ 42, 0, 2 }, .{ 83, 0, -22 }, .{ 83, 0, 26 } }) |pod| {
+        const ground = Terrain.surface(sb.seed, center[0] + pod[0], center[1] + pod[2]).height;
+        if (n < out.len) {
+            out[n] = .{ .mesh = c.orb, .transform = .{ .position = .{ center[0] + pod[0], ground + 4.2, center[1] + pod[2] } }, .size = .{ 17, 8.4, 13 }, .tint = .{ 0.73, 0.79, 0.82, 1 } };
+            n += 1;
+        }
+        _ = Add(out, &n, c.block, center[0] + pod[0], ground + 7.1, center[1] + pod[2], .{ 4.8, 0.34, 5.2 }, gold);
+        _ = Add(out, &n, c.block, center[0] + pod[0], ground + 1.25, center[1] + pod[2] + 6.3, .{ 1.4, 2.5, 0.25 }, blue);
+    }
+    _ = Add(out, &n, c.block, center[0] + 62, base_y + 1.5, center[1] - 2, .{ 47, 2.4, 4.2 }, dark);
+    _ = Add(out, &n, c.block, center[0] + 62, base_y + 2.85, center[1] - 2, .{ 45, 0.28, 3.8 }, blue);
+    _ = Add(out, &n, c.block, center[0] + 83, base_y + 1.4, center[1] + 2, .{ 4, 2.2, 31 }, dark);
+    // Hinged photovoltaic wings sit above dust level on four braced pylons.
+    for ([_][2]f32{ .{ -48, 70 }, .{ -18, 70 }, .{ 130, -48 }, .{ 130, 0 }, .{ 130, 48 } }) |o| {
+        const x = center[0] + o[0];
+        const z = center[1] + o[1];
+        const ground = Terrain.surface(sb.seed, x, z).height;
+        _ = Add(out, &n, c.block, x, ground + 3.2, z, .{ 2, 6.4, 2 }, shell);
+        _ = Add(out, &n, c.block, x, ground + 6.8, z, .{ 26, 0.7, 18 }, dark);
+        _ = Add(out, &n, c.block, x, ground + 7.22, z, .{ 24, 0.16, 16 }, .{ 0.08, 0.28, 0.42, 1 });
+        _ = Add(out, &n, c.block, x, ground + 7.34, z, .{ 0.35, 0.18, 15 }, blue);
+    }
+    // The relay mast and its directional dish give the camp a strong long-range silhouette.
+    const mast_x = center[0] + 18;
+    const mast_z = center[1] + 52;
+    _ = Add(out, &n, c.block, mast_x, base_y + 12, mast_z, .{ 1.4, 24, 1.4 }, shell);
+    _ = Add(out, &n, c.block, mast_x, base_y + 20, mast_z, .{ 0.28, 16, 0.3 }, blue);
+    if (n < out.len) {
+        out[n] = .{ .mesh = c.shrine_hoop, .transform = .{ .position = .{ mast_x, base_y + 25, mast_z } }, .size = .{ 6, 6, 1.2 }, .tint = Material.emissive(.{ 0.64, 0.86, 1, 1 }, 1.15), .rotation = yawQuat(0.32) };
+        n += 1;
+    }
+    return n;
 }
 
 /// Hive troopers: dark red heavy plate, sealed helmets, magenta lumen.

@@ -117,6 +117,8 @@ flora_review_seed: u64 = 0,
 flora_review_origin: [3]f32 = .{ 0, 0, 0 },
 /// Isolated backdrop for orbital vehicle art-review captures.
 space_review: bool = false,
+/// Airless sky and clear-weather lighting while a player is on the Moon.
+lunar_surface: bool = false,
 
 pub fn init(allocator: std.mem.Allocator, io: std.Io, seed: u64, catalog: *const Catalog) !Scene {
     const stream = try Streamer.create(allocator, io, seed);

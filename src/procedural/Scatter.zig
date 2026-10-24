@@ -47,12 +47,16 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
     const regional_seed = Chunk.regionalSeed(seed, key.x, key.z);
     const antarctic = Region.antarctica.contains(key.x, key.z);
     const alpine_glacier = Region.k2.contains(key.x, key.z);
+    const lunar = Region.moon.contains(key.x, key.z);
     const chunk_seed = Seed.at(regional_seed ^ 0x53434154544552, key.x, key.z);
     var count: usize = 0;
     for (0..candidates) |i| {
         const h = Seed.mix(chunk_seed +% i);
         const x = @as(f32, @floatFromInt(key.x)) * Key.extent + Seed.unit(h) * 124 - 62;
         const z = @as(f32, @floatFromInt(key.z)) * Key.extent + Seed.unit(Seed.mix(h)) * 124 - 62;
+        // The ordinary relic marker is a young tree. Leave lunar ground to rocks, mined veins,
+        // and authored structures rather than generating foliage-shaped salvage on the Moon.
+        if (lunar) continue;
         const kind: Kind = if (i % 7 == 0) .relic else .vegetation;
         // The subglacial approach is a wind-carved ice sheet; preserve salvage, clear the forest.
         if (antarctic and kind == .vegetation) continue;
@@ -99,7 +103,7 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
         const cover = Biome.cover(regional_seed, x, z, height, @sqrt(nx * nx + nz * nz));
         // Rocky, high and dry ground carries the most stone; lush meadow the least.
         const alpine = std.math.clamp((height - 8) / 30, 0, 1);
-        const chance = if (antarctic or alpine_glacier) @as(f32, 0.32) else 0.12 + 0.35 * cover.weights.arid + 0.45 * alpine + 0.4 * cover.exposed;
+        const chance = if (lunar) @as(f32, 0.68) else if (antarctic or alpine_glacier) @as(f32, 0.32) else 0.12 + 0.35 * cover.weights.arid + 0.45 * alpine + 0.4 * cover.exposed;
         if (Seed.unit(Seed.mix(h +% 2)) > chance) continue;
         const size = Seed.unit(Seed.mix(h +% 1));
         // Mostly knee-high stones, with the odd boulder taller than a ranger.
@@ -114,12 +118,12 @@ pub fn generate(seed: u64, key: Key, output: *[capacity]Object) usize {
             .kind = .boulder,
             .variant = @intCast(Seed.mix(h +% 4) % Vegetation.boulder_count),
             .transform = .{ .position = .{ x, height - 0.05 * scale, z }, .scale = scale },
-            .tint = if (antarctic) .{ 0.5 * shade, 0.75 * shade, 0.98 * shade, -2 } else if (alpine_glacier) .{ 0.58 * shade, 0.78 * shade, 0.95 * shade, -2 } else frosted(tint, cover.snow * 0.8, stone ++ [_]f32{1}),
+            .tint = if (lunar) .{ 0.78 * shade, 0.8 * shade, 0.84 * shade, 1 } else if (antarctic) .{ 0.5 * shade, 0.75 * shade, 0.98 * shade, -2 } else if (alpine_glacier) .{ 0.58 * shade, 0.78 * shade, 0.95 * shade, -2 } else frosted(tint, cover.snow * 0.8, stone ++ [_]f32{1}),
         };
         count += 1;
     }
     // The living-sap flora: glowing grasses, flowers, bushes and small trees in patchy meadows.
-    if (!antarctic and !alpine_glacier) for (0..sap_candidates) |j| {
+    if (!lunar and !antarctic and !alpine_glacier) for (0..sap_candidates) |j| {
         const i = candidates + boulder_candidates + j;
         const h = Seed.mix(chunk_seed ^ 0x534150464c4f5241 +% i);
         const x = @as(f32, @floatFromInt(key.x)) * Key.extent + Seed.unit(h) * 124 - 62;

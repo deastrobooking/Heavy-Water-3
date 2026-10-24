@@ -690,7 +690,9 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
     else
         self.time_of_day;
     var light = Sky.at(sky_time);
-    const weather = if (options.showcase == 114)
+    const weather = if (self.scene.lunar_surface)
+        Weather.State{ .precipitation = 0, .cloud = 0 }
+    else if (options.showcase == 114)
         Weather.State{ .precipitation = 0.88, .cloud = 0.78 }
     else
         Weather.at(self.seed, self.tick);
@@ -701,6 +703,15 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
         .ambient_ground = .{ 0.36, 0.45, 0.62 },
         .horizon = .{ 0.018, 0.038, 0.082 },
         .zenith = .{ 0.006, 0.018, 0.052 },
+        .night = 0,
+    };
+    if (self.scene.lunar_surface and !self.scene.space_review) light = .{
+        .direction = .{ 0.35, 0.88, -0.31 },
+        .color = .{ 1.8, 1.7, 1.55 },
+        .ambient_sky = .{ 0.72, 0.74, 0.78 },
+        .ambient_ground = .{ 0.52, 0.52, 0.52 },
+        .horizon = .{ 0.002, 0.003, 0.008 },
+        .zenith = .{ 0.001, 0.002, 0.006 },
         .night = 0,
     };
     self.clock = if (options.benchmark_limiter) 2 else if (options.smoke_frames > 0 or options.benchmark_frames > 0 or options.capture_frame > 0)
@@ -795,7 +806,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             .shadow = .{ shadow_strength, @floatFromInt(Shadow.size), 0.25 / (2 * Shadow.half_depth), 1.5 * Shadow.texel },
             .camera = .{ view.camera.yaw, view.camera.pitch, @as(f32, @floatFromInt(pixels[i][2])) / @as(f32, @floatFromInt(pixels[i][3])), @tan(view.camera.fov / 2) },
             .sky_zenith = mix3(mix3(light.zenith, caveAmbient(view.cave_hue, 0.05), under), .{ 0.28, 0.34, 0.42 }, weather.cloud * 0.58 * (1 - under)) ++ [_]f32{0},
-            .weather = .{ weather.precipitation * (1 - under), weather.cloud, under, params[1] },
+            .weather = .{ weather.precipitation * (1 - under), weather.cloud, under, if (self.scene.space_review) -1 else params[1] },
         };
         var sun_frame = frame;
         sun_frame.vp = sun_vp;

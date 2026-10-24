@@ -13,9 +13,9 @@ comptime {
     if (Sandbox.travel_count > 32) @compileError("world-map travel unlock mask supports at most 32 destinations");
 }
 
-pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, pets, heroes, arena, party, player, world_map, music, confirm_quit, guide };
+pub const Screen = enum { none, title, pause, build, settings, controls, pad_controls, quest_log, pets, heroes, arena, party, player, world_map, solar_system, fighter_designer, music, confirm_quit, guide };
 pub const Key = enum { up, down, left, right, confirm, back };
-pub const Command = enum { none, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, start_space_trial, leave_space_trial, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
+pub const Command = enum { none, menu_back, @"resume", new_game, continue_game, save, load, character, quit, settings_changed, pad_export, pad_import, play_hero, start_arena, leave_arena, start_space_trial, leave_space_trial, start_solar_battle, start_space_mining, land_moon, choose_space_frame, party_toggle, party_controller, party_position, party_ranger, travel, select_build, music_previous, music_toggle, music_next };
 pub const MapTarget = enum { none, nest, cave, wildkin, wildlife };
 pub const Item = struct { label: []const u8, command: Command = .none, opens: Screen = .none };
 
@@ -24,6 +24,7 @@ pub const title_items = [_]Item{
     .{ .label = "NEW GAME", .command = .new_game },
     .{ .label = "HOW TO PLAY", .opens = .guide },
     .{ .label = "HERO ARENA", .opens = .arena },
+    .{ .label = "SOLAR SYSTEM / SPACE BATTLES", .opens = .solar_system },
     .{ .label = "SETTINGS", .opens = .settings },
     .{ .label = "CONTROLS", .opens = .controls },
     .{ .label = "QUIT", .opens = .confirm_quit },
@@ -35,6 +36,7 @@ pub const pause_items = [_]Item{
     .{ .label = "RESUME", .command = .@"resume" },
     .{ .label = "HEROES", .opens = .heroes },
     .{ .label = "HERO ARENA", .opens = .arena },
+    .{ .label = "SOLAR SYSTEM / SPACE BATTLES", .opens = .solar_system },
     .{ .label = "CUSTOMIZE RANGER", .command = .character },
     .{ .label = "QUEST LOG", .opens = .quest_log },
     .{ .label = "PETS & ROBOTS", .opens = .pets },
@@ -52,7 +54,7 @@ pub const music_items = [_]Item{
     .{ .label = "PREVIOUS TRACK", .command = .music_previous },
     .{ .label = "PLAY / PAUSE", .command = .music_toggle },
     .{ .label = "NEXT TRACK", .command = .music_next },
-    .{ .label = "BACK" },
+    .{ .label = "BACK", .command = .menu_back },
 };
 pub const confirm_items = [_]Item{
     .{ .label = "QUIT TO DESKTOP", .command = .quit },
@@ -91,9 +93,35 @@ pub const arena_items = [_]Item{
     .{ .label = "BATTLE LOCATION" },
     .{ .label = "DROP IN AND FIGHT", .command = .start_arena },
     .{ .label = "LEAVE THE ARENA", .command = .leave_arena },
-    .{ .label = "SPACE DOGFIGHT TRIAL", .command = .start_space_trial },
+    .{ .label = "SPACE BATTLE: LUNA ORBIT", .command = .start_space_trial },
     .{ .label = "LEAVE SPACE TRIAL", .command = .leave_space_trial },
-    .{ .label = "BACK" },
+    .{ .label = "BACK", .command = .menu_back },
+};
+/// Solar map rows: orbital campaign sectors, local asteroid mining, the rescued Moon landing,
+/// fighter design, then BACK.
+pub const solar_items = [_]Item{
+    .{ .label = "LUNA ORBIT", .command = .start_solar_battle },
+    .{ .label = "MARS ORBIT", .command = .start_solar_battle },
+    .{ .label = "ASTEROID BELT", .command = .start_solar_battle },
+    .{ .label = "KUIPER BELT", .command = .start_solar_battle },
+    .{ .label = "ASTEROID MINING RUN", .command = .start_space_mining },
+    .{ .label = "LAND ON MOON / SELENE RELAY", .command = .land_moon },
+    .{ .label = "FIGHTER DESIGNER", .opens = .fighter_designer },
+    .{ .label = "BACK", .command = .menu_back },
+};
+pub const solar_sectors = 4;
+pub const solar_mining = 4;
+pub const solar_landing = 5;
+pub const solar_designer = 6;
+/// Fighter designer rows: the six native frames in `Progress.SpaceFrame` order, then BACK.
+pub const designer_items = [_]Item{
+    .{ .label = "KESTREL", .command = .choose_space_frame },
+    .{ .label = "EMBER WYRM", .command = .choose_space_frame },
+    .{ .label = "VOID LANCE", .command = .choose_space_frame },
+    .{ .label = "DREADCLAW", .command = .choose_space_frame },
+    .{ .label = "STARWING", .command = .choose_space_frame },
+    .{ .label = "BULWARK", .command = .choose_space_frame },
+    .{ .label = "BACK", .command = .menu_back },
 };
 /// Heroes screen rows: four player tabs, your own ranger, every Wildkin, then BACK. Cards sit in
 /// a grid `heroes_columns` wide.
@@ -166,6 +194,9 @@ heroes_unlocked: u32 = 0,
 players_present: u8 = 1,
 arena_active: bool = false,
 space_trial_active: bool = false,
+/// Solar sectors open on the route, bit per sector (`SpaceLevels.unlocked`); set by the app.
+solar_unlocked: u8 = 1,
+moon_landing_unlocked: bool = false,
 arena_venue: Arena.Venue = .current_landscape,
 /// The player a hero card is chosen for (Heroes screen tabs).
 hero_player: u8 = 0,
@@ -209,6 +240,8 @@ pub fn items(self: *const Menu) []const Item {
         .party => &party_items,
         .player => &player_items,
         .world_map => &map_items,
+        .solar_system => &solar_items,
+        .fighter_designer => &designer_items,
         .music => &music_items,
         else => &.{},
     };
@@ -242,6 +275,14 @@ pub fn enabled(self: *const Menu, row: usize) bool {
         .leave_space_trial => self.space_trial_active,
         else => row != 0 or (!self.arena_active and !self.space_trial_active),
     };
+    if (self.screen == .solar_system) {
+        if (row < solar_sectors) return !self.space_trial_active and self.solar_unlocked & (@as(u8, 1) << @intCast(row)) != 0;
+        if (row == solar_mining) return !self.space_trial_active;
+        if (row == solar_landing) return !self.space_trial_active and self.moon_landing_unlocked;
+        return true;
+    }
+    // A frame cannot be swapped mid-battle.
+    if (self.screen == .fighter_designer and row < designer_items.len - 1) return !self.space_trial_active;
     if (self.screen == .heroes) {
         if (row < heroes_tabs) return self.players_present & (@as(u8, 1) << @intCast(row)) != 0;
         if (row >= heroes_first and row < heroes_back) return self.heroes_unlocked & (@as(u32, 1) << @intCast(row - heroes_first)) != 0;
@@ -331,6 +372,7 @@ pub fn key(self: *Menu, k: Key) Command {
         .confirm => {
             if (self.screen == .music and self.row == music_items.len - 1) return self.back();
             if (self.screen == .pets and self.row == pets_items.len - 1) return self.back();
+            if ((self.screen == .solar_system and self.row == solar_items.len - 1) or (self.screen == .fighter_designer and self.row == designer_items.len - 1)) return self.back();
             if (self.screen == .settings) {
                 if (self.row == Settings.field_count) return self.back();
                 self.settings.adjust(@enumFromInt(self.row), 1);
@@ -556,7 +598,7 @@ pub fn chosenHero(self: *const Menu) ?u8 {
     return null;
 }
 
-fn back(self: *Menu) Command {
+pub fn back(self: *Menu) Command {
     if (self.parent_count > 0) {
         self.parent_count -= 1;
         const parent = self.parents[self.parent_count];
@@ -567,7 +609,7 @@ fn back(self: *Menu) Command {
         return .none;
     }
     switch (self.screen) {
-        .build, .settings, .controls, .quest_log, .pets, .heroes, .arena, .party, .player, .world_map, .music, .confirm_quit => {
+        .build, .settings, .controls, .quest_log, .pets, .heroes, .arena, .party, .player, .world_map, .solar_system, .fighter_designer, .music, .confirm_quit => {
             const from = self.screen;
             self.open(self.base);
             // Land on the entry that opened the sub-screen.
@@ -615,6 +657,45 @@ test "title skips continue without a save, and sub-screens return to their entry
     try std.testing.expectEqual(Command.continue_game, m.key(.confirm));
 }
 
+test "solar route menu can be opened from the title and returns after back" {
+    var m: Menu = .{};
+    m.open(.title);
+    const route = rowOf(&title_items, "SOLAR SYSTEM / SPACE BATTLES");
+    m.select(route);
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.solar_system, m.screen);
+    try std.testing.expectEqual(Command.start_solar_battle, m.key(.confirm));
+    // Mars waits until Luna's midboss falls: it cannot even be selected.
+    try std.testing.expect(!m.enabled(1));
+    m.select(1);
+    try std.testing.expectEqual(@as(u8, 0), m.row);
+    m.solar_unlocked = 0b11;
+    m.select(1);
+    try std.testing.expectEqual(@as(u8, 1), m.row);
+    try std.testing.expectEqual(Command.start_solar_battle, m.key(.confirm));
+    try std.testing.expect(!m.enabled(solar_landing));
+    m.moon_landing_unlocked = true;
+    m.select(solar_landing);
+    try std.testing.expect(m.enabled(solar_landing));
+    try std.testing.expectEqual(Command.land_moon, m.key(.confirm));
+    // The designer opens under the solar map and returns to it.
+    m.select(solar_designer);
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.fighter_designer, m.screen);
+    m.select(2);
+    try std.testing.expectEqual(Command.choose_space_frame, m.key(.confirm));
+    m.space_trial_active = true;
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    m.space_trial_active = false;
+    _ = m.key(.back);
+    try std.testing.expectEqual(Screen.solar_system, m.screen);
+    try std.testing.expectEqual(@as(u8, solar_designer), m.row);
+    m.select(@intCast(solar_items.len - 1));
+    try std.testing.expectEqual(Command.none, m.key(.confirm));
+    try std.testing.expectEqual(Screen.title, m.screen);
+    try std.testing.expectEqual(route, m.row);
+}
+
 test "the packaged music player opens from title and pause menus and exposes skip controls" {
     var m: Menu = .{};
     m.open(.title);
@@ -637,12 +718,13 @@ test "the packaged music player opens from title and pause menus and exposes ski
 test "quest log opens from pause and returns to its menu row" {
     var m: Menu = .{};
     m.open(.pause);
-    m.row = 5;
+    const quest_row = rowOf(&pause_items, "QUEST LOG");
+    m.select(quest_row);
     try std.testing.expectEqual(Command.none, m.key(.confirm));
     try std.testing.expectEqual(Screen.quest_log, m.screen);
     try std.testing.expectEqual(Command.none, m.key(.back));
     try std.testing.expectEqual(Screen.pause, m.screen);
-    try std.testing.expectEqual(@as(u8, 5), m.row);
+    try std.testing.expectEqual(quest_row, m.row);
 }
 
 test "heroes are chosen per player from unlocked cards, and the arena starts or leaves" {

@@ -757,6 +757,7 @@ fn runCommand(self: *App, command: Menu.Command) void {
             if (!self.uiActive()) self.capture(self.core, true);
         },
         .music_previous => if (self.audio) |a| if (a.music) |music| music.previous(),
+        .menu_back => _ = self.menu.back(),
         .music_toggle => if (self.audio) |a| if (a.music) |music| music.toggle(),
         .music_next => if (self.audio) |a| if (a.music) |music| music.next(),
         .@"resume" => {
@@ -766,7 +767,16 @@ fn runCommand(self: *App, command: Menu.Command) void {
         .new_game => self.newGame(),
         .play_hero => self.playHero(),
         .start_arena => self.startArena(),
-        .start_space_trial => self.startSpaceTrial(),
+        .start_space_trial => self.startSolarBattle(.moon),
+        .start_solar_battle => self.startSolarBattle(switch (self.menu.row) {
+            0 => .moon,
+            1 => .mars,
+            2 => .asteroid_belt,
+            else => .kuiper_belt,
+        }),
+        .start_space_mining => self.startSpaceMining(),
+        .land_moon => self.landMoon(),
+        .choose_space_frame => if (self.menu.row < @import("game/Progress.zig").space_frame_count) self.sandbox.chooseSpaceFrame(@enumFromInt(self.menu.row)),
         .leave_space_trial => {
             self.leaveSpaceTrial();
             self.menu.open(.none);
@@ -895,7 +905,7 @@ fn startArena(self: *App) void {
     self.capture(self.core, true);
 }
 
-fn startSpaceTrial(self: *App) void {
+fn prepareSpaceActivity(self: *App) bool {
     if (self.menu.base == .title) {
         if (self.menu.has_save and self.quickload()) {} else {
             self.newGame();
@@ -905,7 +915,10 @@ fn startSpaceTrial(self: *App) void {
         }
     }
     const sb = &self.sandbox;
-    if (sb.hangar.piloting or sb.garage.piloting != null or sb.seated != null) return self.report("EXIT YOUR VEHICLE BEFORE STARTING SPACE TRIAL", .{});
+    if (sb.hangar.piloting or sb.garage.piloting != null or sb.seated != null) {
+        self.report("EXIT YOUR VEHICLE BEFORE STARTING A SPACE MISSION", .{});
+        return false;
+    }
     const return_to = sb.player.feet;
     const Terrain = @import("procedural/Terrain.zig");
     const x = return_to[0];
@@ -913,10 +926,49 @@ fn startSpaceTrial(self: *App) void {
     const center: [3]f32 = .{ x, Terrain.surface(sb.seed, x, z).height + 850, z };
     if (sb.hangar.fighter == null) sb.hangar.placeWithFrame(sb.seed, Sandbox.spawn, null, 0, sb.progress.kestrel_levels, sb.progress.space_frame);
     sb.hangar.enterSpaceTrial(center, return_to, &self.engine.camera);
-    sb.say("SPACE TRIAL: A/D strafe, W accelerate, Q/E rise or sink, SHIFT boost, S brake, F return", .{});
     self.menu.open(.none);
     self.engine.input = .{};
     self.capture(self.core, true);
+    return true;
+}
+
+fn startSolarBattle(self: *App, location: @import("game/SpaceBattle.zig").Location) void {
+    const SpaceLevels = @import("game/SpaceLevels.zig");
+    if (!SpaceLevels.unlocked(&self.sandbox.progress, location)) return self.report("{s} OPENS WHEN THE PREVIOUS SECTOR'S LEVEL 5 IS CLEARED", .{SpaceLevels.name(location)});
+    if (!self.prepareSpaceActivity()) return;
+    const sb = &self.sandbox;
+    const level = SpaceLevels.nextLevel(&sb.progress, location);
+    sb.space_battle.begin(location, level, false, sb.seed ^ sb.tick, sb.progress.space_frame, sb.progress.kestrel_levels);
+    sb.say("{s} LEVEL {d}/10  WASD MOVE  MOUSE AIM  CLICK GUNS  HOLD RIGHT CHARGE  Z MISSILE  C BOMB  F EXIT", .{ SpaceLevels.name(location), level });
+}
+
+fn landMoon(self: *App) void {
+    if (self.menu.base == .title) {
+        if (!self.menu.has_save or !self.quickload()) return self.report("CONTINUE A CAMPAIGN THAT HAS RESCUED THE MOON FIRST", .{});
+    }
+    if (!self.sandbox.progress.hasFlag("luna_rescued")) return self.report("CLEAR LUNA ORBIT LEVEL 10 TO OPEN THE MOON LANDING", .{});
+    if (self.sandbox.travelBlocked(0)) |reason| return self.report("CANNOT LAND: {s}", .{reason});
+    if (!self.sandbox.fastTravel(0, moonTravelDestination(), &self.engine.camera)) return self.report("SELENE RELAY HAS NO SAFE ARRIVAL", .{});
+    self.menu.open(.none);
+    self.engine.input = .{};
+    self.sandbox.say("SELENE RELAY: MINE THE LUNAR VEINS, BUILD PRESSURE HABITATS, AND FIND THE HIVE BURROW TO THE EAST", .{});
+    self.capture(self.core, true);
+}
+
+fn moonTravelDestination() usize {
+    const Regions = @import("world/Region.zig");
+    for (Sandbox.travel_destinations, 0..) |destination, i| {
+        if (destination.kind != .region) continue;
+        if (std.mem.eql(u8, Regions.all[destination.index].title, Regions.moon.title)) return i;
+    }
+    unreachable;
+}
+
+fn startSpaceMining(self: *App) void {
+    if (!self.prepareSpaceActivity()) return;
+    const sb = &self.sandbox;
+    sb.space_battle.begin(.asteroid_belt, 1, true, sb.seed ^ sb.tick, sb.progress.space_frame, sb.progress.kestrel_levels);
+    sb.say("ASTEROID MINING RUN: SHOOT THE GLOWING ROCKS FOR ORE (YOURS UNTIL YOU DEPOSIT IT AT A COLONY STORE). F EXIT", .{});
 }
 
 fn leaveSpaceTrial(self: *App) void {
@@ -1397,6 +1449,11 @@ pub fn update(self: *App, core: *mach.Core) void {
     self.menu.heroes_unlocked = self.sandbox.progress.heroes;
     self.menu.arena_active = self.sandbox.arena.active;
     self.menu.space_trial_active = self.sandbox.hangar.space_mode;
+    self.menu.solar_unlocked = 0;
+    for (0..4) |i| if (@import("game/SpaceLevels.zig").unlocked(&self.sandbox.progress, @enumFromInt(i))) {
+        self.menu.solar_unlocked |= @as(u8, 1) << @intCast(i);
+    };
+    self.menu.moon_landing_unlocked = self.sandbox.progress.hasFlag("luna_rescued");
     self.syncTravelMenu();
     self.menu.players_present = 1;
     for (self.sandbox.guests, 1..) |g, i| if (g.active) {
@@ -1741,7 +1798,7 @@ fn showcase(self: *App) void {
     const camera = &self.engine.camera;
     const v = options.showcase;
     self.show_metrics = false;
-    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82 or v == 91 or v == 101 or v == 102) return self.guiShowcase(v);
+    if ((v >= 18 and v <= 35) or (v >= 37 and v <= 46) or (v >= 48 and v <= 57) or v == 60 or v == 68 or v == 69 or v == 77 or v == 80 or v == 81 or v == 82 or v == 91 or v == 101 or v == 102 or v == 107 or v == 108) return self.guiShowcase(v);
     self.sandbox.player.mode = .fly;
     self.engine.input = .{};
     var target: [3]f32 = undefined;
@@ -2158,10 +2215,18 @@ fn showcase(self: *App) void {
         const x = Sandbox.spawn[0];
         const z = Sandbox.spawn[2];
         const center: [3]f32 = .{ x, Terrain.surface(self.sandbox.seed, x, z).height + 850, z };
-        if (self.sandbox.hangar.fighter == null) self.sandbox.hangar.placeWithFrame(self.sandbox.seed, Sandbox.spawn, null, 0, self.sandbox.progress.kestrel_levels, self.sandbox.progress.space_frame);
-        self.sandbox.hangar.enterSpaceTrial(center, return_to, &self.engine.camera);
+        // A live fight for review: Luna's boss level from its first wave, guns held while the aim
+        // sweeps, so enemies, their telegraphed shots and the fighter's bolts are all in frame.
+        if (!self.sandbox.space_battle.active) {
+            if (self.sandbox.hangar.fighter == null) self.sandbox.hangar.placeWithFrame(self.sandbox.seed, Sandbox.spawn, null, 0, self.sandbox.progress.kestrel_levels, self.sandbox.progress.space_frame);
+            self.sandbox.hangar.enterSpaceTrial(center, return_to, &self.engine.camera);
+            self.sandbox.space_battle.begin(.moon, 10, false, self.sandbox.seed, self.sandbox.progress.space_frame, self.sandbox.progress.kestrel_levels);
+        }
+        self.sandbox.trigger.fire = true;
+        self.sandbox.space_battle.aim = @floatCast(self.seconds * 0.8);
+        if (self.sandbox.hangar.fighter) |*f| f.hull = f.hull_max;
         target = center;
-        eye = .{ center[0], center[1] + 260, center[2] - 60 };
+        eye = .{ center[0], center[1] + @import("game/Hangar.zig").space_camera_height, center[2] - @import("game/Hangar.zig").space_camera_back };
     } else if (v == 67) {
         // Review the new Wilds architecture as a clean lineup over the seeded terrain.
         const Terrain = @import("procedural/Terrain.zig");
@@ -2210,6 +2275,17 @@ fn showcase(self: *App) void {
         self.sandbox.player.velocity = @splat(0);
         target = .{ spot[0], ground + 0.7, spot[1] };
         eye = .{ spot[0] - 5, ground + 1.8, spot[1] + 9 };
+    } else if (v == 109) {
+        const Region = @import("world/Region.zig");
+        const Terrain = @import("procedural/Terrain.zig");
+        const center = Region.moon.arrival;
+        const x = center[0] - 92;
+        const z = center[1] - 88;
+        const ground = Terrain.surface(self.sandbox.seed, x, z).height;
+        self.sandbox.player.feet = .{ x, ground, z };
+        self.sandbox.player.velocity = @splat(0);
+        target = .{ center[0] + 34, Terrain.surface(self.sandbox.seed, center[0] + 34, center[1]).height + 9, center[1] + 8 };
+        eye = .{ center[0] - 180, target[1] + 130, center[1] - 200 };
     } else if (v == 116) {
         // An iron vein beside a crystal one's colour, with ore in hand so the colony panel shows.
         const vein = self.sandbox.mining.veins[0];
@@ -2246,6 +2322,25 @@ fn guiShowcase(self: *App, v: u32) void {
     sb.tick = @import("engine/Sky.zig").day_ticks * 15 / 100;
     if (v == 18) {
         if (self.menu.screen == .none) self.menu.open(.title);
+        self.titleCamera();
+        return;
+    }
+    if (v == 107) {
+        self.menu.open(.title);
+        self.menu.open(.solar_system);
+        self.menu.row = 0;
+        self.titleCamera();
+        return;
+    }
+    if (v == 108) {
+        // The fighter designer with the Void Lance selected: owned frames, one to unlock, the
+        // rest locked behind it.
+        sb.progress.fighter = true;
+        sb.progress.space_frames = 0b011;
+        self.menu.open(.title);
+        self.menu.open(.solar_system);
+        self.menu.open(.fighter_designer);
+        self.menu.row = 2;
         self.titleCamera();
         return;
     }
@@ -4397,24 +4492,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
     }
     self.publishBlocks(renderer);
     if (self.sandbox.hangar.space_mode) {
-        renderer.prop_count = 0;
         const c = self.sandbox.catalog.content;
-        const center = self.sandbox.hangar.space_center;
-        const props = [_]struct { mesh: @TypeOf(c.orbital_ring), position: [3]f32, scale: f32, tint: [4]f32 }{
-            .{ .mesh = c.orbital_ring, .position = .{ center.x, center.y, center.z }, .scale = 1, .tint = .{ 1, 1, 1, 1 } },
-            .{ .mesh = c.orbital_ring_glow, .position = .{ center.x, center.y, center.z }, .scale = 1, .tint = .{ 1, 1, 1, 1.8 } },
-            .{ .mesh = c.orbital_service_hub, .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48, .tint = .{ 1, 1, 1, 1 } },
-            .{ .mesh = c.orbital_service_hub_glow, .position = .{ center.x - 135, center.y + 24, center.z + 95 }, .scale = 0.48, .tint = .{ 1, 1, 1, 1.8 } },
-            .{ .mesh = c.orbital_planet, .position = .{ center.x + 900, center.y - 900, center.z + 80 }, .scale = 450, .tint = .{ 1, 1, 1, 1 } },
-            .{ .mesh = c.boulders[0], .position = .{ center.x - 70, center.y - 18, center.z - 68 }, .scale = 16, .tint = .{ 0.75, 0.82, 0.9, 1 } },
-            .{ .mesh = c.boulders[1], .position = .{ center.x + 72, center.y + 12, center.z - 56 }, .scale = 14, .tint = .{ 0.75, 0.82, 0.9, 1 } },
-            .{ .mesh = c.boulders[2], .position = .{ center.x - 64, center.y + 18, center.z + 62 }, .scale = 17, .tint = .{ 0.75, 0.82, 0.9, 1 } },
-            .{ .mesh = c.boulders[0], .position = .{ center.x + 74, center.y - 8, center.z + 60 }, .scale = 19, .tint = .{ 0.75, 0.82, 0.9, 1 } },
-        };
-        for (props) |prop| {
-            renderer.props[renderer.prop_count] = .{ .mesh = prop.mesh, .transform = .{ .position = prop.position, .scale = prop.scale }, .tint = prop.tint };
-            renderer.prop_count += 1;
-        }
+        renderer.prop_count = @import("game/Frontier.zig").publishSpace(&self.sandbox, &renderer.props, 0);
         if (self.sandbox.hangar.fighter) |fighter| {
             const shell, const glow = switch (self.sandbox.hangar.frame) {
                 .kestrel => .{ c.kestrel, c.kestrel_glow },
@@ -4427,7 +4506,9 @@ pub fn publish(self: *App, renderer: *Renderer) void {
             const at = [3]f32{ fighter.body.pos.x, fighter.body.pos.y, fighter.body.pos.z };
             const q = fighter.body.rot;
             const rotation = [4]f32{ q.x, q.y, q.z, q.w };
-            renderer.props[renderer.prop_count] = .{ .mesh = shell, .transform = .{ .position = at }, .rotation = rotation, .tint = .{ 1, 1, 1, 1 } };
+            // The hull flashes while a hit's grace window runs.
+            const hit = self.sandbox.space_battle.invulnerable > 0 and @mod(self.seconds, 0.16) < 0.08;
+            renderer.props[renderer.prop_count] = .{ .mesh = shell, .transform = .{ .position = at }, .rotation = rotation, .tint = if (hit) .{ 1.6, 0.7, 0.6, 1 } else .{ 1, 1, 1, 1 } };
             renderer.props[renderer.prop_count + 1] = .{ .mesh = glow, .transform = .{ .position = at }, .rotation = rotation, .tint = .{ 1, 1, 1, 1.4 } };
             renderer.prop_count += 2;
         }
@@ -4442,6 +4523,8 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         break :blk origin;
     } else floraReviewOrigin();
     renderer.scene.space_review = options.showcase == 66 or options.showcase == 103 or self.sandbox.hangar.space_mode;
+    const lunar_key = ChunkKey.fromPosition(self.sandbox.player.feet[0], self.sandbox.player.feet[2]);
+    renderer.scene.lunar_surface = @import("world/Region.zig").moon.contains(lunar_key.x, lunar_key.z);
     if (options.showcase == 47 and renderer.prop_count + 5 <= renderer.props.len) {
         const fleet = [_]struct { mesh: @import("asset/Catalog.zig").MeshHandle, position: [3]f32, scale: f32 }{
             .{ .mesh = self.sandbox.catalog.content.scalari_throne_serpent, .position = .{ -120, 480, 15 }, .scale = 1 },
@@ -4581,10 +4664,15 @@ pub fn publish(self: *App, renderer: *Renderer) void {
         view.cave_hue = self.cave_hue[i];
     }
     const minutes: u32 = @intFromFloat(renderer.time_of_day * 24 * 60);
-    const motion = if (sandbox.hangar.space_mode) "SPACE TRIAL" else if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "SUPER FLIGHT" else @tagName(sandbox.player.motion);
+    const motion = if (sandbox.hangar.space_mode) "SPACE BATTLE" else if (sandbox.seated != null) "DRIVE" else if (sandbox.player.mode == .fly) "SUPER FLIGHT" else @tagName(sandbox.player.motion);
     renderer.hud_lines[0].set("{d:0>2}:{d:0>2}  {s}  {s}  {s} FUEL {d:.0}  TOOL {s}  SCRAP {d}  PARTS {d}", .{ minutes / 60, minutes % 60, sandbox.profile.name(), motion, @tagName(sandbox.player.traversal), sandbox.player.fuel, @tagName(sandbox.tools.tool), sandbox.kits[0].wallet.scrap, sandbox.kits[0].wallet.parts });
     if (sandbox.hangar.space_mode) {
-        renderer.hud_lines[1].set("SPACE TRIAL {d:.0}M/S  A/D STRAFE  W ACCELERATE  Q/E ALTITUDE  SHIFT BOOST  S BRAKE  F RETURN", .{sandbox.hangar.fighter.?.body.vel.length()});
+        if (sandbox.space_battle.active) {
+            const mission = if (sandbox.space_battle.mining) "MINING" else "SPACE BATTLE";
+            renderer.hud_lines[1].set("{s} {d:.0}M/S  WASD MOVE  MOUSE AIM  CLICK FIRE  RMB CHARGE  Z MISSILE  C BOMB  F EXIT", .{ mission, sandbox.hangar.fighter.?.body.vel.length() });
+        } else {
+            renderer.hud_lines[1].set("SPACE TRANSIT {d:.0}M/S  WASD MOVE  MOUSE AIM  SHIFT BOOST  ALT BRAKE  F RETURN", .{sandbox.hangar.fighter.?.body.vel.length()});
+        }
     } else if (sandbox.hangar.piloting) {
         const f = &sandbox.hangar.fighter.?;
         const g = &sandbox.skies.guns;

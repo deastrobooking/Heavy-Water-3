@@ -13,17 +13,20 @@ const nyc_bytes = @embedFile("../assets/nyc_terrain.hwmh");
 const chicago_bytes = @embedFile("../assets/chicago_terrain.hwmh");
 const antarctica_bytes = @embedFile("../assets/antarctica_terrain.hwmh");
 const k2_bytes = @embedFile("../assets/k2_terrain.hwmh");
+const moon_bytes = @embedFile("../assets/moon_terrain.hwmh");
 const detroit_map = Heightmap.view(detroit_bytes) catch unreachable;
 const nyc_map = Heightmap.view(nyc_bytes) catch unreachable;
 const chicago_map = Heightmap.view(chicago_bytes) catch unreachable;
 const antarctica_map = Heightmap.view(antarctica_bytes) catch unreachable;
 const k2_map = Heightmap.view(k2_bytes) catch unreachable;
+const moon_map = Heightmap.view(moon_bytes) catch unreachable;
 
 const detroit_center = Region.detroit.arrival;
 const nyc_center = Region.new_york.arrival;
 const chicago_center = Region.chicago.arrival;
 const antarctica_center = Region.antarctica.arrival;
 const k2_center = Region.k2.arrival;
+const moon_center = Region.moon.arrival;
 // Source row zero is north, mapping to negative Z in Heightmap.sample.
 const detroit_anchor_x = (CityGeography.detroit_raster_anchor.anchor_u - 0.5) * detroit_map.settings.world_width;
 const detroit_anchor_z = (CityGeography.detroit_raster_anchor.anchor_v - 0.5) * detroit_map.settings.world_depth;
@@ -69,6 +72,11 @@ pub fn generatedHeight(seed: u64, x: f32, z: f32) f32 {
             return Cloudwater.carve(seed, x, z, mapped);
         }
     }
+    if (Region.moon.contains(key.x, key.z)) {
+        const mx = x - moon_center[0];
+        const mz = z - moon_center[1];
+        if (sampleMap(moon_map, mx, mz)) |height| return blendToFallback(moon_map, mx, mz, height, seed, x, z);
+    }
     const dx = x - detroit_center[0] + detroit_anchor_x;
     const dz = z - detroit_center[1] + detroit_anchor_z;
     // The four procedural mountain ranges ring the hub (1.3 to 1.7 km out, nothing beyond 2.6 km).
@@ -104,4 +112,14 @@ test "height is finite and repeatable in every region and between them" {
         try std.testing.expect(std.math.isFinite(h));
         try std.testing.expectEqual(h, heightAt(7, p[0], p[1]));
     }
+}
+
+test "Moon region samples the imported global elevation raster" {
+    const std = @import("std");
+    const center = Region.moon.arrival;
+    const expected = moon_map.sample(0, 0).?;
+    try std.testing.expectApproxEqAbs(expected, generatedHeight(42, center[0], center[1]), 0.001);
+    const west = generatedHeight(42, center[0] - 1800, center[1]);
+    const east = generatedHeight(42, center[0] + 1800, center[1]);
+    try std.testing.expect(@abs(west - east) > 0.1);
 }

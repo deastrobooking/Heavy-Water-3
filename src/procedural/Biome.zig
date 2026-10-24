@@ -44,6 +44,7 @@ pub const Kind = enum { grass, sand, marsh, rock, snow };
 /// Altitude and exposed steep faces transition through alpine stone into permanent snow.
 pub fn cover(seed: u64, x: f32, z: f32, height: f32, slope: f32) Cover {
     const key = ChunkKey.fromPosition(x, z);
+    if (Region.moon.contains(key.x, key.z)) return .{ .weights = .{ .arid = 1, .meadow = 0, .wetland = 0 }, .exposed = 1, .snow = 0 };
     const k2 = Region.k2.contains(key.x, key.z);
     const alpine = std.math.clamp((height - 12) / 24, 0, 1);
     const exposed = std.math.clamp((slope - 0.72) / 0.9, 0, 1) * alpine;
@@ -73,11 +74,16 @@ pub fn coverAt(seed: u64, x: f32, z: f32) Cover {
 
 pub fn terrainColor(seed: u64, x: f32, z: f32, height: f32, slope: f32) [3]f32 {
     const c = cover(seed, x, z, height, slope);
+    const key = ChunkKey.fromPosition(x, z);
+    if (Region.moon.contains(key.x, key.z)) {
+        const fleck = Noise.value(seed ^ 0x4c554e415f445553, x / 17, z / 17);
+        const rock = std.math.clamp(0.38 + (fleck - 0.5) * 0.28 + c.exposed * 0.04, 0.22, 0.62);
+        return .{ rock * 0.94, rock * 0.96, rock };
+    }
     var base = c.weights.color();
     const hills = sunmeadowWeight(seed, x, z, height, slope);
     const sunmeadow = [3]f32{ 0.33, 0.67, 0.22 };
     for (&base, sunmeadow) |*channel, hill_channel| channel.* = channel.* * (1 - hills) + hill_channel * hills;
-    const key = ChunkKey.fromPosition(x, z);
     const k2 = Region.k2.contains(key.x, key.z);
     const rock = if (k2) [3]f32{ 0.31, 0.39, 0.45 } else [3]f32{ 0.42, 0.48, 0.49 };
     const snow_color = if (k2) [3]f32{ 0.68, 0.84, 0.94 } else [3]f32{ 0.86, 0.91, 0.94 };
