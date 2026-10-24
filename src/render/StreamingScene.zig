@@ -70,6 +70,9 @@ instance_count: u32 = 1,
 relic_count: u32 = 0,
 plant_count: u32 = 0,
 flora_counts: [@import("../procedural/Vegetation.zig").variant_count]u32 = @splat(0),
+/// How large trees look in this view against a full-height, 60° view (`viewDetailScale`): crown
+/// detail distances scale by it, so a quarter-screen split view lightens trees sooner.
+detail_scale: f32 = 1,
 /// Trees drawn with a lighter crown: `[0]` mid, `[1]` far, by species (`treeDetail`).
 tree_lod_counts: [2][Vegetation.tree_count]u32 = @splat(@splat(0)),
 /// Trees outside the view that the sun's shadow box still sees, by species: drawn only into
@@ -351,10 +354,12 @@ const mid_crown_heights: f32 = 2.5;
 /// trees keep detail farther out than short ones.
 /// `previous` is the tree's detail last frame: it changes by one step only once the tree is
 /// `detail_margin` past the boundary, so standing at a boundary does not flicker.
-pub fn treeDetail(eye: [3]f32, transform: @import("../world/Transform.zig"), previous: ?Vegetation.Detail) Vegetation.Detail {
+/// `view_scale` is the view's `detail_scale`: a tree's size on screen, so distance is measured in
+/// tree heights as they appear in this view.
+pub fn treeDetail(eye: [3]f32, transform: @import("../world/Transform.zig"), previous: ?Vegetation.Detail, view_scale: f32) Vegetation.Detail {
     const p = transform.position;
     const d: [3]f32 = .{ p[0] - eye[0], p[1] + transform.scale * 0.5 - eye[1], p[2] - eye[2] };
-    const heights = @sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / transform.scale;
+    const heights = @sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) / (transform.scale * view_scale);
     const plain: Vegetation.Detail = if (heights < near_crown_heights) .near else if (heights < mid_crown_heights) .mid else .far;
     const last = previous orelse return plain;
     const a = @intFromEnum(plain);
@@ -362,6 +367,12 @@ pub fn treeDetail(eye: [3]f32, transform: @import("../world/Transform.zig"), pre
     if (a == b or @max(a, b) - @min(a, b) > 1) return plain;
     const boundary = if (@min(a, b) == 0) near_crown_heights else mid_crown_heights;
     return if (@abs(heights - boundary) < boundary * detail_margin) last else plain;
+}
+
+/// A view's `detail_scale`: its height as a fraction of the window's, against a 60° field of view.
+/// Things look this much smaller than in a full-height view, so crowns lighten this much sooner.
+pub fn viewDetailScale(height_fraction: f32, fov: f32) f32 {
+    return std.math.clamp(height_fraction * @tan(std.math.pi / 6.0) / @tan(fov / 2), 0.25, 2);
 }
 
 /// How far past a detail boundary, as a fraction of it, a tree must go before switching crowns.
@@ -494,7 +505,7 @@ fn bucketOf(self: *const Scene, key: Key, object: Scatter.Object, vp: mach.math.
             if (Region.k2.contains(key.x, key.z) and !Cloudwater.isSheltered(object.transform.position[0], object.transform.position[2])) return no_bucket;
             // Keep the fixed flora showcase legible instead of letting random nearby trees occlude it.
             if (self.flora_review) return no_bucket;
-            if (Vegetation.treeIndex(object.variant)) |species| switch (treeDetail(eye, object.transform, previous)) {
+            if (Vegetation.treeIndex(object.variant)) |species| switch (treeDetail(eye, object.transform, previous, self.detail_scale)) {
                 .near => {},
                 .mid => break :blk tree_mid_bucket + species,
                 .far => break :blk tree_far_bucket + species,
@@ -882,20 +893,26 @@ fn sumOf(counts: []const u32) u32 {
 
 test "tree crowns lighten with distance measured in tree heights" {
     const tall: @import("../world/Transform.zig") = .{ .position = .{ 0, 0, 0 }, .scale = 120 };
-    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 80 }, tall, null));
-    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 200 }, tall, null));
-    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall, null));
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 80 }, tall, null, 1));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 200 }, tall, null, 1));
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall, null, 1));
     // The same 200 m keeps a giant at mid detail but sends a small pine far.
     const pine: @import("../world/Transform.zig") = .{ .position = .{ 0, 0, 0 }, .scale = 12 };
-    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 6, 200 }, pine, null));
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 6, 200 }, pine, null, 1));
     // Just past the near boundary (1 height = 120 m), the crown it had is kept; well past, it changes.
-    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 125 }, tall, .near));
-    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 125 }, tall, null));
-    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 140 }, tall, .near));
-    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 115 }, tall, .mid));
-    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 100 }, tall, .mid));
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 125 }, tall, .near, 1));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 125 }, tall, null, 1));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 140 }, tall, .near, 1));
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 115 }, tall, .mid, 1));
+    try std.testing.expectEqual(Vegetation.Detail.near, treeDetail(.{ 0, 60, 100 }, tall, .mid, 1));
+    // A quarter-screen view (half the height) sees the giant at 80 m as a full view sees it at
+    // 160 m: past one height, so mid.
+    try std.testing.expectEqual(Vegetation.Detail.mid, treeDetail(.{ 0, 60, 80 }, tall, null, viewDetailScale(0.5, std.math.pi / 3.0)));
+    try std.testing.expectEqual(@as(f32, 1), viewDetailScale(1, std.math.pi / 3.0));
+    // A wider field of view also shrinks things on screen.
+    try std.testing.expect(viewDetailScale(1, std.math.pi / 2.0) < 1);
     // A jump of two steps (a teleport) takes the plain choice.
-    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall, .near));
+    try std.testing.expectEqual(Vegetation.Detail.far, treeDetail(.{ 0, 60, 400 }, tall, .near, 1));
 }
 
 test "a tree walked back and forth across a crown boundary switches once each way" {

@@ -776,6 +776,7 @@ pub fn render(self: *Renderer, core: *mach.Core) !void {
             }
             self.field_last = f.plan(.{ view.camera.position.x(), view.camera.position.y(), view.camera.position.z() }, vp);
         };
+        scenes[i].detail_scale = Scene.viewDetailScale(r.h, view.camera.fov);
         scenes[i].prepare(window.queue, view.camera, vp, self.culling, budget, &self.modifications, self.props[0..self.prop_count], view.hide_owner, if (shadowed[i]) sun_vp else null);
         budget -= scenes[i].upload_bytes;
         encoder.writeBuffer(self.uniforms[i].?, 0, &[_]Frame{frame});

@@ -2,6 +2,21 @@
 
 Dated entries, newest first: what changed, what was checked and what was not. Undated sections from the early engine phases follow under "Local validation" at the end. Add new entries at the top.
 
+## Split-screen views lighten tree crowns by their on-screen size — 2026-10-24
+
+- **Added:** each view scales its crown detail distances by how large trees look in it (`viewDetailScale`: the view's share of the window height, against a 60° field of view, clamped to 0.25–2). Full-height views, including side-by-side two-player, are unchanged. A quarter-screen four-player view switches to the mid and far crowns at half the distance, where the tree is the same size on screen as in a full view at the old distance.
+- **Test:** a quarter view sees a 120 m tree at 80 m as mid (a full view keeps it near); the scale is 1 for a full 60° view and smaller for a wider field of view. The test fails with the scale ignored.
+- **Measured** (four players, floor spec 1280×800 on the M3 Pro):
+  - **With the factor (one valid run, all checks passing):** GPU p50/p95/p99 14.5/15.4/16.5 ms, under the 16.7 ms p99 floor.
+  - **Comparison:** the same benchmark without the factor, earlier the same night, measured 15.5 ms p50 and 17.3 ms p99.
+  - **Not a same-sitting A/B:** three further runs (one with the factor, two without) were throttled (frame interval p99 about 1.2 s) and are not used. The improvement is promising, not proven; repeat the A/B on an idle machine.
+- **Captures:** a four-player frame with and without the factor. The quarter views' background trees look the same; the lighter crowns are not noticeable at that size.
+- **Checked:**
+  - default and 0.17 `build check`;
+  - the full suite, 647/647;
+  - the Metal smoke under `MTL_DEBUG_LAYER=1` (exit 0, all stages, no validation messages).
+- **Not done:** props with their own level of detail (Arbors) still switch at a fixed distance.
+
 ## Debug builds launch again: the scene's instance array moved to the heap — 2026-10-24
 
 - **Problem:** a Debug launch crashed with a stack overflow in `mach.mods.init` before `App.init`. The other session's limiter work found it. It reproduces at `9c4b98f`, before this session's 2026-10-23 work, so it predates the shadow, level-of-detail and streaming changes. Those added about 25 KB of scene state on top.
